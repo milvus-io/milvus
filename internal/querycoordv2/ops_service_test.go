@@ -981,3 +981,75 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 func TestOpsService(t *testing.T) {
 	suite.Run(t, new(OpsServiceSuite))
 }
+
+// TestTransferSegmentMultiReplica covers the case where the source node serves several
+// collections and therefore belongs to several replicas. The requested segment lives in
+// exactly one of them, and the other replicas must not abort the whole request.
+func (suite *OpsServiceSuite) TestTransferSegmentMultiReplica() {
+	ctx := context.Background()
+	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	const (
+		targetCollection = int64(100)
+		partitionID      = int64(1)
+		segmentID        = int64(1000)
+		channelName      = "channel-multi-replica"
+	)
+	nodes := []int64{1, 2}
+
+	// the source node also serves 5 other collections that hold no segment on it
+	for i, collectionID := range []int64{101, 102, 103, 104, 105, targetCollection} {
+		suite.meta.Put(ctx, utils.CreateTestReplica(int64(200+i), collectionID, nodes))
+		suite.meta.PutCollection(ctx,
+			utils.CreateTestCollection(collectionID, 1),
+			utils.CreateTestPartition(partitionID, collectionID))
+	}
+
+	segments := []*datapb.SegmentInfo{{
+		ID:            segmentID,
+		CollectionID:  targetCollection,
+		PartitionID:   partitionID,
+		InsertChannel: channelName,
+		NumOfRows:     1,
+	}}
+	channels := []*datapb.VchannelInfo{{CollectionID: targetCollection, ChannelName: channelName}}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, targetCollection).Return(channels, segments, nil)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, targetCollection)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, targetCollection)
+	suite.dist.SegmentDistManager.Update(nodes[0], &meta.Segment{SegmentInfo: segments[0], Node: nodes[0]})
+
+	for _, node := range nodes {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		suite.meta.HandleNodeUp(ctx, node)
+	}
+
+	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
+	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
+		Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
+	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().Add(mock.Anything).Return(nil).Maybe()
+
+	// before the fix this returned SegmentNotFound whenever a replica of another
+	// collection happened to be visited before the one holding the segment
+	resp, err := suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: nodes[0],
+		TargetNodeID: nodes[1],
+		SegmentID:    segmentID,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+
+	// a segment that exists on no replica must still be reported as not found
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: nodes[0],
+		TargetNodeID: nodes[1],
+		SegmentID:    segmentID + 1,
+	})
+	suite.NoError(err)
+	suite.False(merr.Ok(resp))
+}

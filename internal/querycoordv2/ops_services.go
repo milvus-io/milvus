@@ -393,6 +393,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	}
 
 	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
+	segmentFound := false
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -425,9 +426,12 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			// check whether sealed segment exist
 			segment, ok := lo.Find(segments, func(s *meta.Segment) bool { return s.GetID() == req.GetSegmentID() })
 			if !ok {
-				err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
-				return merr.Status(err), nil
+				// The source node may serve several collections, so it belongs to several
+				// replicas. The requested segment lives in exactly one of them, keep
+				// searching the remaining replicas instead of failing the whole request.
+				continue
 			}
+			segmentFound = true
 
 			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 			if !existInTarget {
@@ -443,6 +447,12 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			log.Warn(ctx, msg, mlog.Err(err))
 			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
+	}
+
+	if !req.GetTransferAll() && !segmentFound {
+		err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
+		log.Warn(ctx, "failed to transfer segment", mlog.Err(err))
+		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
 }
@@ -472,6 +482,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	}
 
 	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
+	channelFound := false
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -500,9 +511,13 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			// check whether sealed segment exist
 			channel, ok := lo.Find(channels, func(ch *meta.DmChannel) bool { return ch.GetChannelName() == req.GetChannelName() })
 			if !ok {
-				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
-				return merr.Status(err), nil
+				// The source node may serve several collections, so it belongs to several
+				// replicas. The requested channel lives in exactly one of them, keep
+				// searching the remaining replicas instead of failing the whole request.
+				continue
 			}
+			channelFound = true
+
 			existInTarget := s.targetMgr.GetDmChannel(ctx, channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
 			if !existInTarget {
 				log.Info(ctx, "channel doesn't exist in current target, skip it", mlog.String("channelName", channel.GetChannelName()))
@@ -517,6 +532,12 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			log.Warn(ctx, msg, mlog.Err(err))
 			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
+	}
+
+	if !req.GetTransferAll() && !channelFound {
+		err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
+		log.Warn(ctx, "failed to transfer channel", mlog.Err(err))
+		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
 }
