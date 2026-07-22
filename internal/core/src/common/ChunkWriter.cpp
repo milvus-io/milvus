@@ -786,6 +786,9 @@ create_chunk_buffer(const FieldMeta& field_meta,
             file_path, mmap_populate, aligned_size, io_prio);
     }
     cw->write_to_target(array_vec, target);
+    // The writer is one-shot. Release its scratch buffers before a
+    // file-backed target populates the resulting mmap in release().
+    cw.reset();
     auto data = target->release();
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr;
     if (!file_path.empty()) {
@@ -895,6 +898,9 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
             char padding[ChunkTarget::ALIGNED_SIZE] = {};
             target->write(padding, padding_size);
         }
+        // Release each one-shot writer's scratch buffers before the combined
+        // file-backed mapping is populated in target->release().
+        cws[i].reset();
     }
 
     auto data = target->release();
