@@ -146,7 +146,8 @@ func TestFileResourceHandlerV2FormatsInt64IDs(t *testing.T) {
 		expectedRaw string
 	}{
 		{
-			name:        "default string",
+			name:        "disallow int64",
+			allowInt64:  "false",
 			expectedRaw: `"9007199254740993"`,
 		},
 		{
