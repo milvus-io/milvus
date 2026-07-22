@@ -253,9 +253,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
             }
 
-            if (exec_path_ == ExprExecPath::ScalarIndex &&
-                val_type != proto::plan::GenericValue::ValCase::kArrayVal &&
-                !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -2061,9 +2059,6 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         case DataType::JSON: {
             auto val_type = FromValCase(expr_->val_.val_case());
             switch (val_type) {
-                case DataType::ARRAY:
-                    can_use = false;
-                    break;
                 case DataType::STRING:
                 case DataType::VARCHAR:
                     can_use = SegmentExpr::CanUseIndexForOp<std::string>(

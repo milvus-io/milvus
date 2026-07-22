@@ -544,6 +544,82 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 		}
 	})
 
+	s.Run("template elements same type", func() {
+		schemaH := newTestSchemaHelper(s.T())
+		testcases := []struct {
+			name     string
+			expr     string
+			values   map[string]*schemapb.TemplateValue
+			expected bool
+		}{
+			{
+				name: "typed homogeneous array",
+				expr: `json_contains_any(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2, 3})),
+				},
+				expected: true,
+			},
+			{
+				name: "JSON homogeneous array",
+				expr: `json_contains_all(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+							generateJSONData(int64(1)),
+							generateJSONData(int64(2)),
+							generateJSONData(int64(3)),
+						})),
+				},
+				expected: true,
+			},
+			{
+				name: "JSON heterogeneous array",
+				expr: `json_contains_any(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+							generateJSONData(int64(1)),
+							generateJSONData("1"),
+						})),
+				},
+				expected: false,
+			},
+			{
+				name: "empty array",
+				expr: `json_contains_any(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{})),
+				},
+				expected: true,
+			},
+			{
+				name: "singleton array",
+				expr: `json_contains_all(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+							generateJSONData(1.5),
+						})),
+				},
+				expected: true,
+			},
+		}
+
+		for _, testcase := range testcases {
+			s.Run(testcase.name, func() {
+				expr, err := ParseExpr(schemaH, testcase.expr, testcase.values)
+				s.NoError(err)
+				s.NotNil(expr)
+				contains := expr.GetJsonContainsExpr()
+				s.NotNil(contains)
+				s.Equal(testcase.expected, contains.GetElementsSameType())
+			})
+		}
+	})
+
 	s.Run("failed case", func() {
 		testcases := []testcase{
 			{`json_contains(ArrayField[0], {str})`, map[string]*schemapb.TemplateValue{
@@ -639,46 +715,47 @@ func (s *FillExpressionValueSuite) TestBinaryExpression() {
 }
 
 func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON() {
-	// Test that mixed int64/float types are normalized to float for JSON fields.
-	// This prevents assertion failures in C++ expression execution.
-	// Related issue: https://github.com/milvus-io/milvus/issues/46588
+	// Mixed JSON numeric bounds must preserve their concrete literal types so
+	// large int64 values are not rounded before precise segcore comparison.
 	schemaH := newTestSchemaHelper(s.T())
 
-	s.Run("lower int64 upper float should normalize to float", func() {
+	s.Run("lower int64 upper float should preserve types", func() {
 		// A is a dynamic field (JSON type)
 		exprStr := `{min} < A < {max}`
 		templateValues := map[string]*schemapb.TemplateValue{
-			"min": generateTemplateValue(schemapb.DataType_Int64, int64(499)),
-			"max": generateTemplateValue(schemapb.DataType_Double, float64(512.0)),
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740996)),
 		}
 
 		expr, err := ParseExpr(schemaH, exprStr, templateValues)
 		s.NoError(err)
 		s.NotNil(expr)
 
-		// Verify both bounds are normalized to float type
 		bre := expr.GetBinaryRangeExpr()
 		s.NotNil(bre, "expected BinaryRangeExpr")
-		s.Equal(float64(499), bre.GetLowerValue().GetFloatVal())
-		s.Equal(float64(512.0), bre.GetUpperValue().GetFloatVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetLowerValue().GetVal())
+		s.Equal(int64(9007199254740993), bre.GetLowerValue().GetInt64Val())
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetUpperValue().GetVal())
+		s.Equal(float64(9007199254740996), bre.GetUpperValue().GetFloatVal())
 	})
 
-	s.Run("lower float upper int64 should normalize to float", func() {
+	s.Run("lower float upper int64 should preserve types", func() {
 		exprStr := `{min} < A < {max}`
 		templateValues := map[string]*schemapb.TemplateValue{
-			"min": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
-			"max": generateTemplateValue(schemapb.DataType_Int64, int64(100)),
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740995)),
 		}
 
 		expr, err := ParseExpr(schemaH, exprStr, templateValues)
 		s.NoError(err)
 		s.NotNil(expr)
 
-		// Verify both bounds are normalized to float type
 		bre := expr.GetBinaryRangeExpr()
 		s.NotNil(bre, "expected BinaryRangeExpr")
-		s.Equal(float64(10.5), bre.GetLowerValue().GetFloatVal())
-		s.Equal(float64(100), bre.GetUpperValue().GetFloatVal())
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.Equal(float64(9007199254740992), bre.GetLowerValue().GetFloatVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+		s.Equal(int64(9007199254740995), bre.GetUpperValue().GetInt64Val())
 	})
 
 	s.Run("both int64 should remain int64", func() {

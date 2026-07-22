@@ -116,13 +116,10 @@ func normalizeJSONTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb
 }
 
 func valueGroupKey(col *planpb.ColumnInfo, value *planpb.GenericValue) (string, bool) {
-	if col == nil || value == nil || value.GetVal() == nil {
+	if col == nil || !canBuildTermExpr(value) {
 		return "", false
 	}
 	kind := valueCase(value)
-	if kind == "array" || kind == "other" {
-		return "", false
-	}
 	key := columnKey(col)
 	// Statically typed columns are cast before rewriting. JSON is the only
 	// column type whose predicates must remain partitioned by literal kind.
@@ -133,23 +130,13 @@ func valueGroupKey(col *planpb.ColumnInfo, value *planpb.GenericValue) (string, 
 }
 
 func termGroupKey(term *planpb.TermExpr) (string, bool) {
-	if term == nil || term.GetColumnInfo() == nil || len(term.GetValues()) == 0 {
+	if term == nil || term.GetColumnInfo() == nil || !canBuildTermExpr(term.GetValues()...) {
 		return "", false
 	}
-	kind := valueCaseWithNil(term.GetValues()[0])
-	if kind == "nil" || kind == "other" || kind == "array" {
-		return "", false
-	}
+	kind := valueCase(term.GetValues()[0])
 	key := columnKey(term.GetColumnInfo())
 	if term.GetColumnInfo().GetDataType() != schemapb.DataType_JSON {
 		return key, true
-	}
-	// this for loop is for defensive. in practice after normalization, all values
-	// in a term should have the same kind. but we still check it here to be safe.
-	for _, value := range term.GetValues()[1:] {
-		if valueCaseWithNil(value) != kind {
-			return "", false
-		}
 	}
 	return key + "|" + kind, true
 }
