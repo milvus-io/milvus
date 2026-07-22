@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "ArrayOffsets.h"
 #include "common/Tracer.h"
@@ -31,6 +32,16 @@ struct SearchIteratorV2Info {
     std::optional<float> last_bound = std::nullopt;
 };
 
+// Brute-force index params sourced from the collection-level index metadata at
+// plan creation. Used only by brute force when a segment predates a field added
+// by add_function_field, so its per-segment metadata does not carry the field.
+struct BruteForceIndexParams {
+    std::optional<float> bm25_k1_;
+    std::optional<float> bm25_b_;
+    std::optional<int64_t> minhash_lsh_band_;
+    std::optional<int64_t> minhash_element_bit_width_;
+};
+
 struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
@@ -39,6 +50,7 @@ struct SearchInfo {
     FieldId field_id_;
     MetricType metric_type_;
     knowhere::Json search_params_;
+    BruteForceIndexParams brute_force_index_params_;
     std::vector<FieldId>
         group_by_field_ids_;  // Group by field IDs (single or multi-field)
     tracer::TraceContext trace_ctx_;
