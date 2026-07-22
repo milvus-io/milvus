@@ -3557,10 +3557,15 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
 
-        // get index params for bm25 and minhash brute force
+        // get index params for bm25 and minhash brute force.
+        // A field added by add_function_field is absent from this segment's
+        // construction-time col_index_meta_ snapshot, so guard with HasField:
+        // BM25 k1/b are delivered through the plan, MinHash falls back to
+        // defaults for the brief window before the segment is reloaded.
         std::map<std::string, std::string> index_info;
-        if (search_info.metric_type_ == knowhere::metric::BM25 ||
-            search_info.metric_type_ == knowhere::metric::MHJACCARD) {
+        if ((search_info.metric_type_ == knowhere::metric::BM25 ||
+             search_info.metric_type_ == knowhere::metric::MHJACCARD) &&
+            col_index_meta_ != nullptr && col_index_meta_->HasField(field_id)) {
             index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
