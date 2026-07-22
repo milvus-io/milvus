@@ -89,7 +89,7 @@ func TestPauseConsumption(t *testing.T) {
 			IgnorePauseConsumption: false,
 		},
 		filterFunc:    func(message.ImmutableMessage) bool { return true },
-		reorderBuffer: utility.NewReOrderBuffer(),
+		reorderBuffer: utility.NewReOrderBuffer(true),
 		pendingQueue:  utility.NewPendingQueue(),
 		cleanup:       func() {},
 		ScannerHelper: helper.NewScannerHelper("test"),
@@ -131,7 +131,7 @@ func TestScannerAdaptorObservesPhysicalDedupDropFromPushResult(t *testing.T) {
 
 	scanner := &scannerAdaptorImpl{
 		logger:          mlog.With(),
-		reorderBuffer:   utility.NewReOrderBuffer(),
+		reorderBuffer:   utility.NewReOrderBuffer(true),
 		pendingQueue:    utility.NewPendingQueue(),
 		txnBuffer:       utility.NewTxnBuffer(mlog.With(), scannerMetrics),
 		readRateCounter: utility.NewAverageRateCounter(time.Second),

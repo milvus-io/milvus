@@ -8,9 +8,8 @@ import (
 	"encoding/json"
 	"sort"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -225,10 +224,10 @@ func unmarshalPChannelWindowChunk(payload []byte) (map[string][]committedWriteRe
 
 func marshalVChannelWindowChunk(chunk *vchannelWindowChunk) ([]byte, error) {
 	if chunk == nil {
-		return nil, errors.New("nil vchannel window chunk")
+		return nil, merr.WrapErrServiceInternalMsg("nil vchannel window chunk")
 	}
 	if len(chunk.Records) == 0 {
-		return nil, errors.New("empty vchannel window chunk")
+		return nil, merr.WrapErrServiceInternalMsg("empty vchannel window chunk")
 	}
 	chunk.CodecVersion = pchannelWindowCodecVersion
 	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
@@ -262,7 +261,7 @@ func newPChannelWindowChunkHeader() []byte {
 
 func marshalPChannelWindowChunkFooter(footer *pchannelWindowChunkFooter) ([]byte, error) {
 	if footer == nil {
-		return nil, errors.New("nil pchannel window chunk footer")
+		return nil, merr.WrapErrServiceInternalMsg("nil pchannel window chunk footer")
 	}
 	footer.CodecVersion = pchannelWindowCodecVersion
 	sort.Slice(footer.Chunks, func(i, j int) bool {

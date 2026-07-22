@@ -2,13 +2,13 @@ package idempotency
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -324,6 +324,103 @@ func TestInterceptorWaitErrorReclaimsRetriedTxnBuffer(t *testing.T) {
 	require.Zero(t, waiterAppends.Load())
 	// The retried txn's buffer is reclaimed immediately instead of lazily.
 	require.Nil(t, interceptor.txnInsertResultBuffers.Build(newCommit(retryTxn)))
+}
+
+// A waiter whose OWN context is canceled must not reclaim the (vchannel,
+// txnID) buffer: the owner may still sit between Begin and Build, and deleting
+// the buffer would permanently commit a window entry without its insert result
+// (later duplicates would silently return the retry's own unpersisted IDs).
+func TestInterceptorWaitCtxCancelKeepsTxnBuffer(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	ownerTxn := message.TxnContext{TxnID: 1, Keepalive: 10}
+	retryTxn := message.TxnContext{TxnID: 2, Keepalive: 10}
+
+	newCommit := func(txnCtx message.TxnContext) message.MutableMessage {
+		return message.NewCommitTxnMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithBody(&message.CommitTxnMessageBody{}).
+			MustBuildMutable().
+			WithTxnContext(txnCtx)
+	}
+
+	// Buffer a body under the retried txnID.
+	body := newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{100}}},
+		},
+	}).WithTxnContext(retryTxn)
+	_, err := interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), body, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+
+	ownerStarted := make(chan struct{})
+	releaseOwner := make(chan struct{})
+	ownerDone := make(chan appendResult, 1)
+	go func() {
+		ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+		msgID, err := interceptor.DoAppend(ctx, newCommit(ownerTxn), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			close(ownerStarted)
+			<-releaseOwner
+			utility.ReplaceAppendResultTimeTick(ctx, 100)
+			utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+			return newTestMessageID(11), nil
+		})
+		ownerDone <- appendResult{id: msgID, err: err}
+	}()
+
+	select {
+	case <-ownerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owner append did not start")
+	}
+
+	// The waiter's context is already canceled, so Wait exits without the
+	// owner having resolved — the buffer must survive.
+	canceledCtx, cancel := context.WithCancel(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}))
+	cancel()
+	_, err = interceptor.DoAppend(canceledCtx, newCommit(retryTxn), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		t.Error("canceled waiter must not append")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(newCommit(retryTxn)))
+
+	close(releaseOwner)
+	require.NoError(t, (<-ownerDone).err)
+}
+
+// A quiet vchannel must release its TTL-expired entries on the periodic
+// TimeTick append instead of waiting for its next write.
+func TestInterceptorTimeTickSweepEvictsIdleWindows(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{WindowTTL: 5 * time.Second})
+
+	oldTT := tsoutil.ComposeTS(1_000, 0)
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-idle"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, oldTT)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, interceptor.window("v1").Len())
+
+	// The vchannel then goes idle; a TimeTick append far past the TTL sweeps it.
+	ttMsg := message.NewTimeTickMessageBuilderV1().
+		WithHeader(&message.TimeTickMessageHeader{}).
+		WithBody(&msgpb.TimeTickMsg{}).
+		WithAllVChannel().
+		MustBuildMutable()
+	newTT := tsoutil.ComposeTS(100_000, 0)
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err = interceptor.DoAppend(ctx, ttMsg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, newTT)
+		return newTestMessageID(11), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, interceptor.window("v1").Len())
 }
 
 func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {

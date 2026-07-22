@@ -4,13 +4,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -27,6 +27,26 @@ type vchannelWindow struct {
 	latestAppliedGeneration     uint64
 	minRequiredGeneration       uint64
 	dirty                       bool
+
+	// generationStats is the view's durable-retention ledger: one row per
+	// persisted chunk generation, tracking how many window entries it holds and
+	// the newest commit timetick among them. minRequiredGeneration derives from
+	// this ledger under evictionCfg (TTL / min / max entries) — NOT from the
+	// entries materialized in this staging window, which are cleared on persist
+	// (evictPersisted). Rebuilt on restart from the chunk replay.
+	generationStats map[uint64]*windowGenerationStat
+	// evictionCfg is the view's retention policy, assigned by the windowManager
+	// on construction. A zero policy (no TTL, no count cap) makes no durable
+	// retention promise: the ledger is ignored and only materialized entries pin
+	// chunks (the legacy behavior, kept for tests constructing windows directly).
+	evictionCfg windowEvictionConfig
+}
+
+// windowGenerationStat aggregates the entries persisted at one chunk
+// generation. ~16 bytes per retained generation.
+type windowGenerationStat struct {
+	entryCount  int
+	maxCommitTT uint64
 }
 
 // windowEntry is a committed idempotency entry together with the chunk
@@ -46,11 +66,12 @@ type idempotencyWindowMetaUpdate struct {
 
 func newEmptyVChannelWindow(pchannel, vchannel string, checkpoint *WALCheckpoint) *vchannelWindow {
 	state := &vchannelWindow{
-		pchannel:       pchannel,
-		vchannel:       vchannel,
-		entries:        make(map[string]*windowEntry),
-		pendingEntries: make(map[string]*streamingpb.WindowEntry),
-		pendingRecords: make([]committedWriteRecord, 0),
+		pchannel:        pchannel,
+		vchannel:        vchannel,
+		entries:         make(map[string]*windowEntry),
+		pendingEntries:  make(map[string]*streamingpb.WindowEntry),
+		pendingRecords:  make([]committedWriteRecord, 0),
+		generationStats: make(map[uint64]*windowGenerationStat),
 	}
 	if checkpoint != nil {
 		state.snapshotCheckpointTimetick = checkpoint.TimeTick
@@ -65,7 +86,7 @@ func newEmptyVChannelWindow(pchannel, vchannel string, checkpoint *WALCheckpoint
 
 func newVChannelWindowFromSnapshot(snapshot *streamingpb.WindowSnapshot) (*vchannelWindow, error) {
 	if snapshot == nil {
-		return nil, errors.New("nil idempotency window snapshot")
+		return nil, merr.WrapErrServiceInternalMsg("nil idempotency window snapshot")
 	}
 	state := &vchannelWindow{
 		pchannel:                    snapshot.GetPchannel(),
@@ -77,6 +98,7 @@ func newVChannelWindowFromSnapshot(snapshot *streamingpb.WindowSnapshot) (*vchan
 		pendingEntries:              make(map[string]*streamingpb.WindowEntry),
 		pendingRecords:              make([]committedWriteRecord, 0),
 		commitOrder:                 make([]string, 0, len(snapshot.GetEntries())),
+		generationStats:             make(map[uint64]*windowGenerationStat),
 	}
 	sortedEntries := append([]*streamingpb.WindowEntry(nil), snapshot.GetEntries()...)
 	sortWindowEntries(sortedEntries)
@@ -189,10 +211,10 @@ func (s *vchannelWindow) applyCommittedWriteRecordsAtGeneration(records []commit
 
 func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, markDirty bool) error {
 	if record.SourcePChannel != "" && s.pchannel != "" && record.SourcePChannel != s.pchannel {
-		return errors.Errorf("committed write record pchannel mismatch, state %s, record %s", s.pchannel, record.SourcePChannel)
+		return merr.WrapErrServiceInternalMsg("committed write record pchannel mismatch, state %s, record %s", s.pchannel, record.SourcePChannel)
 	}
 	if record.VChannel != "" && s.vchannel != "" && record.VChannel != s.vchannel {
-		return errors.Errorf("committed write record vchannel mismatch, state %s, record %s", s.vchannel, record.VChannel)
+		return merr.WrapErrServiceInternalMsg("committed write record vchannel mismatch, state %s, record %s", s.vchannel, record.VChannel)
 	}
 	if record.Idempotency == nil {
 		if markDirty {
@@ -203,7 +225,7 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 	}
 	key := record.Idempotency.Key
 	if key == "" {
-		return errors.New("committed write record has malformed idempotency info")
+		return merr.WrapErrServiceInternalMsg("committed write record has malformed idempotency info")
 	}
 	if _, ok := s.entries[key]; ok {
 		if markDirty {
@@ -214,7 +236,7 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 	}
 	entry := record.WindowEntry()
 	if entry == nil {
-		return errors.New("committed write record cannot materialize idempotency window entry")
+		return merr.WrapErrServiceInternalMsg("committed write record cannot materialize idempotency window entry")
 	}
 	s.entries[key] = &windowEntry{entry: entry}
 	s.commitOrder = append(s.commitOrder, key)
@@ -287,6 +309,25 @@ func (s *vchannelWindow) markCommittedWriteRecordGeneration(record committedWrit
 	if !e.generationSet {
 		e.generation = generation
 		e.generationSet = true
+		s.registerGenerationEntry(generation, e.entry.GetCommitTimetick())
+	}
+}
+
+// registerGenerationEntry records one persisted entry in the durable-retention
+// ledger. The generationSet guard on the caller ensures each entry is counted
+// exactly once.
+func (s *vchannelWindow) registerGenerationEntry(generation, commitTT uint64) {
+	if s.generationStats == nil {
+		s.generationStats = make(map[uint64]*windowGenerationStat)
+	}
+	stat, ok := s.generationStats[generation]
+	if !ok {
+		stat = &windowGenerationStat{}
+		s.generationStats[generation] = stat
+	}
+	stat.entryCount++
+	if commitTT > stat.maxCommitTT {
+		stat.maxCommitTT = commitTT
 	}
 }
 
@@ -309,21 +350,54 @@ func (s *vchannelWindow) windowMetaAtGeneration(generation uint64) *streamingpb.
 	meta := s.windowMeta()
 	if generation > meta.GetLatestAppliedGeneration() {
 		meta.LatestAppliedGeneration = generation
-		if meta.GetEntryCount() == 0 {
+		// Project the boundary forward only when nothing pins retention — the
+		// staging window being empty (EntryCount==0) is NOT sufficient: the
+		// durable-retention ledger may still pin older generations even though
+		// every persisted entry was evicted from staging memory.
+		if !s.hasRetentionPin() {
 			meta.MinRequiredGeneration = generation
 		}
 	}
 	return meta
 }
 
+func (s *vchannelWindow) hasRetentionPin() bool {
+	if _, ok := s.materializedMinGeneration(); ok {
+		return true
+	}
+	_, ok := s.statsMinRequiredGeneration()
+	return ok
+}
+
+// refreshMinRequiredGeneration recomputes the oldest chunk generation this view
+// still needs. Two pins contribute, and the lower wins:
+//   - materialized entries carrying a generation (recovery mode keeps replayed
+//     entries in memory until TTL eviction);
+//   - the durable-retention ledger (generationStats) under the view's eviction
+//     policy — the staging window is cleared on persist, so chunk retention
+//     must NOT depend on entries still being materialized here; the ledger is
+//     what keeps a TTL's worth of chunks recoverable across restarts.
+//
+// An entry that has never been persisted lives in the WAL, not in any chunk,
+// and is recovered by replaying the WAL from the window source checkpoint —
+// it pins nothing. When nothing pins, nothing below the latest persisted
+// generation is still needed. NOTE: during recovery, the value loaded from the
+// persisted VChannelWindowMeta must not be recomputed before the chunk replay
+// has rebuilt the ledger (the single-threaded recovery sequence guarantees
+// this today).
 func (s *vchannelWindow) refreshMinRequiredGeneration() {
-	// Only persisted entries (with an assigned generation) pin chunk retention.
-	// An entry that has not been persisted yet lives in the WAL, not in any
-	// chunk, and is recovered by replaying the WAL from the window source
-	// checkpoint -- counting it as generation 0 would pin the chunk-retention
-	// boundary at 0 forever on a busy channel. When no persisted entry remains,
-	// nothing below the latest persisted generation is still needed.
 	minimum := s.latestAppliedGeneration
+	if m, ok := s.materializedMinGeneration(); ok && m < minimum {
+		minimum = m
+	}
+	if m, ok := s.statsMinRequiredGeneration(); ok && m < minimum {
+		minimum = m
+	}
+	s.minRequiredGeneration = minimum
+}
+
+func (s *vchannelWindow) materializedMinGeneration() (uint64, bool) {
+	var minimum uint64
 	initialized := false
 	for _, e := range s.entries {
 		if !e.generationSet {
@@ -334,7 +408,53 @@ func (s *vchannelWindow) refreshMinRequiredGeneration() {
 			initialized = true
 		}
 	}
-	s.minRequiredGeneration = minimum
+	return minimum, initialized
+}
+
+// statsMinRequiredGeneration walks the durable-retention ledger newest-first
+// under the eviction policy and returns the oldest generation still holding a
+// retained entry: generations are kept while the count cap is not exhausted and
+// either some entry is within TTL or the minEntries floor still needs them.
+// Rows older than the returned boundary are dropped from the ledger, keeping it
+// bounded to the retained window. A zero policy makes no durable retention
+// promise and contributes no pin.
+func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
+	cfg := s.evictionCfg
+	if len(s.generationStats) == 0 || (cfg.windowTTL <= 0 && cfg.maxEntries <= 0) {
+		return 0, false
+	}
+	generations := make([]uint64, 0, len(s.generationStats))
+	for generation := range s.generationStats {
+		generations = append(generations, generation)
+	}
+	sort.Slice(generations, func(i, j int) bool { return generations[i] > generations[j] })
+
+	evictBefore := evictBeforeTimetick(s.snapshotCheckpointTimetick, cfg.windowTTL)
+	cumulative := 0
+	var minRequired uint64
+	retainedAny := false
+	for _, generation := range generations {
+		stat := s.generationStats[generation]
+		if cfg.maxEntries > 0 && cumulative >= cfg.maxEntries {
+			break
+		}
+		withinTTL := cfg.windowTTL <= 0 || stat.maxCommitTT >= evictBefore
+		if !withinTTL && cumulative >= cfg.minEntries {
+			break
+		}
+		minRequired = generation
+		retainedAny = true
+		cumulative += stat.entryCount
+	}
+	if !retainedAny {
+		return 0, false
+	}
+	for generation := range s.generationStats {
+		if generation < minRequired {
+			delete(s.generationStats, generation)
+		}
+	}
+	return minRequired, true
 }
 
 func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxEntries int) {

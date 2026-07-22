@@ -135,8 +135,8 @@ func TestRecoveryStorage(t *testing.T) {
 	})
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(windowStoreRoot))
 	pchannelWindowMeta = writeTestBootstrapPChannelWindowMeta(
-		t,
 		context.Background(),
+		t,
 		"test_channel",
 		chunkManager,
 		utility.NewWALCheckpointFromProto(cp),

@@ -83,6 +83,13 @@ type CommitResult struct {
 type PendingResult struct {
 	Entry *streamingpb.WindowEntry
 	Err   error
+	// OwnerResolved reports that this result was published by the owner
+	// (Complete or Fail), which necessarily happens after the owner's Build
+	// consumed its txn insert-result buffer — so a same-txnID waiter may safely
+	// reclaim the (vchannel, txnID) buffer. It stays false when Wait exited on
+	// the waiter's own context: the owner may not have reached Build yet, and
+	// removing the buffer then would destroy the owner's un-built results.
+	OwnerResolved bool
 }
 
 func NewWindow(config WindowConfig) *Window {
@@ -173,7 +180,7 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	observeWindowEntries(msg, len(w.entries))
 	observeWindowInflight(msg, len(w.inflight))
 
-	pending.result = PendingResult{Entry: entry}
+	pending.result = PendingResult{Entry: entry, OwnerResolved: true}
 	close(pending.done)
 	return true, evicted
 }
@@ -188,7 +195,7 @@ func (w *Window) Fail(pending *PendingEntry, err error, msg message.MutableMessa
 	}
 	delete(w.inflight, pending.Key)
 	observeWindowInflight(msg, len(w.inflight))
-	pending.result = PendingResult{Err: err}
+	pending.result = PendingResult{Err: err, OwnerResolved: true}
 	close(pending.done)
 	return true
 }

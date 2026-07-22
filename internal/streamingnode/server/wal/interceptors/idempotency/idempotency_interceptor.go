@@ -3,8 +3,6 @@ package idempotency
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -94,10 +92,43 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 		return append(ctx, msg)
 	}
 
+	if msg.MessageType() == message.MessageTypeTimeTick {
+		msgID, err := append(ctx, msg)
+		if err == nil {
+			impl.sweepWindowsOnTimeTick(ctx)
+		}
+		return msgID, err
+	}
+
 	if isTxnMessage(msg) {
 		return impl.appendTxnMessage(ctx, msg, append)
 	}
 	return impl.appendSingleMessage(ctx, msg, append)
+}
+
+// sweepWindowsOnTimeTick evicts TTL-expired entries from every window on the
+// periodic TimeTick append, so an idle vchannel releases its retained per-row
+// PK memory without waiting for its next write — Complete-driven eviction alone
+// never runs on a quiet vchannel.
+func (impl *idempotencyInterceptor) sweepWindowsOnTimeTick(ctx context.Context) {
+	if impl.config.WindowTTL <= 0 {
+		return
+	}
+	// The assigned timetick is read from the append result rather than the
+	// message: the inner timetick interceptor publishes it there, and a mutable
+	// message without the property would panic on TimeTick().
+	extra := utility.GetExtraAppendResult(ctx)
+	if extra == nil || extra.TimeTick == 0 {
+		return
+	}
+	evictBefore := evictBeforeCommitTT(extra.TimeTick, impl.config.WindowTTL)
+	if evictBefore == 0 {
+		return
+	}
+	impl.windows.Range(func(vchannel string, window *Window) bool {
+		window.Evict(evictBefore, nil)
+		return true
+	})
 }
 
 func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
@@ -166,14 +197,20 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
 	case BeginDecisionWait:
-		// Reclaim this commit's txn buffer on EVERY exit, including the owner-error
-		// one: for a client retry (its own txnID) the buffer is abandoned along
-		// with the retried txn however Wait resolves, and for a same-txnID
-		// concurrent duplicate the owner's Build has already consumed it before its
-		// append, making this a no-op — it cannot blank out the committed entry's
-		// insert IDs.
-		defer impl.txnInsertResultBuffers.Remove(msg)
 		result := begin.Pending.Wait(ctx, msg)
+		// Reclaim this commit's txn buffer only when the OWNER resolved the
+		// pending entry (Complete or Fail — both happen after the owner's Build
+		// consumed its buffer, so a same-txnID Remove is a no-op and a
+		// retried-txnID Remove reclaims the abandoned buffer). When Wait exited
+		// on the waiter's own context instead, the owner may still sit between
+		// Begin and Build, and removing the (vchannel, txnID) buffer here would
+		// destroy the owner's un-built insert results — a committed entry would
+		// then permanently carry no IdempotentResult and later duplicates would
+		// silently return the retry's own unpersisted IDs. Leave that buffer to
+		// the txnActive/keepalive reclamation.
+		if result.OwnerResolved {
+			defer impl.txnInsertResultBuffers.Remove(msg)
+		}
 		if result.Err != nil {
 			// The owner failed, so there is no duplicate result to serve. No
 			// rollback is synthesized here: a same-txnID concurrent commit may
@@ -391,7 +428,9 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 
 func fillDuplicateResult(ctx context.Context, entry *streamingpb.WindowEntry) (message.MessageID, error) {
 	if entry == nil || entry.GetMessageId() == nil {
-		return nil, errors.New("missing duplicate idempotency entry result")
+		// Typed so the streamingnode->proxy status converter carries a real code
+		// instead of the untyped catch-all.
+		return nil, status.NewInner("missing duplicate idempotency entry result")
 	}
 	msgID := message.MustUnmarshalMessageID(entry.GetMessageId())
 	lastConfirmed := message.MustUnmarshalMessageID(entry.GetLastConfirmedMessageId())

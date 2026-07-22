@@ -67,7 +67,7 @@ func TestRecoverWindowsDropsStaleStoreWhenIdempotencyDisabled(t *testing.T) {
 
 	// A store persisted by an earlier enabled run: one chunk, the pchannel meta,
 	// and one vchannel window meta.
-	footer, _, _ := writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}, nil)
@@ -106,13 +106,13 @@ func TestRecoverWindowsDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	footer, _, _ := writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}, nil)
 	// The meta only ever referenced generation 0; generation 1 is the orphan of a
 	// persist that crashed after writing the chunk.
-	writeTestPChannelWindowChunk(t, ctx, "p1", 1, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelWindowChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(20),
 		TimeTick:  20,
 	}, nil)
@@ -152,11 +152,11 @@ func TestBootstrapReapsChunksLeftByIncompleteDrop(t *testing.T) {
 	// Leftovers of a store whose metas are already gone: generation 0 carries a
 	// different payload than the one bootstrap is about to write, and generation 3
 	// sits above a gap, at a generation the store writes again later.
-	writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}, nil)
-	writeTestPChannelWindowChunk(t, ctx, "p1", 3, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelWindowChunk(ctx, t, "p1", 3, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(40),
 		TimeTick:  40,
 	}, nil)
@@ -230,7 +230,7 @@ func TestRecoverWindowsTreatsCorruptionAsNonFatal(t *testing.T) {
 			}),
 		},
 	}
-	footer, key, _ := writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	footer, key, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
