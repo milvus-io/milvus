@@ -92,6 +92,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.result.Timestamp = resp.MaxTimeTick()
 
 	if it.idempotencyEnabled {
+		warnOnPartialIdempotentDuplicate(ctx, it.idempotencyKey, resp)
 		if err := mergeDuplicateInsertResults(it.result, resp); err != nil {
 			// The append itself already committed (or deduplicated) durably; the
 			// only reachable cause of a merge failure is an EXPLICIT idempotency

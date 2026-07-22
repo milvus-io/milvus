@@ -40,6 +40,11 @@ type Window struct {
 	commitOrder          []IdempotencyKey
 	evictedWatermarkTT   uint64
 	snapshotCheckpointTT uint64
+	// ttlEvictBoundTT is the highest TTL eviction bound this window has ever been
+	// asked to apply (commitTT of "now" minus the TTL). Entries older than it are
+	// TTL-expired even when the minEntries floor still keeps them in memory; see
+	// servableLocked.
+	ttlEvictBoundTT uint64
 
 	minEntries int
 	maxEntries int
@@ -131,8 +136,24 @@ func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResu
 	defer w.mu.Unlock()
 
 	if entry, ok := w.entries[key]; ok {
-		observeWindowDuplicate(vchannelOf(msg))
-		return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
+		if w.servableLocked(entry) {
+			observeWindowDuplicate(vchannelOf(msg))
+			return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
+		}
+		// TTL-expired but still held by the minEntries floor: serving it would make
+		// "is this key still deduplicated" a per-vchannel LOAD function instead of a
+		// request-level one. One client key fans out to every vchannel the insert
+		// touches, each with its own window; under shard skew a busy window is
+		// already above minEntries and drops the key at the TTL bound while a quiet
+		// window stays below the floor and keeps it forever. A retry would then be
+		// re-appended on the busy shard (duplicate rows) and deduplicated on the
+		// quiet one, and the proxy merges that mix into one silently-successful
+		// response. Ending duplicate visibility exactly at the TTL — a bound derived
+		// from cluster timeticks, identical on every shard — makes the outcome
+		// uniform: past the TTL every shard treats the retry as a new write, which
+		// is the documented TTL semantics. The floor keeps bounding memory, it just
+		// no longer extends the dedup answer.
+		w.dropEntryLocked(key)
 	}
 
 	if pending, ok := w.inflight[key]; ok {
@@ -270,7 +291,36 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 	w.commitOrder[i] = key
 }
 
+// servableLocked reports whether an entry may still answer a duplicate hit.
+// Retention (minEntries / maxEntries) is per-window and load dependent, so it
+// must not decide this; only the TTL bound, which every window of the request's
+// fan-out advances from the same timetick clock, may.
+func (w *Window) servableLocked(entry *streamingpb.WindowEntry) bool {
+	if w.windowTTL <= 0 || w.ttlEvictBoundTT == 0 {
+		return true
+	}
+	return entry.GetCommitTimetick() >= w.ttlEvictBoundTT
+}
+
+// dropEntryLocked removes a retained-but-unservable entry together with its
+// commitOrder slot. The slot must go too: Complete re-appends the key at its new
+// commit timetick, and a leftover old slot would resolve to that new entry and
+// stall eviction of everything queued behind it.
+func (w *Window) dropEntryLocked(key IdempotencyKey) {
+	delete(w.entries, key)
+	for i, ordered := range w.commitOrder {
+		if ordered == key {
+			w.commitOrder = append(w.commitOrder[:i], w.commitOrder[i+1:]...)
+			break
+		}
+	}
+	w.refreshEvictedWatermarkLocked()
+}
+
 func (w *Window) evictLocked(evictBeforeTT uint64) int {
+	if evictBeforeTT > w.ttlEvictBoundTT {
+		w.ttlEvictBoundTT = evictBeforeTT
+	}
 	evicted := 0
 	for len(w.entries) > w.minEntries && len(w.commitOrder) > 0 {
 		key := w.commitOrder[0]

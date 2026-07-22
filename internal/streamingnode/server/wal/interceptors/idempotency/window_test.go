@@ -65,6 +65,59 @@ func TestWindowTTLEvictionUsesCommitTimetick(t *testing.T) {
 	require.Len(t, tiny.entries, 2)
 }
 
+// One client idempotency key fans out to a window per vchannel, so "is this key
+// still deduplicated" must not depend on how loaded each individual shard is.
+// Under shard skew the busy window sits above the minEntries floor and drops the
+// key at the TTL bound while the quiet window stays below the floor and keeps it:
+// a retry would then be appended again on the busy shard (duplicate rows) and
+// deduplicated on the quiet one, and the proxy merges that mix into one
+// successful response. Duplicate visibility must therefore end at the TTL on
+// every shard alike.
+func TestWindowDuplicateVisibilityIsUniformAcrossSkewedShards(t *testing.T) {
+	const ttl = 10 * time.Minute
+	// Both shards run the SAME config; only their load differs.
+	newShard := func() *Window { return NewWindow(WindowConfig{WindowTTL: ttl, MinEntries: 2}) }
+	busy, quiet := newShard(), newShard()
+
+	commitTT := tsoutil.ComposeTS(1_000_000, 0)
+	completeKey(t, busy, "shared-key", commitTT)
+	completeKey(t, quiet, "shared-key", commitTT)
+	// The busy shard carries unrelated traffic that lifts it above the floor.
+	completeKey(t, busy, "other-1", commitTT+1)
+	completeKey(t, busy, "other-2", commitTT+2)
+	completeKey(t, busy, "other-3", commitTT+3)
+
+	// Within the TTL both shards deduplicate the retry.
+	require.Equal(t, BeginDecisionDuplicate, busy.Begin("shared-key", nil).Decision)
+	require.Equal(t, BeginDecisionDuplicate, quiet.Begin("shared-key", nil).Decision)
+
+	// Past the TTL, the periodic timetick sweep hits every window of the pchannel
+	// with the same bound.
+	expiredBound := evictBeforeCommitTT(commitTT+tsoutil.ComposeTS(ttl.Milliseconds()+1_000, 0), ttl)
+	require.NotZero(t, expiredBound)
+	busy.Evict(expiredBound, "")
+	quiet.Evict(expiredBound, "")
+
+	// The floor still holds the quiet shard's entry in memory...
+	require.Contains(t, quiet.entries, IdempotencyKey("shared-key"))
+	require.NotContains(t, busy.entries, IdempotencyKey("shared-key"))
+	// ...but it no longer answers the retry, so both shards agree it is a new write.
+	require.Equal(t, BeginDecisionOwner, busy.Begin("shared-key", nil).Decision)
+	begin := quiet.Begin("shared-key", nil)
+	require.Equal(t, BeginDecisionOwner, begin.Decision)
+
+	// The dropped entry leaves no stale commitOrder slot behind: the re-append
+	// owns exactly one entry, at its new commit timetick.
+	retryTT := commitTT + tsoutil.ComposeTS(ttl.Milliseconds()+2_000, 0)
+	completed, _ := quiet.Complete(begin.Pending, CommitResult{CommitTimeTick: retryTT}, nil)
+	require.True(t, completed)
+	require.Equal(t, 1, quiet.Len())
+	require.Len(t, quiet.commitOrder, 1)
+	duplicate := quiet.Begin("shared-key", nil)
+	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
+	require.Equal(t, retryTT, duplicate.Entry.GetCommitTimetick())
+}
+
 // Complete order is append-completion order, not commit-timetick order: the
 // idempotency interceptor is outermost while the timetick is assigned by the
 // inner timetick interceptor, so concurrent appends on one vchannel can
