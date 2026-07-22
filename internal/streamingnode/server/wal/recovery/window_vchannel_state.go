@@ -62,6 +62,15 @@ type windowEntry struct {
 type idempotencyWindowMetaUpdate struct {
 	meta             *streamingpb.VChannelWindowMeta
 	pendingEntryKeys []string
+	// retentionPinned captures hasRetentionPin() at construction time: whether
+	// any materialized entry or durable-retention-ledger generation still pins
+	// chunk retention. WithPersistedGeneration must consult it instead of
+	// inferring "nothing pinned" from EntryCount == 0 — the staging window is
+	// cleared on every persist, so an empty entry set says nothing about the
+	// ledger, and projecting the boundary forward past a pinned generation
+	// would poison the persisted meta (irreversibly, once chunk GC runs after
+	// a restart).
+	retentionPinned bool
 }
 
 func newEmptyVChannelWindow(pchannel, vchannel string, checkpoint *WALCheckpoint) *vchannelWindow {
@@ -165,6 +174,7 @@ func (s *vchannelWindow) consumePendingCommittedWriteRecords() ([]committedWrite
 	update := &idempotencyWindowMetaUpdate{
 		meta:             s.windowMeta(),
 		pendingEntryKeys: pendingEntryKeys,
+		retentionPinned:  s.hasRetentionPin(),
 	}
 	s.dirty = false
 	s.pendingEntries = make(map[string]*streamingpb.WindowEntry)
@@ -527,7 +537,14 @@ func (update *idempotencyWindowMetaUpdate) WithPersistedGeneration(generation ui
 	meta := proto.Clone(update.meta).(*streamingpb.VChannelWindowMeta)
 	meta.LatestAppliedGeneration = maxUint64(meta.GetLatestAppliedGeneration(), generation)
 	if meta.GetEntryCount() == 0 {
-		meta.MinRequiredGeneration = meta.GetLatestAppliedGeneration()
+		// Advance the boundary only when nothing pinned retention at capture
+		// time — mirroring windowMetaAtGeneration. An empty staging window is
+		// NOT sufficient: the durable-retention ledger may still pin older
+		// generations after evictPersisted cleared the entries, and the captured
+		// meta already carries the ledger-derived MinRequiredGeneration.
+		if !update.retentionPinned {
+			meta.MinRequiredGeneration = meta.GetLatestAppliedGeneration()
+		}
 		return meta
 	}
 	if len(update.pendingEntryKeys) > 0 {

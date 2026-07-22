@@ -31,6 +31,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
+// The persisted-meta projection must honor the durable-retention ledger the
+// same way windowMetaAtGeneration does: after evictPersisted clears the staging
+// window, a later persist cycle carrying only keyless committed writes
+// (EntryCount == 0) must not project MinRequiredGeneration forward past a
+// generation the ledger still pins — that poisoned meta would survive restart
+// and make the loss of in-TTL keys irreversible once chunk GC runs.
+func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
+	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
+	state.evictionCfg = windowEvictionConfig{windowTTL: 10 * time.Minute}
+
+	// Generation 1 persists a keyed insert; the staging window is then cleared.
+	keyed := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		Key:            "key-1",
+		CommitTimetick: tsoutil.ComposeTS(600_000, 0),
+		MessageId:      rmq.NewRmqID(600_000).IntoProto(),
+	})
+	require.NoError(t, state.applyCommittedWriteRecord(keyed, true))
+	state.markCommittedWriteRecordsPersisted([]committedWriteRecord{keyed}, 1)
+	state.evictPersisted()
+	state.consumePendingCommittedWriteRecords()
+	require.Equal(t, uint64(1), state.minRequiredGeneration)
+
+	// The next cycle carries only a keyless committed write (delete/replicated),
+	// so the staged meta reports EntryCount == 0 while the ledger still pins 1.
+	keyless := committedWriteRecord{
+		SourcePChannel: "p1",
+		VChannel:       "v1",
+		SourceTimeTick: tsoutil.ComposeTS(660_000, 0),
+	}
+	require.NoError(t, state.applyCommittedWriteRecord(keyless, true))
+	_, update := state.consumePendingCommittedWriteRecords()
+	require.NotNil(t, update)
+
+	meta := update.WithPersistedGeneration(2)
+	require.Equal(t, uint64(2), meta.GetLatestAppliedGeneration())
+	require.Equal(t, uint64(1), meta.GetMinRequiredGeneration(),
+		"persisted meta must keep the ledger-pinned generation, not project it forward")
+}
+
 // The durable-retention ledger must keep chunk generations recoverable for the
 // full retention policy even after evictPersisted cleared the staging memory.
 // Previously minRequiredGeneration was derived from materialized entries only,
