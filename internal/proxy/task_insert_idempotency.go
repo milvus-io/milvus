@@ -186,6 +186,39 @@ func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
 	return nil, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
 }
 
+// warnOnPartialIdempotentDuplicate makes a fan-out that was deduplicated on some
+// write units but appended fresh on others visible in the log instead of merging
+// silently into a successful response.
+//
+// This is a diagnostic, not a rejection: the mix is the EXPECTED outcome of a
+// retry after an attempt that only reached part of the fan-out (the missing
+// shards must be written, the landed ones must not be written twice), and the
+// proxy cannot tell that apart from the pathological case where a shard's window
+// forgot a key its siblings still hold — the retry then re-appends rows that are
+// already in the WAL. Failing here would break the legitimate case, so the mix is
+// only reported; the uniform-TTL rule in the idempotency window is what keeps
+// retention from diverging between shards in the first place.
+func warnOnPartialIdempotentDuplicate(ctx context.Context, key string, resp types.AppendResponses) {
+	duplicates := 0
+	total := 0
+	for _, appendResp := range resp.Responses {
+		if appendResp.Error != nil || appendResp.AppendResult == nil {
+			continue
+		}
+		total++
+		if appendResp.AppendResult.Extra != nil {
+			duplicates++
+		}
+	}
+	if duplicates == 0 || duplicates == total {
+		return
+	}
+	mlog.Warn(ctx, "idempotent insert was deduplicated on part of its write units only; the fresh ones were appended again",
+		mlog.String("idempotencyKey", key),
+		mlog.Int("duplicateWriteUnits", duplicates),
+		mlog.Int("totalWriteUnits", total))
+}
+
 func mergeDuplicateInsertResults(result *milvuspb.MutationResult, resp types.AppendResponses) error {
 	if result == nil || result.GetIDs() == nil {
 		return nil
