@@ -29,9 +29,12 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES 
 # re-encoded as fp16 at load (validated fp16 GPU path; the int8 query is widened
 # to fp32 through searchHost). int8 L2/IP keep direct_signed + DP4A.
 # Includes the faiss review fixes: upload the filter bitset in
-# GpuIndexHNSW::searchImpl_ (standard search() path) and guard extract_hnsw_layers
-# against an OOB nb_neighbors(1) read on a layer-0-only index.
-set( KNOWHERE_VERSION 97f933f33ee959c311ee641ad5715bf2855bf252 )
+# GpuIndexHNSW::searchImpl_ (standard search() path); guard extract_hnsw_layers
+# against an OOB nb_neighbors(1) read on a layer-0-only index; and select the
+# int8 DP4A layer-0 path on a per-search staged flag (not a leftover pooled
+# d_queries_i8 buffer) so a fp32-query search reusing the slot can't score
+# against stale int8 data.
+set( KNOWHERE_VERSION 9c0af31fe7b1d8c98d8cd3e219420e0ceca3cb62 )
 set( GIT_REPOSITORY  "https://github.com/6si/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
