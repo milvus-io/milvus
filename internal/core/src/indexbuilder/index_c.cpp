@@ -51,6 +51,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 
@@ -214,6 +215,14 @@ configure_manifest_file_manager_context(
                                      build_index_info.external_source(),
                                      build_index_info.external_spec());
     }
+    // Widen the per-round read window for index-build manifest reads when
+    // configured. With loon's 32MB default each prefetch round admits a
+    // single 64MB-class row group, so the whole raw-data download degrades
+    // to one S3 range read at a time; a wider window lets one round span
+    // multiple row groups whose column chunks are prefetched in parallel
+    // on the arrow IO thread pool.
+    milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+        .ApplyIndexBuildReadWindow(*loon_properties);
     file_manager_context.set_loon_ffi_properties(loon_properties);
 
     auto is_milvus_table =

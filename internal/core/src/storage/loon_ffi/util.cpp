@@ -40,6 +40,7 @@
 #include "nlohmann/json_fwd.hpp"
 #include "storage/Types.h"
 #include "storage/loon_ffi/external_spec_c.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
@@ -256,6 +257,16 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_USE_CRC32C_CHECKSUM,
         c_storage_config.use_crc32c_checksum ? "true" : "false");
+
+    // Carry the configured arrow reader prebuffer limits into every
+    // freshly-built properties map. Index build (index_c.cpp) and the FFI
+    // readers construct properties per task through this helper instead of
+    // going through LoonFFIPropertiesSingleton's cached map, so without this
+    // the common.arrow.reader.* configuration never reaches those reads and
+    // external-table index builds are stuck with arrow's default range
+    // coalescing (effectively one in-flight S3 range per file).
+    milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+        .ApplyArrowReaderConfig(*properties_map);
 
     return properties_map;
 }
