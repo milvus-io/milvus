@@ -342,7 +342,7 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 					pluginContext = &indexcgopb.StoragePluginContext{
 						EncryptionZoneId: ez.EzID,
 						CollectionId:     ez.CollectionID,
-						EncryptionKey:    string(unsafe),
+						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 					}
 				}
 			}
