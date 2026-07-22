@@ -54,14 +54,16 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
-	MaxClusterIDBits                = 3
+	DefaultMaxDegree                     = 56
+	DefaultSearchListSize                = 100
+	DefaultPQCodeBudgetGBRatio           = 0.125
+	DefaultBuildNumThreadsRatio          = 1.0
+	DefaultSearchCacheBudgetGBRatio      = 0.10
+	DefaultAiSAQSearchCacheBudgetGBRatio = 0.0
+	DefaultDiskPQCodeBudgetGBRatio       = 0.25
+	DefaultLoadNumThreadRatio            = 8.0
+	DefaultBeamWidthRatio                = 4.0
+	MaxClusterIDBits                     = 3
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -362,6 +364,122 @@ type commonConfig struct {
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
+	AiSAQCfg         aisaqConfig
+}
+
+type aisaqConfig struct {
+	MaxDegree                ParamItem `refreshable:"true"`
+	SearchListSize           ParamItem `refreshable:"true"`
+	PQCodeBudgetGBRatio      ParamItem `refreshable:"true"`
+	SearchCacheBudgetGBRatio ParamItem `refreshable:"true"`
+	BeamWidthRatio           ParamItem `refreshable:"true"`
+	DiskPQCodeBudgetGBRatio  ParamItem `refreshable:"true"`
+	InlinePQ                 ParamItem `refreshable:"true"`
+	PQCacheSize              ParamItem `refreshable:"true"`
+	Rearrange                ParamItem `refreshable:"true"`
+	PQReadPageCacheSize      ParamItem `refreshable:"true"`
+	NumEntryPoints           ParamItem `refreshable:"true"`
+}
+
+func (p *aisaqConfig) init(base *BaseTable) {
+	p.MaxDegree = ParamItem{
+		Key:          "common.AiSAQIndex.MaxDegree",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultMaxDegree),
+		Export:       true,
+	}
+	p.MaxDegree.Init(base.mgr)
+
+	p.SearchListSize = ParamItem{
+		Key:          "common.AiSAQIndex.SearchListSize",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultSearchListSize),
+		Export:       true,
+	}
+	p.SearchListSize.Init(base.mgr)
+
+	p.PQCodeBudgetGBRatio = ParamItem{
+		Key:          "common.AiSAQIndex.PQCodeBudgetGBRatio",
+		Version:      "2.0.0",
+		DefaultValue: fmt.Sprintf("%f", DefaultPQCodeBudgetGBRatio),
+		Export:       true,
+	}
+	p.PQCodeBudgetGBRatio.Init(base.mgr)
+
+	p.DiskPQCodeBudgetGBRatio = ParamItem{
+		Key:          "common.AiSAQIndex.DiskPQCodeBudgetGBRatio",
+		Version:      "2.0.0",
+		DefaultValue: fmt.Sprintf("%f", DefaultDiskPQCodeBudgetGBRatio),
+		Export:       true,
+	}
+	p.DiskPQCodeBudgetGBRatio.Init(base.mgr)
+
+	p.SearchCacheBudgetGBRatio = ParamItem{
+		Key:          "common.AiSAQIndex.SearchCacheBudgetGBRatio",
+		Version:      "2.0.0",
+		DefaultValue: fmt.Sprintf("%f", DefaultAiSAQSearchCacheBudgetGBRatio),
+		Export:       true,
+	}
+	p.SearchCacheBudgetGBRatio.Init(base.mgr)
+
+	p.BeamWidthRatio = ParamItem{
+		Key:          "common.AiSAQIndex.BeamWidthRatio",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultBeamWidthRatio),
+		Doc:          "",
+		Export:       true,
+	}
+	p.BeamWidthRatio.Init(base.mgr)
+
+	p.InlinePQ = ParamItem{
+		Key:          "common.AiSAQIndex.inlinePQ",
+		Version:      "2.5.0",
+		Doc:          "Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by the node size.",
+		DefaultValue: "-1",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.InlinePQ.Init(base.mgr)
+
+	p.PQCacheSize = ParamItem{
+		Key:          "common.AiSAQIndex.pqCacheSize",
+		Version:      "2.5.0",
+		Doc:          "compressed vectors cache DRAM size in MiB.",
+		DefaultValue: "0",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.PQCacheSize.Init(base.mgr)
+
+	p.Rearrange = ParamItem{
+		Key:          "common.AiSAQIndex.rearrange",
+		Version:      "2.5.0",
+		Doc:          "Enable vectors rearrangement during build.",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.Rearrange.Init(base.mgr)
+
+	p.PQReadPageCacheSize = ParamItem{
+		Key:          "common.AiSAQIndex.pqReadPageCacheSize",
+		Version:      "2.5.0",
+		Doc:          "compressed vectors read cache DRAM size in bytes per thread.",
+		DefaultValue: "0",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.PQReadPageCacheSize.Init(base.mgr)
+
+	p.NumEntryPoints = ParamItem{
+		Key:          "common.AiSAQIndex.numEntryPoints",
+		Version:      "2.5.0",
+		Doc:          "Number of entry points that should be generated to be used as a search start points",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.NumEntryPoints.Init(base.mgr)
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1520,6 +1638,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		},
 	}
 	p.GroupByMaxGroups.Init(base.mgr)
+	p.AiSAQCfg.init(base)
 }
 
 type gpuConfig struct {

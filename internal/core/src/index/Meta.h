@@ -111,6 +111,11 @@ constexpr const char* DISK_ANN_BUILD_DRAM_BUDGET = "build_dram_budget_gb";
 constexpr const char* DISK_ANN_BUILD_THREAD_NUM = "num_build_thread";
 constexpr const char* DISK_ANN_PQ_DIMS = "disk_pq_dims";
 constexpr const char* DISK_ANN_THREADS_NUM = "num_threads";
+constexpr const char* AISAQ_INLINE_PQ = "inline_pq";
+constexpr const char* AISAQ_PQ_CACHE_SIZE = "pq_cache_size";
+constexpr const char* AISAQ_REARRANGE = "rearrange";
+constexpr const char* AISAQ_NUM_ENTRY_POINTS = "num_entry_points";
+constexpr const char* AISAQ_PQ_READ_PAGE_CACHE_SIZE = "pq_read_page_cache_size";
 
 // DiskAnn prepare params
 constexpr const char* DISK_ANN_LOAD_THREAD_NUM = "num_load_thread";
@@ -121,6 +126,7 @@ constexpr const char* DISK_ANN_PREPARE_USE_BFS_CACHE = "use_bfs_cache";
 // DiskAnn query params
 constexpr const char* DISK_ANN_QUERY_LIST = "search_list";
 constexpr const char* DISK_ANN_QUERY_BEAMWIDTH = "beamwidth";
+constexpr const char* DISK_ANN_QUERY_PQ_BEAMWIDTH = "vectors_beamwidth";
 
 // HNSW query params
 constexpr const char* HNSW_QUERY_EF = "ef";
