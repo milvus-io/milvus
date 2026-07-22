@@ -129,6 +129,17 @@ func (s *StructArraySuite) TestAppendValueWithUntypedNil() {
 	s.True(isNull)
 }
 
+func (s *StructArraySuite) TestAppendNullDoesNotPartiallyMutateMixedNullableFields() {
+	nullableField := NewColumnInt64Array("age", nil)
+	nullableField.SetNullable(true)
+	requiredField := NewColumnVarCharArray("tag", nil)
+	column := NewColumnStructArray("profile", []Column{nullableField, requiredField})
+
+	s.Require().Error(column.AppendNull())
+	s.Zero(nullableField.Len())
+	s.Zero(requiredField.Len())
+}
+
 func (s *StructArraySuite) TestNullableCompactSlice() {
 	column := NewColumnStructArray("profile", []Column{
 		NewColumnInt64Array("id", nil),
