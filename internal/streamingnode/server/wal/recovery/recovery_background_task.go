@@ -154,12 +154,13 @@ func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, che
 	if flusherCP == nil {
 		return
 	}
-	// use the smaller one to truncate the wal.
-	if flusherCP.MessageID.LTE(checkpoint.MessageID) {
-		_ = rs.truncator.Truncate(ctx, flusherCP.MessageID)
-	} else {
-		_ = rs.truncator.Truncate(ctx, checkpoint.MessageID)
+	// use the smallest one to truncate the wal.
+	truncateCP := minCheckpointByMessageID(flusherCP, checkpoint)
+	truncateCP = minCheckpointByMessageID(truncateCP, rs.windowManager.truncateClampCheckpoint())
+	if truncateCP == nil || truncateCP.MessageID == nil {
+		return
 	}
+	_ = rs.truncator.Truncate(ctx, truncateCP.MessageID)
 }
 
 // dropAllVirtualChannel drops all virtual channels that are in the dropped state.
