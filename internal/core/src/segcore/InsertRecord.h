@@ -509,8 +509,7 @@ class OffsetOrderedMap : public OffsetMap {
         // skipping (older offsets of an already-hit PK, or docs past the
         // limit) are simply unused — the lookups are pure.
         constexpr int64_t kRangeBatchSize = 64;
-        int64_t batch_docs[kRangeBatchSize];
-        int32_t batch_rows[kRangeBatchSize];
+        int32_t batch_offsets[kRangeBatchSize];
         std::pair<int32_t, int32_t> batch_ranges[kRangeBatchSize];
         const typename OrderedMap::value_type* batch_pks[kRangeBatchSize];
 
@@ -537,20 +536,20 @@ class OffsetOrderedMap : public OffsetMap {
                         static_cast<int64_t>(gather_it->second.size()) - 1;
                     continue;
                 }
-                batch_docs[n] = gather_it->second[gather_idx];
-                batch_rows[n] = static_cast<int32_t>(batch_docs[n]);
+                batch_offsets[n] =
+                    static_cast<int32_t>(gather_it->second[gather_idx]);
                 batch_pks[n] = &*gather_it;
                 ++n;
                 --gather_idx;
             }
-            array_offsets->CopyRowElementRanges(batch_rows, n, batch_ranges);
+            array_offsets->CopyRowElementRanges(batch_offsets, n, batch_ranges);
 
             for (int64_t k = 0; k < n && hit_num < limit; ++k) {
                 const auto* pk_entry = batch_pks[k];
                 if (pk_entry == skip_pk) {
                     continue;
                 }
-                auto doc_offset = batch_docs[k];
+                const int64_t doc_offset = batch_offsets[k];
 
                 // Get element range for this doc
                 auto [first_elem, last_elem] = batch_ranges[k];

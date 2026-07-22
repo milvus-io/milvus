@@ -999,19 +999,18 @@ class SegmentExpr : public Expr {
             // resolution covers every consecutive element id of that row.
             auto resolve_run = [&](size_t pos) -> RunInfo {
                 int32_t element_id = (*element_ids)[pos];
-                auto [row_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
-                const int32_t row_last =
-                    array_offsets->ElementIDRangeOfRow(row_id).second;
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
                 int64_t max_run =
-                    std::min<int64_t>(row_last - element_id,
+                    std::min<int64_t>(row.row_element_end - element_id,
                                       element_ids->size() - pos);
                 int64_t run_len = 1;
                 while (run_len < max_run &&
                        (*element_ids)[pos + run_len] == element_id + run_len) {
                     ++run_len;
                 }
-                return {row_id, elem_idx, static_cast<int32_t>(run_len)};
+                return {row.row_id,
+                        row.element_index,
+                        static_cast<int32_t>(run_len)};
             };
 
             while (i < element_ids->size()) {
@@ -1060,15 +1059,13 @@ class SegmentExpr : public Expr {
                 // Process each run's elements in this batch
                 size_t result_idx = batch_start;
                 for (size_t j = 0; j < offsets.size(); j++) {
-                    for (int32_t t = 0; t < run_lengths[j];
-                         ++t, ++result_idx) {
+                    for (int32_t t = 0; t < run_lengths[j]; ++t, ++result_idx) {
                         if (chunk_active) {
                             // Extract element from ArrayView
                             auto value =
                                 array_vec[j].template get_data<ElementType>(
                                     first_elem_indices[j] + t);
-                            bool is_valid =
-                                !valid_data.data() || valid_data[j];
+                            bool is_valid = !valid_data.data() || valid_data[j];
 
                             func.template operator()<FilterType::random>(
                                 &value,
@@ -1082,8 +1079,7 @@ class SegmentExpr : public Expr {
                             // Chunk is skipped - handle exactly like
                             // ProcessDataByOffsets
                             if (valid_data.size() > j && !valid_data[j]) {
-                                res[result_idx] = valid_res[result_idx] =
-                                    false;
+                                res[result_idx] = valid_res[result_idx] = false;
                             }
                         }
 
@@ -1106,20 +1102,17 @@ class SegmentExpr : public Expr {
 
             // Same run exploitation as the sealed branch: element ids from
             // RowOffsetsToElementOffsets list each row's elements
-            // consecutively ascending, so resolve the row (two virtual
-            // calls, i.e. two shared locks on the growing offsets) and pin
-            // the Array chunk ONCE per run instead of once per element. The
+            // consecutively ascending, so resolve the row and its range with
+            // one virtual call/shared lock and pin the Array chunk ONCE per
+            // run instead of once per element. The
             // consecutive-id guard below keeps this correct for arbitrary
             // input orders.
             while (i < element_ids->size()) {
                 int32_t element_id = (*element_ids)[i];
 
-                auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
-                const int32_t row_last =
-                    array_offsets->ElementIDRangeOfRow(doc_id).second;
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
                 int64_t max_run = std::min<int64_t>(
-                    row_last - element_id, element_ids->size() - i);
+                    row.row_element_end - element_id, element_ids->size() - i);
                 int64_t run_len = 1;
                 while (run_len < max_run &&
                        (*element_ids)[i + run_len] == element_id + run_len) {
@@ -1127,8 +1120,8 @@ class SegmentExpr : public Expr {
                 }
 
                 // Calculate chunk_id and chunk_offset for this doc
-                auto chunk_id = doc_id / size_per_chunk_;
-                auto chunk_offset = doc_id % size_per_chunk_;
+                auto chunk_id = row.row_id / size_per_chunk_;
+                auto chunk_offset = row.row_id % size_per_chunk_;
 
                 // Get the Array chunk (Growing segment stores Array, not ArrayView)
                 auto pw =
@@ -1146,8 +1139,8 @@ class SegmentExpr : public Expr {
                 for (int64_t t = 0; t < run_len; ++t) {
                     if (chunk_active) {
                         // Extract element from Array
-                        auto value =
-                            array_ptr->get_data<ElementType>(elem_idx + t);
+                        auto value = array_ptr->get_data<ElementType>(
+                            row.element_index + t);
                         bool is_valid = !valid_data || valid_data[0];
 
                         func.template operator()<FilterType::random>(

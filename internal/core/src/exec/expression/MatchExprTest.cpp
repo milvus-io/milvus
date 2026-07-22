@@ -38,7 +38,12 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Vector.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/MatchExpr.h"
+#include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
@@ -432,6 +437,238 @@ TEST_F(MatchExprTest, MatchExactZero) {
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count == threshold;
         });
+}
+
+namespace {
+
+class FixedBitmapExpr : public exec::Expr {
+ public:
+    FixedBitmapExpr(TargetBitmap data, TargetBitmap valid)
+        : Expr(DataType::BOOL, {}, "FixedBitmapExpr", nullptr),
+          data_(std::move(data)),
+          valid_(std::move(valid)) {
+    }
+
+    void
+    Eval(exec::EvalCtx&, VectorPtr& result) override {
+        result = std::make_shared<ColumnVector>(data_.clone(), valid_.clone());
+    }
+
+    std::string
+    ToString() const override {
+        return "FixedBitmapExpr";
+    }
+
+    std::optional<expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+
+ private:
+    TargetBitmap data_;
+    TargetBitmap valid_;
+};
+
+bool
+MatchSingleRowReference(int64_t bitset_start,
+                        int64_t row_elem_count,
+                        const TargetBitmap& match_bitmap,
+                        const TargetBitmap& valid_bitmap,
+                        expr::MatchType match_type,
+                        int64_t threshold) {
+    int64_t hit_count = 0;
+    for (int64_t i = 0; i < row_elem_count; ++i) {
+        const auto bit = bitset_start + i;
+        if (!valid_bitmap[bit]) {
+            continue;
+        }
+        if (match_bitmap[bit]) {
+            ++hit_count;
+        } else if (match_type == expr::MatchType::MatchAll) {
+            return false;
+        }
+    }
+
+    switch (match_type) {
+        case expr::MatchType::MatchAny:
+            return hit_count > 0;
+        case expr::MatchType::MatchAll:
+            return true;
+        case expr::MatchType::MatchLeast:
+            return hit_count >= threshold;
+        case expr::MatchType::MatchMost:
+            return hit_count <= threshold;
+        case expr::MatchType::MatchExact:
+            return hit_count == threshold;
+        default:
+            return false;
+    }
+}
+
+}  // namespace
+
+TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
+    const std::vector<int64_t> row_lengths = {0, 1, 63, 64, 65, 200};
+    const int64_t row_count = row_lengths.size();
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, false);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(row_count);
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count);
+    std::vector<milvus::proto::schema::ScalarField> sub_int_data(row_count);
+    for (int64_t row = 0; row < row_count; ++row) {
+        ids[row] = row;
+        row_ids[row] = row;
+        timestamps[row] = row;
+        for (int64_t i = 0; i < row_lengths[row]; ++i) {
+            sub_int_data[row].mutable_int_data()->add_data(i);
+        }
+    }
+
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+    auto sub_int_array = CreateDataArrayFrom(sub_int_data.data(),
+                                             nullptr,
+                                             row_count,
+                                             schema->operator[](sub_int_fid));
+    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    insert_data->set_num_rows(row_count);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    const auto reserved_offset = segment->PreInsert(row_count);
+    segment->Insert(reserved_offset,
+                    row_count,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_data.get());
+
+    exec::OffsetVector offsets = {1, 3, 4, 5, 0, 2};
+    std::vector<int64_t> bitset_starts(offsets.size() + 1, 0);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        bitset_starts[i + 1] = bitset_starts[i] + row_lengths[offsets[i]];
+    }
+    const int64_t elem_count = bitset_starts.back();
+
+    TargetBitmap boundary_matches(elem_count, false);
+    TargetBitmap boundary_valid(elem_count, true);
+    TargetBitmap random_matches(elem_count, false);
+    TargetBitmap random_valid(elem_count, true);
+    std::mt19937 random(0x51390);
+    std::bernoulli_distribution random_match(0.5);
+    std::bernoulli_distribution random_is_valid(0.75);
+    for (size_t output_row = 0; output_row < offsets.size(); ++output_row) {
+        const auto row_length = row_lengths[offsets[output_row]];
+        for (int64_t i = 0; i < row_length; ++i) {
+            const auto bit = bitset_starts[output_row] + i;
+            const bool local_boundary = i == 0 || i + 1 == row_length ||
+                                        i == 62 || i == 63 || i == 64 ||
+                                        i == 199;
+            const bool word_boundary = bit % 64 == 0 || bit % 64 == 63;
+            boundary_matches[bit] = local_boundary || word_boundary;
+            boundary_valid[bit] =
+                !((local_boundary && output_row % 2 == 0) || bit % 17 == 0);
+            random_matches[bit] = random_match(random);
+            random_valid[bit] = random_is_valid(random);
+        }
+    }
+
+    struct BitmapCase {
+        std::string name;
+        TargetBitmap matches;
+        TargetBitmap valid;
+    };
+    std::vector<BitmapCase> bitmap_cases;
+    bitmap_cases.push_back({"all-match/all-valid",
+                            TargetBitmap(elem_count, true),
+                            TargetBitmap(elem_count, true)});
+    bitmap_cases.push_back({"no-match/all-valid",
+                            TargetBitmap(elem_count, false),
+                            TargetBitmap(elem_count, true)});
+    bitmap_cases.push_back({"boundary/all-valid",
+                            boundary_matches.clone(),
+                            TargetBitmap(elem_count, true)});
+    bitmap_cases.push_back({"boundary/mixed-valid",
+                            boundary_matches.clone(),
+                            boundary_valid.clone()});
+    bitmap_cases.push_back({"random/all-valid",
+                            random_matches.clone(),
+                            TargetBitmap(elem_count, true)});
+    bitmap_cases.push_back(
+        {"random/mixed-valid", random_matches.clone(), random_valid.clone()});
+
+    const std::vector<expr::MatchType> match_types = {
+        expr::MatchType::MatchAny,
+        expr::MatchType::MatchAll,
+        expr::MatchType::MatchLeast,
+        expr::MatchType::MatchMost,
+        expr::MatchType::MatchExact,
+    };
+    const std::vector<int64_t> thresholds = {
+        0, 1, 2, 62, 63, 64, 65, 66, 199, 200, 201};
+
+    exec::QueryContext query_context(
+        "match_word_fold_test", segment.get(), row_count, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    for (const auto& bitmap_case : bitmap_cases) {
+        for (const auto match_type : match_types) {
+            for (const auto threshold : thresholds) {
+                SCOPED_TRACE(::testing::Message()
+                             << "bitmap=" << bitmap_case.name << ", type="
+                             << proto::plan::MatchType_Name(match_type)
+                             << ", threshold=" << threshold);
+
+                auto child = std::make_shared<FixedBitmapExpr>(
+                    bitmap_case.matches.clone(), bitmap_case.valid.clone());
+                std::vector<std::shared_ptr<exec::Expr>> inputs = {child};
+                auto logical_expr =
+                    std::make_shared<expr::MatchExpr>("struct_array",
+                                                      match_type,
+                                                      threshold,
+                                                      expr::TypedExprPtr{});
+                exec::PhyMatchFilterExpr physical_expr(inputs,
+                                                       logical_expr,
+                                                       "PhyMatchFilterExpr",
+                                                       nullptr,
+                                                       segment.get(),
+                                                       row_count,
+                                                       row_count);
+                exec::EvalCtx eval_context(&exec_context);
+                eval_context.set_offset_input(&offsets);
+
+                VectorPtr result;
+                physical_expr.Eval(eval_context, result);
+                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                ASSERT_NE(output, nullptr);
+                ASSERT_EQ(output->size(), offsets.size());
+                TargetBitmapView output_data(output->GetRawData(),
+                                             output->size());
+                TargetBitmapView output_valid(output->GetValidRawData(),
+                                              output->size());
+                for (size_t output_row = 0; output_row < offsets.size();
+                     ++output_row) {
+                    const bool expected = MatchSingleRowReference(
+                        bitset_starts[output_row],
+                        row_lengths[offsets[output_row]],
+                        bitmap_case.matches,
+                        bitmap_case.valid,
+                        match_type,
+                        threshold);
+                    EXPECT_EQ(output_data[output_row], expected)
+                        << "output_row=" << output_row
+                        << ", source_row=" << offsets[output_row]
+                        << ", row_length=" << row_lengths[offsets[output_row]];
+                    EXPECT_TRUE(output_valid[output_row]);
+                }
+            }
+        }
+    }
 }
 
 TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {

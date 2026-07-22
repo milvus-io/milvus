@@ -211,17 +211,14 @@ PhyIterativeElementFilterNode::CollectResults(
             if (element_id >= cached_first_elem &&
                 element_id < cached_last_elem) {
                 doc_id = cached_doc_id;
-                elem_idx = static_cast<int32_t>(element_id) -
-                           cached_first_elem;
+                elem_idx = static_cast<int32_t>(element_id) - cached_first_elem;
             } else {
-                const auto row = array_offsets->ElementIDToRowID(element_id);
-                doc_id = row.first;
-                elem_idx = row.second;
-                cached_doc_id = doc_id;
-                cached_first_elem =
-                    static_cast<int32_t>(element_id) - elem_idx;
-                cached_last_elem =
-                    array_offsets->ElementIDRangeOfRow(doc_id).second;
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
+                doc_id = row.row_id;
+                elem_idx = row.element_index;
+                cached_doc_id = row.row_id;
+                cached_first_elem = row.row_element_start;
+                cached_last_elem = row.row_element_end;
             }
 
             // Find insert position using binary search

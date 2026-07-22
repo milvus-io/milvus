@@ -402,6 +402,40 @@ TEST_F(ArrayOffsetsTest, SingleElementPerRow) {
     }
 }
 
+TEST_F(ArrayOffsetsTest, SealedElementIDToRowInfo) {
+    // Adjacent singleton rows, an empty row, a multi-element row, and a final
+    // singleton row.
+    ArrayOffsetsSealed offsets({0, 1, 2, 2, 5, 6});
+
+    for (int32_t element_id = 0; element_id < 6; ++element_id) {
+        const auto info = offsets.ElementIDToRowInfo(element_id);
+        const auto [row_id, element_index] =
+            offsets.ElementIDToRowID(element_id);
+        const auto [row_start, row_end] = offsets.ElementIDRangeOfRow(row_id);
+        EXPECT_EQ(info.row_id, row_id);
+        EXPECT_EQ(info.element_index, element_index);
+        EXPECT_EQ(info.row_element_start, row_start);
+        EXPECT_EQ(info.row_element_end, row_end);
+    }
+}
+
+TEST_F(ArrayOffsetsTest, GrowingElementIDToRowInfo) {
+    ArrayOffsetsGrowing offsets;
+    std::vector<int32_t> lengths = {1, 1, 0, 3, 1};
+    offsets.Insert(0, lengths.data(), lengths.size());
+
+    for (int32_t element_id = 0; element_id < 6; ++element_id) {
+        const auto info = offsets.ElementIDToRowInfo(element_id);
+        const auto [row_id, element_index] =
+            offsets.ElementIDToRowID(element_id);
+        const auto [row_start, row_end] = offsets.ElementIDRangeOfRow(row_id);
+        EXPECT_EQ(info.row_id, row_id);
+        EXPECT_EQ(info.element_index, element_index);
+        EXPECT_EQ(info.row_element_start, row_start);
+        EXPECT_EQ(info.row_element_end, row_end);
+    }
+}
+
 TEST_F(ArrayOffsetsTest, LargeArrayLength) {
     ArrayOffsetsGrowing offsets;
 
@@ -958,8 +992,8 @@ TEST_F(ArrayOffsetsTest, SealedCopyRowElementRanges) {
     // row 0: [0,2), row 1: [2,5), row 2: empty, row 3: [5,6)
     ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
 
-    // Arbitrary order + duplicates + the end sentinel row (== row_count).
-    std::vector<int32_t> rows = {3, 0, 2, 0, 4};
+    // Arbitrary order + duplicates.
+    std::vector<int32_t> rows = {3, 0, 2, 0};
     std::vector<std::pair<int32_t, int32_t>> out(rows.size());
     offsets.CopyRowElementRanges(
         rows.data(), static_cast<int64_t>(rows.size()), out.data());
@@ -967,15 +1001,35 @@ TEST_F(ArrayOffsetsTest, SealedCopyRowElementRanges) {
     EXPECT_EQ(out[1], (std::pair<int32_t, int32_t>{0, 2}));
     EXPECT_EQ(out[2], (std::pair<int32_t, int32_t>{5, 5}));  // empty row
     EXPECT_EQ(out[3], (std::pair<int32_t, int32_t>{0, 2}));
-    EXPECT_EQ(out[4], (std::pair<int32_t, int32_t>{6, 6}));  // == row_count
     // Consistency with the per-row method.
     for (size_t i = 0; i < rows.size(); ++i) {
         EXPECT_EQ(out[i], offsets.ElementIDRangeOfRow(rows[i]));
+    }
+
+    for (const int32_t invalid_row : {-1, 4}) {
+        std::pair<int32_t, int32_t> invalid_out;
+        try {
+            offsets.CopyRowElementRanges(&invalid_row, 1, &invalid_out);
+            FAIL() << "expected invalid sealed row id to throw";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        }
     }
 }
 
 TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
     ArrayOffsetsGrowing offsets;
+
+    {
+        const int32_t invalid_row = -1;
+        std::pair<int32_t, int32_t> invalid_out;
+        try {
+            offsets.CopyRowElementRanges(&invalid_row, 1, &invalid_out);
+            FAIL() << "expected negative growing row id to throw";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        }
+    }
 
     // No committed rows: {0, 0} out-of-range insurance.
     {
@@ -1010,7 +1064,8 @@ TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
     {
         std::vector<int32_t> pending_rows = {5, 4};
         std::vector<std::pair<int32_t, int32_t>> pending_out(2);
-        offsets.CopyRowElementRanges(pending_rows.data(), 2, pending_out.data());
+        offsets.CopyRowElementRanges(
+            pending_rows.data(), 2, pending_out.data());
         EXPECT_EQ(pending_out[0], (std::pair<int32_t, int32_t>{0, 0}));
         EXPECT_EQ(pending_out[1], (std::pair<int32_t, int32_t>{0, 0}));
     }

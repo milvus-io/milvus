@@ -39,6 +39,20 @@ namespace milvus {
 
 namespace {
 
+ElementRowInfo
+LocateElement(const std::vector<int32_t>& row_to_element_start,
+              int32_t elem_id) {
+    assert(!row_to_element_start.empty() && elem_id >= 0 &&
+           elem_id < row_to_element_start.back());
+
+    auto it = std::upper_bound(
+        row_to_element_start.begin(), row_to_element_start.end(), elem_id);
+    const int32_t row_id = static_cast<int32_t>(
+        std::distance(row_to_element_start.begin(), it) - 1);
+    const int32_t row_element_start = *(it - 1);
+    return {row_id, elem_id - row_element_start, row_element_start, *it};
+}
+
 // Word-wise ANY-semantics reduction shared by the sealed and growing
 // implementations of ElementBitsetToRowBitsetAny.
 //
@@ -115,17 +129,13 @@ ElementBitsetAnyReduce(const int32_t* starts,
 
 std::pair<int32_t, int32_t>
 ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
-    assert(elem_id >= 0 && elem_id < GetTotalElementCount());
+    const auto info = LocateElement(row_to_element_start_, elem_id);
+    return {info.row_id, info.element_index};
+}
 
-    // Binary search: find the row where elem_id belongs
-    // row_to_element_start_[row_id] <= elem_id < row_to_element_start_[row_id + 1]
-    auto it = std::upper_bound(
-        row_to_element_start_.begin(), row_to_element_start_.end(), elem_id);
-    int32_t row_id = static_cast<int32_t>(
-        std::distance(row_to_element_start_.begin(), it) - 1);
-
-    int32_t elem_idx = elem_id - row_to_element_start_[row_id];
-    return {row_id, elem_idx};
+ElementRowInfo
+ArrayOffsetsSealed::ElementIDToRowInfo(int32_t elem_id) const {
+    return LocateElement(row_to_element_start_, elem_id);
 }
 
 std::pair<int32_t, int32_t>
@@ -149,12 +159,11 @@ ArrayOffsetsSealed::CopyRowElementRanges(
     const int32_t* starts = row_to_element_start_.data();
     for (int64_t i = 0; i < count; ++i) {
         const int32_t row_id = row_ids[i];
-        assert(row_id >= 0 && row_id <= row_count);
-        if (row_id == row_count) {
-            out[i] = {starts[row_count], starts[row_count]};
-        } else {
-            out[i] = {starts[row_id], starts[row_id + 1]};
-        }
+        AssertInfo(row_id >= 0 && row_id < row_count,
+                   "row id out of bounds: row_id={}, row_count={}",
+                   row_id,
+                   row_count);
+        out[i] = {starts[row_id], starts[row_id + 1]};
     }
 }
 
@@ -483,18 +492,14 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
 std::pair<int32_t, int32_t>
 ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
     std::shared_lock lock(mutex_);
-    int64_t total_elements =
-        row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
-    assert(elem_id >= 0 && elem_id < total_elements);
+    const auto info = LocateElement(row_to_element_start_, elem_id);
+    return {info.row_id, info.element_index};
+}
 
-    // Binary search: find the row where elem_id belongs
-    auto it = std::upper_bound(
-        row_to_element_start_.begin(), row_to_element_start_.end(), elem_id);
-    int32_t row_id = static_cast<int32_t>(
-        std::distance(row_to_element_start_.begin(), it) - 1);
-
-    int32_t elem_idx = elem_id - row_to_element_start_[row_id];
-    return {row_id, elem_idx};
+ElementRowInfo
+ArrayOffsetsGrowing::ElementIDToRowInfo(int32_t elem_id) const {
+    std::shared_lock lock(mutex_);
+    return LocateElement(row_to_element_start_, elem_id);
 }
 
 std::pair<int32_t, int32_t>
@@ -520,10 +525,11 @@ ArrayOffsetsGrowing::CopyRowElementRanges(
     const int32_t* starts = row_to_element_start_.data();
     for (int64_t i = 0; i < count; ++i) {
         const int32_t row_id = row_ids[i];
+        AssertInfo(
+            row_id >= 0, "row id must be non-negative: row_id={}", row_id);
         // Out-of-range insurance: with zero committed rows the vector is
         // empty, and a not-yet-committed row has no range yet.
-        if (row_id < 0 || row_id > committed_row_count_ ||
-            row_to_element_start_.empty()) {
+        if (row_id > committed_row_count_ || row_to_element_start_.empty()) {
             out[i] = {0, 0};
             continue;
         }
@@ -554,8 +560,7 @@ ArrayOffsetsGrowing::CopyRowElementStarts(int64_t row_start,
     const int64_t committed = committed_row_count_;
     if (row_start + row_count <= committed) {
         // Fast path: fully committed range, straight copy under the lock.
-        std::memcpy(
-            out, starts + row_start, sizeof(int32_t) * (row_count + 1));
+        std::memcpy(out, starts + row_start, sizeof(int32_t) * (row_count + 1));
         return;
     }
     // Rows at or beyond the committed count clamp to the committed total
