@@ -249,6 +249,83 @@ func TestInterceptorDuplicateTxnCommitRollsBackRetriedTxn(t *testing.T) {
 	require.Len(t, appended, 4)
 }
 
+// When the owner's commit append fails, a waiter with its own retried txnID
+// must still reclaim its txn insert-result buffer, but must NOT synthesize a
+// rollback: a same-txnID concurrent commit may be legitimately retried by the
+// client after the owner's failure.
+func TestInterceptorWaitErrorReclaimsRetriedTxnBuffer(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	ownerTxn := message.TxnContext{TxnID: 1, Keepalive: 10}
+	retryTxn := message.TxnContext{TxnID: 2, Keepalive: 10}
+	appendErr := errors.New("owner append failed")
+
+	newCommit := func(txnCtx message.TxnContext) message.MutableMessage {
+		return message.NewCommitTxnMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithBody(&message.CommitTxnMessageBody{}).
+			MustBuildMutable().
+			WithTxnContext(txnCtx)
+	}
+
+	// Buffer a body under the retried txnID.
+	body := newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{100}}},
+		},
+	}).WithTxnContext(retryTxn)
+	_, err := interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), body, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+
+	ownerStarted := make(chan struct{})
+	releaseOwner := make(chan struct{})
+	ownerDone := make(chan appendResult, 1)
+	waiterDone := make(chan appendResult, 1)
+
+	go func() {
+		ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+		msgID, err := interceptor.DoAppend(ctx, newCommit(ownerTxn), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			close(ownerStarted)
+			<-releaseOwner
+			return nil, appendErr
+		})
+		ownerDone <- appendResult{id: msgID, err: err}
+	}()
+
+	select {
+	case <-ownerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owner append did not start")
+	}
+
+	waiterAppends := atomic.Int32{}
+	go func() {
+		ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+		msgID, err := interceptor.DoAppend(ctx, newCommit(retryTxn), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			waiterAppends.Add(1)
+			return newTestMessageID(11), nil
+		})
+		waiterDone <- appendResult{id: msgID, err: err}
+	}()
+
+	select {
+	case result := <-waiterDone:
+		t.Fatalf("waiter returned before owner completed: %+v", result)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseOwner)
+	require.ErrorIs(t, (<-ownerDone).err, appendErr)
+	require.ErrorIs(t, (<-waiterDone).err, appendErr)
+	// No rollback (or any append) was synthesized on the waiter's error path.
+	require.Zero(t, waiterAppends.Load())
+	// The retried txn's buffer is reclaimed immediately instead of lazily.
+	require.Nil(t, interceptor.txnInsertResultBuffers.Build(newCommit(retryTxn)))
+}
+
 func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {
 	interceptor := newInterceptor(WindowConfig{})
 	insertResult := &messagespb.IdempotentInsertResult{
