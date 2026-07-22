@@ -3,12 +3,11 @@ package proxy
 import (
 	"math"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan) error {
@@ -16,10 +15,10 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 		return nil
 	}
 	if it.idempotencyKey == "" {
-		return errors.New("idempotency key is required to stabilize auto id shard assignment")
+		return merr.WrapErrServiceInternalMsg("idempotency key is required to stabilize auto id shard assignment")
 	}
 	if it.idAllocator == nil {
-		return errors.New("id allocator is required to stabilize auto id shard assignment")
+		return merr.WrapErrServiceInternalMsg("id allocator is required to stabilize auto id shard assignment")
 	}
 
 	// The routing base must stay exactly the channel list returned by the channel
@@ -76,7 +75,7 @@ func reassignAutoIDByOffsetChannels(
 		return nil
 	}
 	if allocFunc == nil {
-		return errors.New("id allocator is nil")
+		return merr.WrapErrServiceInternalMsg("id allocator is nil")
 	}
 
 	// Retry stability comes from the offset bucketing alone: offset%numChannels is
@@ -104,7 +103,7 @@ func reassignAutoIDByOffsetChannels(
 			break
 		}
 		if round >= maxAutoIDStabilizeRounds {
-			return errors.Errorf("failed to stabilize idempotent autoID assignment: still short %d candidate(s) across %d channels after %d allocation rounds", missing, numChannels, maxAutoIDStabilizeRounds)
+			return merr.WrapErrServiceInternalMsg("failed to stabilize idempotent autoID assignment: still short %d candidate(s) across %d channels after %d allocation rounds", missing, numChannels, maxAutoIDStabilizeRounds)
 		}
 		allocCount := uint64(missing) * uint64(numChannels)
 		if allocCount < uint64(numChannels) {
@@ -188,6 +187,6 @@ func autoIDCandidatesToPrimaryIDs(rowIDs []int64, primaryDataType schemapb.DataT
 		}
 		return parsePrimaryFieldData2IDs(fieldData)
 	default:
-		return nil, errors.Errorf("unsupported auto id primary field type: %s", primaryDataType.String())
+		return nil, merr.WrapErrServiceInternalMsg("unsupported auto id primary field type: %s", primaryDataType.String())
 	}
 }
