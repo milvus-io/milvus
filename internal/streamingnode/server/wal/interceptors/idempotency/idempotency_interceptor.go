@@ -166,19 +166,26 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
 	case BeginDecisionWait:
+		// Reclaim this commit's txn buffer on EVERY exit, including the owner-error
+		// one: for a client retry (its own txnID) the buffer is abandoned along
+		// with the retried txn however Wait resolves, and for a same-txnID
+		// concurrent duplicate the owner's Build has already consumed it before its
+		// append, making this a no-op — it cannot blank out the committed entry's
+		// insert IDs.
+		defer impl.txnInsertResultBuffers.Remove(msg)
 		result := begin.Pending.Wait(ctx, msg)
 		if result.Err != nil {
+			// The owner failed, so there is no duplicate result to serve. No
+			// rollback is synthesized here: a same-txnID concurrent commit may
+			// still be legitimately retried by the client after the owner's
+			// failure, and rolling its session back would turn that recoverable
+			// commit retry into a whole-txn retry. A retried txn under its own
+			// txnID falls back to keepalive expiry, as before this interceptor.
 			return nil, result.Err
 		}
 		mlog.Debug(ctx, "idempotency duplicate hit",
 			mlog.String("vchannel", msg.VChannel()),
 			mlog.String("idempotency_key", string(key)))
-		// Removing the buffer here cannot blank out the committed entry's insert
-		// IDs even when the duplicate shares the owner's txnID: Wait only returns
-		// after the owner completed, and the owner consumed the buffer via Build
-		// before appending. For a client retry (its own txnID) this reclaims the
-		// retried bodies' buffer instead of waiting for lazy expiry.
-		defer impl.txnInsertResultBuffers.Remove(msg)
 		impl.resolveRetriedTxnAfterDuplicate(ctx, msg, append)
 		return fillDuplicateResult(ctx, result.Entry)
 	case BeginDecisionDuplicate:
