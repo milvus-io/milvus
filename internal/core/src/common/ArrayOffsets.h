@@ -38,6 +38,13 @@ namespace milvus {
 
 class ChunkedColumnInterface;
 
+struct ElementRowInfo {
+    int32_t row_id;
+    int32_t element_index;
+    int32_t row_element_start;
+    int32_t row_element_end;
+};
+
 class IArrayOffsets {
  public:
     virtual ~IArrayOffsets() = default;
@@ -54,17 +61,24 @@ class IArrayOffsets {
     virtual std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const = 0;
 
+    // Convert an element ID to its row and return the row's element range in
+    // the same lookup. The growing implementation reads one published
+    // lock-free snapshot; the binary search that finds the row also identifies
+    // row_element_end.
+    virtual ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const = 0;
+
     // Convert row ID to element ID range
     // elements with id in [ret.first, ret.last) belong to row_id
     virtual std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const = 0;
 
-    // Batched form of ElementIDRangeOfRow: out[i] = element range of
-    // row_ids[i]. Semantics per entry match the per-row method. The growing
-    // implementation acquire-loads one publication watermark for the whole
-    // batch, and the caller pays one virtual call instead of one per row. A
-    // row id outside [0, committed rows] yields {0, 0} on growing
-    // (out-of-range insurance: a not-yet-committed row has no range yet).
+    // Batched row-range lookup. Sealed row IDs must be in [0, row_count).
+    // Growing rejects negative row IDs, but rows not yet committed yield an
+    // empty range so concurrent readers never observe a half-written range.
+    // The growing implementation acquire-loads one publication watermark for
+    // the whole batch, and the caller pays one virtual call instead of one per
+    // row.
     virtual void
     CopyRowElementRanges(const int32_t* row_ids,
                          int64_t count,
@@ -178,6 +192,9 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const override;
 
+    ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const override;
+
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
 
@@ -277,6 +294,9 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
 
     std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const override;
+
+    ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const override;
 
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
