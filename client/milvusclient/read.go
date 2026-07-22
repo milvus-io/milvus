@@ -146,6 +146,31 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 		schemaFields[field.Name] = field
 	}
 	dynamicNames := outputSet.Complement(schemaFieldSet)
+	structOutputParents := make(map[string]string)
+	structOutputSelections := make(map[string]map[string]struct{})
+	for _, field := range sch.Fields {
+		if field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct || field.StructSchema == nil {
+			continue
+		}
+		_, parentRequested := outputSet[field.Name]
+		for _, subField := range field.StructSchema.Fields {
+			outputName := field.Name + "[" + subField.Name + "]"
+			if _, requested := outputSet[outputName]; !requested {
+				continue
+			}
+			delete(dynamicNames, outputName)
+			structOutputParents[outputName] = field.Name
+			if parentRequested {
+				continue
+			}
+			selection := structOutputSelections[field.Name]
+			if selection == nil {
+				selection = make(map[string]struct{})
+				structOutputSelections[field.Name] = selection
+			}
+			selection[subField.Name] = struct{}{}
+		}
+	}
 
 	columns := make([]column.Column, 0, len(outputFields))
 	var dynamicColumn *column.ColumnJSONBytes
@@ -183,16 +208,20 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	if len(fieldDataList) == 0 {
 		seen := make(map[string]struct{}, len(outputFields))
 		for _, fieldName := range outputFields {
-			if _, ok := seen[fieldName]; ok {
+			parentName := fieldName
+			if name, ok := structOutputParents[fieldName]; ok {
+				parentName = name
+			}
+			if _, ok := seen[parentName]; ok {
 				continue
 			}
-			seen[fieldName] = struct{}{}
+			seen[parentName] = struct{}{}
 
-			field := schemaFields[fieldName]
+			field := schemaFields[parentName]
 			if field == nil || field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
 				continue
 			}
-			col, err := newEmptyStructArrayColumn(field)
+			col, err := newEmptyStructArrayColumn(field, structOutputSelections[parentName])
 			if err != nil {
 				return nil, err
 			}
@@ -220,13 +249,18 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	return columns, nil
 }
 
-func newEmptyStructArrayColumn(field *entity.Field) (column.Column, error) {
+func newEmptyStructArrayColumn(field *entity.Field, selectedSubFields map[string]struct{}) (column.Column, error) {
 	if field.StructSchema == nil {
 		return nil, errors.Newf("struct array field %q has no struct schema", field.Name)
 	}
 
 	subColumns := make([]column.Column, 0, len(field.StructSchema.Fields))
 	for _, subField := range field.StructSchema.Fields {
+		if selectedSubFields != nil {
+			if _, ok := selectedSubFields[subField.Name]; !ok {
+				continue
+			}
+		}
 		subColumn, err := newStructSubColumn(subField)
 		if err != nil {
 			return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
