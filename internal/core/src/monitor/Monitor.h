@@ -68,6 +68,14 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_get_target_entry_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_random_sample);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_optimize_expr_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_expr_filter_ratio);
+// GIS split-fusion pruning ratios, emitted once per segment per query when
+// queryNode.segcore.enableGISSplitFusion is on (no split nodes exist when it is
+// off, so these stay empty). Both are fractions of the segment's active rows:
+// coarse = rows surviving the R-Tree coarse pass, refine = rows Refine actually
+// builds a geometry for. Refine's ratio IS the optimization's contract -- if it
+// approaches 1 the pruning has silently degraded to a full scan.
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_coarse_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_refine_ratio);
 
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);

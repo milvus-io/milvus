@@ -553,6 +553,9 @@ SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             auto state = std::make_shared<GISGroupState>();
             state->field_id = FieldId(field);
             state->is_and = is_and;
+            // Denominator for the pruning ratios reported when the state dies;
+            // set here so it is valid even if neither node ever executes.
+            state->active_count = active;
             for (auto& g : leaves) {
                 auto le = g->GetGISExpr();
                 // Guard at the point of use, independent of the
