@@ -41,6 +41,7 @@ toAggregateInfo(const plan::AggregationNode& aggregationNode,
         const auto& aggregate = aggregationNode.aggregates()[i];
         AggregateInfo info;
         auto& inputColumnIdxes = info.input_column_idxes_;
+        auto& inputNestedPaths = info.input_nested_paths_;
         for (const auto& inputExpr : aggregate.call_->inputs()) {
             if (auto fieldExpr = dynamic_cast<const expr::FieldAccessTypeExpr*>(
                     inputExpr.get())) {
@@ -51,6 +52,7 @@ toAggregateInfo(const plan::AggregationNode& aggregationNode,
                 }
                 inputColumnIdxes.emplace_back(
                     inputType->GetChildIndex(fieldName));
+                inputNestedPaths.emplace_back(fieldExpr->nested_path());
             } else if (inputExpr != nullptr) {
                 ThrowInfo(ExprInvalid,
                           "Only support aggregation towards column for now");

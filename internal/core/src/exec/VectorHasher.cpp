@@ -32,7 +32,15 @@ createVectorHashers(const RowTypePtr& rowType,
     hashers.reserve(exprs.size());
     for (const auto& expr : exprs) {
         auto column_idx = rowType->GetChildIndex(expr->name());
-        hashers.emplace_back(VectorHasher::create(expr->type(), column_idx));
+        if (expr->has_nested_path()) {
+            // JSON sub-field grouping: hash as VARCHAR after extraction.
+            // The actual extraction happens in GroupingSet before hashing.
+            hashers.emplace_back(VectorHasher::create(
+                DataType::VARCHAR, column_idx, expr->nested_path()));
+        } else {
+            hashers.emplace_back(
+                VectorHasher::create(expr->type(), column_idx));
+        }
     }
     return hashers;
 }

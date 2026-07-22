@@ -26,6 +26,7 @@
 #include "exec/Driver.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/query-agg/GroupingSet.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "plan/PlanNode.h"
 
 namespace milvus {
@@ -78,10 +79,21 @@ class PhyAggregationNode : public Operator {
     }
 
  private:
+    // Info for GROUP BY keys that can use shredding columns instead of JSON parsing
+    struct ShreddingKeyInfo {
+        int32_t column_idx;       // index of JSON column in input RowVector
+        std::string shred_field;  // shredding column name in JsonKeyStats
+        std::shared_ptr<index::JsonKeyStats> stats;
+        OpContext* op_ctx;
+    };
+
     RowVectorPtr output_;
     std::unique_ptr<GroupingSet> grouping_set_;
     std::shared_ptr<const plan::AggregationNode> aggregationNode_;
     const bool isGlobal_;
+
+    // Shredding column info for GROUP BY keys (populated in initialize)
+    std::vector<ShreddingKeyInfo> shredding_info_;
 
     // Count the number of input rows. It is reset on partial aggregation output
     // flush.

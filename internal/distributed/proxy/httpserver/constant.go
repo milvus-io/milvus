@@ -56,6 +56,7 @@ const (
 	RefreshLoadAction    = "refresh_load"
 	ReleaseAction        = "release"
 	QueryAction          = "query"
+	SqlQueryAction       = "sql_query"
 	GetAction            = "get"
 	DeleteAction         = "delete"
 	InsertAction         = "insert"

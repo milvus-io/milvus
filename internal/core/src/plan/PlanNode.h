@@ -318,16 +318,38 @@ class ElementFilterBitsNode : public PlanNode {
 
 class ProjectNode : public PlanNode {
  public:
+    // Primary constructor with nested_paths for JSON sub-field extraction.
     ProjectNode(const PlanNodeId& id,
                 std::vector<FieldId>&& field_ids,
                 std::vector<std::string>&& field_names,
                 std::vector<milvus::DataType>&& field_types,
+                std::vector<std::vector<std::string>>&& nested_paths,
                 std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
         : PlanNode(id),
           sources_(std::move(sources)),
           field_ids_(std::move(field_ids)),
           output_type_(std::make_shared<RowType>(std::move(field_names),
-                                                 std::move(field_types))) {
+                                                 std::move(field_types))),
+          nested_paths_(std::move(nested_paths)) {
+        if (nested_paths_.empty()) {
+            nested_paths_.resize(field_ids_.size());
+        }
+        AssertInfo(nested_paths_.size() == field_ids_.size(),
+                   "nested_paths size must match field_ids size");
+    }
+
+    // Backward-compatible constructor (no nested_paths).
+    ProjectNode(const PlanNodeId& id,
+                std::vector<FieldId>&& field_ids,
+                std::vector<std::string>&& field_names,
+                std::vector<milvus::DataType>&& field_types,
+                std::vector<PlanNodePtr> sources)
+        : ProjectNode(id,
+                      std::move(field_ids),
+                      std::move(field_names),
+                      std::move(field_types),
+                      std::vector<std::vector<std::string>>{},
+                      std::move(sources)) {
     }
 
     std::vector<PlanNodePtr>
@@ -356,10 +378,16 @@ class ProjectNode : public PlanNode {
         return field_ids_;
     }
 
+    const std::vector<std::vector<std::string>>&
+    NestedPaths() const {
+        return nested_paths_;
+    }
+
  private:
     const std::vector<PlanNodePtr> sources_;
     const std::vector<FieldId> field_ids_;
     const RowTypePtr output_type_;
+    std::vector<std::vector<std::string>> nested_paths_;
 };
 
 class MvccNode : public PlanNode {
@@ -547,6 +575,62 @@ class RescoresNode : public PlanNode {
     const proto::plan::ScoreOption option_;
     const std::vector<PlanNodePtr> sources_;
     const std::vector<std::shared_ptr<rescores::Scorer>> scorers_;
+};
+
+// ComputeProjectNode: represents post-aggregation computed projections.
+// Handles operations like extract(hour, ts), div(value, 1000), etc.
+// Maps to the proto ProjectNode (field 8 of QueryPlanNode).
+class ComputeProjectNode : public PlanNode {
+ public:
+    struct ProjectItem {
+        std::string function_name;      // "div", "mul", "extract", etc.
+        std::vector<std::string> args;  // references to fields or literals
+        std::string alias;              // output column name
+    };
+
+    ComputeProjectNode(
+        const PlanNodeId& id,
+        std::vector<ProjectItem>&& items,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id),
+          items_(std::move(items)),
+          sources_(std::move(sources)) {
+        // Inherit output_type from upstream source if available.
+        if (!sources_.empty() && sources_[0]) {
+            output_type_ = sources_[0]->output_type();
+        }
+    }
+
+    RowTypePtr
+    output_type() const override {
+        return output_type_ ? output_type_ : RowType::None;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "ComputeProjectNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("ComputeProjectNode:[items_count:{}]",
+                           items_.size());
+    }
+
+    const std::vector<ProjectItem>&
+    items() const {
+        return items_;
+    }
+
+ private:
+    const std::vector<ProjectItem> items_;
+    const std::vector<PlanNodePtr> sources_;
+    RowTypePtr output_type_;
 };
 
 class AggregationNode : public PlanNode {
