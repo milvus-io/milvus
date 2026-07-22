@@ -288,6 +288,59 @@ func TestDelegatorGrowingSourceProviderClearsHandoffOnlyAfterReleasePrepared(t *
 	source.Release()
 }
 
+// TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight pins the
+// invariant that a concurrent ClearReleasePrepared must NOT drop the handoff-only
+// fence while a PrepareGrowingSourceReleaseHandoff is still parked in waitFence.
+// enterHandoffOnly releases p.mu before waitFence, so without the in-flight guard
+// the concurrent clear would drain handoffAllowed and lower the fence early,
+// letting a brand-new segment acquire a lease mid-handoff.
+func TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+
+	fenceEntered := make(chan struct{})
+	fenceRelease := make(chan struct{})
+	provider := newDelegatorGrowingSourceProvider(segmentManager, func(ctx context.Context, fenceTs uint64) error {
+		close(fenceEntered) // signal that Prepare is now parked in waitFence
+		<-fenceRelease      // stay parked until the test releases us
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		// TargetOffset=0 keeps the setup minimal: no retained registration, no
+		// segment mock; the segment is only added to handoffAllowed.
+		done <- provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 100,
+			[]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1001, TargetOffset: 0}})
+	}()
+
+	// Wait until Prepare has armed the fence and parked in waitFence
+	// (handoffOnly=true, handoffAllowed={1001}, handoffInflight=1, p.mu released).
+	<-fenceEntered
+
+	// Concurrently clear the in-flight segment. Before the fix this drained
+	// handoffAllowed and dropped handoffOnly while the handoff was still in flight.
+	provider.ClearReleasePrepared(1001)
+
+	provider.mu.Lock()
+	stillArmed := provider.handoffOnly
+	provider.mu.Unlock()
+	require.True(t, stillArmed, "handoffOnly must stay armed while a Prepare is parked in waitFence")
+
+	// A brand-new, unrelated segment must still be rejected.
+	require.False(t, provider.acquireLease(2002), "new segment must be rejected while the fence is armed")
+
+	// Let Prepare finish; the fence lowers only after the in-flight count hits zero.
+	close(fenceRelease)
+	require.NoError(t, <-done)
+
+	provider.mu.Lock()
+	drained := provider.handoffOnly
+	inflight := provider.handoffInflight
+	provider.mu.Unlock()
+	require.False(t, drained, "handoffOnly should lower once the in-flight handoff finishes and maps are drained")
+	require.Equal(t, 0, inflight)
+}
+
 func TestDelegatorGrowingSourceProviderDeactivatedOnlyServesRetainedSources(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
 	segment := segments.NewMockSegment(t)
