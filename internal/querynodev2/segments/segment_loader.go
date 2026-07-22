@@ -276,26 +276,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	for _, info := range infos {
 		loadInfo := info
 
-		for _, indexInfo := range loadInfo.IndexInfos {
-			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-
-			// some build params also exist in indexParams, which are useless during loading process
-			if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-				if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-					return nil, err
-				}
-			}
-
-			// set whether enable offset cache for bitmap index
-			if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-				indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-			}
-
-			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-				return nil, err
-			}
-
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		if err := prepareIndexLoadParams(loadInfo.GetIndexInfos()); err != nil {
+			return nil, err
 		}
 
 		segment, err := NewSegment(
@@ -2422,6 +2404,41 @@ func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 		dataType == schemapb.DataType_SparseFloatVector ||
 		dataType == schemapb.DataType_Float16Vector ||
 		dataType == schemapb.DataType_BFloat16Vector
+}
+
+// prepareIndexLoadParams injects QueryNode-local index load parameters into each
+// index's IndexParams in place. These params (e.g. DISKANN num_load_thread) are
+// derived from local QueryNode resources/config and are never persisted in the
+// index metadata, so they must be re-injected on every load path before the load
+// info reaches segcore. Both full-load (Load) and Reopen call this; skipping it
+// on Reopen was the root cause of issue #51249 (segcore asserts
+// "param num_load_thread is empty" while loading a DISKANN index).
+func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
+	for _, indexInfo := range indexInfos {
+		if indexInfo == nil {
+			continue
+		}
+		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
+
+		// some build params also exist in indexParams, which are useless during loading process
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
+			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+				return err
+			}
+		}
+
+		// set whether enable offset cache for bitmap index
+		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+			indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+		}
+
+		if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+			return err
+		}
+
+		indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+	}
+	return nil
 }
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
