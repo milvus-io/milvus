@@ -235,12 +235,22 @@ PhyIterativeFilterNode::GetOutput() {
                         auto [doc_id, elem_idx] =
                             array_offsets->ElementIDToRowID(element_id);
                         element_to_doc_mapping.push_back({doc_id, elem_idx});
-                        unique_doc_ids.insert(doc_id);
                     }
 
-                    doc_offsets.reserve(unique_doc_ids.size());
-                    for (auto doc_id : unique_doc_ids) {
-                        doc_offsets.emplace_back(static_cast<int32_t>(doc_id));
+                    // The deduplicated doc offsets feed only the native
+                    // offset-input Eval below; the non-native fallback
+                    // indexes the segment-wide bitset by doc id directly
+                    // and never reads eval_offsets.
+                    if (is_native_supported_) {
+                        for (const auto& [doc_id, elem_idx] :
+                             element_to_doc_mapping) {
+                            unique_doc_ids.insert(doc_id);
+                        }
+                        doc_offsets.reserve(unique_doc_ids.size());
+                        for (auto doc_id : unique_doc_ids) {
+                            doc_offsets.emplace_back(
+                                static_cast<int32_t>(doc_id));
+                        }
                     }
                     eval_offsets = &doc_offsets;
                 } else {
