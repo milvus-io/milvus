@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 
 #include <folly/CancellationToken.h>
@@ -184,6 +185,41 @@ TEST(SegmentReadGateTest, NullContextPublisherTimesOutAndReopensGate) {
     reader.reset();
     auto next_reader = gate.AcquireRead(folly::CancellationToken(), 105);
     EXPECT_TRUE(next_reader->valid());
+}
+
+TEST(SegmentReadGateTest, FailFastPublisherDoesNotWaitOrCloseGate) {
+    SegmentReadGate gate;
+    auto first_reader = gate.AcquireRead(folly::CancellationToken(), 106);
+
+    try {
+        auto publish_lease = gate.AcquirePublishFailFast(nullptr, 106);
+        FAIL() << "expected fail-fast publisher rejection";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyOtherException);
+        EXPECT_NE(std::string(error.what()).find("segment read gate busy"),
+                  std::string::npos);
+    }
+
+    EXPECT_FALSE(gate.WriterPending());
+    EXPECT_EQ(gate.ActiveReaders(), 1);
+
+    // A rejected fail-fast publisher must not close the gate.
+    auto second_reader = gate.AcquireRead(folly::CancellationToken(), 106);
+    EXPECT_TRUE(second_reader->valid());
+    EXPECT_EQ(gate.ActiveReaders(), 2);
+
+    first_reader.reset();
+    second_reader.reset();
+
+    {
+        auto publish_lease = gate.AcquirePublishFailFast(nullptr, 106);
+        EXPECT_TRUE(publish_lease.valid());
+        EXPECT_TRUE(gate.WriterPending());
+        publish_lease.MarkPublished();
+    }
+
+    EXPECT_FALSE(gate.WriterPending());
+    EXPECT_EQ(gate.PublishedGeneration(), 1);
 }
 
 TEST(SegmentReadGateTest, CrossSegmentRequestsReleaseAndRetryWithoutDeadlock) {

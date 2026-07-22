@@ -27,9 +27,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -3870,6 +3871,115 @@ TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
     // Drop again - should be a no-op (idempotent)
     segment->DropFieldData(pk_id);
     EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
+
+TEST(SealedSegmentReopen, LazySchemaReopenFailsFastWhileReadLeaseActive) {
+    auto old_schema = std::make_shared<Schema>();
+    auto old_pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(old_pk_id);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_field = new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto read_lease = sealed->AcquireReadLease(folly::CancellationToken());
+    auto started = std::chrono::steady_clock::now();
+    bool rejected = false;
+    try {
+        sealed->LazyCheckSchema(new_schema, nullptr);
+    } catch (const SegcoreError& error) {
+        rejected = true;
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyOtherException);
+        EXPECT_NE(std::string(error.what()).find("segment read gate busy"),
+                  std::string::npos);
+    }
+    auto elapsed = std::chrono::steady_clock::now() - started;
+
+    EXPECT_TRUE(rejected);
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+    EXPECT_FALSE(sealed->TestReadGateWriterPending());
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 100);
+
+    // The failed lazy publisher must leave the gate open.
+    auto second_read_lease =
+        sealed->AcquireReadLease(folly::CancellationToken());
+    EXPECT_TRUE(second_read_lease->valid());
+    read_lease.reset();
+    second_read_lease.reset();
+
+    EXPECT_NO_THROW(sealed->LazyCheckSchema(new_schema, nullptr));
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 200);
+    EXPECT_TRUE(sealed->HasFieldData(new_field));
+}
+
+TEST(SealedSegmentReopen, LazySchemaReopenDoesNotWaitForReopenMutex) {
+    auto old_schema = std::make_shared<Schema>();
+    auto old_pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(old_pk_id);
+    old_schema->set_schema_version(100);
+
+    auto middle_schema = std::make_shared<Schema>();
+    auto middle_pk_id = middle_schema->AddDebugField("pk", DataType::INT64);
+    middle_schema->AddDebugField("middle_field", DataType::INT64);
+    middle_schema->set_primary_field_id(middle_pk_id);
+    middle_schema->set_schema_version(200);
+
+    auto newest_schema = std::make_shared<Schema>();
+    auto newest_pk_id = newest_schema->AddDebugField("pk", DataType::INT64);
+    newest_schema->AddDebugField("middle_field", DataType::INT64);
+    newest_schema->AddDebugField("newest_field", DataType::INT64);
+    newest_schema->set_primary_field_id(newest_pk_id);
+    newest_schema->set_schema_version(300);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto read_lease = sealed->AcquireReadLease(folly::CancellationToken());
+    std::thread explicit_reopen([&] { sealed->Reopen(middle_schema); });
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!sealed->TestReadGateWriterPending() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    bool writer_pending = sealed->TestReadGateWriterPending();
+
+    bool rejected = false;
+    auto started = std::chrono::steady_clock::now();
+    if (writer_pending) {
+        try {
+            sealed->LazyCheckSchema(newest_schema, nullptr);
+        } catch (const SegcoreError& error) {
+            rejected = true;
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyOtherException);
+            EXPECT_NE(std::string(error.what()).find("segment read gate busy"),
+                      std::string::npos);
+        }
+    }
+    auto elapsed = std::chrono::steady_clock::now() - started;
+
+    // Always release and join before asserting so a failure cannot leave a
+    // joinable thread behind.
+    read_lease.reset();
+    explicit_reopen.join();
+
+    ASSERT_TRUE(writer_pending);
+    EXPECT_TRUE(rejected);
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 200);
+
+    EXPECT_NO_THROW(sealed->LazyCheckSchema(newest_schema, nullptr));
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 300);
 }
 
 TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {

@@ -1484,6 +1484,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     NormalizePublishedState(PublishedSegmentState& state) const;
 
+    enum class PublishMode {
+        Drain,
+        FailFast,
+    };
+
     class StagedStateCommitter {
      public:
         StagedStateCommitter(ChunkedSegmentSealedImpl& segment,
@@ -1552,7 +1557,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         void
         Publish(const std::shared_ptr<const PublishedSegmentState>& current,
                 const StateDelta& delta,
-                milvus::OpContext* op_ctx = nullptr) {
+                milvus::OpContext* op_ctx = nullptr,
+                PublishMode publish_mode = PublishMode::Drain) {
             std::vector<SealedIndexingEntryPtr> retired_indexings;
             std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
             std::shared_ptr<PublishedSegmentState> next;
@@ -1562,7 +1568,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 retired_indexings.swap(retired_vector_indexings_);
                 retired_cache_indexings.swap(retired_cache_indexings_);
             }
-            segment_.PublishStateOnline(std::move(next), op_ctx);
+            segment_.PublishStateOnline(std::move(next), op_ctx, publish_mode);
             for (auto& entry : retired_indexings) {
                 if (entry != nullptr && entry->indexing_ != nullptr) {
                     entry->indexing_->CancelWarmup();
@@ -1610,11 +1616,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     PublishStateOnline(
         const std::shared_ptr<const PublishedSegmentState>& state,
-        milvus::OpContext* op_ctx = nullptr);
+        milvus::OpContext* op_ctx = nullptr,
+        PublishMode publish_mode = PublishMode::Drain);
 
     void
     PublishStateOnline(std::shared_ptr<PublishedSegmentState> state,
-                       milvus::OpContext* op_ctx = nullptr);
+                       milvus::OpContext* op_ctx = nullptr,
+                       PublishMode publish_mode = PublishMode::Drain);
 
     std::shared_ptr<index::JsonKeyStats>
     BuildJsonKeyStatsIndex(
@@ -2121,6 +2129,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     Reopen(milvus::OpContext* op_ctx, SchemaPtr sch);
 
     void
+    ReopenSchemaLocked(milvus::OpContext* op_ctx,
+                       SchemaPtr sch,
+                       PublishMode publish_mode);
+
+    void
     ApplySchemaForReopen(SchemaPtr sch);
 
     void
@@ -2287,6 +2300,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     SchemaPtr
     TestGetSchemaSnapshot() const {
         return CapturePublishedState()->schema;
+    }
+
+    bool
+    TestReadGateWriterPending() const {
+        return operation_gate_.WriterPending();
     }
 
     std::shared_ptr<const PublishedSegmentState>

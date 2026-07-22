@@ -107,8 +107,9 @@ entire `SearchResult` lifetime.
 6. Reopen preparation remains non-blocking for readers; only final publication
    performs the drain.
 7. Reopen performs one externally visible publication.
-8. `LazyCheckSchema` remains available as a transitional mechanism but runs
-   before gate acquisition.
+8. `LazyCheckSchema` remains available as a transitional mechanism, runs
+   before gate acquisition, and fails fast instead of waiting for either the
+   publication gate or another reopen.
 9. Cancellation, timeout, and error paths cannot leak a lease or leave the read
    gate closed.
 
@@ -463,12 +464,39 @@ Reopen waits for active_readers == 0
 the request waits for itself
 ```
 
-Before the gate:
+The lazy path must also avoid blocking on older requests. Search result consume
+callbacks run on the same Search CPU executor as AsyncSearch and Retrieve. If a
+lazy reopen waits for an old lease while enough newer-schema requests occupy
+the executor, those callbacks cannot run and the old lease cannot be released.
 
-- the request is not an active reader;
-- LazyCheckSchema may safely call Reopen;
-- the lazy Reopen may drain older requests;
-- the current request acquires the resulting snapshot afterward.
+Sealed LazyCheckSchema therefore uses a fail-fast publication mode:
+
+```text
+compare schema version
+        ↓
+try_lock reopen_mutex; fail gate-busy if another reopen owns it
+        ↓
+recheck schema version
+        ↓
+if readers or a publisher are already present: fail gate-busy
+        ↓
+prepare the staged schema/runtime snapshot
+        ↓
+atomically try to acquire publication with active_readers == 0
+        ↓
+publish, or discard the staged snapshot and fail gate-busy
+```
+
+The early gate check avoids known-unnecessary preparation but is not the
+linearization point: a reader may enter during preparation, so final
+publication must repeat the check while holding the gate mutex. A failed lazy
+publication does not set `writer_pending` and leaves the old snapshot readable.
+QueryNode handles the narrow gate-busy signal using the existing whole-batch
+Search retry or per-segment Retrieve retry.
+
+Explicit Reopen continues to serialize with a blocking `reopen_mutex_` and use
+bounded drain on the Load executor. Only the read-triggered lazy path is
+fail-fast.
 
 ### 9.3 Race Between Lazy Check and Gate Acquisition
 
@@ -971,6 +999,10 @@ Normal read-lease acquire/release must not emit INFO logs per query.
 4. An unexpectedly older snapshot causes release-before-retry.
 5. A newer incompatible snapshot returns an error without Reopen under lease.
 6. Lazy cancellation or failure does not create a lease.
+7. An active read lease makes lazy schema reopen return gate-busy without
+   setting writer pending.
+8. A lazy schema reopen does not wait behind an explicit reopen holding
+   `reopen_mutex_`.
 
 ### 18.3 Publication
 
@@ -1055,10 +1087,14 @@ from progressing. Rejection counts and retry duration should be observable.
 
 ### 19.4 Lazy Reopen on the Search Executor
 
-LazyCheckSchema may perform I/O, loading, and drain wait on a search executor
-thread.
+LazyCheckSchema may still perform I/O and loading on one Search CPU executor
+thread, but it never waits for active readers or queues behind
+`reopen_mutex_`. Competing requests fail fast so consume callbacks retain
+executor capacity and can release old SearchResult leases.
 
-This behavior is accepted initially. Long-term alternatives include:
+Preparation can still increase latency, and a reader racing with the final
+publication check can cause the staged work to be discarded and retried.
+Long-term alternatives include:
 
 - explicit QueryNode schema refresh;
 - a dedicated reopen executor;

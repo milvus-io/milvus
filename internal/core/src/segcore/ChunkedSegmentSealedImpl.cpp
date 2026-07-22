@@ -1973,20 +1973,27 @@ ChunkedSegmentSealedImpl::PublishState(
 void
 ChunkedSegmentSealedImpl::PublishStateOnline(
     const std::shared_ptr<const PublishedSegmentState>& state,
-    milvus::OpContext* op_ctx) {
+    milvus::OpContext* op_ctx,
+    PublishMode publish_mode) {
     if (!state) {
         return;
     }
-    auto publish_lease = operation_gate_.AcquirePublish(op_ctx, id_);
+    auto publish_lease =
+        publish_mode == PublishMode::FailFast
+            ? operation_gate_.AcquirePublishFailFast(op_ctx, id_)
+            : operation_gate_.AcquirePublish(op_ctx, id_);
     PublishState(publish_lease, state);
 }
 
 void
 ChunkedSegmentSealedImpl::PublishStateOnline(
-    std::shared_ptr<PublishedSegmentState> state, milvus::OpContext* op_ctx) {
+    std::shared_ptr<PublishedSegmentState> state,
+    milvus::OpContext* op_ctx,
+    PublishMode publish_mode) {
     PublishStateOnline(
         std::const_pointer_cast<const PublishedSegmentState>(std::move(state)),
-        op_ctx);
+        op_ctx,
+        publish_mode);
 }
 
 void
@@ -6860,16 +6867,48 @@ ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch,
     auto current_schema = CaptureSchemaSnapshot();
     auto current_schema_version = current_schema->get_schema_version();
 
-    if (sch->get_schema_version() > current_schema_version) {
-        LOG_INFO(
-            "lazy check schema segment {} found newer schema version, "
-            "current "
-            "schema version {}, new schema version {}",
-            id_,
-            current_schema_version,
-            sch->get_schema_version());
-        Reopen(op_ctx, std::move(sch));
+    if (sch->get_schema_version() <= current_schema_version) {
+        return;
     }
+
+    if (op_ctx != nullptr &&
+        op_ctx->cancellation_token.isCancellationRequested()) {
+        ThrowInfo(ErrorCode::FollyCancel,
+                  "lazy schema reopen cancelled for segment {}",
+                  id_);
+    }
+
+    std::unique_lock<std::mutex> reopen_guard(reopen_mutex_, std::try_to_lock);
+    if (!reopen_guard.owns_lock()) {
+        ThrowInfo(ErrorCode::FollyOtherException,
+                  "segment read gate busy for segment {} while another "
+                  "schema reopen is in progress",
+                  id_);
+    }
+
+    current_schema = CaptureSchemaSnapshot();
+    current_schema_version = current_schema->get_schema_version();
+    if (sch->get_schema_version() <= current_schema_version) {
+        return;
+    }
+
+    // Avoid preparing a new snapshot while an old SearchResult is known to
+    // hold a lease. This is only a preflight optimization; the final
+    // fail-fast publish check is the linearization point.
+    if (!operation_gate_.CanAcquirePublishImmediately()) {
+        ThrowInfo(ErrorCode::FollyOtherException,
+                  "segment read gate busy for segment {} during lazy schema "
+                  "reopen",
+                  id_);
+    }
+
+    LOG_INFO(
+        "lazy check schema segment {} found newer schema version, current "
+        "schema version {}, new schema version {}",
+        id_,
+        current_schema_version,
+        sch->get_schema_version());
+    ReopenSchemaLocked(op_ctx, std::move(sch), PublishMode::FailFast);
 }
 
 void
@@ -7387,6 +7426,17 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     }
 
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+    ReopenSchemaLocked(op_ctx, std::move(sch), PublishMode::Drain);
+}
+
+void
+ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
+                                             SchemaPtr sch,
+                                             PublishMode publish_mode) {
+    if (!sch) {
+        return;
+    }
+
     auto current = CapturePublishedState();
     auto current_schema = current->schema;
     if (sch->get_schema_version() <= current_schema->get_schema_version()) {
@@ -7430,7 +7480,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    committer.Publish(current, delta, op_ctx);
+    committer.Publish(current, delta, op_ctx, publish_mode);
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }

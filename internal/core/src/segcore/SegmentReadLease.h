@@ -256,6 +256,39 @@ class SegmentReadGate {
         return PublishLease(state_);
     }
 
+    bool
+    CanAcquirePublishImmediately() const {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        return state_->active_readers == 0 && !state_->writer_pending &&
+               !state_->writer_active;
+    }
+
+    PublishLease
+    AcquirePublishFailFast(milvus::OpContext* op_ctx,
+                           int64_t segment_id) const {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (op_ctx != nullptr &&
+            op_ctx->cancellation_token.isCancellationRequested()) {
+            ThrowInfo(ErrorCode::FollyCancel,
+                      "publication cancelled for segment {}",
+                      segment_id);
+        }
+        if (state_->active_readers != 0 || state_->writer_pending ||
+            state_->writer_active) {
+            ThrowInfo(ErrorCode::FollyOtherException,
+                      "segment read gate busy for segment {} during lazy "
+                      "schema reopen",
+                      segment_id);
+        }
+
+        // No drain is needed because the reader count was checked while
+        // holding the gate mutex. Mark the writer active before releasing the
+        // mutex so a new reader cannot race with publication.
+        state_->writer_pending = true;
+        state_->writer_active = true;
+        return PublishLease(state_);
+    }
+
     uint64_t
     ActiveReaders() const {
         std::lock_guard<std::mutex> lock(state_->mutex);
