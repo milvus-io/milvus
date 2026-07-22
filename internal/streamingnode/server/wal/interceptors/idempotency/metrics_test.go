@@ -14,7 +14,7 @@ func TestIdempotencyMetricsObserveWindowInflightEntriesAndEvents(t *testing.T) {
 	paramtable.Init()
 
 	msg := newIdempotentInsertMessage(t, "metrics-idempotency-vchannel", "metrics-key")
-	nodeID, vchannel := idempotencyMetricLabels(msg)
+	nodeID, vchannel := paramtable.GetStringNodeID(), vchannelOf(msg)
 	entryGauge := pkgmetrics.WALIdempotencyWindowEntries.WithLabelValues(nodeID, vchannel)
 	inflightGauge := pkgmetrics.WALIdempotencyWindowInflight.WithLabelValues(nodeID, vchannel)
 	duplicateCounter := pkgmetrics.WALIdempotencyDuplicateTotal.WithLabelValues(nodeID, vchannel)

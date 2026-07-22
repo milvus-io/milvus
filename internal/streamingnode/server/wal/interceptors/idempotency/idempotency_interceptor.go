@@ -89,7 +89,20 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 	// sit in this cluster's window — e.g. after a demotion, or after the source
 	// evicted the key by TTL and a client legally re-issued it.
 	if msg.ReplicateHeader() != nil {
-		return append(ctx, msg)
+		msgID, err := append(ctx, msg)
+		if err == nil && msg.MessageType() == message.MessageTypeDropCollection {
+			// A replicated drop reclaims the vchannel just like a native one.
+			impl.removeWindow(msg.VChannel())
+		}
+		return msgID, err
+	}
+
+	if msg.MessageType() == message.MessageTypeDropCollection {
+		msgID, err := append(ctx, msg)
+		if err == nil {
+			impl.removeWindow(msg.VChannel())
+		}
+		return msgID, err
 	}
 
 	if msg.MessageType() == message.MessageTypeTimeTick {
@@ -126,9 +139,23 @@ func (impl *idempotencyInterceptor) sweepWindowsOnTimeTick(ctx context.Context) 
 		return
 	}
 	impl.windows.Range(func(vchannel string, window *Window) bool {
-		window.Evict(evictBefore, nil)
+		window.Evict(evictBefore, vchannel)
 		return true
 	})
+}
+
+// removeWindow drops the in-memory window and its metric series for a
+// reclaimed vchannel, mirroring the recovery-side removeIdempotencyWindow.
+// Without this, impl.windows pins minEntries' worth of per-row PKs plus four
+// Prometheus series per dropped vchannel for the WAL's whole lifetime under
+// collection create/drop churn.
+func (impl *idempotencyInterceptor) removeWindow(vchannel string) {
+	if vchannel == "" {
+		return
+	}
+	if _, loaded := impl.windows.GetAndRemove(vchannel); loaded {
+		deleteWindowMetrics(vchannel)
+	}
 }
 
 func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
@@ -155,6 +182,17 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 		}
 		msgID, err := append(ctx, msg)
 		if err != nil {
+			// KNOWN LIMITATION (documented; live reconciliation is a follow-up):
+			// releasing the key assumes an append error means nothing was
+			// written, but some WAL impls may land the write despite returning an
+			// error (pulsar walimpls documents exactly this). In that ambiguous
+			// window a same-key retry re-owns the key and appends again under a
+			// fresh timetick, producing duplicate rows — the same outcome a retry
+			// without idempotency would produce. Crash recovery is unaffected
+			// (the persisted window re-materializes landed keys at WAL open);
+			// closing the live-process gap requires the interceptor window to
+			// reconcile from the recovery-side observer. The txn commit path
+			// below shares this limitation.
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}
@@ -189,6 +227,19 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 		// longer needed whether or not the commit append succeeds. Drop them on
 		// every Owner exit so a failed commit does not leak the txn buffer.
 		defer impl.txnInsertResultBuffers.Remove(msg)
+		if insertResult == nil {
+			// A keyed commit is only synthesized from the insert path, and the
+			// proxy stamps an IdempotentInsertResult onto every insert header when
+			// idempotency is enabled — so a nil Build means the txn buffer expired
+			// early (its MVCC-driven expiry clock can run ahead of the txn
+			// session's timetick-driven one under concurrent non-txn traffic).
+			// Completing with a nil result would permanently persist an entry
+			// whose duplicates return the retry's own unpersisted IDs; fail the
+			// commit instead so the client retries the whole transaction.
+			err := status.NewInner("idempotent txn commit lost its buffered insert results; retry the transaction")
+			window.Fail(begin.Pending, err, msg)
+			return nil, err
+		}
 		msgID, err := append(ctx, msg)
 		if err != nil {
 			window.Fail(begin.Pending, err, msg)

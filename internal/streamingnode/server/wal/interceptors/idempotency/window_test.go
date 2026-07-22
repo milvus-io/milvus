@@ -221,7 +221,7 @@ func TestDIDWindowEvictRespectsMinEntries(t *testing.T) {
 	completeKey(t, window, "key-2", 20)
 	completeKey(t, window, "key-3", 30)
 
-	window.Evict(100, nil)
+	window.Evict(100, "")
 	assert.Equal(t, 2, window.Len())
 	assert.Equal(t, uint64(20), window.EvictedWatermarkTT())
 
@@ -237,7 +237,7 @@ func TestDIDWindowEvictAppliesMaxEntries(t *testing.T) {
 	completeKey(t, window, "key-2", 20)
 	completeKey(t, window, "key-3", 30)
 
-	window.Evict(0, nil)
+	window.Evict(0, "")
 	assert.Equal(t, 2, window.Len())
 	assert.Equal(t, uint64(20), window.EvictedWatermarkTT())
 	assert.Equal(t, BeginDecisionOwner, window.Begin("key-1", nil).Decision)
