@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"hash"
 	"sort"
 	"strconv"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -49,7 +51,7 @@ func (it *insertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, co
 
 	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
 	if it.idempotencyKey == "" {
-		autoIdempotencyKey, err := canonicalInsertPayloadKey(it.insertMsg.GetNumRows(), it.insertMsg.GetFieldsData(), it.schema, excludeAutoIDPrimary)
+		autoIdempotencyKey, err := canonicalInsertPayloadKey(insertIdempotencyScopeOf(it.insertMsg), it.insertMsg.GetNumRows(), it.insertMsg.GetFieldsData(), it.schema, excludeAutoIDPrimary)
 		if err != nil {
 			log.Warn(ctx, "compute insert idempotency key failed", mlog.Err(err))
 			return err
@@ -221,17 +223,73 @@ func mergeInsertIDsByOffsets(dst *schemapb.IDs, src *schemapb.IDs, rowOffsets []
 	return merr.WrapErrServiceInternalMsg("unsupported idempotent insert result ids type")
 }
 
+// insertIdempotencyScope is the request-level destination of an insert: the
+// fields that select where the rows go but never appear in the column payload.
+//
+// They must be part of the auto-derived key. The server-side dedup window is
+// keyed by vchannel (see the idempotency interceptor), and a vchannel is a
+// collection shard, not a partition or a namespace: two logically distinct
+// inserts of the same rows into two partitions of one collection would hash to
+// one key, and the second one would be answered from the window as a duplicate
+// with the first insert's primary keys while its rows never reach the WAL. An
+// auto key is not under the caller's control, so the "do not reuse a key"
+// contract that covers an explicit client key does not excuse that collision.
+type insertIdempotencyScope struct {
+	dbName         string
+	collectionName string
+	partitionName  string
+	// namespace is optional: an unset namespace routes by primary key while an
+	// empty-string namespace routes by namespace, so nil and "" are distinct.
+	namespace *string
+}
+
+func insertIdempotencyScopeOf(insertMsg *msgstream.InsertMsg) insertIdempotencyScope {
+	return insertIdempotencyScope{
+		dbName:         insertMsg.GetDbName(),
+		collectionName: insertMsg.GetCollectionName(),
+		partitionName:  insertMsg.GetPartitionName(),
+		namespace:      insertMsg.Namespace,
+	}
+}
+
+// writeTo mixes the destination into h, length-prefixing every string so
+// neighbouring fields cannot be shifted into each other.
+func (scope insertIdempotencyScope) writeTo(h hash.Hash) {
+	var buf [8]byte
+	writeString := func(value string) {
+		binary.LittleEndian.PutUint64(buf[:], uint64(len(value)))
+		h.Write(buf[:])
+		h.Write([]byte(value))
+	}
+	writeString(scope.dbName)
+	writeString(scope.collectionName)
+	writeString(scope.partitionName)
+	if scope.namespace == nil {
+		h.Write([]byte{0})
+		return
+	}
+	h.Write([]byte{1})
+	writeString(*scope.namespace)
+}
+
 // canonicalInsertPayloadKey derives a deterministic idempotency key from the
-// insert payload. It intentionally covers only the client-supplied columns plus
-// numRows: it runs before the proxy fills field properties / function output /
-// dynamic / namespace fields, so by design it must not depend on any of them.
+// insert destination plus the insert payload. On the payload side it
+// intentionally covers only the client-supplied columns plus numRows: it runs
+// before the proxy fills field properties / function output / dynamic /
+// namespace fields, so by design it must not depend on any of them.
+//
+// NOTE: the destination is hashed exactly as the client sent it, before the
+// proxy resolves an empty partition name to the default partition. A retry
+// resends the same request, so the key stays stable; spelling the same
+// destination two ways only costs a dedup hit, it can never merge two
+// destinations.
 //
 // NOTE: at this point the client FieldData carry no field id yet (FieldId == 0),
 // so the sort below effectively orders by field NAME (the FieldID comparison is a
 // no-op), and the auto-id primary exclusion below matches by name. The hash is
 // still deterministic for byte-identical client payloads, which is all an
 // idempotent retry needs; do not assume field-id ordering here.
-func canonicalInsertPayloadKey(numRows uint64, fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema, excludeAutoIDPrimary bool) (string, error) {
+func canonicalInsertPayloadKey(scope insertIdempotencyScope, numRows uint64, fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema, excludeAutoIDPrimary bool) (string, error) {
 	if excludeAutoIDPrimary {
 		primaryField, err := typeutil.GetPrimaryFieldSchema(schema)
 		if err != nil {
@@ -262,6 +320,7 @@ func canonicalInsertPayloadKey(numRows uint64, fieldsData []*schemapb.FieldData,
 	})
 
 	hash := sha256.New()
+	scope.writeTo(hash)
 	var buf [8]byte
 	binary.LittleEndian.PutUint64(buf[:], numRows)
 	hash.Write(buf[:])
