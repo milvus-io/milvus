@@ -499,6 +499,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
+	var bloomFilterPlanSize int64
 	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
 		return err
 	}
@@ -692,7 +693,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
+		internalSubReq.SerializedExprPlan, bloomFilterPlanSize, err = marshalPlanWithBloomFilterSizeLimit(plan, bloomFilterPlanSize)
 		if err != nil {
 			return err
 		}
@@ -704,7 +705,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.queryInfos[index] = queryInfo
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			mlog.Stringer("plan", plan)) // may be very large if large term passed.
+			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if large term passed; bloom blobs elided.
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
@@ -1040,7 +1041,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		queryInfo.StrictGroupSize = true
 	}
 
-	t.SerializedExprPlan, err = proto.Marshal(plan)
+	t.SerializedExprPlan, _, err = marshalPlanWithBloomFilterSizeLimit(plan, 0)
 	if err != nil {
 		return err
 	}
@@ -1123,7 +1124,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-		mlog.Stringer("plan", plan)) // may be very large if large term passed.
+		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if large term passed; bloom blobs elided.
 
 	return nil
 }

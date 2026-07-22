@@ -78,6 +78,15 @@ func IsString(n *planpb.GenericValue) bool {
 	return false
 }
 
+func IsBytes(n *planpb.GenericValue) bool {
+	switch n.GetVal().(type) {
+	case *planpb.GenericValue_BytesVal:
+		return true
+	default:
+		return false
+	}
+}
+
 func IsArray(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_ArrayVal:
@@ -252,6 +261,15 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	// A raw-bytes value has exactly one consumer — the bloom_match filter blob,
+	// which FillBloomMatchExpressionValue validates and embeds without passing
+	// through castValue. Reject it in every typed/JSON comparison context here,
+	// at the proxy, instead of fanning out a GenericValue kBytesVal that
+	// segcore's plan parser cannot evaluate.
+	if IsBytes(value) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"a bytes template value can only be used as the bloom_match filter argument")
+	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
 	}

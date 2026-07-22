@@ -144,6 +144,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->Reverse_Lookup(offset);
     }
 
+    bool
+    SupportFastReverseLookup() const override {
+        return internal_index_->SupportFastReverseLookup();
+    }
+
     int64_t
     Size() override {
         return internal_index_->Size();

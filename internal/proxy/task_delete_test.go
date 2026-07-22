@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/sbbf"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -619,6 +620,38 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 
 		globalMetaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
+	})
+
+	s.Run("delete with bloom_match expression rejected", func() {
+		// bloom_match takes a client pre-built blob as a {template} bytes param;
+		// build a valid SBBF blob so the plan PARSES successfully and the delete
+		// guard (not the arg validator) is what rejects it.
+		builder, err := sbbf.NewBuilder(3, 0.001)
+		s.Require().NoError(err)
+		builder.AddInt64(1)
+		builder.AddInt64(2)
+		builder.AddInt64(3)
+		blob := builder.Marshal()
+
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Expr:           "bloom_match(pk, {bf})",
+				ExprTemplateValues: map[string]*schemapb.TemplateValue{
+					"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+				},
+			},
+		}
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
+			Return(s.schema, nil)
+
+		globalMetaCache = s.mockCache
+		err = dr.Init(context.Background())
+		s.Error(err)
+		s.ErrorContains(err, "bloom_match is approximate and cannot be used in delete expressions")
 	})
 
 	s.Run("partition key mode but delete with partition name", func() {

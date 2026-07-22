@@ -195,7 +195,7 @@ func TestDecodePackedNonPackedFixed(t *testing.T) {
 }
 
 // TestColdScalarVariants pins the rare ScalarField oneof variants that delegate
-// to the official codec (decodeScalarFallback cases 8/10/11/12/13/14).
+// to the official codec (decodeScalarFallback cases 8/10/11/12/13/14/15/16).
 func TestColdScalarVariants(t *testing.T) {
 	cases := map[string]*schemapb.ScalarField{
 		"array":       {Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64}}},
@@ -204,6 +204,8 @@ func TestColdScalarVariants(t *testing.T) {
 		"geometrywkt": {Data: &schemapb.ScalarField_GeometryWktData{GeometryWktData: &schemapb.GeometryWktArray{}}},
 		"mol":         {Data: &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{}}},
 		"molsmiles":   {Data: &schemapb.ScalarField_MolSmilesData{MolSmilesData: &schemapb.MolSmilesArray{}}},
+		"date":        {Data: &schemapb.ScalarField_DateData{DateData: &schemapb.DateArray{}}},
+		"time":        {Data: &schemapb.ScalarField_TimeData{TimeData: &schemapb.TimeArray{}}},
 	}
 	for name, sf := range cases {
 		t.Run(name, func(t *testing.T) {

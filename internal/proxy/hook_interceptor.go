@@ -46,7 +46,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 
 	if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
 		mlog.Warn(ctx, "hook before error", mlog.String("user", userName), mlog.String("full method", fullMethod),
-			mlog.Any("request", req), mlog.Err(err))
+			mlog.Any("request", RedactReqForLog(req)), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
 		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
@@ -55,7 +55,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
 		mlog.Warn(ctx, "hook after error", mlog.String("user", userName), mlog.String("full method", fullMethod),
-			mlog.Any("request", req), mlog.Err(err))
+			mlog.Any("request", RedactReqForLog(req)), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
 		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
