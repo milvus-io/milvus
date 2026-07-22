@@ -51,6 +51,7 @@ type delegatorGrowingSourceProvider struct {
 	releasePrepared map[int64]int64
 	handoffOnly     bool
 	handoffAllowed  map[int64]struct{}
+	handoffInflight int
 }
 
 func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error, getTSafe ...func() uint64) *delegatorGrowingSourceProvider {
@@ -153,6 +154,11 @@ func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx 
 		return p.prepareDeactivatedGrowingSourceReleaseHandoff(fenceTs, segments)
 	}
 	handoffSnapshot := p.enterHandoffOnly(segments)
+	// Keep the handoff-only fence armed until this in-flight handoff finishes.
+	// enterHandoffOnly releases p.mu before waitFence, so a concurrent
+	// ClearReleasePrepared could otherwise drain handoffAllowed and drop the
+	// fence while we are still parked in waitFence.
+	defer p.leaveHandoffOnlyInflight()
 	if p.waitFence != nil && fenceTs > 0 {
 		if err := p.waitFence(ctx, fenceTs); err != nil {
 			p.rollbackHandoffOnly(handoffSnapshot)
@@ -333,6 +339,7 @@ func (p *delegatorGrowingSourceProvider) enterHandoffOnly(segments []syncmgr.Gro
 	}
 
 	p.handoffOnly = true
+	p.handoffInflight++
 	for _, segment := range segments {
 		p.handoffAllowed[segment.SegmentID] = struct{}{}
 	}
@@ -464,9 +471,22 @@ func (p *delegatorGrowingSourceProvider) tryReleaseRetainedLocked(segmentID int6
 }
 
 func (p *delegatorGrowingSourceProvider) exitHandoffOnlyIfDrainedLocked() {
-	if p.handoffOnly && len(p.handoffAllowed) == 0 && len(p.retained) == 0 {
+	if p.handoffOnly && len(p.handoffAllowed) == 0 && len(p.retained) == 0 && p.handoffInflight == 0 {
 		p.handoffOnly = false
 	}
+}
+
+// leaveHandoffOnlyInflight marks one in-flight PrepareGrowingSourceReleaseHandoff
+// as finished. It re-checks the drain condition so that if the last allowed/
+// retained entry was cleared while this handoff was still in flight (drain was
+// blocked by handoffInflight), the fence is lowered now that it reaches zero.
+func (p *delegatorGrowingSourceProvider) leaveHandoffOnlyInflight() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handoffInflight > 0 {
+		p.handoffInflight--
+	}
+	p.exitHandoffOnlyIfDrainedLocked()
 }
 
 func (p *delegatorGrowingSourceProvider) releaseRetained(registration *syncmgr.GrowingSourceRegistration, retained *retainedGrowingFlushSource) {
