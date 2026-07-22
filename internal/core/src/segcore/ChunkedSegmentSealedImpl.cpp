@@ -5305,11 +5305,12 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
             AssertInfo(impl != nullptr,
                        "failed to create text index, field index cannot be "
                        "converted to string index");
-            auto n = impl->Size();
+            auto n = impl->Count();
             for (size_t i = 0; i < n; i++) {
                 auto raw = impl->Reverse_Lookup(i);
                 if (!raw.has_value()) {
                     index->AddNullSealed(i);
+                    continue;
                 }
                 index->AddTextSealed(raw.value(), true, i);
             }
