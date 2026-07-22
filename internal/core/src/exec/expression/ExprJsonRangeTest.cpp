@@ -31,6 +31,7 @@
 #include "bitset/bitset.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
 #include "common/IndexMeta.h"
 #include "common/Json.h"
 #include "common/Schema.h"
@@ -83,8 +84,10 @@ TEST(ExprJsonTermTest, MixedValueTypesReturnError) {
     try {
         ExecuteQueryExpr(plan, seg.get(), 1, MAX_TIMESTAMP);
         FAIL() << "mixed TermExpr values must be rejected";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), DataTypeInvalid);
+    } catch (const ExecOperatorException& error) {
+        EXPECT_NE(std::string_view(error.what())
+                      .find("TermExpr values must have the same type"),
+                  std::string_view::npos);
     }
 }
 
