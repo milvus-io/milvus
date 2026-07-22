@@ -60,37 +60,34 @@ func (m *windowManager) recoverWindows(ctx context.Context, pchannel string, che
 	}
 	windowInfo, err := m.recoverWindowInfoFromMeta(ctx, pchannel, checkpoint, vchannels)
 	if err != nil {
-		return checkpoint, m.handleWindowRecoveryError(err, checkpoint, vchannels)
+		return checkpoint, wrapWindowRecoveryError(err)
 	}
 	rewound, err := m.recoverWindowStoreFromSnapshot(ctx, windowInfo, checkpoint, vchannels)
 	if err != nil {
-		return checkpoint, m.handleWindowRecoveryError(err, checkpoint, vchannels)
+		return checkpoint, wrapWindowRecoveryError(err)
 	}
 	return rewound, nil
 }
 
-// handleWindowRecoveryError swallows window-store corruption (a rebuildable
-// cache) by resetting to an empty window set, but lets every other error abort
-// recovery.
-func (m *windowManager) handleWindowRecoveryError(err error, checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) error {
-	if !errors.Is(err, ErrPChannelWindowStoreCorrupted) {
-		return err
+// wrapWindowRecoveryError decorates referenced-state corruption with the
+// operator remediation and FAILS the WAL open. Corruption reaching here always
+// concerns state the meta references (chunks inside [MinInUse, Latest] or the
+// meta's generation ranges) — orphan-chunk corruption never escalates, it is
+// self-healed inline by the recovery probe. A referenced chunk is the only
+// durable copy of the idempotency keys below the consume checkpoint once the
+// WAL has been truncated past them (the window snapshot checkpoint is what
+// allowed that truncation), so silently resetting to an empty window would
+// accept in-TTL client retries as fresh writes — duplicate data with no error
+// anywhere. Failing open is explicit and actionable instead.
+func wrapWindowRecoveryError(err error) error {
+	if errors.Is(err, ErrPChannelWindowStoreCorrupted) {
+		return errors.Wrap(err,
+			"idempotency window store is corrupted and the WAL may already be truncated past its coverage; "+
+				"refusing to open the WAL rather than silently losing in-TTL idempotency keys. "+
+				"Remediation: set streaming.idempotency.enabled=false and restart to drop the corrupted store, "+
+				"then re-enable for a clean bootstrap (idempotency history is lost either way)")
 	}
-	m.Logger().Warn(context.TODO(), "idempotency window store corrupted; dropping window cache and continuing WAL recovery", mlog.Err(err))
-	m.resetWindowCacheAfterCorruption(checkpoint, vchannels)
-	return nil
-}
-
-// resetWindowCacheAfterCorruption discards any partially-recovered window state
-// and re-establishes the same empty, initialized state a fresh (empty) store
-// would yield at the given consume checkpoint. The cache repopulates from WAL
-// replay and subsequent writes; persistence appends fresh generations on top of
-// the existing meta.
-func (m *windowManager) resetWindowCacheAfterCorruption(checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) {
-	m.resetIdempotencyWindows()
-	m.setPChannelWindowSnapshotCheckpoint(checkpoint)
-	m.ensureActiveIdempotencyWindows(vchannels, checkpoint)
-	m.markActiveViewsInitialized()
+	return err
 }
 
 func (m *windowManager) recoverWindowInfoFromMeta(ctx context.Context, pchannel string, checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) (*windowStoreRecoveryInfo, error) {

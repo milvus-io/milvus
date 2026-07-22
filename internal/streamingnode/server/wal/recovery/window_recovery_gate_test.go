@@ -212,10 +212,14 @@ func TestIdempotencyWindowLifecycleMovedToVChannelEvents(t *testing.T) {
 	require.Len(t, rs.windowManager.idempotencyWindows(), 1)
 }
 
-// The durable window store is a rebuildable cache, not a source of truth: a
-// corrupted chunk must not abort WAL recovery. Recovery drops the corrupted
-// cache and continues with an empty, initialized window set.
-func TestRecoverWindowsTreatsCorruptionAsNonFatal(t *testing.T) {
+// A corrupted chunk the meta references fails the WAL open: the window
+// snapshot checkpoint gated WAL truncation, so a referenced chunk is the only
+// durable copy of the idempotency keys below the consume checkpoint. Silently
+// resetting to an empty window (the old behavior) would accept in-TTL client
+// retries as fresh writes — duplicate data with no error anywhere. Here the
+// consume checkpoint (120) has advanced together with the chunk, modeling the
+// truncated-WAL reality where key-1@99 is not replayable.
+func TestRecoverWindowsFailsOnReferencedChunkCorruption(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -243,19 +247,71 @@ func TestRecoverWindowsTreatsCorruptionAsNonFatal(t *testing.T) {
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
-		MessageID: rmq.NewRmqID(1),
-		TimeTick:  1,
+		MessageID: rmq.NewRmqID(120),
+		TimeTick:  120,
 	})
 	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
 		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	// Corruption is swallowed: recovery succeeds with a clean, empty window cache.
+	_, err = rs.windowManager.recoverWindows(ctx, "p1", rs.checkpoint, rs.vchannels)
+	require.ErrorIs(t, err, ErrPChannelWindowStoreCorrupted)
+	require.ErrorContains(t, err, "streaming.idempotency.enabled=false")
+	require.False(t, rs.windowManager.activeViewsInitialized)
+}
+
+// A corrupt chunk ABOVE the durable LatestGeneration is an orphan: the meta
+// never referenced it, its source data is still in the WAL, and the recovery
+// probe drops it inline — recovery must still succeed with the referenced
+// window intact.
+func TestRecoverWindowsSelfHealsCorruptOrphanChunk(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	records := map[string][]committedWriteRecord{
+		"v1": {
+			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+				Key:            "key-1",
+				CommitTimetick: 99,
+				MessageId:      rmq.NewRmqID(99).IntoProto(),
+			}),
+		},
+	}
+	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(120),
+		TimeTick:  120,
+	}, records)
+	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+
+	// An orphan at generation 1 from a persist that crashed before the meta
+	// advanced; corrupt it.
+	_, orphanKey, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(130),
+		TimeTick:  130,
+	}, nil)
+	payload, err := chunkManager.Read(ctx, orphanKey)
+	require.NoError(t, err)
+	payload[0] ^= 0x01
+	require.NoError(t, chunkManager.Write(ctx, orphanKey, payload))
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(120),
+		TimeTick:  120,
+	})
+	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
+		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
 	_, err = rs.windowManager.recoverWindows(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.NoError(t, err)
 	require.True(t, rs.windowManager.activeViewsInitialized)
-	for vchannel, window := range rs.windowManager.idempotencyWindows() {
-		require.Emptyf(t, window.snapshot().GetEntries(), "window %s should be reset to empty after corruption", vchannel)
-	}
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 1, false)
+	window, ok := rs.windowManager.idempotencyWindows()["v1"]
+	require.True(t, ok)
+	require.Len(t, window.entries, 1)
+	require.Contains(t, window.entries, "key-1")
 }
