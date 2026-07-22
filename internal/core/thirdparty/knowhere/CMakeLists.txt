@@ -33,8 +33,11 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES 
 # against an OOB nb_neighbors(1) read on a layer-0-only index; and select the
 # int8 DP4A layer-0 path on a per-search staged flag (not a leftover pooled
 # d_queries_i8 buffer) so a fp32-query search reusing the slot can't score
-# against stale int8 data.
-set( KNOWHERE_VERSION 9c0af31fe7b1d8c98d8cd3e219420e0ceca3cb62 )
+# against stale int8 data. Also converts the standard search() label output
+# on-device (convert_labels_kernel) instead of a D2H->host->H2D round-trip;
+# milvus uses the searchHost path so this is a no-op for production but keeps
+# the vendored tree in sync with faiss.
+set( KNOWHERE_VERSION 99d92eb1eeaa8d5c72e7d2ea537c7d09d08ffd0d )
 set( GIT_REPOSITORY  "https://github.com/6si/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
