@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"sort"
 	"strconv"
 
@@ -121,7 +120,7 @@ func buildInsertWriteUnitIdempotentInsertResult(ids *schemapb.IDs, rowOffsets []
 	offsets := make([]uint32, 0, len(rowOffsets))
 	for _, offset := range rowOffsets {
 		if offset < 0 {
-			return nil, fmt.Errorf("negative row offset %d", offset)
+			return nil, merr.WrapErrServiceInternalMsg("negative row offset %d", offset)
 		}
 		offsets = append(offsets, uint32(offset))
 	}
@@ -130,14 +129,14 @@ func buildInsertWriteUnitIdempotentInsertResult(ids *schemapb.IDs, rowOffsets []
 
 func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
 	if ids == nil {
-		return nil, fmt.Errorf("missing mutation result ids")
+		return nil, merr.WrapErrServiceInternalMsg("missing mutation result ids")
 	}
 	if intIDs := ids.GetIntId(); intIDs != nil {
 		data := intIDs.GetData()
 		selected := make([]int64, 0, len(rowOffsets))
 		for _, offset := range rowOffsets {
 			if offset < 0 || offset >= len(data) {
-				return nil, fmt.Errorf("row offset %d out of int id range %d", offset, len(data))
+				return nil, merr.WrapErrServiceInternalMsg("row offset %d out of int id range %d", offset, len(data))
 			}
 			selected = append(selected, data[offset])
 		}
@@ -150,7 +149,7 @@ func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
 		selected := make([]string, 0, len(rowOffsets))
 		for _, offset := range rowOffsets {
 			if offset < 0 || offset >= len(data) {
-				return nil, fmt.Errorf("row offset %d out of string id range %d", offset, len(data))
+				return nil, merr.WrapErrServiceInternalMsg("row offset %d out of string id range %d", offset, len(data))
 			}
 			selected = append(selected, data[offset])
 		}
@@ -158,7 +157,7 @@ func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
 			IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: selected}},
 		}, nil
 	}
-	return nil, fmt.Errorf("unsupported mutation result ids type")
+	return nil, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
 }
 
 func mergeDuplicateInsertResults(result *milvuspb.MutationResult, resp types.AppendResponses) error {
@@ -185,19 +184,19 @@ func mergeDuplicateInsertResults(result *milvuspb.MutationResult, resp types.App
 
 func mergeInsertIDsByOffsets(dst *schemapb.IDs, src *schemapb.IDs, rowOffsets []uint32) error {
 	if dst == nil || src == nil {
-		return fmt.Errorf("missing ids for idempotent insert result merge")
+		return merr.WrapErrServiceInternalMsg("missing ids for idempotent insert result merge")
 	}
 	if srcIntIDs := src.GetIntId(); srcIntIDs != nil {
 		dstIntIDs := dst.GetIntId()
 		if dstIntIDs == nil {
-			return fmt.Errorf("id type mismatch for idempotent insert result merge")
+			return merr.WrapErrServiceInternalMsg("id type mismatch for idempotent insert result merge")
 		}
 		if len(rowOffsets) != len(srcIntIDs.GetData()) {
-			return fmt.Errorf("row offsets length %d mismatches int ids length %d", len(rowOffsets), len(srcIntIDs.GetData()))
+			return merr.WrapErrServiceInternalMsg("row offsets length %d mismatches int ids length %d", len(rowOffsets), len(srcIntIDs.GetData()))
 		}
 		for i, offset := range rowOffsets {
 			if int(offset) >= len(dstIntIDs.Data) {
-				return fmt.Errorf("row offset %d out of mutation result int id range %d", offset, len(dstIntIDs.Data))
+				return merr.WrapErrServiceInternalMsg("row offset %d out of mutation result int id range %d", offset, len(dstIntIDs.Data))
 			}
 			dstIntIDs.Data[offset] = srcIntIDs.GetData()[i]
 		}
@@ -206,20 +205,20 @@ func mergeInsertIDsByOffsets(dst *schemapb.IDs, src *schemapb.IDs, rowOffsets []
 	if srcStrIDs := src.GetStrId(); srcStrIDs != nil {
 		dstStrIDs := dst.GetStrId()
 		if dstStrIDs == nil {
-			return fmt.Errorf("id type mismatch for idempotent insert result merge")
+			return merr.WrapErrServiceInternalMsg("id type mismatch for idempotent insert result merge")
 		}
 		if len(rowOffsets) != len(srcStrIDs.GetData()) {
-			return fmt.Errorf("row offsets length %d mismatches string ids length %d", len(rowOffsets), len(srcStrIDs.GetData()))
+			return merr.WrapErrServiceInternalMsg("row offsets length %d mismatches string ids length %d", len(rowOffsets), len(srcStrIDs.GetData()))
 		}
 		for i, offset := range rowOffsets {
 			if int(offset) >= len(dstStrIDs.Data) {
-				return fmt.Errorf("row offset %d out of mutation result string id range %d", offset, len(dstStrIDs.Data))
+				return merr.WrapErrServiceInternalMsg("row offset %d out of mutation result string id range %d", offset, len(dstStrIDs.Data))
 			}
 			dstStrIDs.Data[offset] = srcStrIDs.GetData()[i]
 		}
 		return nil
 	}
-	return fmt.Errorf("unsupported idempotent insert result ids type")
+	return merr.WrapErrServiceInternalMsg("unsupported idempotent insert result ids type")
 }
 
 // canonicalInsertPayloadKey derives a deterministic idempotency key from the
@@ -283,17 +282,17 @@ func validateCanonicalInsertPayloadFields(fieldsData []*schemapb.FieldData) erro
 	seenFieldNames := make(map[string]struct{}, len(fieldsData))
 	for _, fieldData := range fieldsData {
 		if fieldData == nil {
-			return fmt.Errorf("nil field data in insert payload")
+			return merr.WrapErrParameterInvalidMsg("nil field data in insert payload")
 		}
 		if fieldID := fieldData.GetFieldId(); fieldID != 0 {
 			if _, ok := seenFieldIDs[fieldID]; ok {
-				return fmt.Errorf("duplicate field id %d in insert payload", fieldID)
+				return merr.WrapErrParameterInvalidMsg("duplicate field id %d in insert payload", fieldID)
 			}
 			seenFieldIDs[fieldID] = struct{}{}
 		}
 		if fieldName := fieldData.GetFieldName(); fieldName != "" {
 			if _, ok := seenFieldNames[fieldName]; ok {
-				return fmt.Errorf("duplicate field name %q in insert payload", fieldName)
+				return merr.WrapErrParameterInvalidMsg("duplicate field name %q in insert payload", fieldName)
 			}
 			seenFieldNames[fieldName] = struct{}{}
 		}
