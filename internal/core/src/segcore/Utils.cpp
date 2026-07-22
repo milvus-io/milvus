@@ -1582,6 +1582,32 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     load_index_info->cache_index =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), op_ctx);
+
+    milvus::cachinglayer::CellAccessor accessor(
+        load_index_info->cache_index,
+        std::vector<milvus::cachinglayer::internal::ListNode::NodePin>());
+    auto the_cell = accessor.get_cell_of(0);
+    if (the_cell) {
+        size_t cell_size = the_cell->MemByteSize();
+        load_index_info->index_mem_size = cell_size;
+        LOG_INFO(
+            "[collection={}][segment={}][field={}]"
+            " load index {}, "
+            "cell_size={}",
+            load_index_info->collection_id,
+            load_index_info->segment_id,
+            load_index_info->field_id,
+            load_index_info->index_id,
+            cell_size);
+    } else {
+        LOG_INFO(
+            "No cell for [collection={}][segment={}][field={}]"
+            " load index {}",
+            load_index_info->collection_id,
+            load_index_info->segment_id,
+            load_index_info->field_id,
+            load_index_info->index_id);
+    }
 }
 
 FieldDataPtr

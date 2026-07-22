@@ -299,7 +299,8 @@ TEST(ChunkedSegmentSealedStorageV2,
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
     segcore::SegmentSealedUPtr
-    CreateSegment(bool is_sorted_by_pk) {
+    CreateSegment(bool is_sorted_by_pk, int segment_storage_version = 0) {
+        milvus::proto::segcore::SegmentLoadInfo segment_load_info;
         auto seg = segcore::CreateSealedSegment(
             schema_,
             nullptr,
@@ -307,6 +308,10 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             segcore::SegcoreConfig::default_config(),
             is_sorted_by_pk);
         seg->AddFieldDataInfoForSealed(load_info_);
+        if (segment_storage_version > 0) {
+            segment_load_info.set_storageversion(segment_storage_version);
+            seg->SetLoadInfo(segment_load_info);
+        }
         for (auto& [id, info] : load_info_.field_infos) {
             LoadFieldDataInfo load_field_info;
             load_field_info.storage_version = 2;
@@ -800,6 +805,11 @@ TEST_P(TestChunkSegmentStorageV2, TestTermExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(1, final.count());
+}
+
+TEST_P(TestChunkSegmentStorageV2, TestCreateSegment) {
+    auto sorted_segment = CreateSegment(true, 2);
+    sorted_segment = CreateSegment(false, 2);
 }
 
 TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {

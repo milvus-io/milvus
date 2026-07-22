@@ -510,7 +510,10 @@ ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
     target_runtime->timestamp_index_slot.reset();
 
     stats_.mem_size += sizeof(Timestamp) * num_rows;
-
+    LOG_INFO("Adding timestamps raw with size {} for segment {} , mem_size= {}",
+             timestamps.size() * sizeof(Timestamp),
+             id_,
+             stats_.mem_size.load());
     if (owned_runtime != nullptr) {
         PublishRuntimeStateLocked(
             ToConstRuntimeState(std::move(owned_runtime)));
@@ -532,6 +535,19 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
     std::unique_ptr<Translator<storagev2translator::PkIndexCell>> translator =
         std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
+    size_t pk_index_size = 0;
+    ResourceUsage expected_total_size;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        expected_total_size += translator->estimated_byte_size_of_cell(i).first;
+    }
+    pk_index_size = expected_total_size.memory_bytes;
+    stats_.mem_size.fetch_add(pk_index_size, std::memory_order_relaxed);
+    LOG_INFO(
+        "Adding pk to offset index with size {} for segment {} , mem_size= "
+        "{}",
+        pk_index_size,
+        id_,
+        stats_.mem_size.load());
     auto slot = Manager::GetInstance().CreateCacheSlot(std::move(translator));
     if (eager) {
         auto cell_holder = SemiInlineGet(slot->PinCells(op_ctx, {0}));
@@ -682,9 +698,13 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
         }
         next_runtime->vector_indexings[field_id] =
             BuildVectorIndexEntry(metric_type, std::move(info.cache_index));
-        LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
-                 info.field_id,
-                 id_);
+        LOG_INFO("index_mem_size: {}", info.index_mem_size);
+        stats_.mem_size += info.index_mem_size;
+        LOG_INFO(
+            "Has load vec index done, fieldID:{}. segmentID:{}, mem_size: {}",
+            info.field_id,
+            id_,
+            stats_.mem_size.load());
         PublishIndexReadyLocked(field_id,
                                 request.has_raw_data,
                                 ToConstRuntimeState(std::move(next_runtime)));
@@ -2548,6 +2568,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            LOG_INFO("chunked_column_group->memory_size(): {}",
+                     chunked_column_group->memory_size());
             stats_.mem_size += chunked_column_group->memory_size();
         }
     }
