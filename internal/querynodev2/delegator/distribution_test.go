@@ -788,6 +788,117 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.Error(err)
 }
 
+// NotServingSealedSegments reports the loaded sealed segments that are no longer part of the
+// delegator's readable snapshot -- the fact QueryCoord uses to release redundant segments
+// instead of inferring it from target versions.
+func (s *DistributionSuite) TestNotServingSealedSegments() {
+	s.Run("not_synced_by_coord_yet", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 1},
+			SegmentEntry{NodeID: 1, SegmentID: 2},
+		)
+
+		// The query view has not been synced yet: the readable set is empty, so every loaded
+		// segment would look "not serving". The delegator must decline to answer instead.
+		_, ok := s.dist.NotServingSealedSegments()
+		s.False(ok, "an unsynced delegator must not report a serving set")
+	})
+
+	s.Run("reports_loaded_minus_readable", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 1},
+			SegmentEntry{NodeID: 1, SegmentID: 2},
+			SegmentEntry{NodeID: 2, SegmentID: 3},
+		)
+		// coord syncs a readable set that only contains segments 1 and 3: segment 2 is loaded
+		// but no longer served (e.g. compacted away in the synced target version).
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1, 3},
+			SealedSegmentRowCount: map[int64]int64{1: 100, 3: 100},
+		}, []int64{1})
+
+		notServing, ok := s.dist.NotServingSealedSegments()
+		s.True(ok, "a synced delegator must report its serving set")
+		s.ElementsMatch([]int64{2}, notServing, "only the loaded segment outside the readable set is not served")
+	})
+
+	s.Run("all_loaded_segments_still_served", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1})
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1},
+			SealedSegmentRowCount: map[int64]int64{1: 100},
+		}, []int64{1})
+
+		notServing, ok := s.dist.NotServingSealedSegments()
+		s.True(ok)
+		s.Empty(notServing, "nothing to release while every loaded segment is in the readable set")
+	})
+}
+
+// A release decided by QueryCoord from an earlier heartbeat must not drop a segment that has since
+// been pulled back into the delegator's readable snapshot -- the holder refuses, and the checker
+// retries once the segment has genuinely left it.
+func (s *DistributionSuite) TestServedFromNode() {
+	s.Run("in_readable_set_and_served_from_that_node", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1})
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1},
+			SealedSegmentRowCount: map[int64]int64{1: 100},
+		}, []int64{1})
+
+		s.True(s.dist.ServedFromNode(1, 1), "the delegator serves this segment from node 1")
+		s.False(s.dist.ServedFromNode(1, 2), "node 2 does not serve it -- releasing that copy is safe")
+	})
+
+	s.Run("not_in_readable_set", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1}, SegmentEntry{NodeID: 1, SegmentID: 2})
+		// only segment 1 is readable at this version
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1},
+			SealedSegmentRowCount: map[int64]int64{1: 100},
+		}, []int64{1})
+
+		s.False(s.dist.ServedFromNode(2, 1), "segment 2 is loaded but outside the readable set: releasable")
+	})
+
+	s.Run("balance_move_releases_the_old_copy", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1})
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1},
+			SealedSegmentRowCount: map[int64]int64{1: 100},
+		}, []int64{1})
+
+		// a move loads the segment on node 2 first; the distribution now points there
+		s.dist.AddDistributions(SegmentEntry{NodeID: 2, SegmentID: 1, Version: 2})
+
+		s.False(s.dist.ServedFromNode(1, 1), "the copy on node 1 is no longer the one being served: the move may release it")
+		s.True(s.dist.ServedFromNode(1, 2), "node 2 now serves it")
+	})
+}
+
 func TestDistributionSuite(t *testing.T) {
 	suite.Run(t, new(DistributionSuite))
 }

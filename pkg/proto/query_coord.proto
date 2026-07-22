@@ -692,11 +692,21 @@ message LeaderView {
     int64 num_of_growing_rows = 7;
     map<int64, int64> partition_stats_versions = 8;
     LeaderViewStatus status = 9;
+    // Sealed segments that are loaded under this delegator but are no longer part of its
+    // readable snapshot, i.e. the delegator is not serving them and they can be released
+    // as far as the delegator is concerned. Only meaningful when
+    // LeaderViewStatus.reports_serving_set is true.
+    repeated int64 not_serving_segmentIDs = 10;
 }
 
 message LeaderViewStatus {
     bool serviceable = 1;
     bool catching_up_streaming_data = 2;  // true = still catching up, not ready
+    // true = this delegator reports not_serving_segmentIDs, so QueryCoord can decide
+    // segment release from the reported fact instead of inferring it from target versions.
+    // Absent on QueryNodes older than this feature, where coord falls back to the
+    // target-version guard.
+    bool reports_serving_set = 3;
 }
 
 message SegmentDist {

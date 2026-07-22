@@ -345,6 +345,50 @@ func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
 }
 
+// ServedFromNode reports whether a sealed segment is part of this delegator's readable snapshot
+// *and* is served from the given node. QueryCoord decides what to release from a leader view it
+// pulled on an earlier heartbeat, so its picture can predate a SyncTargetVersion that has since
+// pulled the segment back into the readable set: the delegator is the only party that knows the
+// answer at the moment the release actually runs.
+//
+// The node matters: a balance move loads the segment on its new node before releasing it on the
+// old one, and by then the distribution already points at the new node -- releasing the old copy of
+// a segment that is still readable is exactly what a move is.
+func (d *distribution) ServedFromNode(segmentID int64, nodeID int64) bool {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	if _, readable := d.queryView.sealedSegmentRowCount[segmentID]; !readable {
+		return false
+	}
+	entry, ok := d.sealedSegments[segmentID]
+	return ok && !entry.Offline && entry.NodeID == nodeID
+}
+
+// NotServingSealedSegments returns the sealed segments which are loaded under this delegator
+// but are no longer part of its readable snapshot, so the delegator is not serving them.
+// QueryCoord uses this to release redundant segments from the holder's own fact instead of
+// inferring it from target version arithmetic.
+//
+// The second return value is false while the query view has not been synced by coord yet:
+// the readable set is empty then, which would make every loaded segment look "not serving".
+func (d *distribution) NotServingSealedSegments() ([]int64, bool) {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	if !d.queryView.syncedByCoord || d.queryView.version == initialTargetVersion {
+		return nil, false
+	}
+
+	notServing := make([]int64, 0)
+	for segmentID := range d.sealedSegments {
+		if _, readable := d.queryView.sealedSegmentRowCount[segmentID]; !readable {
+			notServing = append(notServing, segmentID)
+		}
+	}
+	return notServing, true
+}
+
 // for now, delegator become serviceable only when watchDmChannel is done
 // so we regard all needed growing is loaded and we compute loadRatio based on sealed segments
 func (d *distribution) updateServiceable(triggerAction string) {
