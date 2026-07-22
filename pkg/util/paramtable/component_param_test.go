@@ -210,6 +210,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "grpc.log.client.level", Params.GrpcClientLogLevel.Key)
 		assert.Equal(t, "grpc.log.server.methods", Params.GrpcServerLogMethods.Key)
 		assert.Equal(t, "grpc.log.client.methods", Params.GrpcClientLogMethods.Key)
+		assert.Equal(t, "grpc.log.server.events", Params.GrpcServerLogEvents.Key)
+		assert.Equal(t, "grpc.log.client.events", Params.GrpcClientLogEvents.Key)
+		assert.Equal(t, "grpc.log.server.fields", Params.GrpcServerLogFields.Key)
+		assert.Equal(t, "grpc.log.client.fields", Params.GrpcClientLogFields.Key)
+		assert.Equal(t, "finish_call", Params.GrpcServerLogEvents.GetValue())
+		assert.Equal(t, "finish_call", Params.GrpcClientLogEvents.GetValue())
+		assert.NotContains(t, Params.GrpcServerLogFields.GetValue(), "grpc.request.content")
+		assert.NotContains(t, Params.GrpcServerLogFields.GetValue(), "grpc.response.content")
+		assert.NotContains(t, Params.GrpcClientLogFields.GetValue(), "grpc.request.content")
+		assert.NotContains(t, Params.GrpcClientLogFields.GetValue(), "grpc.response.content")
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

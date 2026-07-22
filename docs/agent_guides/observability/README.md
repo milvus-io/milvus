@@ -10,7 +10,7 @@ configuration.
 |---|---|
 | [mlog - AI Agent Logging Guide](logging.md) | Adding or changing application logs. Covers `mlog` usage, context requirements, fields, levels, and logging rules. |
 | [WAL Tracing](../streaming-system/wal/tracing.md) | Understanding or changing WAL trace span semantics across append, consume, transaction, broadcast, and replication paths. |
-| [gRPC Observability - AI Agent Guide](grpc_observability.md) | Debugging gRPC latency/failures/trace context, or working on gRPC metrics, access logs, method filters, and related hot-reloadable configs. |
+| [gRPC Observability - AI Agent Guide](grpc_observability.md) | Debugging gRPC latency/failures/trace context, or working on gRPC metrics, middleware logs, method filters, and related hot-reloadable configs. |
 
 ## Rules of Thumb
 

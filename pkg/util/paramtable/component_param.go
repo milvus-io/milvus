@@ -1752,6 +1752,10 @@ type logConfig struct {
 	GrpcClientLogLevel          ParamItem `refreshable:"true"`
 	GrpcServerLogMethods        ParamItem `refreshable:"true"`
 	GrpcClientLogMethods        ParamItem `refreshable:"true"`
+	GrpcServerLogEvents         ParamItem `refreshable:"true"`
+	GrpcClientLogEvents         ParamItem `refreshable:"true"`
+	GrpcServerLogFields         ParamItem `refreshable:"true"`
+	GrpcClientLogFields         ParamItem `refreshable:"true"`
 	AsyncWriteEnable            ParamItem `refreshable:"false"`
 	AsyncWriteFlushInterval     ParamItem `refreshable:"false"`
 	AsyncWriteDroppedTimeout    ParamItem `refreshable:"false"`
@@ -1872,6 +1876,44 @@ Set this parameter as the path that you have permission to write.`,
 		Export:       false,
 	}
 	l.GrpcClientLogMethods.Init(base.mgr)
+
+	l.GrpcServerLogEvents = ParamItem{
+		Key:          "grpc.log.server.events",
+		DefaultValue: "finish_call",
+		Version:      "3.0.0",
+		Doc:          "Comma-separated gRPC server logging events. Options: start_call, finish_call, payload_received, payload_sent. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcServerLogEvents.Init(base.mgr)
+
+	l.GrpcClientLogEvents = ParamItem{
+		Key:          "grpc.log.client.events",
+		DefaultValue: "finish_call",
+		Version:      "3.0.0",
+		Doc:          "Comma-separated gRPC client logging events. Options: start_call, finish_call, payload_received, payload_sent. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcClientLogEvents.Init(base.mgr)
+
+	defaultGRPCLogFields := "protocol,grpc.component,grpc.service,grpc.method,grpc.method_type,peer.address,method,dstServerID,grpc.start_time,grpc.request.deadline,grpc.code,grpc.error,grpc.duration,grpc.send.duration,grpc.recv.duration,grpc.request.type,grpc.response.type"
+
+	l.GrpcServerLogFields = ParamItem{
+		Key:          "grpc.log.server.fields",
+		DefaultValue: defaultGRPCLogFields,
+		Version:      "3.0.0",
+		Doc:          "Comma-separated gRPC server log field allowlist. Empty disables field filtering. Payload content fields such as grpc.request.content and grpc.response.content are not included by default. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcServerLogFields.Init(base.mgr)
+
+	l.GrpcClientLogFields = ParamItem{
+		Key:          "grpc.log.client.fields",
+		DefaultValue: defaultGRPCLogFields,
+		Version:      "3.0.0",
+		Doc:          "Comma-separated gRPC client log field allowlist. Empty disables field filtering. Payload content fields such as grpc.request.content and grpc.response.content are not included by default. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcClientLogFields.Init(base.mgr)
 
 	l.AsyncWriteEnable = ParamItem{
 		Key:          "log.asyncWrite.enable",

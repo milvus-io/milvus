@@ -18,6 +18,8 @@ package interceptor
 
 import (
 	"context"
+	"io"
+	"slices"
 	"sync"
 	"testing"
 
@@ -29,7 +31,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 
+	grpc_logging "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -164,17 +168,20 @@ func TestDynamicLogConfig_UpdateMethodsRejectsInvalidRegex(t *testing.T) {
 func TestNewDynamicLogConfig_SeedsAndHandlesUpdates(t *testing.T) {
 	// The production paths use paramtable-driven config keys; here we just
 	// verify the seeding path with existing paramtable keys.
-	c := newDynamicLogConfig("grpc.log.server.level", "grpc.log.server.methods", "debug", "/svc/M")
+	c := newDynamicLogConfig("grpc.log.server.level", "grpc.log.server.methods", "grpc.log.server.events", "grpc.log.server.fields", "debug", "/svc/M", "finish_call", "grpc.code,method")
 	lvl, ok := c.shouldLog("/svc/M")
 	assert.True(t, ok)
 	assert.Equal(t, mlog.DebugLevel, lvl)
+	assert.Equal(t, []grpc_logging.LoggableEvent{grpc_logging.FinishCall}, c.logEvents())
+	assert.True(t, c.logFields().has("grpc.code"))
+	assert.True(t, c.logFields().has("method"))
 
 	_, ok = c.shouldLog("/svc/Other")
 	assert.False(t, ok)
 }
 
 func TestNewDynamicLogConfig_RegexMethodFilter(t *testing.T) {
-	c := newDynamicLogConfig("grpc.log.server.level", "grpc.log.server.methods", "debug", "re:^/svc/.+$")
+	c := newDynamicLogConfig("grpc.log.server.level", "grpc.log.server.methods", "grpc.log.server.events", "grpc.log.server.fields", "debug", "re:^/svc/.+$", "finish_call", "grpc.code")
 
 	lvl, ok := c.shouldLog("/svc/RegexMatched")
 	assert.True(t, ok)
@@ -182,6 +189,74 @@ func TestNewDynamicLogConfig_RegexMethodFilter(t *testing.T) {
 
 	_, ok = c.shouldLog("/other/RegexNotMatched")
 	assert.False(t, ok)
+}
+
+func TestParseLogEvents(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    []grpc_logging.LoggableEvent
+		invalid []string
+	}{
+		{name: "default", in: "", want: []grpc_logging.LoggableEvent{grpc_logging.FinishCall}},
+		{name: "all events", in: "start_call,finish_call,payload_received,payload_sent", want: []grpc_logging.LoggableEvent{grpc_logging.StartCall, grpc_logging.FinishCall, grpc_logging.PayloadReceived, grpc_logging.PayloadSent}},
+		{name: "trim canonical names", in: " start_call , finish_call ", want: []grpc_logging.LoggableEvent{grpc_logging.StartCall, grpc_logging.FinishCall}},
+		{name: "duplicate events are deduplicated", in: "finish_call,start_call,finish_call,start_call", want: []grpc_logging.LoggableEvent{grpc_logging.FinishCall, grpc_logging.StartCall}},
+		{name: "invalid event skipped", in: "finish_call,bogus", want: []grpc_logging.LoggableEvent{grpc_logging.FinishCall}, invalid: []string{"bogus"}},
+		{name: "aliases are invalid", in: "start,finish,payload_recv,payload_send", want: []grpc_logging.LoggableEvent{grpc_logging.FinishCall}, invalid: []string{"start", "finish", "payload_recv", "payload_send"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events, invalid := parseLogEvents(tt.in)
+			assert.Equal(t, tt.want, events)
+			assert.Equal(t, tt.invalid, invalid)
+		})
+	}
+}
+
+func TestDynamicLogConfig_UpdateEventsRejectsInvalidEvent(t *testing.T) {
+	c := &dynamicLogConfig{}
+	c.updateEvents("grpc.log.server.events", "start_call")
+
+	assert.False(t, c.updateEvents("grpc.log.server.events", "bogus"))
+	assert.Equal(t, []grpc_logging.LoggableEvent{grpc_logging.StartCall}, c.logEvents())
+}
+
+func TestParseLogFields(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{name: "empty disables filtering", in: "", want: nil},
+		{name: "trim and deduplicate", in: " grpc.code , method,grpc.code ", want: []string{"grpc.code", "method"}},
+		{name: "empty parts skipped", in: "grpc.code,,grpc.duration,", want: []string{"grpc.code", "grpc.duration"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := parseLogFields(tt.in)
+			if tt.want == nil {
+				assert.Nil(t, filter)
+				return
+			}
+			for _, field := range tt.want {
+				assert.True(t, filter.has(field), field)
+			}
+			assert.Equal(t, len(tt.want), filter.len())
+		})
+	}
+}
+
+func TestDynamicLogConfig_UpdateFields(t *testing.T) {
+	c := &dynamicLogConfig{}
+	c.updateFields("grpc.log.server.fields", "grpc.code,method")
+
+	assert.True(t, c.logFields().has("grpc.code"))
+	assert.True(t, c.logFields().has("method"))
+	assert.False(t, c.logFields().has("grpc.response.content"))
+
+	c.updateFields("grpc.log.server.fields", "")
+	assert.Nil(t, c.logFields())
 }
 
 func resetDynamicLogConfigSingletonsForTest() {
@@ -200,6 +275,32 @@ func configureObservabilityLogMethodsForTest(t *testing.T, serverMethods, client
 	t.Cleanup(func() {
 		pt.Reset(pt.LogCfg.GrpcServerLogMethods.Key)
 		pt.Reset(pt.LogCfg.GrpcClientLogMethods.Key)
+		resetDynamicLogConfigSingletonsForTest()
+	})
+}
+
+func configureObservabilityLogEventsForTest(t *testing.T, serverEvents, clientEvents string) {
+	t.Helper()
+	pt := paramtable.Get()
+	pt.Save(pt.LogCfg.GrpcServerLogEvents.Key, serverEvents)
+	pt.Save(pt.LogCfg.GrpcClientLogEvents.Key, clientEvents)
+	resetDynamicLogConfigSingletonsForTest()
+	t.Cleanup(func() {
+		pt.Reset(pt.LogCfg.GrpcServerLogEvents.Key)
+		pt.Reset(pt.LogCfg.GrpcClientLogEvents.Key)
+		resetDynamicLogConfigSingletonsForTest()
+	})
+}
+
+func configureObservabilityLogFieldsForTest(t *testing.T, serverFields, clientFields string) {
+	t.Helper()
+	pt := paramtable.Get()
+	pt.Save(pt.LogCfg.GrpcServerLogFields.Key, serverFields)
+	pt.Save(pt.LogCfg.GrpcClientLogFields.Key, clientFields)
+	resetDynamicLogConfigSingletonsForTest()
+	t.Cleanup(func() {
+		pt.Reset(pt.LogCfg.GrpcServerLogFields.Key)
+		pt.Reset(pt.LogCfg.GrpcClientLogFields.Key)
 		resetDynamicLogConfigSingletonsForTest()
 	})
 }
@@ -249,7 +350,7 @@ func TestObservabilityServerUnary_FastPath(t *testing.T) {
 	assert.ErrorIs(t, err, wantErr)
 }
 
-func TestObservabilityServerUnary_AccessLogPath(t *testing.T) {
+func TestObservabilityServerUnary_MiddlewareLogPath(t *testing.T) {
 	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
 	configureObservabilityLogMethodsForTest(t, "/svc/Unary", "")
 	intercept := NewObservabilityServerUnaryInterceptor()
@@ -291,7 +392,7 @@ func TestObservabilityServerUnary_RecordsMetricsLabels(t *testing.T) {
 	}))
 }
 
-func TestObservabilityServerStream_AccessLogPath(t *testing.T) {
+func TestObservabilityServerStream_MiddlewareLogPath(t *testing.T) {
 	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
 	configureObservabilityLogMethodsForTest(t, "/svc/Stream", "")
 	intercept := NewObservabilityServerStreamInterceptor()
@@ -307,7 +408,7 @@ func TestObservabilityServerStream_AccessLogPath(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestObservabilityClientUnary_AccessLogPath(t *testing.T) {
+func TestObservabilityClientUnary_MiddlewareLogPath(t *testing.T) {
 	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
 	configureObservabilityLogMethodsForTest(t, "", "/svc/Unary")
 	intercept := NewObservabilityClientUnaryInterceptor()
@@ -323,13 +424,22 @@ func TestObservabilityClientUnary_AccessLogPath(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestObservabilityClientStream_AccessLogPath(t *testing.T) {
+func TestObservabilityClientStream_MiddlewareLogPath(t *testing.T) {
 	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
 	configureObservabilityLogMethodsForTest(t, "", "/svc/Stream")
 	intercept := NewObservabilityClientStreamInterceptor()
 
+	var logs []string
+	oldLogger := grpcMiddlewareLogger
+	grpcMiddlewareLogger = grpc_logging.LoggerFunc(func(ctx context.Context, level grpc_logging.Level, msg string, fields ...any) {
+		logs = append(logs, msg)
+	})
+	t.Cleanup(func() {
+		grpcMiddlewareLogger = oldLogger
+	})
+
 	streamerCalled := false
-	rawStream := &mockClientStream{ctx: context.Background()}
+	rawStream := &mockClientStream{ctx: context.Background(), recvErr: io.EOF}
 	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		streamerCalled = true
 		return rawStream, nil
@@ -340,11 +450,97 @@ func TestObservabilityClientStream_AccessLogPath(t *testing.T) {
 	assert.NotNil(t, cs)
 	assert.NotEqual(t, rawStream, cs)
 	assert.NoError(t, err)
+	assert.Empty(t, logs)
+
+	assert.ErrorIs(t, cs.RecvMsg(nil), io.EOF)
+	assert.Equal(t, []string{"finished call"}, logs)
+}
+
+func TestObservabilityClientStream_UsesConfiguredMiddlewareEvents(t *testing.T) {
+	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
+	configureObservabilityLogMethodsForTest(t, "", "/svc/Stream")
+	configureObservabilityLogEventsForTest(t, "", "payload_sent,payload_received,finish_call")
+	intercept := NewObservabilityClientStreamInterceptor()
+
+	var logs []string
+	oldLogger := grpcMiddlewareLogger
+	grpcMiddlewareLogger = grpc_logging.LoggerFunc(func(ctx context.Context, level grpc_logging.Level, msg string, fields ...any) {
+		logs = append(logs, msg)
+	})
+	t.Cleanup(func() {
+		grpcMiddlewareLogger = oldLogger
+	})
+
+	rawStream := &mockClientStream{ctx: context.Background(), recvErrs: []error{nil, io.EOF}}
+	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		return rawStream, nil
+	}
+	cs, err := intercept(context.Background(), &grpc.StreamDesc{}, nil, "/svc/Stream", streamer)
+	assert.NoError(t, err)
+
+	assert.NoError(t, cs.SendMsg(&emptypb.Empty{}))
+	assert.NoError(t, cs.RecvMsg(&emptypb.Empty{}))
+	assert.ErrorIs(t, cs.RecvMsg(&emptypb.Empty{}), io.EOF)
+	assert.True(t, slices.Contains(logs, "request sent"))
+	assert.True(t, slices.Contains(logs, "response received"))
+	assert.True(t, slices.Contains(logs, "finished call"))
+}
+
+func TestObservabilityClientStream_FiltersMiddlewareFields(t *testing.T) {
+	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
+	configureObservabilityLogMethodsForTest(t, "", "/svc/Stream")
+	configureObservabilityLogEventsForTest(t, "", "payload_sent,payload_received,finish_call")
+	configureObservabilityLogFieldsForTest(t, "", "grpc.code,method,dstServerID")
+	intercept := NewObservabilityClientStreamInterceptor()
+
+	var gotFields []any
+	oldLogger := grpcMiddlewareLogger
+	grpcMiddlewareLogger = grpc_logging.LoggerFunc(func(ctx context.Context, level grpc_logging.Level, msg string, fields ...any) {
+		if msg == "finished call" {
+			gotFields = append([]any(nil), fields...)
+		}
+	})
+	t.Cleanup(func() {
+		grpcMiddlewareLogger = oldLogger
+	})
+
+	ctx := metadata.AppendToOutgoingContext(context.Background(), ServerIDKey, "42")
+	rawStream := &mockClientStream{ctx: context.Background(), recvErr: io.EOF}
+	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		return rawStream, nil
+	}
+	cs, err := intercept(ctx, &grpc.StreamDesc{}, nil, "/svc/Stream", streamer)
+	assert.NoError(t, err)
+	assert.ErrorIs(t, cs.RecvMsg(&emptypb.Empty{}), io.EOF)
+
+	assertFieldSet(t, gotFields, "grpc.code")
+	assertFieldSet(t, gotFields, "method")
+	assertFieldSet(t, gotFields, "dstServerID")
+	assertFieldNotSet(t, gotFields, "grpc.duration")
+	assertFieldNotSet(t, gotFields, "grpc.response.content")
+}
+
+func TestObservabilityLogFields_DefaultExcludesPayloadContent(t *testing.T) {
+	pt := paramtable.Get()
+
+	serverFields := parseLogFields(pt.LogCfg.GrpcServerLogFields.GetValue())
+	clientFields := parseLogFields(pt.LogCfg.GrpcClientLogFields.GetValue())
+
+	assert.NotNil(t, serverFields)
+	assert.NotNil(t, clientFields)
+	assert.False(t, serverFields.has("grpc.request.content"))
+	assert.False(t, serverFields.has("grpc.response.content"))
+	assert.False(t, clientFields.has("grpc.request.content"))
+	assert.False(t, clientFields.has("grpc.response.content"))
+	assert.True(t, serverFields.has("grpc.code"))
+	assert.True(t, clientFields.has("grpc.code"))
 }
 
 type mockClientStream struct {
 	grpc.ClientStream
-	ctx context.Context
+	ctx      context.Context
+	recvErr  error
+	recvErrs []error
 }
 
 func (s *mockClientStream) Header() (metadata.MD, error) {
@@ -368,7 +564,12 @@ func (s *mockClientStream) SendMsg(any) error {
 }
 
 func (s *mockClientStream) RecvMsg(any) error {
-	return nil
+	if len(s.recvErrs) > 0 {
+		err := s.recvErrs[0]
+		s.recvErrs = s.recvErrs[1:]
+		return err
+	}
+	return s.recvErr
 }
 
 func hasMetricWithLabels(mfs []*dto.MetricFamily, name string, labels map[string]string) bool {
@@ -396,4 +597,23 @@ func metricHasLabels(metric *dto.Metric, labels map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func assertFieldSet(t *testing.T, fields []any, key string) {
+	t.Helper()
+	assert.True(t, fieldSet(fields, key), key)
+}
+
+func assertFieldNotSet(t *testing.T, fields []any, key string) {
+	t.Helper()
+	assert.False(t, fieldSet(fields, key), key)
+}
+
+func fieldSet(fields []any, key string) bool {
+	for i := 0; i+1 < len(fields); i += 2 {
+		if fields[i] == key {
+			return true
+		}
+	}
+	return false
 }
