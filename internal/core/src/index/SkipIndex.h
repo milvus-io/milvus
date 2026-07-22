@@ -185,6 +185,20 @@ class SkipIndex {
                            T>;
 
  public:
+    std::shared_ptr<SkipIndex>
+    Clone() const {
+        auto cloned = std::make_shared<SkipIndex>();
+        std::shared_lock lck(mutex_);
+        cloned->fieldChunkMetrics_ = fieldChunkMetrics_;
+        return cloned;
+    }
+
+    void
+    Erase(FieldId field_id) {
+        std::unique_lock lck(mutex_);
+        fieldChunkMetrics_.erase(field_id);
+    }
+
     template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
     CanSkipUnaryRange(milvus::OpContext* op_ctx,

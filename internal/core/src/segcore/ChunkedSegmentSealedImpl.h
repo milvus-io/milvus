@@ -58,7 +58,6 @@
 #include "common/protobuf_utils.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
-#include "folly/Synchronized.h"
 #include "google/protobuf/message.h"
 #include "index/Index.h"
 #include "index/NgramInvertedIndex.h"
@@ -96,9 +95,9 @@ class TimestampIndex;
 
 using namespace milvus::cachinglayer;
 
-// Test-only accessor that pokes private members to simulate v2/v3 segment
-// state (raw timestamp column emplaced into fields_ alongside an overwritten
-// timestamp index). Defined in internal/core/unittest/test_commit_timestamp.cpp.
+// Test-only accessor that simulates v2/v3 segment state (raw timestamp column
+// published in runtime alongside an overwritten timestamp index). Defined in
+// internal/core/unittest/test_commit_timestamp.cpp.
 class CommitTimestampV2TestAccess;
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
@@ -162,22 +161,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     PinWrapper<const index::IndexBase*>(std::move(ca), index)};
             }
         }
-
-        auto [scalar_indexings, ngram_fields] =
-            lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
-        if (!include_ngram) {
-            if (ngram_fields->find(field_id) != ngram_fields->end()) {
-                return {};
-            }
-        }
-
-        auto iter = scalar_indexings->find(field_id);
-        if (iter == scalar_indexings->end()) {
-            return {};
-        }
-        auto ca = SemiInlineGet(iter->second->PinCells(op_ctx, {0}));
-        auto index = ca->get_cell_of(0);
-        return {PinWrapper<const index::IndexBase*>(std::move(ca), index)};
+        return {};
     }
 
     std::vector<PinWrapper<const index::IndexBase*>>
@@ -373,6 +357,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>>
             pk_index_slot;
         std::shared_ptr<const OffsetMap> virtual_pk2offset;
+        std::shared_ptr<SkipIndex> skip_index;
+        std::unordered_set<FieldId> mmap_field_ids;
+        std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
+            variable_fields_avg_size;
+        int64_t row_count{0};
     };
 
     struct PublishedSegmentState {
@@ -424,6 +413,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     int64_t
     get_row_count() const override;
+
+    int64_t
+    get_field_avg_size(FieldId field_id) const override;
+
+    void
+    set_field_avg_size(FieldId field_id,
+                       int64_t num_rows,
+                       int64_t field_size) override;
+
+    std::shared_ptr<const SkipIndex>
+    GetSkipIndexSnapshot() const;
 
     int64_t
     get_deleted_count() const override;
@@ -1285,8 +1285,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                        int64_t count) const;
 
     void
-    update_row_count(int64_t row_count) {
-        num_rows_ = row_count;
+    update_row_count(RuntimeResourceState& runtime, int64_t row_count) {
+        runtime.row_count = row_count;
         deleted_record_.set_sealed_row_count(row_count);
     }
 
@@ -1843,9 +1843,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
               RuntimeResourceState* runtime = nullptr);
 
     void
-    DropFieldData(const FieldId field_id,
-                  const SchemaPtr& schema_snapshot,
-                  RuntimeResourceState* runtime = nullptr);
+    DropFieldData(
+        const FieldId field_id,
+        const SchemaPtr& schema_snapshot,
+        RuntimeResourceState* runtime = nullptr,
+        const std::shared_ptr<const PublishedSegmentState>& current = nullptr);
 
     void
     LoadFieldData(const LoadFieldDataInfo& load_info,
@@ -2179,25 +2181,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                              int64_t start,
                              int64_t length) const;
 
-    std::optional<int64_t> num_rows_;
-
-    // ngram indexings for json type
-    folly::Synchronized<std::unordered_map<
-        FieldId,
-        std::unordered_map<std::string, index::CacheIndexBasePtr>>>
-        ngram_indexings_;
-
-    // fields that has ngram index
-    folly::Synchronized<std::unordered_set<FieldId>> ngram_fields_;
-
-    // scalar field index
-    folly::Synchronized<std::unordered_map<FieldId, index::CacheIndexBasePtr>>
-        scalar_indexings_;
-
-    folly::Synchronized<
-        std::shared_ptr<CacheSlot<storagev2translator::TimestampIndexCell>>>
-        timestamp_index_slot_;
-
     // deleted pks
     mutable DeletedRecord<true> deleted_record_;
 
@@ -2223,11 +2206,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // PublishedSegmentState.
     uint64_t commit_ts_{0};
 
-    mutable folly::Synchronized<
-        std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
-        fields_;
     std::unordered_set<FieldId> pending_text_index_fields_;
-    std::unordered_set<FieldId> mmap_field_ids_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;
@@ -2243,13 +2222,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // The reader object itself now lives in RuntimeResourceState snapshots so
     // reopen/load can stage a replacement reader without exposing it early.
     mutable std::mutex reader_mutex_;
-
-    // Array offsets grouped by the shared struct-array parent name.
-    std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
-        struct_to_array_offsets_;
-    // Direct field-id lookup for array/vector-array fields.
-    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
-        array_offsets_map_;
 
 #ifdef MILVUS_UNIT_TEST
  public:
@@ -2352,6 +2324,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");
         return it->second;
+    }
+
+    void
+    TestPublishRuntimeResourceState(
+        std::shared_ptr<RuntimeResourceState> runtime) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
     }
 
     void
