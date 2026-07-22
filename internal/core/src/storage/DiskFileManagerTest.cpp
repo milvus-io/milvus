@@ -1554,7 +1554,6 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
 
     milvus::Config load_config;
     load_config[DIM_KEY] = dim;
-    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
     load_config["index_files"] = files;
 
     loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
