@@ -1733,6 +1733,31 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.NoError(err)
 }
 
+func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
+	ctx := context.Background()
+	// the target worker is offline/unhealthy, GetWorker returns no worker
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).
+		Return(nil, merr.WrapErrNodeNotAvailable(1))
+
+	err := s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		NodeID:     1,
+		SegmentIDs: []int64{1000},
+		Scope:      querypb.DataScope_All,
+	}, false)
+	s.Error(err)
+	// pin the contract: GetWorker's error code must reach the caller unmasked
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
+
+	// growingSegmentLock must be released even when the remote release fails,
+	// otherwise the channel's insert pipeline blocks forever
+	locked := s.delegator.growingSegmentLock.TryLock()
+	s.True(locked, "growingSegmentLock should be released after failed release")
+	if locked {
+		s.delegator.growingSegmentLock.Unlock()
+	}
+}
+
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}
