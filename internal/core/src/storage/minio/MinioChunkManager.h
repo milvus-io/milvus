@@ -91,31 +91,29 @@ S3ErrorMessage(const std::string& func,
 
 inline ErrorCode
 S3ErrorToErrorCode(Aws::S3::S3Errors error,
-                   Aws::Http::HttpResponseCode response_code =
-                       Aws::Http::HttpResponseCode::REQUEST_NOT_MADE) {
+                   Aws::Http::HttpResponseCode response_code,
+                   bool should_retry) {
     switch (error) {
-        case Aws::S3::S3Errors::INTERNAL_FAILURE:
-        case Aws::S3::S3Errors::SERVICE_UNAVAILABLE:
-        case Aws::S3::S3Errors::THROTTLING:
-        case Aws::S3::S3Errors::SLOW_DOWN:
-        case Aws::S3::S3Errors::REQUEST_TIMEOUT:
-        case Aws::S3::S3Errors::NETWORK_CONNECTION:
-            return ErrorCode::S3Error;
         case Aws::S3::S3Errors::NO_SUCH_BUCKET:
             return ErrorCode::BucketInvalid;
         case Aws::S3::S3Errors::NO_SUCH_KEY:
         case Aws::S3::S3Errors::RESOURCE_NOT_FOUND:
             return ErrorCode::ObjectNotExist;
         case Aws::S3::S3Errors::UNKNOWN:
-            // S3-compatible services may return a non-standard error name.
-            // Only retry it when the structured HTTP status is transient.
+            // S3-compatible services may return a non-standard error name the
+            // SDK cannot map, so its retry flag is unreliable here; fall back
+            // to the structured HTTP status for the retry decision.
             return Aws::Http::IsRetryableHttpResponseCode(response_code)
                        ? ErrorCode::S3Error
                        : ErrorCode::UnexpectedError;
         default:
-            // Authentication, authorization, invalid configuration/request,
-            // and all unknown future error types are permanent by default.
-            return ErrorCode::UnexpectedError;
+            // Defer the transient-vs-permanent decision to the AWS SDK's own
+            // retryability classification (throttling, 5xx, timeouts,
+            // REQUEST_EXPIRED, REQUEST_TIME_TOO_SKEWED, network, and any future
+            // error type), instead of a hand-maintained list that drifts from
+            // it. NoSuchBucket / NoSuchKey above stay permanent by identity.
+            return should_retry ? ErrorCode::S3Error
+                                : ErrorCode::UnexpectedError;
     }
 }
 
@@ -128,7 +126,8 @@ ThrowS3Error(const std::string& func,
     std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
     LOG_WARN("{}", error_message);
     throw SegcoreError(
-        S3ErrorToErrorCode(err.GetErrorType(), err.GetResponseCode()),
+        S3ErrorToErrorCode(
+            err.GetErrorType(), err.GetResponseCode(), err.ShouldRetry()),
         error_message);
 }
 
