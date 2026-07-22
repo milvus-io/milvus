@@ -15,18 +15,12 @@ import (
 
 func columnKey(c *planpb.ColumnInfo) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|%t|%t|",
+	fmt.Fprintf(&b, "%d|%t|%d|",
 		c.GetFieldId(),
-		int32(c.GetDataType()),
-		int32(c.GetElementType()),
-		c.GetIsPrimaryKey(),
-		c.GetIsAutoID(),
-		c.GetIsPartitionKey(),
-		c.GetNullable(),
-		c.GetIsElementLevel())
+		c.GetIsElementLevel(),
+		len(c.GetNestedPath()))
 	for _, p := range c.GetNestedPath() {
-		b.WriteString(p)
-		b.WriteByte('|')
+		fmt.Fprintf(&b, "%d:%s|", len(p), p)
 	}
 	return b.String()
 }
@@ -213,7 +207,8 @@ func hasMissingPathSemantics(col *planpb.ColumnInfo) bool {
 	return col != nil && len(col.GetNestedPath()) > 0
 }
 
-func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
+// only non-nullable fields that don't need the true/false/null semantics can be folded to a bool constant.
+func canFoldPredicateToBoolConstant(col *planpb.ColumnInfo) bool {
 	return col != nil && col.GetDataType() != schemapb.DataType_JSON &&
 		!hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
 }
@@ -319,10 +314,4 @@ func filterValuesByRange(dt schemapb.DataType, values []*planpb.GenericValue, lo
 		}
 	}
 	return out
-}
-
-func unionValues(valuesA, valuesB []*planpb.GenericValue) []*planpb.GenericValue {
-	all := append([]*planpb.GenericValue{}, valuesA...)
-	all = append(all, valuesB...)
-	return sortGenericValues(all)
 }
