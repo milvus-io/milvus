@@ -183,15 +183,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            const auto has_array_literal =
-                std::any_of(expr_->vals_.begin(),
-                            expr_->vals_.end(),
-                            [](const auto& value) {
-                                return value.val_case() ==
-                                       proto::plan::GenericValue::kArrayVal;
-                            });
-            if (exec_path_ == ExprExecPath::ScalarIndex && expr_->same_type_ &&
-                !has_array_literal && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 const auto has_unsafe_int_literal =
                     std::any_of(expr_->vals_.begin(),
                                 expr_->vals_.end(),

@@ -90,7 +90,18 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out = append(out, others...)
 	for _, g := range groups {
 		if len(g.values) >= 2 {
-			if hasMissingPathNotEqualSemantics(g.col, g.values...) {
+			// This rewrite requires both an executable TermExpr and strict
+			// != == NOT(==) semantics for every predicate under three-valued logic.
+			canRewrite := canBuildTermExpr(g.values...)
+			if canRewrite {
+				for _, value := range g.values {
+					if !canRewriteNotEqual(g.col, value) {
+						canRewrite = false
+						break
+					}
+				}
+			}
+			if !canRewrite {
 				for _, i := range g.origIndices {
 					out = append(out, indexToExpr[i])
 				}
