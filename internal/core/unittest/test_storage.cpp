@@ -119,36 +119,49 @@ TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
 }
 
 TEST_F(StorageTest, S3ErrorClassification) {
-    for (auto error : {Aws::S3::S3Errors::INTERNAL_FAILURE,
-                       Aws::S3::S3Errors::SERVICE_UNAVAILABLE,
-                       Aws::S3::S3Errors::THROTTLING,
-                       Aws::S3::S3Errors::SLOW_DOWN,
-                       Aws::S3::S3Errors::REQUEST_TIMEOUT,
-                       Aws::S3::S3Errors::NETWORK_CONNECTION}) {
-        EXPECT_EQ(S3ErrorToErrorCode(error), ErrorCode::S3Error);
+    constexpr auto kNoCode = Aws::Http::HttpResponseCode::REQUEST_NOT_MADE;
+
+    // The transient-vs-permanent decision is delegated to the AWS SDK's
+    // ShouldRetry() flag (passed here as the bool): whatever the SDK marks
+    // retryable becomes the retriable S3Error, the rest UnexpectedError.
+    for (auto error : {Aws::S3::S3Errors::THROTTLING,
+                       Aws::S3::S3Errors::REQUEST_EXPIRED,
+                       Aws::S3::S3Errors::REQUEST_TIME_TOO_SKEWED}) {
+        EXPECT_EQ(S3ErrorToErrorCode(error, kNoCode, /*should_retry=*/true),
+                  ErrorCode::S3Error);
     }
-
-    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::NO_SUCH_BUCKET),
-              ErrorCode::BucketInvalid);
-    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::NO_SUCH_KEY),
-              ErrorCode::ObjectNotExist);
-    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::RESOURCE_NOT_FOUND),
-              ErrorCode::ObjectNotExist);
-
     for (auto error : {Aws::S3::S3Errors::ACCESS_DENIED,
-                       Aws::S3::S3Errors::INVALID_ACCESS_KEY_ID,
                        Aws::S3::S3Errors::SIGNATURE_DOES_NOT_MATCH,
-                       Aws::S3::S3Errors::INVALID_REQUEST,
-                       Aws::S3::S3Errors::REQUEST_EXPIRED}) {
-        EXPECT_EQ(S3ErrorToErrorCode(error), ErrorCode::UnexpectedError);
+                       Aws::S3::S3Errors::INVALID_REQUEST}) {
+        EXPECT_EQ(S3ErrorToErrorCode(error, kNoCode, /*should_retry=*/false),
+                  ErrorCode::UnexpectedError);
     }
 
+    // Specific permanent codes are decided by error identity and ignore the
+    // retry flag (a NoSuchBucket must not be retried even if flagged retryable).
+    EXPECT_EQ(
+        S3ErrorToErrorCode(
+            Aws::S3::S3Errors::NO_SUCH_BUCKET, kNoCode, /*should_retry=*/true),
+        ErrorCode::BucketInvalid);
+    EXPECT_EQ(
+        S3ErrorToErrorCode(
+            Aws::S3::S3Errors::NO_SUCH_KEY, kNoCode, /*should_retry=*/true),
+        ErrorCode::ObjectNotExist);
+    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                 kNoCode,
+                                 /*should_retry=*/true),
+              ErrorCode::ObjectNotExist);
+
+    // UNKNOWN (unmappable, e.g. S3-compatible services) falls back to the HTTP
+    // status rather than the SDK retry flag.
     EXPECT_EQ(
         S3ErrorToErrorCode(Aws::S3::S3Errors::UNKNOWN,
-                           Aws::Http::HttpResponseCode::SERVICE_UNAVAILABLE),
+                           Aws::Http::HttpResponseCode::SERVICE_UNAVAILABLE,
+                           /*should_retry=*/false),
         ErrorCode::S3Error);
     EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::UNKNOWN,
-                                 Aws::Http::HttpResponseCode::FORBIDDEN),
+                                 Aws::Http::HttpResponseCode::FORBIDDEN,
+                                 /*should_retry=*/false),
               ErrorCode::UnexpectedError);
 }
 
