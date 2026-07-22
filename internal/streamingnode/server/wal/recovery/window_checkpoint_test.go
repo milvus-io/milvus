@@ -208,7 +208,63 @@ func TestFlusherCheckpointIgnoresWindowSnapshotCheckpoint(t *testing.T) {
 	require.True(t, rmq.NewRmqID(100).EQ(byMessageID.MessageID))
 }
 
-func TestSimpleTruncateCheckpointIgnoresWindowSnapshotCheckpoint(t *testing.T) {
+// WAL truncation must never pass the durable window source checkpoint: that is
+// the position a restart rewinds the consume stream to.
+func TestSimpleTruncateCheckpointClampedByWindowSnapshotCheckpoint(t *testing.T) {
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
+	rs.vchannels = map[string]*vchannelRecoveryInfo{
+		"v1": {
+			meta: &streamingpb.VChannelMeta{
+				Vchannel: "v1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			},
+			flusherCheckpoint: testRecoveryCheckpoint(100, 100),
+		},
+	}
+	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	truncator := mock_walimpls.NewMockWALImpls(t)
+	truncator.EXPECT().Truncate(mock.Anything, rmq.NewRmqID(10)).Return(nil).Once()
+	rs.truncator = truncator
+
+	rs.simpleTruncateCheckpoint(context.Background(), testRecoveryCheckpoint(120, 120))
+}
+
+// An idle pchannel takes no window snapshot (only committed write records mark a
+// window dirty), so its durable source checkpoint freezes while timeticks keep
+// advancing the consume and flusher checkpoints. Truncation must stay clamped to
+// the frozen position, otherwise the restart rewind lands outside the WAL.
+func TestSimpleTruncateCheckpointClampedWhilePChannelIsIdle(t *testing.T) {
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
+	rs.vchannels = map[string]*vchannelRecoveryInfo{
+		"v1": {
+			meta: &streamingpb.VChannelMeta{
+				Vchannel: "v1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			},
+			flusherCheckpoint: testRecoveryCheckpoint(200, 200),
+		},
+	}
+	// the last snapshot persisted the source checkpoint at 10...
+	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	// ...and then only timeticks arrived: the in-memory position moves on, the
+	// persisted one stays where the last chunk was written.
+	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(200, 200))
+	require.Equal(t, uint64(10), rs.windowManager.truncateClampCheckpoint().TimeTick)
+
+	truncator := mock_walimpls.NewMockWALImpls(t)
+	truncator.EXPECT().Truncate(mock.Anything, rmq.NewRmqID(10)).Return(nil).Once()
+	rs.truncator = truncator
+
+	rs.simpleTruncateCheckpoint(context.Background(), testRecoveryCheckpoint(220, 220))
+}
+
+// With idempotency disabled there is no window store to replay, so truncation
+// keeps taking min(flusher, consume) only.
+func TestSimpleTruncateCheckpointNotWindowClampedWhenIdempotencyDisabled(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
+	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
 		"v1": {

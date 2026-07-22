@@ -21,6 +21,31 @@ func (m *windowManager) flusherClampCheckpoint(flusherCheckpoint *WALCheckpoint)
 	return flusherCheckpoint
 }
 
+// truncateClampCheckpoint returns the durable pchannel window source checkpoint
+// that WAL truncation must never pass, or nil when nothing constrains it.
+//
+// On restart rewindCheckpointForPChannelWindowReplay resumes consuming from the
+// source checkpoint recorded in the persisted window meta, so that position must
+// still be readable from the WAL. Unlike the persist clamp above, this one is NOT
+// gated on the window being dirty: an idle pchannel never marks a window dirty
+// (only committed write records do), so no snapshot is taken and the durable
+// source checkpoint freezes while timeticks keep pushing the consume and flusher
+// checkpoints forward — truncating by those alone would drop the WAL entries the
+// next restart rewinds to. It reads the persisted (not the current) position
+// because only that one is what the catalog will hand back after a restart.
+//
+// Truncation therefore stalls at the frozen position while a pchannel stays idle,
+// and resumes as soon as any write makes the window dirty and advances the
+// durable source checkpoint again.
+func (m *windowManager) truncateClampCheckpoint() *WALCheckpoint {
+	if m == nil || !m.cfg.idempotencyEnabled {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getPersistedPChannelWindowSnapshotCheckpointUnsafe()
+}
+
 // clampPersistCheckpoint lowers base to the earliest (by timetick) of itself, the
 // pchannel window snapshot checkpoint, and the flusher checkpoint, so the consume
 // checkpoint never advances past un-persisted window data or unflushed data.
