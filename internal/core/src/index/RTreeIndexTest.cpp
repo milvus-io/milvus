@@ -1226,9 +1226,11 @@ TEST_F(RTreeIndexTest, AddGeometryClassifiesNullByValidityNotPayload) {
 // geometries (RTreeIndex::AddGeometry) while reader threads concurrently call
 // Count() and QueryCandidates(). Before the locking fix these read total row
 // counts / null_offset_ / wrapper_ and the boost rtree size without holding
-// any lock, racing the incremental inserts. Run under ASAN/TSAN this asserts
-// the accesses are now properly synchronized; it must also not crash and must
-// converge to the expected final count.
+// any lock, racing the incremental inserts. Only TSAN can assert the accesses
+// are now properly synchronized; ASAN (what CI runs) catches this class of
+// regression only once it corrupts memory -- e.g. reading wrapper_ or the
+// vectors while another thread reallocates them. Unsanitized, the test still
+// must not crash and must converge to the expected final count.
 TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
     milvus::storage::FileManagerContext ctx_build(
         field_meta_, index_meta_, chunk_manager_, fs_);
@@ -1295,9 +1297,12 @@ TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
 // segment (one flowgraph consumer per vchannel), so this shape is not driven
 // by production today -- the test pins the class-level contract so a future
 // caller change fails here instead of in release. Several threads race on the
-// first-time wrapper_ initialization and then keep inserting. Run under
-// ASAN/TSAN this asserts the lazy init is idempotent and
-// wrapper_/total_num_rows_/null_offset_ are never touched unsynchronized.
+// first-time wrapper_ initialization and then keep inserting. Under TSAN this
+// asserts wrapper_/total_num_rows_/null_offset_ are never touched
+// unsynchronized; under ASAN (what CI runs) it catches only the memory errors
+// an unsynchronized access produces, such as a double-published wrapper_ or a
+// use-after-free from a concurrent vector reallocation. The final count assert
+// pins that the lazy init stayed idempotent.
 TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriter) {
     milvus::storage::FileManagerContext ctx_build(
         field_meta_, index_meta_, chunk_manager_, fs_);

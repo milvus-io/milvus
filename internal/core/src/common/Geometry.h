@@ -169,6 +169,13 @@ class Geometry {
     // cache-owned Geometry from a query thread (hold the cache read lock and
     // pass GetThreadLocalGEOSContext()), and the clone stays valid after the
     // cache is gone.
+    //
+    // NOTE: no production caller today -- the filter paths borrow cached
+    // geometries under the read lock and never copy them, which is cheaper.
+    // This is not leftover dead code: it exists so that the next caller that
+    // does need a copy has a correct path, instead of reaching for the copy
+    // constructor above and silently cloning through the cache's shared
+    // context. Exercised by GeometryTest.
     Geometry
     Clone(GEOSContextHandle_t ctx) const {
         Geometry cloned;

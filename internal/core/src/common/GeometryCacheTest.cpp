@@ -36,6 +36,14 @@ MakePointWkb(double x, double y) {
     return wkb;
 }
 
+std::string
+MakeWkbFromWkt(const char* wkt) {
+    auto ctx = GEOS_init_r();
+    std::string wkb = Geometry(ctx, wkt).to_wkb_string();
+    GEOS_finish_r(ctx);
+    return wkb;
+}
+
 // A query holding the cache shared_ptr must keep it (and its geometries) alive
 // even when the owning segment is dropped and RemoveSegmentCaches() runs
 // concurrently. The pre-fix manager returned a raw pointer into a unique_ptr
@@ -165,18 +173,49 @@ TEST(GeometryCacheLifetime, CorruptWkbCachedAsInvalidPlaceholder) {
 // GEOS through their own per-thread context (the context-taking predicate
 // overloads) rather than the geometry's stored context. This test mirrors that
 // usage: many threads read the same cached geometry at once and evaluate
-// predicates on per-thread contexts. Under ASAN/TSAN a regression back to the
-// stored shared context surfaces as a data race / heap corruption here; results
-// must also stay correct.
+// predicates on per-thread contexts; results must stay correct.
+//
+// What each sanitizer can actually prove here (the earlier claim that "ASAN
+// surfaces a data race" was wrong -- ASAN is not a race detector): TSAN flags a
+// regression back to the shared context directly, as an unsynchronized access.
+// ASAN only catches it indirectly, and only once the shared context's mutable
+// state (error handler slots, reader scratch buffers) is corrupted badly enough
+// to produce a heap error. This suite runs under ASAN in CI; the TSAN evidence
+// for these paths is recorded in the PR, produced with a one-off
+// thread-sanitized GEOS build (there is no wired TSAN target in the repo yet).
+// The cached rows deliberately span every GEOS envelope shape, because the
+// envelope is the one piece of geometry state a predicate can WRITE:
+// GeometryCollection (and so MULTI* / GEOMETRYCOLLECTION) declares a `mutable
+// Envelope` with a lazy getter (GeometryCollection.h:192-197), while Point /
+// LineString / Polygon expose theirs read-only. A single-shape (POINT) test
+// therefore could not have covered the multi-part path at all.
+//
+// For the pinned GEOS 3.12.0 the lazy branch turns out to be unreachable for
+// parsed geometries -- the primary constructor initializes the envelope eagerly
+// (`envelope(computeEnvelopeInternal())`, GeometryCollection.cpp:65), so query
+// threads only ever read it -- which is why no writer-side warm-up is needed
+// here. These rows pin that: if a future GEOS release makes the getter lazy in
+// practice, a TSAN run of this test reports the write.
 TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
     auto& mgr = SimpleGeometryCacheManager::Instance();
     const int64_t seg_id = 900000004;
     const FieldId field_id(11);
-    const std::string wkb = MakePointWkb(1.0, 1.0);
+    const std::vector<std::string> wkbs = {
+        MakePointWkb(1.0, 1.0),
+        MakeWkbFromWkt(
+            "MULTIPOLYGON(((0 0,0 4,4 4,4 0,0 0)),((6 6,6 8,8 8,8 6,6 6)))"),
+        MakeWkbFromWkt("GEOMETRYCOLLECTION(POINT(1 1),LINESTRING(0 0,3 3))"),
+        MakeWkbFromWkt("MULTIPOLYGON EMPTY"),
+    };
+    // Row 0 is the only one equal to the probe point; rows 0-2 all intersect
+    // it; the empty row intersects nothing.
+    const std::vector<bool> expect_intersects = {true, true, true, false};
 
     auto cache = mgr.GetOrCreateCache(seg_id, field_id);
-    cache->AppendData(wkb.data(), wkb.size());
-    ASSERT_EQ(cache->Size(), 1u);
+    for (const auto& wkb : wkbs) {
+        cache->AppendData(wkb.data(), wkb.size());
+    }
+    ASSERT_EQ(cache->Size(), wkbs.size());
 
     constexpr int kThreads = 8;
     constexpr int kIters = 5000;
@@ -194,19 +233,22 @@ TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
             }
             for (int i = 0; i < kIters; ++i) {
                 auto lock = cache->AcquireReadLock();
-                const Geometry* g = cache->GetByOffsetUnsafe(0);
-                if (g == nullptr) {
-                    failures.fetch_add(1, std::memory_order_relaxed);
-                    continue;
-                }
-                // Drive predicates on THIS thread's context, not g's stored
-                // (cache-shared) context — exactly what the fixed filter path
-                // does. Results must match the geometry's semantics.
-                bool eq = g->equals(match, ctx);
-                bool inter = g->intersects(match, ctx);
-                bool inter_miss = g->intersects(miss, ctx);
-                if (!eq || !inter || inter_miss) {
-                    failures.fetch_add(1, std::memory_order_relaxed);
+                for (size_t off = 0; off < wkbs.size(); ++off) {
+                    const Geometry* g = cache->GetByOffsetUnsafe(off);
+                    if (g == nullptr) {
+                        failures.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+                    // Drive predicates on THIS thread's context, not g's stored
+                    // (cache-shared) context — exactly what the fixed filter
+                    // path does. Results must match the geometry's semantics.
+                    bool eq = g->equals(match, ctx);
+                    bool inter = g->intersects(match, ctx);
+                    bool inter_miss = g->intersects(miss, ctx);
+                    if (eq != (off == 0) || inter != expect_intersects[off] ||
+                        inter_miss) {
+                        failures.fetch_add(1, std::memory_order_relaxed);
+                    }
                 }
             }
         });
