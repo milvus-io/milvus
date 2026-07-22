@@ -548,6 +548,11 @@ IndexFactory::VecIndexLoadResource(
         // the peak for admission, but final_memory_cost stays res.memoryCost
         // (~0 once the CPU copy is freed after GPU upload). Falling back to the
         // 2*memoryCost heuristic here would under-reserve and risk a host OOM.
+        // NOTE: GPU_HNSW is currently the only index type that populates
+        // maxMemoryCost (> 0); every other index leaves it 0 and takes the
+        // 2*memoryCost fallback below, so this branch is effectively
+        // GPU_HNSW-only today. Any new index that sets maxMemoryCost will opt
+        // into this same peak-based admission automatically.
         request.max_disk_cost = 0;
         request.max_memory_cost = res.maxMemoryCost;
     } else {
