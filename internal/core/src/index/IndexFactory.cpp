@@ -542,6 +542,14 @@ IndexFactory::VecIndexLoadResource(
         request.max_disk_cost = res.diskCost;
         request.max_memory_cost =
             std::max(res.memoryCost, download_buffer_size_in_bytes);
+    } else if (res.maxMemoryCost > 0) {
+        // Phase-separated accounting (e.g. GPU_HNSW): the index reports a peak
+        // transient host cost that differs from the retained memoryCost. Reserve
+        // the peak for admission, but final_memory_cost stays res.memoryCost
+        // (~0 once the CPU copy is freed after GPU upload). Falling back to the
+        // 2*memoryCost heuristic here would under-reserve and risk a host OOM.
+        request.max_disk_cost = 0;
+        request.max_memory_cost = res.maxMemoryCost;
     } else {
         request.max_disk_cost = 0;
         request.max_memory_cost = 2 * res.memoryCost;

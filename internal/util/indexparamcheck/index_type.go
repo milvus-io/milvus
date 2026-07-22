@@ -36,6 +36,10 @@ const (
 	IndexNGRAM    IndexType = "NGRAM"
 	IndexRTREE    IndexType = "RTREE"
 
+	// gpu vector index needing dedicated Go-side param validation
+	IndexGpuHnsw   IndexType = "GPU_HNSW"
+	IndexGpuHnswSQ IndexType = "GPU_HNSW_SQ"
+
 	AutoIndex IndexType = "AUTOINDEX"
 )
 

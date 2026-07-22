@@ -368,6 +368,10 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	return nil
 }
 
+// AppendPrepareLoadParams applies AutoIndex prepare/load overrides and knowhere-level index params.
+// GPU_HNSW_SQ and GPU_HNSW load directly on the GPU without a CPU-adaptation step, so no
+// index-type-specific handling is required here (unlike GPU_CAGRA's adapt_for_cpu, which is
+// supplied by the caller via indexParams before this function is invoked).
 func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
 	if params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
 		// override prepare params by
@@ -381,6 +385,13 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 	}
 
 	params.KnowhereConfig.MergeIndexParams(indexParams[common.IndexTypeKey], paramtable.LoadStage, indexParams)
+
+	// Apply override_index_type: swap index_type and merge params for the override type.
+	// This mirrors the logic in UpdateIndexParams (build stage) but for the load stage map.
+	if overrideType := indexParams[paramtable.OverrideIndexTypeKey]; overrideType != "" {
+		indexParams[common.IndexTypeKey] = overrideType
+		params.KnowhereConfig.MergeIndexParams(overrideType, paramtable.LoadStage, indexParams)
+	}
 
 	return nil
 }

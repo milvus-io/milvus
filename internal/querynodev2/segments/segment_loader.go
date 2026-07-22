@@ -251,6 +251,19 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	var err error
 	var requestResourceResult requestResourceResult
 
+	// Apply override_index_type before resource estimation so GPU_HNSW's
+	// StaticEstimateLoadResource (memoryCost=0) is used instead of the
+	// default HNSW estimate (memoryCost=file_size).
+	for _, info := range infos {
+		for _, indexInfo := range info.IndexInfos {
+			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+				return nil, err
+			}
+			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		}
+	}
+
 	// Check memory & storage limit
 	// no need to check resource for lazy load here
 	requestResourceResult, err = loader.requestResource(ctx, infos...)
@@ -291,6 +304,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
 			}
 
+			// Re-apply AppendPrepareLoadParams here (it also ran before resource
+			// estimation above). It is idempotent, and this pass must run after
+			// the DiskANN/bitmap load params are set so those are included in
+			// the params handed to segment creation.
 			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
 				return nil, err
 			}
@@ -2165,8 +2182,22 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
+			// Non-tiered: the caching layer is bypassed, so every index's
+			// transient peak (maxMemoryCost) and disk cost are charged here.
+			// Tiered eviction: the caching layer (MCL) tracks only resident cost,
+			// so these additions are normally skipped. GPU indexes are the
+			// exception — a GPU_HNSW upload materializes the CPU index + fp32
+			// staging in host RAM (~2x file size) and frees it once vectors reach
+			// VRAM, leaving resident host cost ~0. That transient peak is invisible
+			// to MCL, so it must still be charged to the loading estimate;
+			// otherwise concurrent loads are admitted against a ~0-cost estimate
+			// and the accumulated peaks OOM the node. The reservation is released
+			// in freeRequestResource once the load completes.
+			indexMemorySize += indexLoadingMemoryContribution(
+				multiplyFactor.TieredEvictionEnabled,
+				gpuIndexRequiresGpu(fieldIndexInfo.IndexParams),
+				estimateResult.MaxMemoryCost)
 			if !multiplyFactor.TieredEvictionEnabled {
-				indexMemorySize += estimateResult.MaxMemoryCost
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
 
@@ -2432,6 +2463,24 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
 	defer loader.unregister(infos...)
 
+	// Apply knowhere load-stage overrides (e.g. override_index_type) before
+	// resource estimation so GPU_HNSW's StaticEstimateLoadResource
+	// (memoryCost=0) is used instead of the default HNSW estimate
+	// (memoryCost=file_size). This mirrors the Load()/LoadIndex() ordering;
+	// applying it after requestResource would size the budget with the CPU
+	// index type and could spuriously reject a GPU reopen with insufficient
+	// memory. AppendPrepareLoadParams is idempotent, so segment.Reopen below
+	// receives the same overridden params.
+	for _, info := range infos {
+		for _, indexInfo := range info.GetIndexInfos() {
+			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+				return err
+			}
+			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		}
+	}
+
 	// use full resource in case of whole segment reopen
 	// TODO use calculated resource from segcore after supported
 	requestResourceResult, err := loader.requestResource(ctx, infos...)
@@ -2480,6 +2529,22 @@ func getBinlogDataMemorySize(fieldBinlog *datapb.FieldBinlog) int64 {
 	return fieldSize
 }
 
+// indexLoadingMemoryContribution returns the transient host memory (bytes) to
+// charge to the segment loading estimate for a single index field.
+//
+// With tiered eviction disabled the caching layer is bypassed, so every index's
+// upload peak (maxMemoryCost) is charged directly. With tiered eviction enabled
+// the caching layer tracks resident cost and this is normally 0 — except for GPU
+// indexes, whose upload peak is transient host RAM freed once vectors reach VRAM
+// and is therefore never seen by the caching layer. Charging it here lets tiered
+// admission reserve the peak and throttle concurrent loads.
+func indexLoadingMemoryContribution(tieredEvictionEnabled, isGpuIndex bool, maxMemoryCost uint64) uint64 {
+	if !tieredEvictionEnabled || isGpuIndex {
+		return maxMemoryCost
+	}
+	return 0
+}
+
 func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
 	indexParamMap := funcutil.KeyValuePair2Map(indexParams)
 	indexType := indexParamMap[common.IndexTypeKey]
@@ -2488,7 +2553,10 @@ func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
 	case "GPU_CAGRA", "GPU_CUVS_CAGRA":
 	case "GPU_BRUTE_FORCE", "GPU_CUVS_BRUTE_FORCE",
 		"GPU_IVF_FLAT", "GPU_CUVS_IVF_FLAT",
-		"GPU_IVF_PQ", "GPU_CUVS_IVF_PQ":
+		"GPU_IVF_PQ", "GPU_CUVS_IVF_PQ",
+		// GPU_HNSW / GPU_HNSW_SQ load directly on the GPU with no
+		// adapt_for_cpu step, so they always require GPU resources.
+		"GPU_HNSW", "GPU_HNSW_SQ":
 		return true
 	default:
 		return false

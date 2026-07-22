@@ -35,6 +35,15 @@ type indexCheckerMgrImpl struct {
 
 func (mgr *indexCheckerMgrImpl) GetChecker(indexType string) (IndexChecker, error) {
 	mgr.once.Do(mgr.registerIndexChecker)
+	// GPU_HNSW / GPU_HNSW_SQ need Go-side M/efConstruction range validation
+	// because knowhere's ValidateIndexParams is a no-op for them; prefer their
+	// dedicated checker over the unified vector checker.
+	switch indexType {
+	case IndexGpuHnsw, IndexGpuHnswSQ:
+		if c, ok := mgr.checkers[indexType]; ok {
+			return c, nil
+		}
+	}
 	// Unify the vector index checker
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
 		return mgr.checkers[IndexVector], nil
@@ -59,6 +68,8 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers["marisa-trie"] = newTRIEChecker()
 	mgr.checkers[AutoIndex] = newAUTOINDEXChecker()
 	mgr.checkers[IndexNGRAM] = newNgramIndexChecker()
+	mgr.checkers[IndexGpuHnsw] = newGpuHnswChecker()
+	mgr.checkers[IndexGpuHnswSQ] = newGpuHnswChecker()
 }
 
 func newIndexCheckerMgr() *indexCheckerMgrImpl {
