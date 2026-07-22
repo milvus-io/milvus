@@ -51,7 +51,7 @@ func (m *windowManager) persistPChannelWindowChunk(
 
 	// Wrap the meta load in retry like every other persist sub-operation below, so
 	// a transient catalog error (e.g. an etcd blip) is retried until the context is
-	// cancelled rather than propagated. The window background task treats any
+	// canceled rather than propagated. The window background task treats any
 	// persist error as fatal-and-exit on the assumption that errors only mean
 	// shutdown; an unwrapped error here would break that assumption and silently
 	// kill idempotency durability (windows then grow until OOM).

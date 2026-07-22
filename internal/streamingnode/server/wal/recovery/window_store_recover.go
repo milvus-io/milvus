@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type pchannelWindowStoreMeta struct {
@@ -117,7 +118,7 @@ func (m *windowManager) loadWindowInfoFromMeta(ctx context.Context, pchannel str
 	storeMeta := pchannelWindowStoreMetaFromCatalog(storeMetaPB)
 	if storeMeta == nil {
 		if !allowBootstrap || len(windowMetas) > 0 {
-			return nil, errors.Errorf("pchannel window meta missing for pchannel %s", pchannel)
+			return nil, merr.WrapErrServiceInternalMsg("pchannel window meta missing for pchannel %s", pchannel)
 		}
 		storeMeta, err = m.bootstrapPChannelWindowStore(ctx, pchannel, checkpoint)
 		if err != nil {
@@ -159,7 +160,7 @@ func (m *windowManager) recoverWindowStoreFromSnapshot(ctx context.Context, info
 
 func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchannel string, sourceCheckpoint *WALCheckpoint) (*pchannelWindowStoreMeta, error) {
 	if sourceCheckpoint == nil {
-		return nil, errors.Errorf("cannot bootstrap pchannel window store without source checkpoint for pchannel %s", pchannel)
+		return nil, merr.WrapErrServiceInternalMsg("cannot bootstrap pchannel window store without source checkpoint for pchannel %s", pchannel)
 	}
 	chunkPayload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, sourceCheckpoint, nil)
 	if err != nil {

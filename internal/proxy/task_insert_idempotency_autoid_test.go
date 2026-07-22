@@ -2,10 +2,10 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"

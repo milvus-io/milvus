@@ -79,8 +79,7 @@ func (m *windowManager) consumeIdempotencySnapshotLocked() *RecoverySnapshot {
 	if !m.hasDirtyWindowUnsafe() {
 		return nil
 	}
-	pchannelWindowRecords, vchannelWindowMetaUpdates, pchannelWindowSourceCheckpoint :=
-		m.consumePendingCommittedWriteRecords()
+	pchannelWindowRecords, vchannelWindowMetaUpdates, pchannelWindowSourceCheckpoint := m.consumePendingCommittedWriteRecords()
 	return &RecoverySnapshot{
 		pchannelWindowRecords:          pchannelWindowRecords,
 		vchannelWindowMetaUpdates:      vchannelWindowMetaUpdates,

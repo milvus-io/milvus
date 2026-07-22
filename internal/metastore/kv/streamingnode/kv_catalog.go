@@ -171,7 +171,7 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 // ListVChannelWindowMetas lists the window metadata of the pchannel for the given view type.
 func (c *catalog) ListVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
 	if viewType == "" {
-		return nil, errors.New("vchannel window meta view type is empty")
+		return nil, merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
 	}
 	prefix := buildVChannelWindowMetaPrefix(pchannelName, viewType)
 	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
@@ -201,7 +201,7 @@ func (c *catalog) ListVChannelWindowMetas(ctx context.Context, pchannelName stri
 // SaveVChannelWindowMetas saves the window metadata of the pchannel for the given view type.
 func (c *catalog) SaveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, windows map[string]*streamingpb.VChannelWindowMeta) error {
 	if viewType == "" {
-		return errors.New("vchannel window meta view type is empty")
+		return merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
 	}
 	kvs := make(map[string]string, len(windows))
 	for vchannel, meta := range windows {
@@ -231,7 +231,7 @@ func (c *catalog) SaveVChannelWindowMetas(ctx context.Context, pchannelName stri
 // RemoveVChannelWindowMetas removes the window metadata of the pchannel for the given view type.
 func (c *catalog) RemoveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error {
 	if viewType == "" {
-		return errors.New("vchannel window meta view type is empty")
+		return merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
 	}
 	if len(vchannels) == 0 {
 		return nil
@@ -290,30 +290,30 @@ func (c *catalog) RemovePChannelWindowMeta(ctx context.Context, pchannelName str
 
 func normalizeVChannelWindowMeta(pchannelName string, viewType string, vchannelName string, meta *streamingpb.VChannelWindowMeta) (*streamingpb.VChannelWindowMeta, string, error) {
 	if meta == nil {
-		return nil, "", errors.New("nil vchannel window meta")
+		return nil, "", merr.WrapErrServiceInternalMsg("nil vchannel window meta")
 	}
 	if viewType == "" {
-		return nil, "", errors.New("vchannel window meta view type is empty")
+		return nil, "", merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
 	}
 	stored := proto.Clone(meta).(*streamingpb.VChannelWindowMeta)
 	if stored.GetPchannel() == "" {
 		stored.Pchannel = pchannelName
 	} else if stored.GetPchannel() != pchannelName {
-		return nil, "", errors.Errorf("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
+		return nil, "", merr.WrapErrServiceInternalMsg("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
 	}
 	if stored.GetViewType() == "" {
 		stored.ViewType = viewType
 	} else if stored.GetViewType() != viewType {
-		return nil, "", errors.Errorf("view type mismatch: path %s, meta %s", viewType, stored.GetViewType())
+		return nil, "", merr.WrapErrServiceInternalMsg("view type mismatch: path %s, meta %s", viewType, stored.GetViewType())
 	}
 	if stored.GetVchannel() == "" {
 		if vchannelName == "" {
-			return nil, "", errors.New("vchannel is empty")
+			return nil, "", merr.WrapErrServiceInternalMsg("vchannel is empty")
 		}
 		stored.Vchannel = vchannelName
 	} else {
 		if vchannelName != "" && stored.GetVchannel() != vchannelName {
-			return nil, "", errors.Errorf("vchannel mismatch: path %s, meta %s", vchannelName, stored.GetVchannel())
+			return nil, "", merr.WrapErrServiceInternalMsg("vchannel mismatch: path %s, meta %s", vchannelName, stored.GetVchannel())
 		}
 		vchannelName = stored.GetVchannel()
 	}
@@ -322,13 +322,13 @@ func normalizeVChannelWindowMeta(pchannelName string, viewType string, vchannelN
 
 func normalizePChannelWindowMeta(pchannelName string, meta *streamingpb.PChannelWindowMeta) (*streamingpb.PChannelWindowMeta, error) {
 	if meta == nil {
-		return nil, errors.New("nil pchannel window meta")
+		return nil, merr.WrapErrServiceInternalMsg("nil pchannel window meta")
 	}
 	stored := proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
 	if stored.GetPchannel() == "" {
 		stored.Pchannel = pchannelName
 	} else if stored.GetPchannel() != pchannelName {
-		return nil, errors.Errorf("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
+		return nil, merr.WrapErrServiceInternalMsg("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
 	}
 	return stored, nil
 }

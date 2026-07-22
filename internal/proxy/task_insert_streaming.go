@@ -92,10 +92,18 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.result.Timestamp = resp.MaxTimeTick()
 
 	if it.idempotencyEnabled {
-		err := mergeDuplicateInsertResults(it.result, resp)
-		if err != nil {
-			mlog.Warn(ctx, "merge idempotent duplicate insert result failed", mlog.Err(err))
-			it.result.Status = merr.Status(err)
+		if err := mergeDuplicateInsertResults(it.result, resp); err != nil {
+			// The append itself already committed (or deduplicated) durably; the
+			// only reachable cause of a merge failure is an EXPLICIT idempotency
+			// key reused with a different payload, so the stored duplicate result
+			// does not line up with this request (auto keys hash the payload and
+			// cannot diverge). Surface that as an input error naming the misuse —
+			// reporting an internal failure here would tell the client an insert
+			// failed when its data exists, deterministically on every retry. The
+			// mismatch detail goes to the log.
+			mlog.Warn(ctx, "idempotent duplicate insert result does not match this request", mlog.Err(err))
+			it.result.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+				"idempotency key was reused with a different payload; the server kept the original insert result"))
 		}
 	}
 	return nil

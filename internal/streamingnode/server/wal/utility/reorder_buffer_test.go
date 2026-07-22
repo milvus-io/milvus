@@ -14,7 +14,7 @@ import (
 )
 
 func TestReOrderByTimeTickBuffer(t *testing.T) {
-	buf := NewReOrderBuffer()
+	buf := NewReOrderBuffer(true)
 	timeticks := rand.Perm(25)
 	for i, timetick := range timeticks {
 		msg := newReorderBufferTestMessage(t, int64(i), uint64(timetick+1), message.MessageTypeInsert)
@@ -46,7 +46,7 @@ func TestReOrderByTimeTickBuffer(t *testing.T) {
 }
 
 func TestReOrderByTimeTickBufferDeduplicatesNonTimeTick(t *testing.T) {
-	buf := NewReOrderBuffer()
+	buf := NewReOrderBuffer(true)
 
 	msg1 := newReorderBufferTestMessage(t, 1, 10, message.MessageTypeInsert)
 	msg2 := newReorderBufferTestMessage(t, 2, 10, message.MessageTypeInsert)
@@ -65,8 +65,29 @@ func TestReOrderByTimeTickBufferDeduplicatesNonTimeTick(t *testing.T) {
 	assert.Equal(t, newReorderBufferTestMessageID(1).Marshal(), result[0].MessageID().Marshal())
 }
 
+// With physical dedup disabled (idempotency off), the timetick-based drop rule
+// must not apply at all — the feature flag is a real kill switch restoring the
+// pre-idempotency scanner behavior.
+func TestReOrderByTimeTickBufferNoDedupWhenDisabled(t *testing.T) {
+	buf := NewReOrderBuffer(false)
+
+	msg1 := newReorderBufferTestMessage(t, 1, 10, message.MessageTypeInsert)
+	msg2 := newReorderBufferTestMessage(t, 2, 10, message.MessageTypeInsert)
+
+	pushResult, err := buf.Push(msg1)
+	require.NoError(t, err)
+	require.False(t, pushResult.Dropped)
+	pushResult, err = buf.Push(msg2)
+	require.NoError(t, err)
+	require.False(t, pushResult.Dropped)
+	assert.Equal(t, 2, buf.Len())
+
+	result := buf.PopUtilTimeTick(10)
+	require.Len(t, result, 2)
+}
+
 func TestReOrderByTimeTickBufferDoesNotDeduplicateTimeTick(t *testing.T) {
-	buf := NewReOrderBuffer()
+	buf := NewReOrderBuffer(true)
 
 	msg1 := newReorderBufferTestMessage(t, 1, 10, message.MessageTypeTimeTick)
 	msg2 := newReorderBufferTestMessage(t, 2, 10, message.MessageTypeTimeTick)
@@ -84,7 +105,7 @@ func TestReOrderByTimeTickBufferDoesNotDeduplicateTimeTick(t *testing.T) {
 }
 
 func TestReOrderByTimeTickBufferClearsSeenTimeTicksAfterPop(t *testing.T) {
-	buf := NewReOrderBuffer()
+	buf := NewReOrderBuffer(true)
 
 	pushResult, err := buf.Push(newReorderBufferTestMessage(t, 1, 10, message.MessageTypeInsert))
 	require.NoError(t, err)

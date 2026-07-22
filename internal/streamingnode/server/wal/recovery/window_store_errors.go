@@ -2,9 +2,7 @@ package recovery
 
 import "github.com/cockroachdb/errors"
 
-var (
-	ErrPChannelWindowStoreCorrupted = errors.New("pchannel window store corrupted")
-)
+var ErrPChannelWindowStoreCorrupted = errors.New("pchannel window store corrupted")
 
 type markedRecoveryError struct {
 	err    error

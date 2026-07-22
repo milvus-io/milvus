@@ -30,7 +30,11 @@ type ReOrderByTimeTickBuffer struct {
 	messageIDs typeutil.Set[string]
 	// seenTimeTicks deduplicates a non-TimeTick message that repeats across the
 	// write-ahead-buffer / WAL-scanner stream switch with a *different* message ID,
-	// which the messageIDs set above cannot catch.
+	// which the messageIDs set above cannot catch. It is nil when physical
+	// dedup is disabled (streaming.idempotency.enabled=false): the drop rule
+	// only exists for the idempotency feature, and gating it there makes the
+	// feature flag a real kill switch that restores the pre-idempotency scanner
+	// behavior.
 	//
 	// INVARIANT: the timetick interceptor assigns a unique timetick to every
 	// appended message, so two genuinely distinct non-TimeTick messages never
@@ -48,13 +52,18 @@ type ReOrderByTimeTickBuffer struct {
 	bytes           int
 }
 
-// NewReOrderBuffer creates a new ReOrderBuffer.
-func NewReOrderBuffer() *ReOrderByTimeTickBuffer {
-	return &ReOrderByTimeTickBuffer{
-		messageIDs:    typeutil.NewSet[string](),
-		seenTimeTicks: typeutil.NewSet[uint64](),
-		messageHeap:   typeutil.NewHeap[message.ImmutableMessage](&immutableMessageHeap{}),
+// NewReOrderBuffer creates a new ReOrderBuffer. physicalDedup enables the
+// timetick-based duplicate drop; pass the idempotency feature flag so the drop
+// rule never applies on deployments that run without the feature.
+func NewReOrderBuffer(physicalDedup bool) *ReOrderByTimeTickBuffer {
+	buffer := &ReOrderByTimeTickBuffer{
+		messageIDs:  typeutil.NewSet[string](),
+		messageHeap: typeutil.NewHeap[message.ImmutableMessage](&immutableMessageHeap{}),
 	}
+	if physicalDedup {
+		buffer.seenTimeTicks = typeutil.NewSet[uint64]()
+	}
+	return buffer
 }
 
 // Push pushes a message into the buffer.
@@ -68,7 +77,7 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) (ReOrderByT
 	if r.messageIDs.Contain(msgID) {
 		return ReOrderByTimeTickBufferPushResult{}, status.NewInner("message is duplicated: %s", msgID)
 	}
-	if msg.MessageType() != message.MessageTypeTimeTick {
+	if r.seenTimeTicks != nil && msg.MessageType() != message.MessageTypeTimeTick {
 		timetick := msg.TimeTick()
 		if r.seenTimeTicks.Contain(timetick) {
 			return ReOrderByTimeTickBufferPushResult{

@@ -104,11 +104,17 @@ func TestSanitizeIdempotencyFallsBack(t *testing.T) {
 	assert.Zero(t, cfg.idempotencyWindowTTL)
 	assert.Zero(t, cfg.idempotencySnapshotInterval)
 
-	// End-to-end: an operator explicitly setting windowTTL: 0s while
-	// maxEntriesPerWindow stays at its 0 default must not panic the WAL open.
+	// End-to-end: an operator explicitly zeroing BOTH windowTTL and
+	// maxEntriesPerWindow must not panic the WAL open — the TTL falls back to
+	// its default with a warning. (windowTTL: 0s alone is now a legitimate
+	// count-capped configuration, since maxEntriesPerWindow defaults to 10000.)
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.IdempotencyWindowTTL.Key, "0s")
-	defer params.Reset(params.StreamingCfg.IdempotencyWindowTTL.Key)
+	params.Save(params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key, "0")
+	defer func() {
+		params.Reset(params.StreamingCfg.IdempotencyWindowTTL.Key)
+		params.Reset(params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key)
+	}()
 	assert.NotPanics(t, func() {
 		cfg := newConfig()
 		assert.Equal(t, 10*time.Minute, cfg.idempotencyWindowTTL)

@@ -8072,8 +8072,8 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMaxEntriesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxEntriesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The maximum completed idempotency key entries retained for each vchannel window. 0 means no count cap beyond TTL/minEntries.`,
-		DefaultValue: "0",
+		Doc:          `The maximum completed idempotency key entries retained for each vchannel window. Each entry holds the per-row primary keys of its insert, so this cap bounds dedup-metadata memory and window-store size; the oldest entries (by commit timetick) are evicted first. 0 means no count cap beyond TTL/minEntries.`,
+		DefaultValue: "10000",
 		FallbackKeys: []string{"idempotency.maxEntriesPerWindow"},
 		Export:       false,
 	}

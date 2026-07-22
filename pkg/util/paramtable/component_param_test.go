@@ -806,7 +806,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, params.StreamingCfg.IdempotencyEnabled.GetAsBool())
 		assert.Equal(t, 10*time.Minute, params.StreamingCfg.IdempotencyWindowTTL.GetAsDurationByParse())
 		assert.Equal(t, 1000, params.StreamingCfg.IdempotencyMinEntriesPerWindow.GetAsInt())
-		assert.Equal(t, 0, params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt())
+		assert.Equal(t, 10000, params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.IdempotencySnapshotInterval.GetAsDurationByParse())
 		assert.Equal(t, 1024, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())

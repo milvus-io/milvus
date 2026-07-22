@@ -103,6 +103,9 @@ func (m *windowManager) getOrCreateIdempotencyWindow(vchannel string, checkpoint
 		return state
 	}
 	state := newEmptyVChannelWindow(m.pchannel, vchannel, checkpoint)
+	// The view's retention policy drives the durable-retention ledger, which
+	// decides how far back chunks stay recoverable across restarts.
+	state.evictionCfg = m.evictionConfig
 	m.windows[vchannel] = state
 	return state
 }
@@ -175,6 +178,9 @@ func (m *windowManager) observeMessage(msg message.ImmutableMessage) {
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		for _, window := range windows {
 			window.advanceCheckpoint(msg)
+			// Time passing expires ledger generations by TTL; recompute the
+			// chunk-retention boundary so GC keeps advancing on idle vchannels.
+			window.refreshMinRequiredGeneration()
 		}
 		if m.recoveryMode {
 			evictBeforeTT := evictBeforeTimetick(msg.TimeTick(), m.evictionConfig.windowTTL)

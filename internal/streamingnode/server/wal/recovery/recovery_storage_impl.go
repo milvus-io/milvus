@@ -71,6 +71,7 @@ func RecoverRecoveryStorage(
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	rs.windowManager.setNormalMode()
 	go rs.backgroundTask()
+	//nolint:gosec // G118: the window background task is a WAL-lifetime goroutine; it must outlive the recovery request context.
 	go rs.windowManager.windowBackgroundTask()
 	return rs, snapshot, nil
 }

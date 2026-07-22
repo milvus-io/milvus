@@ -229,7 +229,7 @@ func newTestPChannelWindowCleanerChunkManager() storage.ChunkManager {
 func writeTestPChannelWindowChunks(t *testing.T, ctx context.Context, pchannel string, chunkManager storage.ChunkManager, startGeneration uint64, endGeneration uint64) {
 	t.Helper()
 	for generation := startGeneration; generation <= endGeneration; generation++ {
-		writeTestPChannelWindowChunk(t, ctx, pchannel, generation, chunkManager, &utility.WALCheckpoint{
+		writeTestPChannelWindowChunk(ctx, t, pchannel, generation, chunkManager, &utility.WALCheckpoint{
 			MessageID: rmq.NewRmqID(int64(generation + 1)),
 			TimeTick:  generation + 1,
 		}, nil)
@@ -246,7 +246,7 @@ func testPChannelWindowStoreMeta(
 	minInUseGeneration uint64,
 ) *streamingpb.PChannelWindowMeta {
 	t.Helper()
-	footer, _, _ := writeTestPChannelWindowChunk(t, ctx, pchannel, latestGeneration, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, pchannel, latestGeneration, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(int64(latestGeneration + 1)),
 		TimeTick:  latestGeneration + 1,
 	}, nil)

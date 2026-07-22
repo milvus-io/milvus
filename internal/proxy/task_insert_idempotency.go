@@ -31,7 +31,31 @@ func collectionInsertIdempotencyEnabled(properties []*commonpb.KeyValuePair) boo
 		return false
 	}
 	enabled, err := strconv.ParseBool(value)
-	return err == nil && enabled
+	if err != nil {
+		// DDL validation rejects unparseable values, but a property written
+		// before that validation existed may still carry one; make the silent
+		// downgrade observable instead of quietly disabling the durability
+		// guarantee the operator believes is on.
+		mlog.Warn(context.TODO(), "malformed collection insert idempotency property; treating idempotency as disabled",
+			mlog.String("key", common.CollectionInsertIdempotencyEnabledKey),
+			mlog.String("value", value))
+		return false
+	}
+	return enabled
+}
+
+// validateInsertIdempotencyProperty rejects an unparseable
+// collection.insert.idempotency.enabled value at DDL time, so a typo cannot
+// silently disable the durability feature the operator believes is on.
+func validateInsertIdempotencyProperty(props []*commonpb.KeyValuePair) error {
+	value, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CollectionInsertIdempotencyEnabledKey, props)
+	if !ok {
+		return nil
+	}
+	if _, err := strconv.ParseBool(value); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %q", common.CollectionInsertIdempotencyEnabledKey, value)
+	}
+	return nil
 }
 
 func (it *insertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, collectionProperties []*commonpb.KeyValuePair, excludeAutoIDPrimary bool) error {
@@ -253,7 +277,7 @@ func insertIdempotencyScopeOf(insertMsg *msgstream.InsertMsg) insertIdempotencyS
 }
 
 // writeTo mixes the destination into h, length-prefixing every string so
-// neighbouring fields cannot be shifted into each other.
+// neighboring fields cannot be shifted into each other.
 func (scope insertIdempotencyScope) writeTo(h hash.Hash) {
 	var buf [8]byte
 	writeString := func(value string) {
