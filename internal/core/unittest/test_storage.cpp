@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "aws/core/client/ClientConfiguration.h"
+#include "azure/storage/common/storage_exception.hpp"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
@@ -41,8 +42,10 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/azure/AzureChunkManager.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
 #include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
@@ -113,6 +116,115 @@ class StorageTest : public testing::Test {
 TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
     auto status = InitLocalChunkManagerSingleton("tmp");
     EXPECT_EQ(status.error_code, Success);
+}
+
+TEST_F(StorageTest, S3ErrorClassification) {
+    for (auto error : {Aws::S3::S3Errors::INTERNAL_FAILURE,
+                       Aws::S3::S3Errors::SERVICE_UNAVAILABLE,
+                       Aws::S3::S3Errors::THROTTLING,
+                       Aws::S3::S3Errors::SLOW_DOWN,
+                       Aws::S3::S3Errors::REQUEST_TIMEOUT,
+                       Aws::S3::S3Errors::NETWORK_CONNECTION}) {
+        EXPECT_EQ(S3ErrorToErrorCode(error), ErrorCode::S3Error);
+    }
+
+    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::NO_SUCH_BUCKET),
+              ErrorCode::BucketInvalid);
+    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::NO_SUCH_KEY),
+              ErrorCode::ObjectNotExist);
+    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::RESOURCE_NOT_FOUND),
+              ErrorCode::ObjectNotExist);
+
+    for (auto error : {Aws::S3::S3Errors::ACCESS_DENIED,
+                       Aws::S3::S3Errors::INVALID_ACCESS_KEY_ID,
+                       Aws::S3::S3Errors::SIGNATURE_DOES_NOT_MATCH,
+                       Aws::S3::S3Errors::INVALID_REQUEST,
+                       Aws::S3::S3Errors::REQUEST_EXPIRED}) {
+        EXPECT_EQ(S3ErrorToErrorCode(error), ErrorCode::UnexpectedError);
+    }
+
+    EXPECT_EQ(
+        S3ErrorToErrorCode(Aws::S3::S3Errors::UNKNOWN,
+                           Aws::Http::HttpResponseCode::SERVICE_UNAVAILABLE),
+        ErrorCode::S3Error);
+    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::UNKNOWN,
+                                 Aws::Http::HttpResponseCode::FORBIDDEN),
+              ErrorCode::UnexpectedError);
+}
+
+TEST_F(StorageTest, GcpNativeErrorClassification) {
+    for (auto status : {google::cloud::StatusCode::kDeadlineExceeded,
+                        google::cloud::StatusCode::kResourceExhausted,
+                        google::cloud::StatusCode::kInternal,
+                        google::cloud::StatusCode::kUnavailable}) {
+        EXPECT_EQ(GcpNativeStatusToErrorCode(status),
+                  ErrorCode::GcpNativeError);
+    }
+
+    EXPECT_EQ(GcpNativeStatusToErrorCode(google::cloud::StatusCode::kNotFound),
+              ErrorCode::ObjectNotExist);
+    for (auto status : {google::cloud::StatusCode::kCancelled,
+                        google::cloud::StatusCode::kAborted,
+                        google::cloud::StatusCode::kInvalidArgument,
+                        google::cloud::StatusCode::kPermissionDenied,
+                        google::cloud::StatusCode::kFailedPrecondition,
+                        google::cloud::StatusCode::kUnauthenticated}) {
+        EXPECT_EQ(GcpNativeStatusToErrorCode(status),
+                  ErrorCode::UnexpectedError);
+    }
+
+    try {
+        SegcoreError cause(ErrorCode::GcpNativeError, "transient");
+        ThrowGcpNativeError("test", cause, "params");
+        FAIL() << "expected SegcoreError";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::GcpNativeError);
+    }
+
+    try {
+        std::runtime_error cause("invalid credentials");
+        ThrowGcpNativeError("test", cause, "params");
+        FAIL() << "expected SegcoreError";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
+}
+
+TEST_F(StorageTest, AzureErrorClassification) {
+    using Azure::Core::Http::HttpStatusCode;
+
+    EXPECT_EQ(AzureHttpStatusToErrorCode(HttpStatusCode::NotFound),
+              ErrorCode::ObjectNotExist);
+    for (auto status : {HttpStatusCode::RequestTimeout,
+                        HttpStatusCode::TooManyRequests,
+                        HttpStatusCode::InternalServerError,
+                        HttpStatusCode::BadGateway,
+                        HttpStatusCode::ServiceUnavailable,
+                        HttpStatusCode::GatewayTimeout}) {
+        EXPECT_EQ(AzureHttpStatusToErrorCode(status), ErrorCode::S3Error);
+    }
+    for (auto status : {HttpStatusCode::BadRequest,
+                        HttpStatusCode::Unauthorized,
+                        HttpStatusCode::Forbidden,
+                        HttpStatusCode::Conflict}) {
+        EXPECT_EQ(AzureHttpStatusToErrorCode(status),
+                  ErrorCode::UnexpectedError);
+    }
+
+    Azure::Storage::StorageException not_found("not found");
+    not_found.StatusCode = HttpStatusCode::NotFound;
+    EXPECT_EQ(AzureExceptionToErrorCode(not_found), ErrorCode::ObjectNotExist);
+
+    Azure::Core::Http::TransportException transport("network failure");
+    EXPECT_EQ(AzureExceptionToErrorCode(transport), ErrorCode::S3Error);
+    Azure::Core::OperationCancelledException timeout("deadline exceeded");
+    EXPECT_EQ(AzureExceptionToErrorCode(timeout), ErrorCode::S3Error);
+
+    std::runtime_error invalid_credentials("invalid credentials");
+    EXPECT_EQ(AzureExceptionToErrorCode(invalid_credentials),
+              ErrorCode::UnexpectedError);
+    SegcoreError coded(ErrorCode::ObjectNotExist, "missing object");
+    EXPECT_EQ(AzureExceptionToErrorCode(coded), ErrorCode::ObjectNotExist);
 }
 
 TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {

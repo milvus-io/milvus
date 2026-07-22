@@ -280,7 +280,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             check_prefix = remote_root_path_ + "/" + check_prefix;
         }
         ListWithPrefix(check_prefix);
-    } catch (SegcoreError& e) {
+    } catch (const SegcoreError& e) {
         auto err_message = fmt::format(
             "precheck chunk manager client failed, "
             "error:{}, "
@@ -288,7 +288,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             e.what(),
             config.ToString());
         LOG_ERROR("{}", err_message);
-        throw SegcoreError(S3Error, err_message);
+        throw SegcoreError(e.get_error_code(), err_message);
     } catch (std::exception& e) {
         throw e;
     }
