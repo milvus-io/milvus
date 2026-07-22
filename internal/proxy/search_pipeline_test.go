@@ -1671,9 +1671,15 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpNullableStringAlignsRows() 
 	result := results[0].(*milvuspb.SearchResults)
 	s.Require().Len(result.GetResults().GetHighlightResults(), 1)
 	highlightResult := result.GetResults().GetHighlightResults()[0]
+	// The fix under test is the row alignment feeding Process: the NULL row
+	// materializes as "" at its own index, asserted on `texts` inside the mock
+	// above. Here we only verify the per-row results survive alignment 1:1 —
+	// the row-1 payload is whatever the mock returned, not a NULL-semantics
+	// guarantee, so we assert positional pass-through across all three rows.
 	s.Require().Len(highlightResult.GetDatas(), 3)
+	s.Equal([]string{"highlighted text 1"}, highlightResult.GetDatas()[0].GetFragments())
 	s.Equal([]string{}, highlightResult.GetDatas()[1].GetFragments())
-	s.Equal([]float32{}, highlightResult.GetDatas()[1].GetScores())
+	s.Equal([]string{"highlighted text 3"}, highlightResult.GetDatas()[2].GetFragments())
 }
 
 func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
