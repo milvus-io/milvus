@@ -918,18 +918,18 @@ class SegmentExpr : public Expr {
             // resolution covers every consecutive element id of that row.
             auto resolve_run = [&](size_t pos) -> RunInfo {
                 int32_t element_id = (*element_ids)[pos];
-                auto [row_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
-                const int32_t row_last =
-                    array_offsets->ElementIDRangeOfRow(row_id).second;
-                int64_t max_run = std::min<int64_t>(row_last - element_id,
-                                                    element_ids->size() - pos);
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
+                int64_t max_run =
+                    std::min<int64_t>(row.row_element_end - element_id,
+                                      element_ids->size() - pos);
                 int64_t run_len = 1;
                 while (run_len < max_run &&
                        (*element_ids)[pos + run_len] == element_id + run_len) {
                     ++run_len;
                 }
-                return {row_id, elem_idx, static_cast<int32_t>(run_len)};
+                return {row.row_id,
+                        row.element_index,
+                        static_cast<int32_t>(run_len)};
             };
 
             while (i < element_ids->size()) {
@@ -1031,20 +1031,17 @@ class SegmentExpr : public Expr {
 
             // Same run exploitation as the sealed branch: element ids from
             // RowOffsetsToElementOffsets list each row's elements
-            // consecutively ascending, so resolve the row with two virtual
-            // calls against published growing-offset snapshots and pin the
-            // Array chunk ONCE per run instead of once per element. The
+            // consecutively ascending, so resolve the row and its range with
+            // one virtual call against a published offsets snapshot and pin
+            // the Array chunk ONCE per run instead of once per element. The
             // consecutive-id guard below keeps this correct for arbitrary
             // input orders.
             while (i < element_ids->size()) {
                 int32_t element_id = (*element_ids)[i];
 
-                auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
-                const int32_t row_last =
-                    array_offsets->ElementIDRangeOfRow(doc_id).second;
-                int64_t max_run = std::min<int64_t>(row_last - element_id,
-                                                    element_ids->size() - i);
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
+                int64_t max_run = std::min<int64_t>(
+                    row.row_element_end - element_id, element_ids->size() - i);
                 int64_t run_len = 1;
                 while (run_len < max_run &&
                        (*element_ids)[i + run_len] == element_id + run_len) {
@@ -1052,8 +1049,8 @@ class SegmentExpr : public Expr {
                 }
 
                 // Calculate chunk_id and chunk_offset for this doc
-                auto chunk_id = doc_id / size_per_chunk_;
-                auto chunk_offset = doc_id % size_per_chunk_;
+                auto chunk_id = row.row_id / size_per_chunk_;
+                auto chunk_offset = row.row_id % size_per_chunk_;
 
                 // Get the Array chunk (Growing segment stores Array, not ArrayView)
                 auto pw =
@@ -1071,8 +1068,8 @@ class SegmentExpr : public Expr {
                 for (int64_t t = 0; t < run_len; ++t) {
                     if (chunk_active) {
                         // Extract element from Array
-                        auto value =
-                            array_ptr->get_data<ElementType>(elem_idx + t);
+                        auto value = array_ptr->get_data<ElementType>(
+                            row.element_index + t);
                         bool is_valid = !valid_data || valid_data[0];
 
                         evaluate_batch.template operator()<FilterType::random>(

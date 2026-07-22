@@ -39,6 +39,47 @@ namespace milvus {
 
 namespace {
 
+ElementRowInfo
+LocateElement(const std::vector<int32_t>& row_to_element_start,
+              int32_t elem_id) {
+    assert(!row_to_element_start.empty() && elem_id >= 0 &&
+           elem_id < row_to_element_start.back());
+
+    auto it = std::upper_bound(
+        row_to_element_start.begin(), row_to_element_start.end(), elem_id);
+    const int32_t row_id = static_cast<int32_t>(
+        std::distance(row_to_element_start.begin(), it) - 1);
+    const int32_t row_element_start = *(it - 1);
+    return {row_id, elem_id - row_element_start, row_element_start, *it};
+}
+
+template <typename Starts>
+ElementRowInfo
+LocateElement(const Starts& starts, int64_t row_count, int32_t elem_id) {
+    const int64_t total_elements = starts[row_count];
+    assert(elem_id >= 0 && elem_id < total_elements);
+    (void)total_elements;
+
+    // upper_bound over logical starts[0..row_count].
+    int64_t lo = 0;
+    int64_t hi = row_count + 1;
+    while (lo < hi) {
+        const int64_t mid = lo + ((hi - lo) >> 1);
+        if (starts[mid] <= elem_id) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    const int32_t row_id = static_cast<int32_t>(lo - 1);
+    const int32_t row_element_start = starts[row_id];
+    const int32_t row_element_end = starts[row_id + 1];
+    return {row_id,
+            elem_id - row_element_start,
+            row_element_start,
+            row_element_end};
+}
+
 // Lock-free random-access reader over the chunk directory. Callers only hand
 // it logical indices covered by an acquire-loaded committed watermark.
 template <typename T>
@@ -142,17 +183,13 @@ ElementBitsetAnyReduce(const Starts& starts,
 
 std::pair<int32_t, int32_t>
 ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
-    assert(elem_id >= 0 && elem_id < GetTotalElementCount());
+    const auto info = LocateElement(row_to_element_start_, elem_id);
+    return {info.row_id, info.element_index};
+}
 
-    // Binary search: find the row where elem_id belongs
-    // row_to_element_start_[row_id] <= elem_id < row_to_element_start_[row_id + 1]
-    auto it = std::upper_bound(
-        row_to_element_start_.begin(), row_to_element_start_.end(), elem_id);
-    int32_t row_id = static_cast<int32_t>(
-        std::distance(row_to_element_start_.begin(), it) - 1);
-
-    int32_t elem_idx = elem_id - row_to_element_start_[row_id];
-    return {row_id, elem_idx};
+ElementRowInfo
+ArrayOffsetsSealed::ElementIDToRowInfo(int32_t elem_id) const {
+    return LocateElement(row_to_element_start_, elem_id);
 }
 
 std::pair<int32_t, int32_t>
@@ -176,12 +213,11 @@ ArrayOffsetsSealed::CopyRowElementRanges(
     const int32_t* starts = row_to_element_start_.data();
     for (int64_t i = 0; i < count; ++i) {
         const int32_t row_id = row_ids[i];
-        assert(row_id >= 0 && row_id <= row_count);
-        if (row_id == row_count) {
-            out[i] = {starts[row_count], starts[row_count]};
-        } else {
-            out[i] = {starts[row_id], starts[row_id + 1]};
-        }
+        AssertInfo(row_id >= 0 && row_id < row_count,
+                   "row id out of bounds: row_id={}, row_count={}",
+                   row_id,
+                   row_count);
+        out[i] = {starts[row_id], starts[row_id + 1]};
     }
 }
 
@@ -511,26 +547,16 @@ std::pair<int32_t, int32_t>
 ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
-    ChunkedReader starts(starts_chunks_);
-    const int64_t total_elements = starts[committed];
-    assert(elem_id >= 0 && elem_id < total_elements);
-    (void)total_elements;
+    const auto info =
+        LocateElement(ChunkedReader(starts_chunks_), committed, elem_id);
+    return {info.row_id, info.element_index};
+}
 
-    // upper_bound over logical starts[0..committed].
-    int64_t lo = 0;
-    int64_t hi = committed + 1;
-    while (lo < hi) {
-        const int64_t mid = lo + ((hi - lo) >> 1);
-        if (starts[mid] <= elem_id) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    const int32_t row_id = static_cast<int32_t>(lo - 1);
-
-    const int32_t elem_idx = elem_id - starts[row_id];
-    return {row_id, elem_idx};
+ElementRowInfo
+ArrayOffsetsGrowing::ElementIDToRowInfo(int32_t elem_id) const {
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+    return LocateElement(ChunkedReader(starts_chunks_), committed, elem_id);
 }
 
 std::pair<int32_t, int32_t>
@@ -558,8 +584,10 @@ ArrayOffsetsGrowing::CopyRowElementRanges(
     const int32_t total = starts[committed];
     for (int64_t i = 0; i < count; ++i) {
         const int32_t row_id = row_ids[i];
+        AssertInfo(
+            row_id >= 0, "row id must be non-negative: row_id={}", row_id);
         // A not-yet-committed row has no published range yet.
-        if (row_id < 0 || row_id > committed) {
+        if (row_id > committed) {
             out[i] = {0, 0};
             continue;
         }
