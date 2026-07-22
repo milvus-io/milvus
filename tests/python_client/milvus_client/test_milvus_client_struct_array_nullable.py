@@ -1096,10 +1096,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             schema=schema,
             index_params=index_params,
             consistency_level="Strong",
-        )
-        self.alter_collection_properties(
-            client,
-            collection_name,
             properties={"collection.autocompaction.enabled": "false"},
         )
 
