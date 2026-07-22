@@ -57,6 +57,7 @@
 #include "google/cloud/status.h"
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
+#include "storage/GcpStatus.h"
 #include "storage/Types.h"
 #include "storage/aliyun/AliyunCredentialsProvider.h"
 #include "storage/huawei/HuaweiCloudCredentialsProvider.h"
@@ -88,6 +89,36 @@ S3ErrorMessage(const std::string& func,
     return oss.str();
 }
 
+inline ErrorCode
+S3ErrorToErrorCode(Aws::S3::S3Errors error,
+                   Aws::Http::HttpResponseCode response_code =
+                       Aws::Http::HttpResponseCode::REQUEST_NOT_MADE) {
+    switch (error) {
+        case Aws::S3::S3Errors::INTERNAL_FAILURE:
+        case Aws::S3::S3Errors::SERVICE_UNAVAILABLE:
+        case Aws::S3::S3Errors::THROTTLING:
+        case Aws::S3::S3Errors::SLOW_DOWN:
+        case Aws::S3::S3Errors::REQUEST_TIMEOUT:
+        case Aws::S3::S3Errors::NETWORK_CONNECTION:
+            return ErrorCode::S3Error;
+        case Aws::S3::S3Errors::NO_SUCH_BUCKET:
+            return ErrorCode::BucketInvalid;
+        case Aws::S3::S3Errors::NO_SUCH_KEY:
+        case Aws::S3::S3Errors::RESOURCE_NOT_FOUND:
+            return ErrorCode::ObjectNotExist;
+        case Aws::S3::S3Errors::UNKNOWN:
+            // S3-compatible services may return a non-standard error name.
+            // Only retry it when the structured HTTP status is transient.
+            return Aws::Http::IsRetryableHttpResponseCode(response_code)
+                       ? ErrorCode::S3Error
+                       : ErrorCode::UnexpectedError;
+        default:
+            // Authentication, authorization, invalid configuration/request,
+            // and all unknown future error types are permanent by default.
+            return ErrorCode::UnexpectedError;
+    }
+}
+
 template <typename... Args>
 static SegcoreError
 ThrowS3Error(const std::string& func,
@@ -96,7 +127,9 @@ ThrowS3Error(const std::string& func,
              Args&&... args) {
     std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
     LOG_WARN("{}", error_message);
-    throw SegcoreError(S3Error, error_message);
+    throw SegcoreError(
+        S3ErrorToErrorCode(err.GetErrorType(), err.GetResponseCode()),
+        error_message);
 }
 
 [[maybe_unused]] static bool
@@ -472,7 +505,9 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
         auto auth_header =
             google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
         if (!auth_header.ok()) {
-            ThrowInfo(S3Error,
+            ThrowInfo(IsRetryableGcpStatus(auth_header.status().code())
+                          ? ErrorCode::S3Error
+                          : ErrorCode::UnexpectedError,
                       fmt::format("get authorization failed, errcode: {}",
                                   google::cloud::StatusCodeToString(
                                       auth_header.status().code())));

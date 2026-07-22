@@ -2059,8 +2059,8 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=vectors, anns_field=ct.default_float_vec_field_name,
                     search_params=search_params, limit=100,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
-                                 "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
+                    check_items={"err_code": 2000,
+                                 "err_msg": "ef(10) should be larger than k(100)"})
 
 
 class TestMilvusClientSearchValid(TestMilvusClientV2Base):
