@@ -82,8 +82,17 @@ L:
 func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
+	// Snapshot the idempotency windows under windowManager.mu, per the
+	// idempotencyWindows() contract. getSnapshot runs in the single-threaded
+	// recovery phase today (before windowBackgroundTask starts), but taking the
+	// lock keeps this correct if the call ever moves.
+	r.windowManager.mu.Lock()
 	idempotencyRuntimeWindows := r.windowManager.idempotencyWindows()
 	idempotencyWindows := make(map[string]*streamingpb.WindowSnapshot, len(idempotencyRuntimeWindows))
+	for channelName, window := range idempotencyRuntimeWindows {
+		idempotencyWindows[channelName] = window.snapshot()
+	}
+	r.windowManager.mu.Unlock()
 	// Collect active vchannels and build a set of active partition IDs (globally unique).
 	activePartitions := make(map[int64]struct{})
 	for channelName, vchannel := range r.vchannels {
@@ -122,9 +131,6 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 			continue
 		}
 		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
-	}
-	for channelName, window := range idempotencyRuntimeWindows {
-		idempotencyWindows[channelName] = window.snapshot()
 	}
 	snapshot := &RecoverySnapshot{
 		VChannels:          vchannels,

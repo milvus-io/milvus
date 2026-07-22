@@ -51,6 +51,14 @@ func newWindowManager(pchannel string, cfg *config, metrics *recoveryMetrics, pe
 	}
 }
 
+// idempotencyWindows returns the live window map WITHOUT locking. Contract:
+// the caller must either hold m.mu (the observe path locks it in
+// recoveryStorageImpl.ObserveMessage, the background task in its own loop; lock
+// order is always rs.mu -> m.mu) or run in the single-threaded recovery
+// bootstrap before windowBackgroundTask starts. The unlocked writers below
+// (setIdempotencyWindows / setIdempotencyWindow / getOrCreateIdempotencyWindow)
+// carry the same contract; removeIdempotencyWindow locks m.mu itself because
+// its caller does not.
 func (m *windowManager) idempotencyWindows() map[string]*vchannelWindow {
 	if m == nil {
 		return nil
