@@ -102,10 +102,18 @@ func InitSegcore(nodeID int64) error {
 		return err
 	}
 
+	// Apply milvus-storage reader concurrency config: the global reader
+	// thread pool (chunk/file-level fan-out) and the index-build read
+	// window (row groups prefetched in parallel per round).
+	if err := initcore.InitLoonReaderConfig(paramtable.Get()); err != nil {
+		return err
+	}
+
 	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
 	// without restart, matching QueryNode behavior.
 	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterLoonReaderConfigWatchers(paramtable.Get(), "datanode")
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

@@ -501,6 +501,30 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+// InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
+// settings: the global reader thread pool size (chunk/file-level read
+// fan-out) and the index-build read window (how many bytes one prefetch
+// round may span, which bounds how many row groups download in parallel per
+// round). Both default to 0 = pre-existing sequential behavior.
+func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
+	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt32()
+	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
+	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
+		return err
+	}
+	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
+	status = C.InitIndexBuildReadWindow(C.int64_t(window))
+	return HandleCStatus(&status, "InitIndexBuildReadWindow failed")
+}
+
+// EffectiveLoonReaderThreadPoolSize returns the pool size actually in effect,
+// which differs from the configured value when the pool already exists: it
+// cannot be destroyed at runtime, so lowering the setting to 0 does not take
+// effect until restart.
+func EffectiveLoonReaderThreadPoolSize() int32 {
+	return int32(C.GetLoonReaderThreadPoolSize())
+}
+
 func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	arrowReaderConfig := C.CArrowReaderConfig{
 		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),

@@ -25,6 +25,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -321,6 +322,28 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType element_type,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs);
+
+// Streams the field's data out of a storage-v3 manifest batch by batch,
+// invoking `consumer` on the calling thread in batch order. Batch decoding
+// (external-type normalization + FieldData materialization) runs in
+// parallel on the MIDDLE thread pool and overlaps with the reader's next
+// prefetch round. Decoded-but-undelivered batches are bounded by a byte
+// budget, so this caps the decode window only — the reader's own prefetch
+// window, arrow's buffers and the consumer's own retention are additional
+// and concurrent builds multiply all of them. Prefer this over
+// GetFieldDatasFromManifest when the caller can process batches
+// incrementally (e.g. spilling to a local file) instead of holding the
+// whole column in memory.
+void
+IterateFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const std::function<void(FieldDataPtr)>& consumer);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
