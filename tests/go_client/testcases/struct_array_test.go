@@ -238,6 +238,18 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 	require.Zero(t, emptyQueryClips.Len())
 	require.NoError(t, emptyQueryClips.ValidateNullable())
 
+	emptySubFieldQueryResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id < 0").WithOutputFields("clips[label]").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Zero(t, emptySubFieldQueryResult.ResultCount)
+	emptySubFieldQueryClips := emptySubFieldQueryResult.GetColumn("clips")
+	require.NotNil(t, emptySubFieldQueryClips)
+	require.True(t, emptySubFieldQueryClips.Nullable())
+	require.Zero(t, emptySubFieldQueryClips.Len())
+	require.NoError(t, emptySubFieldQueryClips.ValidateNullable())
+	require.Len(t, emptySubFieldQueryClips.FieldData().GetStructArrays().GetFields(), 1)
+	require.Equal(t, "label", emptySubFieldQueryClips.FieldData().GetStructArrays().GetFields()[0].GetFieldName())
+
 	// A null vector produces an empty result set while a valid vector produces a
 	// non-empty one. The empty slice must retain every struct sub-column's
 	// nullable state.
@@ -254,6 +266,22 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 	require.NotNil(t, emptyClips)
 	require.True(t, emptyClips.Nullable())
 	require.Zero(t, emptyClips.Len())
+
+	emptySubFieldSearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{0})).
+		WithANNSField("normal_vector").
+		WithOutputFields("clips[label]").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, emptySubFieldSearchResults, 1)
+	require.NoError(t, emptySubFieldSearchResults[0].Err)
+	require.Zero(t, emptySubFieldSearchResults[0].ResultCount)
+	emptySubFieldSearchClips := emptySubFieldSearchResults[0].GetColumn("clips")
+	require.NotNil(t, emptySubFieldSearchClips)
+	require.True(t, emptySubFieldSearchClips.Nullable())
+	require.Zero(t, emptySubFieldSearchClips.Len())
+	require.Len(t, emptySubFieldSearchClips.FieldData().GetStructArrays().GetFields(), 1)
+	require.Equal(t, "label", emptySubFieldSearchClips.FieldData().GetStructArrays().GetFields()[0].GetFieldName())
 
 	validSearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
 		column.NewColumnInt64("id", []int64{1})).
