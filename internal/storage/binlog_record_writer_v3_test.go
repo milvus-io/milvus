@@ -11,6 +11,7 @@
 package storage
 
 import (
+	"path"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -78,7 +80,7 @@ func TestPackedTextManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// No Write before Close. The text writer's nil-handling path must
-	// exit cleanly without producing legacy stats.
+	// exit cleanly without producing a manifest or legacy statslogs.
 	require.NoError(t, w.Close())
 
 	_, _, _, manifestPath, _ := w.GetLogs()
@@ -106,11 +108,17 @@ func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
 	}
 	rec, err := ValueSerializer([]*Value{value}, schema)
 	require.NoError(t, err)
-	require.NoError(t, w.Write(rec))
-	require.NoError(t, w.Close())
+	require.NoError(t, w.pkCollector.Collect(rec))
+	require.NoError(t, w.bm25Collector.Collect(rec))
+	w.rowNum = int64(rec.Len())
+	w.basePath = path.Join(dir, common.SegmentInsertLogPath,
+		metautil.JoinIDPath(collectionID, partitionID, segmentID))
 
-	_, statsLog, bm25Logs, manifestPath, _ := w.GetLogs()
-	require.NotEmpty(t, manifestPath)
+	updates := &packed.ManifestUpdates{}
+	require.NoError(t, w.appendV3Stats(updates))
+	require.Len(t, updates.Stats, 2)
+	manifestPath, err := packed.CommitManifestUpdates(w.basePath, packed.ManifestEarliest, cfg, updates)
+	require.NoError(t, err)
 
 	stats, err := packed.GetManifestStats(manifestPath, cfg)
 	require.NoError(t, err)
@@ -132,6 +140,7 @@ func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
 	assert.True(t, strings.Contains(bm25Stat.Paths[0], "/_stats/bm25.102/"))
 	assert.NotContains(t, bm25Stat.Paths[0], "stats_log")
 
+	_, statsLog, bm25Logs, _, _ := w.GetLogs()
 	assert.Nil(t, statsLog, "V3 manifest stats must not be returned as legacy PK statslog")
 	assert.Empty(t, bm25Logs, "V3 manifest stats must not be returned as legacy BM25 statslog")
 }

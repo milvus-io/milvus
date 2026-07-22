@@ -1636,11 +1636,11 @@ SegmentGrowingImpl::bulk_subscript(
 }
 
 std::unique_ptr<DataArray>
-SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
-                                   FieldId field_id,
-                                   const int64_t* seg_offsets,
-                                   int64_t count) const {
-    auto& field_meta = schema_->operator[](field_id);
+SegmentGrowingImpl::bulk_subscript_with_field_meta(milvus::OpContext* op_ctx,
+                                                   const FieldMeta& field_meta,
+                                                   const int64_t* seg_offsets,
+                                                   int64_t count) const {
+    auto field_id = field_meta.get_id();
     auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
         int64_t valid_count = count;
@@ -1895,6 +1895,16 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
         }
     }
     return result;
+}
+
+std::unique_ptr<DataArray>
+SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
+                                   FieldId field_id,
+                                   const int64_t* seg_offsets,
+                                   int64_t count) const {
+    auto& field_meta = schema_->operator[](field_id);
+    return bulk_subscript_with_field_meta(
+        op_ctx, field_meta, seg_offsets, count);
 }
 
 void

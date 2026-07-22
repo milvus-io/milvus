@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -37,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -132,7 +131,10 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		return nil
 	}
 
-	columnGroups := t.getColumnGroups(segmentInfo)
+	columnGroups, err := t.getColumnGroups(segmentInfo)
+	if err != nil {
+		return err
+	}
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
@@ -212,19 +214,19 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	return nil
 }
 
-func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storagecommon.ColumnGroup {
+func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) ([]storagecommon.ColumnGroup, error) {
 	return resolveColumnGroups(segmentInfo, t.schema, t.segmentID, t.calcColumnStats)
 }
 
-func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.CollectionSchema, segmentID int64, calcColumnStats func() map[int64]storagecommon.ColumnStats) []storagecommon.ColumnGroup {
+func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.CollectionSchema, segmentID int64, calcColumnStats func() map[int64]storagecommon.ColumnStats) ([]storagecommon.ColumnGroup, error) {
 	// column group only needed for storage v2/v3 segments
 	if segmentInfo.GetStorageVersion() != storage.StorageV2 && segmentInfo.GetStorageVersion() != storage.StorageV3 {
-		return nil
+		return nil, nil
 	}
 
 	// empty pack
 	if schema == nil {
-		return nil
+		return nil, nil
 	}
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
@@ -237,7 +239,7 @@ func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.Co
 				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewLocalFormatPolicy(), storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
 				result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 				mlog.Info(context.TODO(), "use legacy split policy", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
-				return result
+				return result, nil
 			}
 		}
 		field2idx := make(map[int64]int)
@@ -245,15 +247,23 @@ func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.Co
 			field2idx[field.GetFieldID()] = idx
 		}
 		for idx, cg := range currentSplit {
-			cg.Columns = lo.Map(cg.Fields, func(fieldID int64, _ int) int {
-				return field2idx[fieldID]
-			})
+			columns := make([]int, 0, len(cg.Fields))
+			for _, fieldID := range cg.Fields {
+				columnIdx, ok := field2idx[fieldID]
+				if !ok {
+					return nil, merr.WrapErrDataIntegrityMsg(
+						"current split field %d missing from sync schema for segment %d",
+						fieldID, segmentID)
+				}
+				columns = append(columns, columnIdx)
+			}
+			cg.Columns = columns
 			currentSplit[idx] = cg
 		}
 		if segmentInfo.GetStorageVersion() == storage.StorageV3 && segmentInfo.ManifestPath() != "" {
-			return currentSplit
+			return currentSplit, nil
 		}
-		return storagecommon.FillColumnGroupFormats(currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
+		return storagecommon.FillColumnGroupFormats(currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue()), nil
 	}
 
 	policies := storagecommon.DefaultPolicies()
@@ -264,7 +274,7 @@ func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.Co
 	result := storagecommon.SplitColumns(allFields, stats, policies...)
 	result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 	mlog.Info(context.TODO(), "sync new split columns", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
-	return result
+	return result, nil
 }
 
 func (t *SyncTask) calcColumnStats() map[int64]storagecommon.ColumnStats {

@@ -56,10 +56,6 @@ func (s fakeGrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
-func (s fakeGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
-	return []int64{0, 1, 100, 101, 102}, nil
-}
-
 func (s fakeGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
 	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
 	for i := startOffset; i < endOffset; i++ {

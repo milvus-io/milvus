@@ -661,20 +661,6 @@ func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, star
 	}, nil
 }
 
-// materializedFieldIDsProvider is the capability a source segment must expose
-// for the flush layout to be trimmed to its materialized columns.
-type materializedFieldIDsProvider interface {
-	MaterializedFieldIDs(ctx context.Context) ([]int64, error)
-}
-
-func (s *delegatorGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
-	provider, ok := s.segment.(materializedFieldIDsProvider)
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("growing flush source segment does not expose materialized field ids")
-	}
-	return provider.MaterializedFieldIDs(ctx)
-}
-
 type primaryKeysProvider interface {
 	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
 }

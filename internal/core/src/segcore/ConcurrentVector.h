@@ -203,8 +203,24 @@ class VectorBase {
         return empty;
     }
 
+    // Monotonic materialization marker, the canonical flush-layout presence
+    // test. Set on the first set_data_raw (any path, incl. all-null bulk fill),
+    // never cleared. Avoids the race-prone chunk state empty()/valid_count,
+    // which a concurrent insert flips mid set_data_raw and interim-index
+    // raw-vector removal empties for a column that still exists.
+    bool
+    materialized() const {
+        return materialized_.load(std::memory_order_relaxed);
+    }
+
  protected:
+    void
+    mark_materialized() {
+        materialized_.store(true, std::memory_order_relaxed);
+    }
+
     const int64_t size_per_chunk_;
+    std::atomic<bool> materialized_{false};
 };
 
 template <typename Type, bool is_type_entire_row = false>
@@ -288,6 +304,9 @@ class ConcurrentVectorImpl : public VectorBase {
     set_data_raw(ssize_t element_offset,
                  const void* source,
                  ssize_t element_count) override {
+        // Entry, not post-chunk: an all-null column reaches here with
+        // valid_count==0 (no chunk emplaced), yet is still materialized.
+        mark_materialized();
         ssize_t valid_count = 0;
         ssize_t storage_offset = 0;
         if (use_mapping_storage_) {
