@@ -16,7 +16,10 @@ func (b *txnInsertResultBuilder) add(result *messagespb.IdempotentInsertResult, 
 }
 
 func (b *txnInsertResultBuilder) keepalive(expiredTimeTick uint64) {
-	if expiredTimeTick > 0 {
+	// Take the max, mirroring the txn session's keepalive: bodies are appended
+	// concurrently, so "last writer wins" would let an older body's expiry
+	// shorten the buffer's life relative to the session it shadows.
+	if expiredTimeTick > b.expiredTimeTick {
 		b.expiredTimeTick = expiredTimeTick
 	}
 }

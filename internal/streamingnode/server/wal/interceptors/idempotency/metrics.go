@@ -6,39 +6,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func observeWindowEntries(msg message.MutableMessage, entries int) {
-	if msg == nil {
+func observeWindowEntries(vchannel string, entries int) {
+	if vchannel == "" {
 		return
 	}
-	nodeID, vchannel := idempotencyMetricLabels(msg)
-	metrics.WALIdempotencyWindowEntries.WithLabelValues(nodeID, vchannel).Set(float64(entries))
+	metrics.WALIdempotencyWindowEntries.WithLabelValues(paramtable.GetStringNodeID(), vchannel).Set(float64(entries))
 }
 
-func observeWindowInflight(msg message.MutableMessage, inflight int) {
-	if msg == nil {
+func observeWindowInflight(vchannel string, inflight int) {
+	if vchannel == "" {
 		return
 	}
-	nodeID, vchannel := idempotencyMetricLabels(msg)
-	metrics.WALIdempotencyWindowInflight.WithLabelValues(nodeID, vchannel).Set(float64(inflight))
+	metrics.WALIdempotencyWindowInflight.WithLabelValues(paramtable.GetStringNodeID(), vchannel).Set(float64(inflight))
 }
 
-func observeWindowDuplicate(msg message.MutableMessage) {
-	if msg == nil {
+func observeWindowDuplicate(vchannel string) {
+	if vchannel == "" {
 		return
 	}
-	nodeID, vchannel := idempotencyMetricLabels(msg)
-	metrics.WALIdempotencyDuplicateTotal.WithLabelValues(nodeID, vchannel).Inc()
+	metrics.WALIdempotencyDuplicateTotal.WithLabelValues(paramtable.GetStringNodeID(), vchannel).Inc()
 }
 
-func observeWindowEviction(msg message.MutableMessage, count int) {
-	if msg == nil {
+// The helpers key on the vchannel name directly (not a message) so callers
+// without a message in hand — the idle-vchannel TTL sweep in particular — still
+// report their evictions; an empty vchannel (pchannel-level caller) is skipped.
+func observeWindowEviction(vchannel string, count int) {
+	if vchannel == "" || count <= 0 {
 		return
 	}
-	if count <= 0 {
-		return
-	}
-	nodeID, vchannel := idempotencyMetricLabels(msg)
-	metrics.WALIdempotencyEvictionTotal.WithLabelValues(nodeID, vchannel).Add(float64(count))
+	metrics.WALIdempotencyEvictionTotal.WithLabelValues(paramtable.GetStringNodeID(), vchannel).Add(float64(count))
 }
 
 // deleteWindowMetrics drops a vchannel's idempotency window metric series so they
@@ -52,6 +48,10 @@ func deleteWindowMetrics(vchannel string) {
 	metrics.WALIdempotencyEvictionTotal.DeleteLabelValues(nodeID, vchannel)
 }
 
-func idempotencyMetricLabels(msg message.MutableMessage) (string, string) {
-	return paramtable.GetStringNodeID(), msg.VChannel()
+// vchannelOf extracts the metric label from a possibly-nil message.
+func vchannelOf(msg message.MutableMessage) string {
+	if msg == nil {
+		return ""
+	}
+	return msg.VChannel()
 }

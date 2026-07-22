@@ -269,6 +269,19 @@ const (
 
 	// CollectionInsertIdempotencyEnabledKey enables idempotency keys for Insert.
 	// Delete and Upsert are already idempotent and do not use this property.
+	//
+	// SEMANTICS — read before enabling. When a client supplies no explicit
+	// idempotency key, the proxy derives one from the insert destination plus a
+	// hash of the client payload ("auto key"). Enabling this property therefore
+	// means CONTENT-ADDRESSED dedup: a byte-identical insert into the same
+	// db/collection/partition/namespace within streaming.idempotency.windowTTL
+	// (default 10m) is answered with the first insert's result and its rows are
+	// NOT written again. That is the intended retry protection for clients that
+	// cannot pass keys (SDK-internal retries), but it also means workloads that
+	// legitimately insert identical content twice (e.g. duplicate log records
+	// into an autoID collection) MUST NOT enable this property, or must supply
+	// distinct explicit keys per logical request. The dedup horizon is bounded
+	// by the window TTL/entry caps, so the collapse is time-dependent by design.
 	CollectionInsertIdempotencyEnabledKey = "collection.insert.idempotency.enabled"
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.

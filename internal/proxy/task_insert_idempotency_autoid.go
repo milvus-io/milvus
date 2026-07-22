@@ -96,6 +96,17 @@ func reassignAutoIDByOffsetChannels(
 	// normally fills every short bucket within a couple of rounds. Bound the loop
 	// so a pathological hash distribution cannot spin forever and keep burning the
 	// global id space; fail loudly after a generous cap instead.
+	//
+	// COST (accepted by design): candidates hashing into already-satisfied
+	// buckets are discarded, so this consumes roughly numChannels/(numChannels-?)
+	// times the ids actually used and usually adds one extra allocator round-trip
+	// per idempotent autoID insert. The alternatives do not work: deriving the
+	// shard from the row offset directly would break Delete/Upsert, whose
+	// index-based routing hashes the PK against the same channel list (the
+	// insert's row->shard assignment MUST equal hash(assignedPK)%%n), and
+	// deterministic PRNG-generated ids cannot guarantee global uniqueness. The
+	// id space is int64, so the burn is negligible; the extra RTT only applies
+	// to idempotency-enabled autoID collections.
 	const maxAutoIDStabilizeRounds = 256
 	for round := 0; ; round++ {
 		missing := missingAutoIDBucketCount(required, buckets)

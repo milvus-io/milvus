@@ -131,7 +131,7 @@ func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResu
 	defer w.mu.Unlock()
 
 	if entry, ok := w.entries[key]; ok {
-		observeWindowDuplicate(msg)
+		observeWindowDuplicate(vchannelOf(msg))
 		return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
 	}
 
@@ -146,7 +146,7 @@ func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResu
 		done:      make(chan struct{}),
 	}
 	w.inflight[key] = pending
-	observeWindowInflight(msg, len(w.inflight))
+	observeWindowInflight(vchannelOf(msg), len(w.inflight))
 	return BeginResult{Decision: BeginDecisionOwner, Pending: pending}
 }
 
@@ -176,9 +176,9 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 		evicted = w.evictLocked(0)
 	}
 	w.refreshEvictedWatermarkLocked()
-	observeWindowEviction(msg, evicted)
-	observeWindowEntries(msg, len(w.entries))
-	observeWindowInflight(msg, len(w.inflight))
+	observeWindowEviction(vchannelOf(msg), evicted)
+	observeWindowEntries(vchannelOf(msg), len(w.entries))
+	observeWindowInflight(vchannelOf(msg), len(w.inflight))
 
 	pending.result = PendingResult{Entry: entry, OwnerResolved: true}
 	close(pending.done)
@@ -194,7 +194,7 @@ func (w *Window) Fail(pending *PendingEntry, err error, msg message.MutableMessa
 		return false
 	}
 	delete(w.inflight, pending.Key)
-	observeWindowInflight(msg, len(w.inflight))
+	observeWindowInflight(vchannelOf(msg), len(w.inflight))
 	pending.result = PendingResult{Err: err, OwnerResolved: true}
 	close(pending.done)
 	return true
@@ -206,7 +206,7 @@ func (p *PendingEntry) Wait(ctx context.Context, msg message.MutableMessage) Pen
 		// The close of p.done happens-after the owner published p.result, so
 		// every waiter observes the same committed result here.
 		if p.result.Err == nil {
-			observeWindowDuplicate(msg)
+			observeWindowDuplicate(vchannelOf(msg))
 		}
 		return p.result
 	case <-ctx.Done():
@@ -214,13 +214,16 @@ func (p *PendingEntry) Wait(ctx context.Context, msg message.MutableMessage) Pen
 	}
 }
 
-func (w *Window) Evict(evictBeforeTT uint64, msg message.MutableMessage) int {
+// Evict takes the vchannel name directly (not a message) so the idle-vchannel
+// TTL sweep — which has no message for the window it is sweeping — still
+// reports its evictions and refreshes the entry gauge.
+func (w *Window) Evict(evictBeforeTT uint64, vchannel string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	evicted := w.evictLocked(evictBeforeTT)
 	w.refreshEvictedWatermarkLocked()
-	observeWindowEviction(msg, evicted)
-	observeWindowEntries(msg, len(w.entries))
+	observeWindowEviction(vchannel, evicted)
+	observeWindowEntries(vchannel, len(w.entries))
 	return evicted
 }
 
