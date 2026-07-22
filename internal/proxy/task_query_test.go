@@ -1690,7 +1690,7 @@ func Test_createCntPlan(t *testing.T) {
 func Test_queryTask_createPlan(t *testing.T) {
 	collSchema := newTestSchema()
 	t.Run("query without expression", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 		tsk := &queryTask{
 			request: &milvuspb.QueryRequest{
 				OutputFields: []string{"Int64"},
@@ -1702,7 +1702,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid expression", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 
 		tsk := &queryTask{
 			schema: schema,
@@ -1716,7 +1716,7 @@ func Test_queryTask_createPlan(t *testing.T) {
 	})
 
 	t.Run("invalid output fields", func(t *testing.T) {
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 
 		tsk := &queryTask{
 			schema: schema,

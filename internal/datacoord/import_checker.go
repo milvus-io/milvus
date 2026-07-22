@@ -22,22 +22,42 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type ImportChecker interface {
 	Start()
 	Close()
+}
+
+// importCheckerHooks bundles the coordinator callbacks the import checker invokes,
+// injected as one named unit (instead of a growing positional-arg list) so the checker
+// does not depend on *Server. A nil callback disables the corresponding behavior; tests
+// inject only the hooks they exercise.
+type importCheckerHooks struct {
+	// commitImport broadcasts a CommitImport WAL message. Required in production; a nil
+	// value is a programming error only when reached on the auto_commit=true path.
+	commitImport func(ctx context.Context, job ImportJob) error
+	// rollbackImport broadcasts a RollbackImport WAL message. nil disables GC self-heal.
+	rollbackImport func(ctx context.Context, job ImportJob) error
+	// isReplicatingCluster reports whether this cluster is currently replicating. A
+	// non-nil error means the status is indeterminate (e.g. a transient balancer error
+	// during shutdown) and the caller must not make an irreversible GC decision. nil hook
+	// is treated as "not replicating" (GC self-heal disabled).
+	isReplicatingCluster func(ctx context.Context) (bool, error)
 }
 
 type importChecker struct {
@@ -49,9 +69,7 @@ type importChecker struct {
 	ci         CompactionInspector
 	handler    Handler
 
-	// commitImportFn broadcasts a CommitImport WAL message.
-	// Injected at construction time so the checker does not depend on *Server.
-	commitImportFn func(ctx context.Context, job ImportJob) error
+	hooks importCheckerHooks
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -64,35 +82,44 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
-	commitImportFn func(ctx context.Context, job ImportJob) error, // required; nil OK for tests
+	hooks importCheckerHooks,
 ) ImportChecker {
 	return &importChecker{
-		ctx:            ctx,
-		meta:           meta,
-		broker:         broker,
-		alloc:          alloc,
-		importMeta:     importMeta,
-		ci:             ci,
-		handler:        handler,
-		commitImportFn: commitImportFn,
-		closeChan:      make(chan struct{}),
+		ctx:        ctx,
+		meta:       meta,
+		broker:     broker,
+		alloc:      alloc,
+		importMeta: importMeta,
+		ci:         ci,
+		handler:    handler,
+		hooks:      hooks,
+		closeChan:  make(chan struct{}),
 	}
 }
 
+// Start runs the checker loops until Close. The state-machine loop and the
+// timeout/GC loop deliberately run on separate goroutines: checkGC's rollback
+// broadcast can park on the ctx-insensitive resource-key lock (see checkGC), and
+// isolating it guarantees the state machine keeps making progress no matter how
+// long GC blocks. All state shared by the two loops lives behind importMeta's
+// mutex (which already serves concurrent RPC and ack-callback goroutines), and
+// UpdateJob refuses transitions out of Completed/Failed, so the loops cannot
+// resurrect or regress each other's terminal states.
 func (c *importChecker) Start() {
 	mlog.Info(c.ctx, "start import checker")
-	var (
-		ticker1 = time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalHigh.GetAsDuration(time.Second)) // 2s
-		ticker2 = time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second))  // 2min
-	)
-	defer ticker1.Stop()
-	defer ticker2.Stop()
+	go c.runGCLoop()
+	c.runStateMachineLoop()
+}
+
+func (c *importChecker) runStateMachineLoop() {
+	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalHigh.GetAsDuration(time.Second)) // 2s
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.closeChan:
-			mlog.Info(c.ctx, "import checker exited")
+			mlog.Info(c.ctx, "import checker state-machine loop exited")
 			return
-		case <-ticker1.C:
+		case <-ticker.C:
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
@@ -122,7 +149,19 @@ func (c *importChecker) Start() {
 					c.checkFailedJob(job)
 				}
 			}
-		case <-ticker2.C:
+		}
+	}
+}
+
+func (c *importChecker) runGCLoop() {
+	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second)) // 2min
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.closeChan:
+			mlog.Info(c.ctx, "import checker gc loop exited")
+			return
+		case <-ticker.C:
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				c.tryTimeoutJob(job)
@@ -469,11 +508,11 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 	// collection-level resource-key lock serializes overlapping broadcasts, the
 	// ack callback only transitions when the job is still Uncommitted, and
 	// HandleCommitVchannel is idempotent on committed_vchannels.
-	if c.commitImportFn == nil {
-		log.Error(c.ctx, "commitImportFn is nil but auto_commit=true; this is a programming error")
+	if c.hooks.commitImport == nil {
+		log.Error(c.ctx, "commit hook is nil but auto_commit=true; this is a programming error")
 		return
 	}
-	if err := c.commitImportFn(c.ctx, job); err != nil {
+	if err := c.hooks.commitImport(c.ctx, job); err != nil {
 		log.Warn(c.ctx, "auto-commit broadcast failed, will retry on next tick", mlog.Err(err))
 	}
 }
@@ -601,6 +640,57 @@ func (c *importChecker) checkGC(job ImportJob) {
 		if !shouldRemoveJob {
 			return
 		}
+		// In a CDC replicating cluster, a failed 2PC source import must release the
+		// peer cluster's replicated Uncommitted job before we drop it — otherwise the
+		// peer is stranded with invisible imported segments and no recovery path, since
+		// source GC never touches the peer. Removal of the job is itself the idempotency
+		// guard: once gone we never re-broadcast. Auto-commit jobs have no 2PC peer to
+		// release, so they skip the gate entirely.
+		if c.hooks.rollbackImport != nil && c.hooks.isReplicatingCluster != nil &&
+			job.GetState() == internalpb.ImportJobState_Failed && !job.GetAutoCommit() {
+			// The check reaches the streaming balancer future, which blocks until the
+			// balancer is registered — under the server-lifetime c.ctx that would park
+			// the GC loop during the window before streamingcoord registers
+			// it (e.g. a restart recovering a job already past retention). Bound it like
+			// checkCollection does; a timeout is just another indeterminate status.
+			replicateCheckCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+			replicating, err := c.hooks.isReplicatingCluster(replicateCheckCtx)
+			cancel()
+			switch {
+			case err != nil:
+				// Indeterminate replication status (e.g. a transient balancer error during
+				// shutdown, when streamingcoord stops before datacoord). Removing the job now
+				// could strand a replicating peer's Uncommitted job with no recovery path,
+				// which is irreversible — a false "not replicating" costs nothing but a retry,
+				// so keep the job and re-evaluate on the next GC tick.
+				log.Warn(c.ctx, "cannot determine replication status before GC of failed import job, will retry", mlog.Err(err))
+				return
+			case replicating:
+				// Broadcast the RollbackImport to release the peer. A transient error keeps
+				// the job to retry next tick; a permanent error (standby ErrNotPrimary, or the
+				// collection was dropped — itself a replicated DDL, so the peer fails its own
+				// job independently) falls through to GC, since retrying it forever would leak
+				// the job's metadata.
+				//
+				// Bound the broadcast like the replication check above: it blocks in
+				// BlockUntilDone until every vchannel append succeeds, and under the
+				// server-lifetime c.ctx an unavailable streamingnode would park this
+				// loop until shutdown. A timeout is just another transient status —
+				// keep the job and retry on the next GC tick. The resource-key lock on
+				// the broadcast path is still ctx-insensitive (making it fail-fast is a
+				// follow-up), which is one reason this GC loop runs on its own
+				// goroutine (see Start): even an unbounded park here can only delay
+				// GC, never the import state machine.
+				rollbackCtx, rollbackCancel := context.WithTimeout(c.ctx, 10*time.Second)
+				err := c.hooks.rollbackImport(rollbackCtx, job)
+				rollbackCancel()
+				if err != nil && !isPermanentRollbackErr(err) {
+					log.Warn(c.ctx, "failed to broadcast rollback before GC of failed replicate import job, will retry", mlog.Err(err))
+					return
+				}
+				log.Info(c.ctx, "proceeding with GC of failed replicate import job after rollback attempt")
+			}
+		}
 		err := c.importMeta.RemoveJob(c.ctx, job.GetJobID())
 		if err != nil {
 			log.Warn(c.ctx, "remove import job failed", mlog.Err(err))
@@ -608,4 +698,21 @@ func (c *importChecker) checkGC(job ImportJob) {
 		}
 		log.Info(c.ctx, "import job removed")
 	}
+}
+
+// isPermanentRollbackErr reports whether a RollbackImport broadcast error is permanent,
+// i.e. retrying it can never succeed, so the failed job should still be GC'd rather than
+// retried forever (which would leak its metadata). Everything else is treated as transient
+// and retried on the next GC tick — misclassifying a transient error as permanent would
+// drop a replicating job without releasing the peer, which is irreversible.
+func isPermanentRollbackErr(err error) bool {
+	// ErrNotPrimary: this cluster is a replication standby, not the primary that owns the
+	// broadcast; its own failed job is independent and safe to drop.
+	// ErrCollectionNotFound: the collection was dropped. DropCollection is itself a
+	// replicated DDL, so the peer marks its own import job Failed independently — there is
+	// no peer left to release, and the broadcast can never succeed.
+	// errRollbackImportNoVchannels: the job carries no vchannels (fixed at creation), so
+	// the broadcast has no peer to address and can never succeed.
+	return errors.Is(err, broadcaster.ErrNotPrimary) || errors.Is(err, merr.ErrCollectionNotFound) ||
+		errors.Is(err, errRollbackImportNoVchannels)
 }

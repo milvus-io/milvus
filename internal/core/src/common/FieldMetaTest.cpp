@@ -84,6 +84,52 @@ TEST(FieldMetaTest, ParseFromWithoutExternalField) {
     EXPECT_TRUE(field.get_external_field_mapping().empty());
 }
 
+TEST(FieldMetaTest, LocalFormatRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(202);
+    proto.set_name("vortex_varchar");
+    proto.set_data_type(milvus::proto::schema::DataType::VarChar);
+    proto.set_nullable(true);
+    auto* max_length = proto.add_type_params();
+    max_length->set_key(MAX_LENGTH);
+    max_length->set_value("128");
+    auto* local_format = proto.add_type_params();
+    local_format->set_key(LOCAL_FORMAT_KEY);
+    local_format->set_value(LOCAL_FORMAT_VORTEX);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_local_format(), LOCAL_FORMAT_VORTEX);
+
+    auto serialized = field.ToProto();
+    int local_format_count = 0;
+    for (const auto& param : serialized.type_params()) {
+        if (param.key() == LOCAL_FORMAT_KEY) {
+            ++local_format_count;
+            EXPECT_EQ(param.value(), LOCAL_FORMAT_VORTEX);
+        }
+    }
+    EXPECT_EQ(local_format_count, 1);
+
+    auto reparsed = FieldMeta::ParseFrom(serialized);
+    EXPECT_EQ(reparsed.get_local_format(), LOCAL_FORMAT_VORTEX);
+    EXPECT_EQ(reparsed.get_max_len(), 128);
+}
+
+TEST(FieldMetaTest, RawLocalFormatIsDefaultAndNotSerialized) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("raw_scalar");
+    proto.set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_local_format(), LOCAL_FORMAT_RAW);
+
+    auto serialized = field.ToProto();
+    for (const auto& param : serialized.type_params()) {
+        EXPECT_NE(param.key(), LOCAL_FORMAT_KEY);
+    }
+}
+
 TEST(FieldMetaTest, ShouldLoadFieldReturnsFalseForExternalField) {
     auto schema = std::make_shared<Schema>();
 

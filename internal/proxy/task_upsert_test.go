@@ -77,16 +77,16 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 
 	// checkFieldsDataBySchema was already checked by TestUpsertTask_checkFieldsDataBySchema
 
-	boolFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Bool}
-	int8FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int8}
-	int16FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int16}
-	int32FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int32}
-	int64FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int64}
-	floatFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Float}
-	doubleFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Double}
-	floatVectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
-	binaryVectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_BinaryVector}
-	varCharFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}
+	boolFieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID, Name: "Bool", DataType: schemapb.DataType_Bool}
+	int8FieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 1, Name: "Int8", DataType: schemapb.DataType_Int8}
+	int16FieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 2, Name: "Int16", DataType: schemapb.DataType_Int16}
+	int32FieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 3, Name: "Int32", DataType: schemapb.DataType_Int32}
+	int64FieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 4, Name: "Int64", DataType: schemapb.DataType_Int64}
+	floatFieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 5, Name: "Float", DataType: schemapb.DataType_Float}
+	doubleFieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 6, Name: "Double", DataType: schemapb.DataType_Double}
+	floatVectorFieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 7, Name: "FloatVector", DataType: schemapb.DataType_FloatVector}
+	binaryVectorFieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 8, Name: "BinaryVector", DataType: schemapb.DataType_BinaryVector}
+	varCharFieldSchema := &schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 9, Name: "VarChar", DataType: schemapb.DataType_VarChar}
 
 	numRows := 20
 	dim := 128
@@ -107,7 +107,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 			varCharFieldSchema,
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 	case2 := upsertTask{
 		req: &milvuspb.UpsertRequest{
 			NumRows:    uint32(numRows),
@@ -429,7 +429,7 @@ func TestUpsertTask_Function(t *testing.T) {
 		},
 	}
 
-	info := newSchemaInfo(schema)
+	info := mustNewSchemaInfo(schema)
 	collectionID := UniqueID(0)
 	cache := NewMockCache(t)
 	globalMetaCache = cache
@@ -504,7 +504,7 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
-			schema: newSchemaInfo(&schemapb.CollectionSchema{
+			schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 				Name: "col-0",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -607,7 +607,7 @@ func createTestSchema() *schemaInfo {
 			},
 		},
 	}
-	return newSchemaInfo(schema)
+	return mustNewSchemaInfo(schema)
 }
 
 func TestRetrieveByPKs_Success(t *testing.T) {
@@ -1072,7 +1072,7 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 
 func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 	// Schema for the test collection
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_merge_collection",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -1165,7 +1165,7 @@ func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 
 func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 	// Schema for the test collection
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_merge_collection",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -1254,7 +1254,7 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 
 func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	// Schema for the test collection
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_merge_collection",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -1341,7 +1341,7 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_struct_partial_update",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -2196,7 +2196,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 
 	t.Run("scalar field with empty data array nullable field", func(t *testing.T) {
 		// Schema with nullable scalar field c
-		schema := newSchemaInfo(&schemapb.CollectionSchema{
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name: "test_empty_data_array",
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "a", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -2314,7 +2314,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 
 	t.Run("scalar field with empty data array - non-nullable field", func(t *testing.T) {
 		// Schema with non-nullable scalar field c
-		schema := newSchemaInfo(&schemapb.CollectionSchema{
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name: "test_empty_data_array_non_nullable",
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "a", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -2448,7 +2448,7 @@ func TestInsertPreExecute_FilterBM25AndMinHashOutputFields(t *testing.T) {
 		m := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1000+numRows), nil).Build()
 		defer m.UnPatch()
 
-		schema := newSchemaInfo(&schemapb.CollectionSchema{
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name:   "test_filter_bm25_minhash",
 			AutoID: true,
 			Fields: []*schemapb.FieldSchema{
@@ -2533,7 +2533,7 @@ func TestInsertPreExecute_FilterBM25AndMinHashOutputFields(t *testing.T) {
 		defer m.UnPatch()
 
 		// Schema with a text embedding function (non-BM25/MinHash)
-		schema := newSchemaInfo(&schemapb.CollectionSchema{
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name:   "test_preserve_embedding",
 			AutoID: true,
 			Fields: []*schemapb.FieldSchema{
@@ -2599,7 +2599,7 @@ func TestInsertPreExecute_FilterBM25AndMinHashOutputFields(t *testing.T) {
 		m := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1000+numRows), nil).Build()
 		defer m.UnPatch()
 
-		noFuncSchema := newSchemaInfo(&schemapb.CollectionSchema{
+		noFuncSchema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name:   "test_no_func",
 			AutoID: true,
 			Fields: []*schemapb.FieldSchema{
@@ -2654,7 +2654,7 @@ func TestInsertPreExecute_FilterBM25AndMinHashOutputFields(t *testing.T) {
 func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 	dim := int64(4)
 
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_nullable_vec",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -2938,7 +2938,7 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 
 func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 	// Schema with a non-nullable field that has DefaultValue
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_default_value_upsert",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -3027,7 +3027,7 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 
 func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 	// Schema with a non-nullable field that has DefaultValue
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_default_value_error",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -3107,7 +3107,7 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 
 func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 	// Schema with dynamic field enabled, simulating a collection with id + value + $meta
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name:               "test_dynamic_validdata",
 		EnableDynamicField: true,
 		Fields: []*schemapb.FieldSchema{
@@ -3305,7 +3305,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		// After upgrading to 2.6, existing collections retain this schema.
 		// queryPreExecute must NOT unconditionally fill ValidData for $meta,
 		// because CheckValidData expects len(ValidData)==0 for non-nullable fields.
-		v25Schema := newSchemaInfo(&schemapb.CollectionSchema{
+		v25Schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name:               "test_v25_compat",
 			EnableDynamicField: true,
 			Fields: []*schemapb.FieldSchema{

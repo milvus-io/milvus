@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -634,6 +635,10 @@ func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, star
 		BM25FieldIDs:            config.BM25FieldIDs,
 		BM25StatsLogIDs:         config.BM25StatsLogIDs,
 		WriteMergedBM25Stats:    config.WriteMergedBM25Stats,
+		PKStatsFieldID:          config.PKStatsFieldID,
+		PKStatsLogID:            config.PKStatsLogID,
+		PKStatsBlob:             config.PKStatsBlob,
+		MergedPKStatsBlob:       config.MergedPKStatsBlob,
 		ReadVersion:             config.ReadVersion,
 		WriterFormat:            config.WriterFormat,
 		SchemaBasedPattern:      config.SchemaBasedPattern,
@@ -668,6 +673,18 @@ func (s *delegatorGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) 
 		return nil, merr.WrapErrServiceInternalMsg("growing flush source segment does not expose materialized field ids")
 	}
 	return provider.MaterializedFieldIDs(ctx)
+}
+
+type primaryKeysProvider interface {
+	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
+}
+
+func (s *delegatorGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	provider, ok := s.segment.(primaryKeysProvider)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("growing flush source segment does not expose primary keys")
+	}
+	return provider.PrimaryKeys(ctx, startOffset, endOffset)
 }
 
 func (s *delegatorGrowingFlushSource) Release() {

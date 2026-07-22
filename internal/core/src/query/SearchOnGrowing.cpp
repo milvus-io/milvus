@@ -170,10 +170,15 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                               query_offsets};
         int32_t current_chunk_id = 0;
 
-        // get index params for bm25 and minhash brute force
+        // get index params for bm25 and minhash brute force.
+        // A field added by add_function_field is absent from the growing
+        // record's index_meta_ snapshot, so guard with has_field_index_meta:
+        // BM25 k1/b are delivered through the plan, MinHash falls back to
+        // defaults for the brief window before the segment is reloaded.
         std::map<std::string, std::string> index_info;
-        if (metric_type == knowhere::metric::BM25 ||
-            metric_type == knowhere::metric::MHJACCARD) {
+        if ((metric_type == knowhere::metric::BM25 ||
+             metric_type == knowhere::metric::MHJACCARD) &&
+            segment.get_indexing_record().has_field_index_meta(vecfield_id)) {
             index_info = segment.get_indexing_record()
                              .get_field_index_meta(vecfield_id)
                              .GetIndexParams();

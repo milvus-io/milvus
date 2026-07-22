@@ -20,6 +20,7 @@ package tasks
 
 import (
 	"container/heap"
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -258,6 +259,54 @@ func buildTestDFWithStringPKAndElementIndices(pool memory.Allocator, idsPerChunk
 	_ = builder.AddColumnFromChunks(elementIndicesCol, collector.Consume(elementIndicesCol))
 	collector.Release()
 
+	return builder.Build()
+}
+
+func buildTestDFWithStringPKElementIndicesAndGroupBy(
+	pool memory.Allocator,
+	idsPerChunk [][]string,
+	scoresPerChunk [][]float32,
+	elemIdxPerChunk [][]int32,
+	groupByPerChunk [][]int64,
+	groupByFieldName string,
+) *chain.DataFrame {
+	numChunks := len(idsPerChunk)
+	chunkSizes := make([]int64, numChunks)
+	colNames := []string{idFieldName, scoreFieldName, segOffsetCol, elementIndicesCol, groupByFieldName}
+	collector := chain.NewChunkCollector(colNames, numChunks)
+
+	for i := 0; i < numChunks; i++ {
+		chunkSizes[i] = int64(len(idsPerChunk[i]))
+
+		idBuilder := array.NewStringBuilder(pool)
+		idBuilder.AppendValues(idsPerChunk[i], nil)
+		collector.Set(idFieldName, i, idBuilder.NewArray())
+		idBuilder.Release()
+
+		scoreBuilder := array.NewFloat32Builder(pool)
+		scoreBuilder.AppendValues(scoresPerChunk[i], nil)
+		collector.Set(scoreFieldName, i, scoreBuilder.NewArray())
+		scoreBuilder.Release()
+
+		elementBuilder := array.NewInt32Builder(pool)
+		elementBuilder.AppendValues(elemIdxPerChunk[i], nil)
+		collector.Set(elementIndicesCol, i, elementBuilder.NewArray())
+		elementBuilder.Release()
+
+		groupBuilder := array.NewInt64Builder(pool)
+		groupBuilder.AppendValues(groupByPerChunk[i], nil)
+		collector.Set(groupByFieldName, i, groupBuilder.NewArray())
+		groupBuilder.Release()
+
+		appendDefaultSegOffsetChunk(pool, collector, i, len(idsPerChunk[i]))
+	}
+
+	builder := chain.NewDataFrameBuilder()
+	builder.SetChunkSizes(chunkSizes)
+	for _, name := range colNames {
+		_ = builder.AddColumnFromChunks(name, collector.Consume(name))
+	}
+	collector.Release()
 	return builder.Build()
 }
 
@@ -1704,6 +1753,35 @@ func TestHeapMergeReduce_ElementIndicesDedup(t *testing.T) {
 	assert.Equal(t, int32(0), eiCol.Value(3))
 }
 
+func TestHeapMergeReduce_GroupByStringElementIndicesDedup(t *testing.T) {
+	pool := memory.NewGoAllocator()
+
+	df0 := buildTestDFWithStringPKElementIndicesAndGroupBy(pool,
+		[][]string{{"a", "a", "b"}},
+		[][]float32{{0.99, 0.97, 0.96}},
+		[][]int32{{0, 1, 0}},
+		[][]int64{{1, 1, 2}},
+		groupByCol)
+	defer df0.Release()
+
+	df1 := buildTestDFWithStringPKElementIndicesAndGroupBy(pool,
+		[][]string{{"a", "c"}},
+		[][]float32{{0.98, 0.95}},
+		[][]int32{{1, 0}},
+		[][]int64{{1, 3}},
+		groupByCol)
+	defer df1.Release()
+
+	result, err := heapMergeReduce(pool, []*chain.DataFrame{df0, df1}, 2, &groupByOptions{GroupSize: 2})
+	require.NoError(t, err)
+	defer result.DF.Release()
+
+	ids := result.DF.Column(idFieldName).Chunk(0).(*array.String)
+	elements := result.DF.Column(elementIndicesCol).Chunk(0).(*array.Int32)
+	assert.Equal(t, []string{"a", "a", "b"}, []string{ids.Value(0), ids.Value(1), ids.Value(2)})
+	assert.Equal(t, []int32{0, 1, 0}, []int32{elements.Value(0), elements.Value(1), elements.Value(2)})
+}
+
 func TestHeapMergeReduce_GroupByElementIndicesDedup(t *testing.T) {
 	pool := memory.NewGoAllocator()
 
@@ -1787,4 +1865,355 @@ func TestHeapMergeReduce_NoElementIndices(t *testing.T) {
 
 	assert.False(t, result.DF.HasColumn(elementIndicesCol),
 		"no $element_indices column should exist when inputs lack it")
+}
+
+func TestMergeHeapAdvanceRoot(t *testing.T) {
+	pool := memory.NewGoAllocator()
+
+	t.Run("Int64", func(t *testing.T) {
+		dfs := []*chain.DataFrame{
+			buildTestDF(pool, [][]int64{{1, 4}}, [][]float32{{0.9, 0.5}}),
+			buildTestDF(pool, [][]int64{{2}}, [][]float32{{0.8}}),
+			buildTestDF(pool, [][]int64{{3, 5}}, [][]float32{{0.7, 0.4}}),
+		}
+		defer func() {
+			for _, df := range dfs {
+				df.Release()
+			}
+		}()
+
+		cols := resolveInputCols(dfs, nil, false)
+		entries, err := buildMergeEntries(cols, 0, false, false)
+		require.NoError(t, err)
+		h := mergeHeapInt64Pk(entries)
+		heap.Init(&h)
+
+		var got []int64
+		for h.Len() > 0 {
+			got = append(got, h[0].idInt64Val())
+			h.advanceRoot()
+		}
+		assert.Equal(t, []int64{1, 2, 3, 4, 5}, got)
+	})
+
+	t.Run("String", func(t *testing.T) {
+		dfs := []*chain.DataFrame{
+			buildTestDFWithStringPK(pool, [][]string{{"a", "d"}}, [][]float32{{0.9, 0.5}}),
+			buildTestDFWithStringPK(pool, [][]string{{"b"}}, [][]float32{{0.8}}),
+			buildTestDFWithStringPK(pool, [][]string{{"c", "e"}}, [][]float32{{0.7, 0.4}}),
+		}
+		defer func() {
+			for _, df := range dfs {
+				df.Release()
+			}
+		}()
+
+		cols := resolveInputCols(dfs, nil, false)
+		entries, err := buildMergeEntries(cols, 0, false, true)
+		require.NoError(t, err)
+		h := mergeHeapStringPk(entries)
+		heap.Init(&h)
+
+		var got []string
+		for h.Len() > 0 {
+			got = append(got, h[0].idStringVal())
+			h.advanceRoot()
+		}
+		assert.Equal(t, []string{"a", "b", "c", "d", "e"}, got)
+	})
+}
+
+func TestMergeHeapAdvanceRoot_NearEpsilonLegacyParity(t *testing.T) {
+	const (
+		high float32 = 0.0999999717
+		mid  float32 = 0.0999999642
+		low  float32 = 0.0999999568
+	)
+
+	pool := memory.NewGoAllocator()
+
+	t.Run("Int64", func(t *testing.T) {
+		dfs := []*chain.DataFrame{
+			buildTestDF(pool, [][]int64{{1, 7}}, [][]float32{{0.2, low}}),
+			buildTestDF(pool, [][]int64{{7}}, [][]float32{{mid}}),
+			buildTestDF(pool, [][]int64{{7}}, [][]float32{{high}}),
+		}
+		defer func() {
+			for _, df := range dfs {
+				df.Release()
+			}
+		}()
+
+		cols := resolveInputCols(dfs, nil, false)
+		entries, err := buildMergeEntries(cols, 0, false, false)
+		require.NoError(t, err)
+
+		legacyHeap := &mergeHeapInt64Pk{}
+		optimizedHeap := &mergeHeapInt64Pk{}
+		for _, entry := range entries {
+			legacyCopy := *entry
+			optimizedCopy := *entry
+			heap.Push(legacyHeap, &legacyCopy)
+			heap.Push(optimizedHeap, &optimizedCopy)
+		}
+
+		wantIDs, wantScores, wantSources := legacyMergeStandardInt64Pk(legacyHeap, 2)
+		gotIDs, gotScores, gotSources := mergeStandardInt64Pk(optimizedHeap, 2)
+
+		assert.Equal(t, []int64{1, 7}, wantIDs)
+		assert.Equal(t, []float32{0.2, high}, wantScores)
+		assert.Equal(t, wantIDs, gotIDs)
+		assert.Equal(t, wantScores, gotScores)
+		assert.Equal(t, wantSources, gotSources)
+	})
+
+	t.Run("String", func(t *testing.T) {
+		dfs := []*chain.DataFrame{
+			buildTestDFWithStringPK(pool, [][]string{{"first", "duplicate"}}, [][]float32{{0.2, low}}),
+			buildTestDFWithStringPK(pool, [][]string{{"duplicate"}}, [][]float32{{mid}}),
+			buildTestDFWithStringPK(pool, [][]string{{"duplicate"}}, [][]float32{{high}}),
+		}
+		defer func() {
+			for _, df := range dfs {
+				df.Release()
+			}
+		}()
+
+		cols := resolveInputCols(dfs, nil, false)
+		entries, err := buildMergeEntries(cols, 0, false, true)
+		require.NoError(t, err)
+
+		legacyHeap := &mergeHeapStringPk{}
+		optimizedHeap := &mergeHeapStringPk{}
+		for _, entry := range entries {
+			legacyCopy := *entry
+			optimizedCopy := *entry
+			heap.Push(legacyHeap, &legacyCopy)
+			heap.Push(optimizedHeap, &optimizedCopy)
+		}
+
+		wantIDs, wantScores, wantSources := legacyMergeStandardStringPk(legacyHeap, 2)
+		gotIDs, gotScores, gotSources := mergeStandardStringPk(optimizedHeap, 2)
+
+		assert.Equal(t, []string{"first", "duplicate"}, wantIDs)
+		assert.Equal(t, []float32{0.2, high}, wantScores)
+		assert.Equal(t, wantIDs, gotIDs)
+		assert.Equal(t, wantScores, gotScores)
+		assert.Equal(t, wantSources, gotSources)
+	})
+}
+
+func legacyMergeStandardInt64Pk(h *mergeHeapInt64Pk, topK int64) ([]int64, []float32, []segmentSource) {
+	dedupSet := make(map[any]struct{}, topK)
+	ids := make([]int64, 0, topK)
+	scores := make([]float32, 0, topK)
+	sources := make([]segmentSource, 0, topK)
+	for int64(len(ids)) < topK && h.Len() > 0 {
+		e := heap.Pop(h).(*mergeEntry)
+		pk := e.idInt64Val()
+		if _, dup := dedupSet[pk]; !dup {
+			ids = append(ids, pk)
+			scores = append(scores, e.scoreVal())
+			dedupSet[pk] = struct{}{}
+			sources = append(sources, segmentSource{
+				InputIdx:    e.inputIdx,
+				SegOffset:   e.segOffsetVal(),
+				OriginalIdx: e.cursor,
+			})
+		}
+		if e.advance() {
+			heap.Push(h, e)
+		}
+	}
+	return ids, scores, sources
+}
+
+func legacyMergeStandardStringPk(h *mergeHeapStringPk, topK int64) ([]string, []float32, []segmentSource) {
+	dedupSet := make(map[any]struct{}, topK)
+	ids := make([]string, 0, topK)
+	scores := make([]float32, 0, topK)
+	sources := make([]segmentSource, 0, topK)
+	for int64(len(ids)) < topK && h.Len() > 0 {
+		e := heap.Pop(h).(*mergeEntry)
+		pk := e.idStringVal()
+		if _, dup := dedupSet[pk]; !dup {
+			ids = append(ids, pk)
+			scores = append(scores, e.scoreVal())
+			dedupSet[pk] = struct{}{}
+			sources = append(sources, segmentSource{
+				InputIdx:    e.inputIdx,
+				SegOffset:   e.segOffsetVal(),
+				OriginalIdx: e.cursor,
+			})
+		}
+		if e.advance() {
+			heap.Push(h, e)
+		}
+	}
+	return ids, scores, sources
+}
+
+func benchmarkHeapMergeReduce(b *testing.B, stringPK bool) {
+	const (
+		numSegments = 16
+		nq          = 50
+		rowsPerNQ   = 500
+		topK        = 500
+	)
+	pool := memory.NewGoAllocator()
+	dfs := make([]*chain.DataFrame, numSegments)
+	for seg := 0; seg < numSegments; seg++ {
+		scores := make([][]float32, nq)
+		if stringPK {
+			ids := make([][]string, nq)
+			for q := 0; q < nq; q++ {
+				ids[q] = make([]string, rowsPerNQ)
+				scores[q] = make([]float32, rowsPerNQ)
+				for row := 0; row < rowsPerNQ; row++ {
+					ids[q][row] = fmt.Sprintf("%04d-%04d-%04d", q, seg, row)
+					scores[q][row] = float32(rowsPerNQ-row) + float32(numSegments-seg)/float32(numSegments+1)
+				}
+			}
+			dfs[seg] = buildTestDFWithStringPK(pool, ids, scores)
+		} else {
+			ids := make([][]int64, nq)
+			for q := 0; q < nq; q++ {
+				ids[q] = make([]int64, rowsPerNQ)
+				scores[q] = make([]float32, rowsPerNQ)
+				for row := 0; row < rowsPerNQ; row++ {
+					ids[q][row] = int64((q*numSegments+seg)*rowsPerNQ + row)
+					scores[q][row] = float32(rowsPerNQ-row) + float32(numSegments-seg)/float32(numSegments+1)
+				}
+			}
+			dfs[seg] = buildTestDF(pool, ids, scores)
+		}
+	}
+	defer func() {
+		for _, df := range dfs {
+			df.Release()
+		}
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := heapMergeReduce(pool, dfs, topK, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+		result.DF.Release()
+	}
+}
+
+func BenchmarkHeapMergeReduceInt64(b *testing.B) {
+	benchmarkHeapMergeReduce(b, false)
+}
+
+func BenchmarkHeapMergeReduceString(b *testing.B) {
+	benchmarkHeapMergeReduce(b, true)
+}
+
+func benchmarkMergeLoop(b *testing.B, stringPK, legacy bool) {
+	const (
+		numSegments = 16
+		rowsPerNQ   = 500
+		topK        = 500
+	)
+	pool := memory.NewGoAllocator()
+	var intEntries []*mergeEntry
+	var stringEntries []*mergeEntry
+	var arrays []arrow.Array
+	defer func() {
+		for _, arr := range arrays {
+			arr.Release()
+		}
+	}()
+
+	for seg := 0; seg < numSegments; seg++ {
+		scores := make([]float32, rowsPerNQ)
+		offsets := make([]int64, rowsPerNQ)
+		for row := 0; row < rowsPerNQ; row++ {
+			scores[row] = float32(rowsPerNQ-row) + float32(numSegments-seg)/float32(numSegments+1)
+			offsets[row] = int64(row)
+		}
+		scoreBuilder := array.NewFloat32Builder(pool)
+		scoreBuilder.AppendValues(scores, nil)
+		scoreArr := scoreBuilder.NewArray().(*array.Float32)
+		scoreBuilder.Release()
+		offsetBuilder := array.NewInt64Builder(pool)
+		offsetBuilder.AppendValues(offsets, nil)
+		offsetArr := offsetBuilder.NewArray().(*array.Int64)
+		offsetBuilder.Release()
+		arrays = append(arrays, scoreArr, offsetArr)
+
+		if stringPK {
+			ids := make([]string, rowsPerNQ)
+			for row := range ids {
+				ids[row] = fmt.Sprintf("%04d-%04d", seg, row)
+			}
+			idBuilder := array.NewStringBuilder(pool)
+			idBuilder.AppendValues(ids, nil)
+			idArr := idBuilder.NewArray().(*array.String)
+			idBuilder.Release()
+			arrays = append(arrays, idArr)
+			stringEntries = append(stringEntries, &mergeEntry{inputIdx: seg, idString: idArr, scoreArr: scoreArr, segOffsetArr: offsetArr})
+		} else {
+			ids := make([]int64, rowsPerNQ)
+			for row := range ids {
+				ids[row] = int64(seg*rowsPerNQ + row)
+			}
+			idBuilder := array.NewInt64Builder(pool)
+			idBuilder.AppendValues(ids, nil)
+			idArr := idBuilder.NewArray().(*array.Int64)
+			idBuilder.Release()
+			arrays = append(arrays, idArr)
+			intEntries = append(intEntries, &mergeEntry{inputIdx: seg, idInt64: idArr, scoreArr: scoreArr, segOffsetArr: offsetArr})
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if stringPK {
+			h := make(mergeHeapStringPk, len(stringEntries))
+			for j, entry := range stringEntries {
+				copy := *entry
+				h[j] = &copy
+			}
+			heap.Init(&h)
+			if legacy {
+				legacyMergeStandardStringPk(&h, topK)
+			} else {
+				mergeStandardStringPk(&h, topK)
+			}
+		} else {
+			h := make(mergeHeapInt64Pk, len(intEntries))
+			for j, entry := range intEntries {
+				copy := *entry
+				h[j] = &copy
+			}
+			heap.Init(&h)
+			if legacy {
+				legacyMergeStandardInt64Pk(&h, topK)
+			} else {
+				mergeStandardInt64Pk(&h, topK)
+			}
+		}
+	}
+}
+
+func BenchmarkMergeLoopInt64Legacy(b *testing.B) {
+	benchmarkMergeLoop(b, false, true)
+}
+
+func BenchmarkMergeLoopInt64Optimized(b *testing.B) {
+	benchmarkMergeLoop(b, false, false)
+}
+
+func BenchmarkMergeLoopStringLegacy(b *testing.B) {
+	benchmarkMergeLoop(b, true, true)
+}
+
+func BenchmarkMergeLoopStringOptimized(b *testing.B) {
+	benchmarkMergeLoop(b, true, false)
 }

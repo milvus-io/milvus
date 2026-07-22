@@ -4794,7 +4794,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status=~\"fail_.*\"}[2m])/120) by(function_name, pod, node_id)",
+              "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status=\"fail\"}[2m])/120) by(function_name, pod, node_id)",
               "interval": "",
               "legendFormat": "{{function_name}}-{{pod}}-{{node_id}}",
               "queryType": "randomWalk",

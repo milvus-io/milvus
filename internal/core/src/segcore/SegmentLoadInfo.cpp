@@ -548,6 +548,32 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool is_replace_field = was_default_filled || files_changed;
             bool index_has_raw_data =
                 new_info.field_index_has_raw_data_.count(fid) > 0;
+            bool is_vector_field = IsVectorDataType(
+                new_info.schema_->operator[](fid).get_data_type());
+            // When a VECTOR field's index already carries the raw data
+            // (IVF_FLAT / DiskANN / HNSW-with-raw), the separate raw vector
+            // column is redundant and must NOT be made resident — neither eager
+            // nor "lazy" (the loon lazy path still materializes a
+            // ProxyChunkColumn and sets field_data_ready, so it stays on disk on
+            // top of the index, ~doubling the footprint). retrieve reconstructs
+            // the vector from the index (get_vector). Restricted to vector
+            // fields on purpose: scalar / JSON / ARRAY raw columns stay resident
+            // because their index-read paths do not cover every consumer
+            // (nullable Reverse_Lookup, column-scan-only exprs like TIMESTAMPTZ
+            // arith, etc.) — those are tracked separately. prefer_field_data is
+            // the explicit opt-in to keep both resident; system fields load.
+            if (field_id >= START_USER_FIELDID && is_vector_field &&
+                index_has_raw_data && !prefer_field_data) {
+                // Free a stale resident copy on the no-raw-index -> raw-index
+                // reopen transition (the raw column was loaded because the
+                // current index had no raw data; now the index carries it).
+                // Steady state (already skipped, never resident) drops nothing.
+                if (cur_iter != cur_field_to_files.end() &&
+                    field_index_has_raw_data_.count(fid) == 0) {
+                    diff.field_data_to_drop.emplace(field_id);
+                }
+                continue;
+            }
             // Eager-load when: system field, OR schema says load AND
             // (we want to keep field data alongside index, OR index can't serve raw).
             bool should_eager_load =
@@ -568,15 +594,12 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 } else {
                     lazy_replace_fields.emplace_back(field_id);
                 }
-            } else {
-                // Field at same position — check if needs lazification
-                // (transitioning from no-raw-data-index to raw-data-index)
-                if (!prefer_field_data &&
-                    new_info.field_index_has_raw_data_.count(fid) > 0 &&
-                    field_index_has_raw_data_.count(fid) == 0) {
-                    lazy_replace_fields.emplace_back(field_id);
-                }
             }
+            // No else: a field at the same position whose index gained raw
+            // data (the no-raw-index -> raw-index transition) is handled by the
+            // early "skip raw column" branch above, which drops the stale
+            // resident copy instead of lazifying it (lazy still keeps it on
+            // disk on top of the index — the double-footprint bug this fixes).
         }
         if (!fields.empty()) {
             diff.column_groups_to_load.emplace_back(i, fields);

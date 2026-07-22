@@ -336,7 +336,7 @@ func TestValidateTextRequiresStorageV3(t *testing.T) {
 	assert.NoError(t, ValidateTextRequiresStorageV3(textSchema, true))
 }
 
-func TestUseGrowingSourceFlush(t *testing.T) {
+func TestAllowGrowingSourceFlush(t *testing.T) {
 	ordinarySchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, DataType: schemapb.DataType_Int64},
@@ -349,13 +349,17 @@ func TestUseGrowingSourceFlush(t *testing.T) {
 		},
 	}
 
-	assert.False(t, UseGrowingSourceFlush(ordinarySchema, false, true))
-	assert.False(t, UseGrowingSourceFlush(textSchema, false, true))
-	assert.False(t, UseGrowingSourceFlush(ordinarySchema, true, false))
-	assert.True(t, UseGrowingSourceFlush(ordinarySchema, true, true))
-	assert.True(t, UseGrowingSourceFlush(textSchema, true, false))
-	assert.False(t, UseGrowingSourceFlush(nil, true, false))
-	assert.True(t, UseGrowingSourceFlush(nil, true, true))
+	assert.False(t, AllowGrowingSourceFlush(ordinarySchema, false, true))
+	assert.False(t, AllowGrowingSourceFlush(textSchema, false, true))
+	assert.False(t, AllowGrowingSourceFlush(ordinarySchema, true, false))
+	assert.True(t, AllowGrowingSourceFlush(ordinarySchema, true, true))
+	assert.False(t, AllowGrowingSourceFlush(textSchema, true, false))
+	assert.True(t, AllowGrowingSourceFlush(textSchema, true, true))
+	assert.False(t, AllowGrowingSourceFlush(nil, true, false))
+	assert.True(t, AllowGrowingSourceFlush(nil, true, true))
+	assert.Equal(t,
+		AllowGrowingSourceFlush(textSchema, true, false),
+		UseGrowingSourceFlush(textSchema, true, false))
 }
 
 func TestSchema_GetVectorFieldSchemas(t *testing.T) {
@@ -5055,6 +5059,45 @@ func TestIsBm25FunctionInputField(t *testing.T) {
 		Functions: nil,
 	}
 	assert.False(t, IsBm25FunctionInputField(nilSchema, nilSchema.Fields[0]))
+}
+
+func TestIsMinHashFunctionInputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 101, Name: "sig", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+			{FieldID: 102, Name: "bm25_in", DataType: schemapb.DataType_VarChar},
+			{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name: "minhash_func", Type: schemapb.FunctionType_MinHash,
+				InputFieldIds: []int64{100}, InputFieldNames: []string{"text"},
+				OutputFieldIds: []int64{101}, OutputFieldNames: []string{"sig"},
+			},
+			{
+				Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+				InputFieldIds: []int64{102}, InputFieldNames: []string{"bm25_in"},
+				OutputFieldIds: []int64{103}, OutputFieldNames: []string{"sparse"},
+			},
+		},
+	}
+	// each helper matches only its own function type's input field
+	assert.True(t, IsMinHashFunctionInputField(schema, schema.Fields[0])) // text -> minhash input
+	assert.False(t, IsBm25FunctionInputField(schema, schema.Fields[0]))
+	assert.True(t, IsBm25FunctionInputField(schema, schema.Fields[2])) // bm25_in -> bm25 input
+	assert.False(t, IsMinHashFunctionInputField(schema, schema.Fields[2]))
+	assert.False(t, IsMinHashFunctionInputField(schema, schema.Fields[1])) // output field
+
+	// name fallback (no field ids assigned yet) + nil safety
+	schemaNoIDs := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{Name: "text", DataType: schemapb.DataType_VarChar}},
+		Functions: []*schemapb.FunctionSchema{
+			{Name: "mh", Type: schemapb.FunctionType_MinHash, InputFieldNames: []string{"text"}},
+		},
+	}
+	assert.True(t, IsMinHashFunctionInputField(schemaNoIDs, schemaNoIDs.Fields[0]))
+	assert.False(t, IsMinHashFunctionInputField(nil, schemaNoIDs.Fields[0]))
 }
 
 func TestIsMinHashFunctionOutputField(t *testing.T) {

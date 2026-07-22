@@ -37,7 +37,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 				},
 				EnableNamespace: true,
 			}
-			return newSchemaInfo(schema), nil
+			return mustNewSchemaInfo(schema), nil
 		}).Build()
 
 		// Patch checkNq to bypass placeholder parsing
@@ -85,7 +85,7 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, consistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(schema), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(schema), nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionsIndex).Return(partitionNames, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitions).Return(partitionIDs, nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
@@ -133,7 +133,7 @@ func TestSearchTask_RequeryPlanNamespace(t *testing.T) {
 		tsk := &searchTask{
 			Condition:     NewTaskCondition(context.Background()),
 			ctx:           context.Background(),
-			schema:        newSchemaInfo(schema),
+			schema:        mustNewSchemaInfo(schema),
 			request:       &milvuspb.SearchRequest{CollectionName: "test_collection"},
 			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
 			node:          &Proxy{},

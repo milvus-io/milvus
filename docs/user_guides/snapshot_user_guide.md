@@ -89,7 +89,7 @@ client.create_snapshot(
 ```go
 import (
     "context"
-    "github.com/milvus-io/milvus/client/v2/milvusclient"
+    "github.com/milvus-io/milvus/client/v3/milvusclient"
 )
 
 client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{

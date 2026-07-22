@@ -188,8 +188,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        if (schema_.data_type() == proto::schema::DataType::Array &&
-            !is_nested_index_) {
+        if (schema_.data_type() == proto::schema::DataType::Array) {
             return false;
         }
         return true;

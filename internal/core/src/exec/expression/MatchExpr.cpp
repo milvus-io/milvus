@@ -308,6 +308,8 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (MatchEmptyElements(match_type, threshold)) {
             bitset_view.set();
         }
+        ApplyStructRowValidity(
+            col_vec.get(), field_meta.get_id(), input, batch_rows);
         if (!has_offset_input_) {
             current_pos_ += batch_rows;
         }
@@ -406,8 +408,60 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         dispatch.template operator()<false>();
     }
 
+    ApplyStructRowValidity(
+        col_vec.get(), field_meta.get_id(), input, batch_rows);
     if (!has_offset_input_) {
         current_pos_ += batch_rows;
+    }
+}
+
+void
+PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
+                                           FieldId field_id,
+                                           const OffsetVector* input,
+                                           int64_t batch_rows) {
+    TargetBitmapView value_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    if (input != nullptr) {
+        AssertInfo(static_cast<int64_t>(input->size()) == batch_rows,
+                   "offset input size {} does not match batch row count {}",
+                   input->size(),
+                   batch_rows);
+        std::vector<int64_t> row_offsets(batch_rows);
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            row_offsets[i] = static_cast<int64_t>((*input)[i]);
+        }
+        segment_->ApplyFieldValidDataByOffsets(
+            op_ctx_, field_id, row_offsets.data(), batch_rows, valid_view);
+    } else {
+        int64_t processed = 0;
+        int64_t row_offset = current_pos_;
+        while (processed < batch_rows) {
+            auto [chunk_id, offset_in_chunk] =
+                segment_->get_chunk_by_offset(field_id, row_offset);
+            auto count = std::min(
+                batch_rows - processed,
+                segment_->chunk_size(field_id, chunk_id) - offset_in_chunk);
+            AssertInfo(count > 0,
+                       "invalid field validity range at row offset {} for "
+                       "field {}",
+                       row_offset,
+                       field_id.get());
+            segment_->ApplyFieldValidData(op_ctx_,
+                                          field_id,
+                                          chunk_id,
+                                          offset_in_chunk,
+                                          count,
+                                          valid_view + processed);
+            processed += count;
+            row_offset += count;
+        }
+    }
+
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        if (!valid_view[i]) {
+            value_view[i] = false;
+        }
     }
 }
 

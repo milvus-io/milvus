@@ -708,7 +708,7 @@ func TestTranslateOutputFields(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 
 	// Test empty output fields
 	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{}, schema, false)
@@ -843,7 +843,7 @@ func TestTranslateOutputFields(t *testing.T) {
 				{Name: common.MetaFieldName, FieldID: 102, DataType: schemapb.DataType_JSON, IsDynamic: true},
 			},
 		}
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 
 		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
 		assert.NoError(t, err)
@@ -919,7 +919,7 @@ func TestTranslateOutputFields_StructArrayField(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 
 	// Test struct array field
 	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"sub_vector_field"}, schema, false)
@@ -2251,7 +2251,7 @@ func TestHasCollectionTask(t *testing.T) {
 	task.CollectionName = collectionName
 
 	// invalidate collection cache, trigger rootcoord rpc
-	globalMetaCache.RemoveCollection(ctx, dbName, collectionName, 0)
+	globalMetaCache.RemoveCollection(ctx, dbName, collectionName)
 
 	// rc return collection not found error
 	mixc.describeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -2326,7 +2326,9 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.NoError(t, err)
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
+	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, task.result.GetStatus().GetErrorCode())
+	assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), task.result.GetStatus().GetCode())
+	assert.Equal(t, "true", task.result.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
@@ -2537,6 +2539,47 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 }
 
+func TestDescribeCollectionTask_FillsNameFromResultWhenQueriedByID(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+
+	const (
+		collectionName = "collection_from_result"
+		collectionID   = int64(449574)
+		dbName         = "db_from_result"
+		dbID           = int64(3)
+	)
+	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:         merr.Success(),
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			DbName:         dbName,
+			DbId:           dbID,
+			Schema: &schemapb.CollectionSchema{
+				Name: collectionName,
+			},
+		}, nil
+	})
+
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionID: collectionID,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
+	assert.Equal(t, collectionID, task.result.GetCollectionID())
+	assert.Equal(t, dbName, task.result.GetDbName())
+	assert.Equal(t, dbID, task.result.GetDbId())
+}
+
 // Security regression: DescribeCollection must redact credentials embedded in
 // ExternalSpec.extfs (access_key_id / access_key_value / ssl_ca_cert) before
 // returning to the client. Any caller with Describe privilege would otherwise
@@ -2586,9 +2629,9 @@ func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
 	assert.NoError(t, task.PreExecute(ctx))
 	assert.NoError(t, task.Execute(ctx))
 
-	// describeCollectionTask now passes ExternalSpec through unredacted —
-	// redaction lives at the public proxy.DescribeCollection edge so both
-	// cached and remote provider paths converge through one sanitizer.
+	// describeCollectionTask passes ExternalSpec through unredacted — the
+	// DescribeCollection interceptor response hook sanitizes both cached and
+	// remote provider results before metrics and API return.
 	// The task-level result must still carry raw creds so that the
 	// post-task wrapper can choose to redact (user-facing) or not
 	// (internal callers, if added later, that need raw spec for FFI).
@@ -2662,7 +2705,7 @@ func TestCreatePartitionTask(t *testing.T) {
 	rc := mocks.NewMockMixCoordClient(t)
 
 	mockCache := NewMockCache(t)
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(&schemapb.CollectionSchema{
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 		EnableDynamicField: false,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "ID", DataType: schemapb.DataType_Int64},
@@ -2746,7 +2789,7 @@ func TestDropPartitionTask(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
-	).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
+	).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
 	globalMetaCache = mockCache
 
 	task := &dropPartitionTask{
@@ -2797,7 +2840,7 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
 		globalMetaCache = mockCache
 		task.PartitionName = "partition1"
 		err = task.PreExecute(ctx)
@@ -2824,7 +2867,7 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -2850,7 +2893,7 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
@@ -3493,7 +3536,7 @@ func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				idField,
 				vectorField,
@@ -3526,7 +3569,7 @@ func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				idField,
 				otherField,
@@ -3675,7 +3718,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -4070,7 +4113,7 @@ func TestLoadCollectionTaskExecuteTextRequiresStorageV3(t *testing.T) {
 		collectionName = "text_collection"
 		collectionID   = int64(100)
 	)
-	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
@@ -8012,7 +8055,9 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 	t.Run("PreExecute add function without fieldInfos", func(t *testing.T) {
 		task := buildTask(buildAddFunctionRequest(minHashFunctionOnlySchema), functionOnlyOldSchema)
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("PreExecute rejects function-only BM25 request", func(t *testing.T) {
@@ -8191,7 +8236,7 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorContains(t, err, "function output field not found")
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("PreExecute happy path", func(t *testing.T) {
@@ -8257,16 +8302,13 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		}
 	})
 
-	t.Run("Execute supports function-only add request", func(t *testing.T) {
+	t.Run("PreExecute rejects function-only add request", func(t *testing.T) {
 		req := buildAddFunctionRequest(minHashFunctionOnlySchema)
 		task := buildTask(req, functionOnlyOldSchema)
 
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
-
-		err = task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.Empty(t, req.GetAction().GetAddRequest().GetFieldInfos())
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("Execute skips nil field infos", func(t *testing.T) {
@@ -8754,7 +8796,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop by function_name - detach minhash success", func(t *testing.T) {
+	t.Run("drop by function_name - detach minhash rejected", func(t *testing.T) {
 		schemaWithFunc := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -8783,7 +8825,8 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 			},
 		}
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "detaching a function without dropping its output field is not supported")
 	})
 
 	t.Run("drop by function_name - bm25 function field success", func(t *testing.T) {
@@ -8976,7 +9019,7 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("detach minhash function succeeds", func(t *testing.T) {
+	t.Run("detach minhash function rejected", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8991,10 +9034,11 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "minhash_func", false)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
 	})
 
-	t.Run("detach bm25 function fails", func(t *testing.T) {
+	t.Run("detach bm25 function rejected", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -9010,7 +9054,26 @@ func TestValidateDropFunction(t *testing.T) {
 		}
 		err := validateDropFunction(schema, "bm25_func", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
+	})
+
+	t.Run("detach text embedding function rejected (coupled like all types)", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "vec_func_out", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec_func_out"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "embed_func", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
 	})
 
 	t.Run("drop function field leaves another vector field", func(t *testing.T) {
@@ -9051,7 +9114,7 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop unsupported function field fails", func(t *testing.T) {
+	t.Run("drop text embedding function field succeeds", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -9067,8 +9130,7 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "embed_func", true)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
+		assert.NoError(t, err)
 	})
 
 	t.Run("drop function field would leave no vector field", func(t *testing.T) {

@@ -108,6 +108,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
 			return err
 		}
+		if err := schemautil.CheckNoFunctionCascade(coll.ToCollectionSchemaPB().GetFunctions(), plan.Function); err != nil {
+			return err
+		}
 		for _, function := range coll.Functions {
 			if function.Name == plan.Function.GetName() {
 				return merr.WrapErrParameterInvalidMsg("function already exists, name: %s", plan.Function.GetName())
@@ -117,6 +120,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 
 	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
 	if err != nil {
+		return err
+	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
 	if plan.HasFunction() {
@@ -368,11 +374,11 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 
 	switch id := dropReq.GetIdentifier().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
-		if dropReq.GetDropFunctionOutputFields() {
-			schema, properties, droppedFieldIds, err = buildSchemaForDropFunctionField(coll, id.FunctionName)
-		} else {
-			schema, properties, droppedFieldIds, err = buildSchemaForDetachFunction(coll, id.FunctionName)
+		if !dropReq.GetDropFunctionOutputFields() {
+			return merr.WrapErrParameterInvalidMsg(
+				"detaching a function without dropping its output field is not supported; drop_function always removes the function together with its output field: %s", id.FunctionName)
 		}
+		schema, properties, droppedFieldIds, err = buildSchemaForDropFunctionField(coll, id.FunctionName)
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
 		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, id.FieldName, 0)
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
@@ -381,6 +387,9 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		return merr.WrapErrParameterMissingMsg("drop request must specify field_name, field_id, or function_name")
 	}
 	if err != nil {
+		return err
+	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
 
@@ -455,6 +464,12 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		newFields = append(newFields, model.MarshalFieldModel(f))
 	}
 	if droppedField != nil {
+		// Mirror the proxy guard for direct-coord callers: a field a function
+		// depends on must be dropped via the function DDL, not directly, else the
+		// function is orphaned and its stored output invalidated.
+		if fn, kind := functionReferencing(coll.Functions, droppedField.Name); fn != "" {
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field is referenced by function %s as %s, drop function first", fn, kind)
+		}
 		schema = coll.ToCollectionSchemaPB()
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
@@ -480,6 +495,11 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		newStructs = append(newStructs, model.MarshalStructArrayFieldModel(s))
 	}
 	if droppedStruct != nil {
+		for _, sub := range droppedStruct.Fields {
+			if fn, kind := functionReferencing(coll.Functions, sub.Name); fn != "" {
+				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as %s", droppedStruct.Name, sub.Name, fn, kind)
+			}
+		}
 		schema = coll.ToCollectionSchemaPB()
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
@@ -499,55 +519,44 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 	return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field not found with id: %d", fieldID)
 }
 
-func buildSchemaForDetachFunction(coll *model.Collection, functionName string) (
-	schema *schemapb.CollectionSchema,
-	properties []*commonpb.KeyValuePair,
-	droppedFieldIds []int64,
-	err error,
-) {
-	var targetFunc *model.Function
-	for _, fn := range coll.Functions {
-		if fn.Name == functionName {
-			targetFunc = fn
+// resolveOutputFieldIDsFromNames re-derives a function's output field IDs from its
+// OutputFieldNames against the current schema (the authoritative name->id mapping),
+// and rejects if the persisted OutputFieldIDs disagree as a set. A drop deletes by
+// field id, but the proxy guard authorizes by name; a stale/injected persisted id
+// that no name resolves to (e.g. a primary key) would then be deleted past that
+// guard. Re-resolving keeps authorization (name) and action (id) on one carrier.
+// Read-only, unlike resolveFunctionFieldIDs which mutates the schema on add/alter.
+func resolveOutputFieldIDsFromNames(fn *model.Function, fields []*model.Field) ([]int64, error) {
+	nameToID := make(map[string]int64, len(fields))
+	for _, f := range fields {
+		nameToID[f.Name] = f.FieldID
+	}
+	resolved := make([]int64, 0, len(fn.OutputFieldNames))
+	resolvedSet := make(map[int64]struct{}, len(fn.OutputFieldNames))
+	for _, name := range fn.OutputFieldNames {
+		id, ok := nameToID[name]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("function %s output field %s not found in schema", fn.Name, name)
+		}
+		resolved = append(resolved, id)
+		resolvedSet[id] = struct{}{}
+	}
+	persistedSet := make(map[int64]struct{}, len(fn.OutputFieldIDs))
+	for _, id := range fn.OutputFieldIDs {
+		persistedSet[id] = struct{}{}
+	}
+	mismatch := len(resolvedSet) != len(persistedSet)
+	for id := range persistedSet {
+		if _, ok := resolvedSet[id]; !ok {
+			mismatch = true
 			break
 		}
 	}
-	if targetFunc == nil {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	if mismatch {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"function %s persisted output field ids %v do not align with output field names %v; metadata may be corrupt", fn.Name, fn.OutputFieldIDs, fn.OutputFieldNames)
 	}
-	if targetFunc.Type == schemapb.FunctionType_BM25 {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
-	}
-
-	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
-	for _, fid := range targetFunc.OutputFieldIDs {
-		outputFieldIDSet[fid] = struct{}{}
-	}
-
-	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
-	for _, field := range coll.Fields {
-		fieldSchema := model.MarshalFieldModel(field)
-		if _, ok := outputFieldIDSet[field.FieldID]; ok {
-			fieldSchema.IsFunctionOutput = false
-		}
-		newFields = append(newFields, fieldSchema)
-	}
-
-	newFunctions := make([]*schemapb.FunctionSchema, 0, len(coll.Functions)-1)
-	for _, fn := range coll.Functions {
-		if fn.Name != functionName {
-			newFunctions = append(newFunctions, model.MarshalFunctionModel(fn))
-		}
-	}
-
-	schema = coll.ToCollectionSchemaPB()
-	properties = coll.Properties
-	schema.Fields = newFields
-	schema.Functions = newFunctions
-	schema.Properties = properties
-	schema.Version = coll.SchemaVersion + 1
-
-	return schema, properties, nil, nil
+	return resolved, nil
 }
 
 func buildSchemaForDropFunctionField(coll *model.Collection, functionName string) (
@@ -566,16 +575,29 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	if targetFunc == nil {
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 	}
-	switch targetFunc.Type {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
+	// Drop is uniform across function types (no backfill); unlike add_function_field
+	// it is not type-restricted. Re-resolve the delete set from names so an injected
+	// persisted id cannot be deleted past the name-based proxy guard.
+	outputFieldIDs, err := resolveOutputFieldIDsFromNames(targetFunc, coll.Fields)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	droppedFieldIds = append(droppedFieldIds, outputFieldIDs...)
+	outputFieldIDSet := make(map[int64]struct{}, len(outputFieldIDs))
+	for _, fid := range outputFieldIDs {
+		outputFieldIDSet[fid] = struct{}{}
 	}
 
-	droppedFieldIds = append(droppedFieldIds, targetFunc.OutputFieldIDs...)
-	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
-	for _, fid := range targetFunc.OutputFieldIDs {
-		outputFieldIDSet[fid] = struct{}{}
+	// Mirror the proxy guard for direct-coord callers: dropping the output vector
+	// field(s) must not leave the collection with no vector field.
+	removedVectors := 0
+	for _, field := range coll.Fields {
+		if _, ok := outputFieldIDSet[field.FieldID]; ok && typeutil.IsVectorType(field.DataType) {
+			removedVectors++
+		}
+	}
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) {
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop function %s: it would leave no vector field in the collection", functionName)
 	}
 
 	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
@@ -601,4 +623,23 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	schema.Version = coll.SchemaVersion + 1
 
 	return schema, properties, droppedFieldIds, nil
+}
+
+// functionReferencing returns the name of the first function referencing fieldName
+// and its role ("input"/"output"), or "" if none. A field a function depends on
+// must not be dropped directly (mirrors the proxy validateDropField guard).
+func functionReferencing(functions []*model.Function, fieldName string) (string, string) {
+	for _, fn := range functions {
+		for _, in := range fn.InputFieldNames {
+			if in == fieldName {
+				return fn.Name, "input"
+			}
+		}
+		for _, out := range fn.OutputFieldNames {
+			if out == fieldName {
+				return fn.Name, "output"
+			}
+		}
+	}
+	return "", ""
 }

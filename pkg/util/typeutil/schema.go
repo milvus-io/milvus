@@ -114,13 +114,20 @@ func ValidateTextRequiresStorageV3(schema *schemapb.CollectionSchema, storageV3E
 	return nil
 }
 
-// UseGrowingSourceFlush returns whether insert payload for the schema should
-// be flushed from QueryNode growing source when available.
-func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+// AllowGrowingSourceFlush returns whether insert payload for the schema may try
+// flushing from QueryNode growing source when available.
+func AllowGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
 	if !storageV3Enabled {
 		return false
 	}
-	return HasTextField(schema) || enableGrowingSourceFlush
+	return enableGrowingSourceFlush
+}
+
+// UseGrowingSourceFlush is kept for compatibility. Prefer
+// AllowGrowingSourceFlush for new code to avoid implying the source choice is
+// mandatory.
+func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+	return AllowGrowingSourceFlush(schema, storageV3Enabled, enableGrowingSourceFlush)
 }
 
 // EstimateSizePerRecord returns the estimate size of a record in a collection
@@ -4066,12 +4073,12 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 	return false
 }
 
-func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+func isFunctionInputFieldOfType(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema, fnType schemapb.FunctionType) bool {
 	if coll == nil || field == nil {
 		return false
 	}
 	for _, fn := range coll.GetFunctions() {
-		if fn.GetType() != schemapb.FunctionType_BM25 {
+		if fn.GetType() != fnType {
 			continue
 		}
 		if field.GetFieldID() != 0 && len(fn.GetInputFieldIds()) > 0 {
@@ -4089,6 +4096,18 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 		}
 	}
 	return false
+}
+
+func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return isFunctionInputFieldOfType(coll, field, schemapb.FunctionType_BM25)
+}
+
+// IsMinHashFunctionInputField reports whether field is the input of a MinHash
+// function. Like BM25, MinHash tokenizes the input text through the field's
+// analyzer, so its analyzer params must not change after backfill or stored
+// signatures would silently disagree with newly written ones.
+func IsMinHashFunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return isFunctionInputFieldOfType(coll, field, schemapb.FunctionType_MinHash)
 }
 
 func IsMinHashFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {

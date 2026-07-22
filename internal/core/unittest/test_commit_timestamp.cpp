@@ -250,14 +250,14 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
 // V2/V3 column-group fixture
 //
 // On v2/v3 import segments the raw timestamp column (original row_ts) is
-// emplaced into fields_ by load_field_data_common, while the timestamp index
-// is built from commit_ts via init_storage_v1_timestamp_index. The V1 fixture
+// published in runtime by load_field_data_common, while the timestamp index is
+// built from commit_ts via init_storage_v1_timestamp_index. The V1 fixture
 // above (CreateImportSegment / LoadGeneratedDataIntoSegment) never reproduces
 // this state because the V1 path stores timestamps in insert_record_ instead
-// of fields_. CommitTimestampV2TestAccess pokes the private fields_ map to
-// simulate exactly the v2/v3 shape, so we can verify that EffectiveCommitTs()
-// short-circuits every timestamp reader regardless of which storage path
-// populated fields_.
+// of runtime. CommitTimestampV2TestAccess publishes the raw column into a
+// cloned runtime to simulate exactly the v2/v3 shape, so we can verify that
+// EffectiveCommitTs() short-circuits every timestamp reader regardless of
+// which storage path populated runtime.
 // ===========================================================================
 
 namespace milvus::segcore {
@@ -302,7 +302,13 @@ class CommitTimestampV2TestAccess {
                 std::move(translator), nullptr);
         auto column =
             std::make_shared<ChunkedColumn>(std::move(slot), ts_field_meta);
-        segment->fields_.wlock()->insert_or_assign(TimestampFieldID, column);
+        auto current = segment->CapturePublishedState();
+        auto runtime = segment->CloneRuntimeResourceState(current->runtime);
+        runtime->fields.insert_or_assign(TimestampFieldID, std::move(column));
+        auto next = segment->ClonePublishedState(current);
+        next->runtime = segment->ToConstRuntimeState(std::move(runtime));
+        segment->NormalizePublishedState(*next);
+        segment->PublishState(std::move(next));
     }
 };
 
@@ -342,7 +348,7 @@ CreateImportSegmentV2(SchemaPtr schema,
 }
 
 // V2.1: MVCC — query_ts < commit_ts must mask every row, even though the
-// raw timestamp column in fields_ would say the rows are old enough to be
+// raw timestamp column in runtime would say the rows are old enough to be
 // visible. This was the latent gap: mask_with_timestamps::do_scan used to
 // scan the raw column inside the index-narrowed range.
 TEST(CommitTimestamp, V2_MVCC_RowsInvisibleBeforeCommitTs) {
@@ -406,7 +412,7 @@ TEST(CommitTimestamp, V2_TTL_RowsNotExpiredWhenCommitTsAboveTtl) {
     EXPECT_EQ(bs.count(), 0UL)
         << "v2: import segment with commit_ts=" << T_commit
         << " must NOT be TTL-expired at threshold=" << TTL_THRESHOLD
-        << " even with raw row_ts=" << T_old << " in fields_";
+        << " even with raw row_ts=" << T_old << " in runtime";
 }
 
 // V2.3: Pre-commit delete must not apply on v2 import segments. The bug was

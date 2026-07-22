@@ -2672,18 +2672,19 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
         std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
                            int64_t,
                            T>;
-    auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
     auto value = GetValueWithCastNumber<H>(expr_->value_);
     auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
 
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index.CanSkipBinaryArithRange<T>(field_id_,
-                                                          i,
-                                                          expr_->op_type_,
-                                                          expr_->arith_op_type_,
-                                                          value,
-                                                          right_value);
+        auto skip =
+            skip_index->CanSkipBinaryArithRange<T>(field_id_,
+                                                   i,
+                                                   expr_->op_type_,
+                                                   expr_->arith_op_type_,
+                                                   value,
+                                                   right_value);
         if (!skip) {
             chunks_may_hit.push_back(i);
         }

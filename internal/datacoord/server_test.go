@@ -1839,7 +1839,7 @@ func TestGetCompactionState(t *testing.T) {
 func TestManualCompaction(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
-	t.Run("test manual compaction successfully", func(t *testing.T) {
+	t.Run("target size zero routes to ordinary manual compaction", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
@@ -1849,7 +1849,12 @@ func TestManualCompaction(t *testing.T) {
 		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
-		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.MatchedBy(func(signal *compactionSignal) bool {
+			return signal.collectionID == 1 && signal.isForce
+		})).Return(1, nil).Once()
+
+		mockTriggerManager := NewMockTriggerManager(t)
+		svr.compactionTriggerManager = mockTriggerManager
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1857,9 +1862,11 @@ func TestManualCompaction(t *testing.T) {
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
+			TargetSize:   0,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockTriggerManager.AssertNotCalled(t, "ManualTrigger", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {

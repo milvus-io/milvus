@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -89,6 +90,41 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 	return nil
 }
 
+// resolveFunctionFieldIDs re-derives the function's input/output field IDs from
+// its field names (the source of truth), discarding any client-supplied IDs — else
+// a request could inject an unrelated field ID that a later drop_function_field
+// would delete. It rejects unknown fields and output fields already owned by
+// another function, and marks the resolved output fields as function outputs.
+func resolveFunctionFieldIDs(ctx context.Context, fSchema *schemapb.FunctionSchema, fieldMapping map[string]*model.Field) error {
+	fSchema.InputFieldIds = make([]int64, 0, len(fSchema.InputFieldNames))
+	for _, name := range fSchema.InputFieldNames {
+		field, exists := fieldMapping[name]
+		if !exists {
+			err := merr.WrapErrParameterInvalidMsg("function's input field %s not exists", name)
+			mlog.Error(ctx, "Incorrect function configuration:", mlog.Err(err))
+			return err
+		}
+		fSchema.InputFieldIds = append(fSchema.InputFieldIds, field.FieldID)
+	}
+	fSchema.OutputFieldIds = make([]int64, 0, len(fSchema.OutputFieldNames))
+	for _, name := range fSchema.OutputFieldNames {
+		field, exists := fieldMapping[name]
+		if !exists {
+			err := merr.WrapErrParameterInvalidMsg("function's output field %s not exists", name)
+			mlog.Error(ctx, "Incorrect function configuration:", mlog.Err(err))
+			return err
+		}
+		if field.IsFunctionOutput {
+			err := merr.WrapErrParameterInvalidMsg("function's output field %s is already of other functions", name)
+			mlog.Error(ctx, "Incorrect function configuration: ", mlog.Err(err))
+			return err
+		}
+		fSchema.OutputFieldIds = append(fSchema.OutputFieldIds, field.FieldID)
+		field.IsFunctionOutput = true
+	}
+	return nil
+}
+
 func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.FunctionSchema, collection *model.Collection) error {
 	if fSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("function schema is empty")
@@ -124,29 +160,8 @@ func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.Functi
 		field.IsFunctionOutput = false
 	}
 
-	for _, name := range fSchema.InputFieldNames {
-		field, exists := fieldMapping[name]
-		if !exists {
-			err := merr.WrapErrParameterInvalidMsg("function's input field %s not exists", name)
-			mlog.Error(ctx, "Incorrect function configuration:", mlog.Err(err))
-			return err
-		}
-		fSchema.InputFieldIds = append(fSchema.InputFieldIds, field.FieldID)
-	}
-	for _, name := range fSchema.OutputFieldNames {
-		field, exists := fieldMapping[name]
-		if !exists {
-			err := merr.WrapErrParameterInvalidMsg("function's output field %s not exists", name)
-			mlog.Error(ctx, "Incorrect function configuration:", mlog.Err(err))
-			return err
-		}
-		if field.IsFunctionOutput {
-			err := merr.WrapErrParameterInvalidMsg("function's output field %s is already of other functions", name)
-			mlog.Error(ctx, "Incorrect function configuration: ", mlog.Err(err))
-			return err
-		}
-		fSchema.OutputFieldIds = append(fSchema.OutputFieldIds, field.FieldID)
-		field.IsFunctionOutput = true
+	if err := resolveFunctionFieldIDs(ctx, fSchema, fieldMapping); err != nil {
+		return err
 	}
 	newFunc := model.UnmarshalFunctionModel(fSchema)
 	newFuncs = append(newFuncs, newFunc)
@@ -169,120 +184,22 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 		return err
 	}
 
+	// Only whitelisted params may be altered; function identity (type, name,
+	// input/output fields) is immutable. Skip when the function is absent so the
+	// mutation helper below emits the canonical "not exists" error.
+	for _, fn := range oldColl.Functions {
+		if fn.Name == req.GetFunctionSchema().GetName() {
+			if err := validator.CheckFunctionAlterAllowed(model.MarshalFunctionModel(fn), req.GetFunctionSchema()); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	newColl := oldColl.Clone()
 	if err := alterFunctionGenNewCollection(ctx, req.FunctionSchema, newColl); err != nil {
 		return err
 	}
 
-	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
-}
-
-func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req *milvuspb.DropCollectionFunctionRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
-	if err != nil {
-		return err
-	}
-	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
-		return err
-	}
-
-	var needDelFunc *model.Function
-	for _, f := range oldColl.Functions {
-		if f.Name == req.FunctionName {
-			needDelFunc = f
-			break
-		}
-	}
-	if needDelFunc == nil {
-		return nil
-	}
-
-	newColl := oldColl.Clone()
-
-	newFuncs := []*model.Function{}
-	for _, f := range newColl.Functions {
-		if f.Name != needDelFunc.Name {
-			newFuncs = append(newFuncs, f)
-		}
-	}
-	newColl.Functions = newFuncs
-
-	fieldMapping := map[int64]*model.Field{}
-	for _, field := range newColl.Fields {
-		fieldMapping[field.FieldID] = field
-	}
-	for _, id := range needDelFunc.OutputFieldIDs {
-		field, exists := fieldMapping[id]
-		if !exists {
-			return merr.WrapErrServiceInternalMsg("function's output field %d not exists", id)
-		}
-		field.IsFunctionOutput = false
-	}
-	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
-}
-
-func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *milvuspb.AddCollectionFunctionRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
-	if err != nil {
-		return err
-	}
-
-	newColl := oldColl.Clone()
-	fSchema := req.FunctionSchema
-	if fSchema == nil {
-		return merr.WrapErrParameterInvalidMsg("function schema is empty")
-	}
-
-	nextFunctionID := int64(StartOfUserFunctionID)
-	for _, f := range newColl.Functions {
-		if f.Name == fSchema.Name {
-			return merr.WrapErrParameterInvalidMsg("function name already exists: %s", f.Name)
-		}
-		nextFunctionID = max(nextFunctionID, f.ID+1)
-	}
-	fSchema.Id = nextFunctionID
-
-	fieldMapping := map[string]*model.Field{}
-	for _, field := range newColl.Fields {
-		fieldMapping[field.Name] = field
-	}
-	for _, name := range fSchema.InputFieldNames {
-		field, exists := fieldMapping[name]
-		if !exists {
-			err := merr.WrapErrParameterInvalidMsg("function's input field %s not exists", name)
-			mlog.Error(ctx, "Incorrect function configuration:", mlog.Err(err))
-			return err
-		}
-		fSchema.InputFieldIds = append(fSchema.InputFieldIds, field.FieldID)
-	}
-	for _, name := range fSchema.OutputFieldNames {
-		field, exists := fieldMapping[name]
-		if !exists {
-			err := merr.WrapErrParameterInvalidMsg("function's output field %s not exists", name)
-			mlog.Error(ctx, "Incorrect function configuration:", mlog.Err(err))
-			return err
-		}
-		if field.IsFunctionOutput {
-			err := merr.WrapErrParameterInvalidMsg("function's output field %s is already of other functions", name)
-			mlog.Error(ctx, "Incorrect function configuration: ", mlog.Err(err))
-			return err
-		}
-		fSchema.OutputFieldIds = append(fSchema.OutputFieldIds, field.FieldID)
-		field.IsFunctionOutput = true
-	}
-	newFunc := model.UnmarshalFunctionModel(fSchema)
-	newColl.Functions = append(newColl.Functions, newFunc)
 	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }

@@ -3254,6 +3254,56 @@ func TestRBACGrantSharedLegacyGranteeIDMigrationFailsClosed(t *testing.T) {
 	assert.Equal(t, "donor-user", donorUser)
 }
 
+func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	firstLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstEtcdKey := fmt.Sprintf("%s%s/%s/%s", granteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondEtcdKey := fmt.Sprintf("%s%s/%s/%s", granteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstLegacyID := crypto.MD5(firstLogicalKey)
+	secondLegacyID := crypto.MD5(secondLogicalKey)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
+		func(ctx context.Context, key string) []string {
+			switch {
+			case key == granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{firstEtcdKey, secondEtcdKey}
+			case strings.HasPrefix(key, granteeIDPrefix):
+				return []string{key + "PrivilegeLoad"}
+			default:
+				return nil
+			}
+		},
+		func(ctx context.Context, key string) []string {
+			switch {
+			case key == granteePrefix:
+				return []string{firstLegacyID, secondLegacyID}
+			case strings.HasPrefix(key, granteeIDPrefix):
+				return []string{"root"}
+			default:
+				return nil
+			}
+		},
+		func(ctx context.Context, key string) error {
+			return nil
+		},
+	)
+
+	policies, err := c.ListPolicy(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "ListPolicy should reuse the initially loaded grantee keys for legacy ID collision checks")
+}
+
 func TestRBACGrantMigrationIgnoresUnreferencedComputedLegacyID(t *testing.T) {
 	ctx := context.Background()
 	etcdCli, _ := etcd.GetEtcdClient(

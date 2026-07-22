@@ -115,7 +115,7 @@ TEST(Query, ExecWithPredicateLoader) {
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
-    query::Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr, 3);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -222,7 +222,7 @@ TEST(Query, ExecWithPredicate) {
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
-    query::Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr, 3);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -404,7 +404,7 @@ TEST(Query, ExecWithoutPredicate) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     assert_order(*sr, "l2");
     std::vector<std::vector<std::string>> results;
-    auto json = SearchResultToJson(*sr);
+    auto json = SearchResultToJson(*sr, 3);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [

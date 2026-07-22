@@ -62,6 +62,10 @@ type GrowingFlushConfig struct {
 	BM25FieldIDs            []int64
 	BM25StatsLogIDs         []int64
 	WriteMergedBM25Stats    bool
+	PKStatsFieldID          int64
+	PKStatsLogID            int64
+	PKStatsBlob             []byte
+	MergedPKStatsBlob       []byte
 	ReadVersion             int64
 	WriterFormat            string
 	SchemaBasedPattern      string
@@ -95,6 +99,7 @@ type GrowingFlushSource interface {
 	// always has materialized columns, so an empty set is an error, not a
 	// no-op.
 	MaterializedFieldIDs(ctx context.Context) ([]int64, error)
+	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
 	FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error)
 	Release()
 }
@@ -384,10 +389,12 @@ type GrowingSourceSyncTask struct {
 	flushedSize   int64
 	insertBinlogs map[int64]*datapb.FieldBinlog
 	bm25Stats     map[int64]*storage.BM25Stats
+	singlePKStats *storage.PrimaryKeyStats
 
 	committedManifestPath  string
 	committedBM25Stats     map[int64]*storage.BM25Stats
 	committedInsertBinlogs map[int64]*datapb.FieldBinlog
+	committedPKStats       *storage.PrimaryKeyStats
 
 	writeRetryOpts  []retry.Option
 	failureCallback func(error)
@@ -482,6 +489,11 @@ func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stat
 	return t
 }
 
+func (t *GrowingSourceSyncTask) WithCommittedPKStats(pkStats *storage.PrimaryKeyStats) *GrowingSourceSyncTask {
+	t.committedPKStats = pkStats
+	return t
+}
+
 func (t *GrowingSourceSyncTask) WithAllocator(allocator allocator.Interface) *GrowingSourceSyncTask {
 	t.allocator = allocator
 	return t
@@ -555,6 +567,13 @@ func (t *GrowingSourceSyncTask) CommittedInsertBinlogs() map[int64]*datapb.Field
 	return cloneFieldBinlogMap(t.insertBinlogs)
 }
 
+func (t *GrowingSourceSyncTask) CommittedPKStats() *storage.PrimaryKeyStats {
+	if t.committedPKStats != nil {
+		return t.committedPKStats
+	}
+	return t.singlePKStats
+}
+
 func (t *GrowingSourceSyncTask) BatchRows() int64 {
 	return t.batchRows
 }
@@ -564,6 +583,9 @@ func (t *GrowingSourceSyncTask) TargetOffset() int64 {
 }
 
 func (t *GrowingSourceSyncTask) HandleError(err error) {
+	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+		return
+	}
 	if t.failureCallback != nil {
 		t.failureCallback(err)
 	}
@@ -626,8 +648,11 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		t.manifestPath = t.committedManifestPath
 		t.bm25Stats = t.committedBM25Stats
 		t.insertBinlogs = cloneFieldBinlogMap(t.committedInsertBinlogs)
+		t.singlePKStats = t.committedPKStats
+		t.flushedSize = growingSourceFlushedSizeFromBinlogs(t.insertBinlogs)
 	} else if expectedRows == 0 {
 		t.manifestPath = segment.ManifestPath()
+		t.flushedSize = 0
 	} else {
 		if t.source == nil {
 			return merr.WrapErrServiceInternalMsg("growing flush source is nil")
@@ -646,7 +671,11 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 				return err
 			}
 		}
-		result, err := t.source.FlushGrowingData(ctx, segment.FlushedRows(), t.targetOffset, config)
+		startOffset := segment.FlushedRows()
+		if err := t.fillPrimaryKeyStatsConfig(ctx, startOffset, t.targetOffset, config); err != nil {
+			return err
+		}
+		result, err := t.source.FlushGrowingData(ctx, startOffset, t.targetOffset, config)
 		if err != nil {
 			return errors.Wrap(err, "flush growing source data")
 		}
@@ -661,6 +690,7 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if len(result.BM25Stats) > 0 {
 			t.bm25Stats = result.BM25Stats
 		}
+		t.flushedSize = growingSourceFlushedSizeFromResult(result)
 		if t.metaWriter != nil && len(columnGroups) > 0 {
 			t.insertBinlogs, err = buildGrowingSourceInsertBinlogs(columnGroups, result, insertSummaryLogIDs)
 			if err != nil {
@@ -668,7 +698,6 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 			}
 		}
 	}
-	t.flushedSize = expectedRows
 	if t.metaWriter != nil && expectedRows > 0 && len(columnGroups) > 0 && len(t.insertBinlogs) == 0 {
 		return merr.WrapErrDataIntegrityMsg("growing source committed flush missing insert binlog summary, segmentID=%d targetOffset=%d",
 			t.segmentID, t.targetOffset)
@@ -689,6 +718,9 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	}
 	if len(t.bm25Stats) > 0 {
 		actions = append(actions, metacache.MergeBm25Stats(t.bm25Stats))
+	}
+	if t.singlePKStats != nil {
+		actions = append(actions, metacache.RollStats(t.singlePKStats))
 	}
 	if len(columnGroups) > 0 {
 		actions = append(actions, metacache.UpdateCurrentSplit(columnGroups))
@@ -823,6 +855,10 @@ func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.
 }
 
 func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup) (*GrowingFlushConfig, error) {
+	if segment.GetStorageVersion() != storage.StorageV3 {
+		return nil, merr.WrapErrDataIntegrityMsg("growing source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
+			t.segmentID, segment.GetStorageVersion())
+	}
 	segmentBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
 		metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID))
 	partitionBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
@@ -892,6 +928,80 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo,
 		AllowedFieldIDs:         allowedFieldIDs,
 		ColumnGroups:            columnGroups,
 	}, nil
+}
+
+func (t *GrowingSourceSyncTask) fillPrimaryKeyStatsConfig(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) error {
+	expectedRows := endOffset - startOffset
+	if expectedRows == 0 {
+		return nil
+	}
+	if t.source == nil {
+		return merr.WrapErrServiceInternalMsg("growing flush source is nil")
+	}
+	pks, err := t.source.PrimaryKeys(ctx, startOffset, endOffset)
+	if err != nil {
+		return err
+	}
+	if int64(len(pks)) != expectedRows {
+		return merr.WrapErrDataIntegrityMsg(
+			"growing source primary key count mismatch, segmentID=%d expected=%d actual=%d",
+			t.segmentID, expectedRows, len(pks))
+	}
+	if len(pks) == 0 {
+		return merr.WrapErrDataIntegrityMsg("growing source primary keys are empty, segmentID=%d rows=%d",
+			t.segmentID, expectedRows)
+	}
+
+	var pkField *schemapb.FieldSchema
+	for _, field := range t.schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			pkField = field
+			break
+		}
+	}
+	if pkField == nil {
+		return merr.WrapErrDataIntegrityMsg("growing source flush schema has no primary field, segmentID=%d", t.segmentID)
+	}
+	stats, err := storage.NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), expectedRows)
+	if err != nil {
+		return err
+	}
+	for _, pk := range pks {
+		if pk.Type() != pkField.GetDataType() {
+			return merr.WrapErrDataIntegrityMsg(
+				"growing source primary key type mismatch, segmentID=%d expected=%s actual=%s",
+				t.segmentID, pkField.GetDataType().String(), pk.Type().String())
+		}
+		stats.Update(pk)
+	}
+	blob, err := storage.NewInsertCodec().SerializePkStats(stats, expectedRows)
+	if err != nil {
+		return err
+	}
+	logIDs, err := t.allocLogIDs(1, "growing source primary key stats")
+	if err != nil {
+		return err
+	}
+	config.PKStatsFieldID = pkField.GetFieldID()
+	config.PKStatsLogID = logIDs[0]
+	config.PKStatsBlob = blob.Value
+	t.singlePKStats = stats
+	if t.IsFlush() && t.level != datapb.SegmentLevel_L0 {
+		serializer, err := NewStorageSerializer(t.metacache, t.schema)
+		if err != nil {
+			return err
+		}
+		mergedBlob, err := serializer.serializeMergedPkStatsWith(&SyncPack{
+			segmentID: t.segmentID,
+		}, stats)
+		if err != nil {
+			return err
+		}
+		if mergedBlob != nil {
+			config.MergedPKStatsBlob = mergedBlob.Value
+		}
+	}
+	return nil
 }
 
 func growingSourceReadVersion(manifestPath string, columnGroups []storagecommon.ColumnGroup) (int64, error) {
@@ -1010,6 +1120,31 @@ func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, r
 		nil,
 		fieldNullCounts,
 	), nil
+}
+
+func growingSourceFlushedSizeFromResult(result *GrowingFlushResult) int64 {
+	if result == nil {
+		return 0
+	}
+	var size int64
+	for _, memorySize := range result.ColumnGroupMemorySizes {
+		size += memorySize
+	}
+	return size
+}
+
+func growingSourceFlushedSizeFromBinlogs(binlogs map[int64]*datapb.FieldBinlog) int64 {
+	var size int64
+	for _, fieldBinlog := range binlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.GetLogSize() > 0 {
+				size += binlog.GetLogSize()
+				continue
+			}
+			size += binlog.GetMemorySize()
+		}
+	}
+	return size
 }
 
 func cloneFieldBinlogMap(binlogs map[int64]*datapb.FieldBinlog) map[int64]*datapb.FieldBinlog {

@@ -504,6 +504,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 				SegmentID:      segmentID,
 				InsertLogs:     []*datapb.FieldBinlog{},
 				Manifest:       manifest,
+				BaseManifest:   manifest,
 				StorageVersion: storage.StorageV3,
 			}},
 		}, nil).Once()
@@ -757,6 +758,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSaveSegmentMeta() {
 					SegmentID:      segmentID,
 					StorageVersion: storage.StorageV3,
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					InsertLogs: []*datapb.FieldBinlog{
 						{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 1000, EntriesNum: 1000}}},
 						{FieldID: 102, Binlogs: []*datapb.Binlog{{LogID: 2000, EntriesNum: 1000}}},

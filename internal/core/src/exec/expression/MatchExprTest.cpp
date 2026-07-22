@@ -24,10 +24,12 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -722,6 +724,228 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(result->offset_size(), 1);
     EXPECT_EQ(result->offset(0), 2);
+}
+
+namespace {
+
+std::unique_ptr<InsertRecordProto>
+BuildNullableStructInsertData(const std::shared_ptr<Schema>& schema,
+                              FieldId int64_fid,
+                              FieldId sub_int_fid) {
+    constexpr int64_t row_count = 5;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+
+    std::vector<int64_t> ids(row_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    auto* sub_field = insert_data->add_fields_data();
+    sub_field->set_field_id(sub_int_fid.get());
+    sub_field->set_field_name("struct_array[sub_int]");
+    sub_field->set_type(proto::schema::DataType::Array);
+    auto* array_data = sub_field->mutable_scalars()->mutable_array_data();
+    array_data->set_element_type(proto::schema::DataType::Int32);
+
+    const std::vector<bool> valid = {true, false, true, true, false};
+    for (auto is_valid : valid) {
+        sub_field->add_valid_data(is_valid);
+    }
+
+    auto append_row = [array_data](std::initializer_list<int32_t> values) {
+        auto* row = array_data->add_data();
+        for (auto value : values) {
+            row->mutable_int_data()->add_data(value);
+        }
+    };
+
+    append_row({1, 2});
+    append_row({});
+    append_row({});
+    append_row({9001});
+    append_row({});
+
+    insert_data->set_num_rows(row_count);
+    return insert_data;
+}
+
+std::set<int64_t>
+RetrieveOffsets(SegmentInternalInterface* segment,
+                const std::shared_ptr<Schema>& schema,
+                const std::string& expr) {
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.Parse(expr);
+    auto plan =
+        CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
+    EXPECT_NE(plan, nullptr);
+    auto result = segment->Retrieve(
+        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_NE(result, nullptr);
+
+    std::set<int64_t> offsets;
+    if (result != nullptr) {
+        offsets.insert(result->offset().begin(), result->offset().end());
+    }
+    return offsets;
+}
+
+void
+CheckNullableStructExpressions(SegmentInternalInterface* segment,
+                               const std::shared_ptr<Schema>& schema) {
+    EXPECT_EQ(
+        RetrieveOffsets(
+            segment, schema, "match_any(struct_array, $[sub_int] >= 9000)"),
+        (std::set<int64_t>{3}));
+    EXPECT_EQ(RetrieveOffsets(
+                  segment, schema, "match_all(struct_array, $[sub_int] >= 0)"),
+              (std::set<int64_t>{0, 2, 3}));
+    EXPECT_EQ(
+        RetrieveOffsets(
+            segment, schema, "not match_any(struct_array, $[sub_int] >= 9000)"),
+        (std::set<int64_t>{0, 2}));
+    EXPECT_EQ(
+        RetrieveOffsets(
+            segment, schema, "json_contains_all(struct_array[sub_int], [])"),
+        (std::set<int64_t>{0, 2, 3}));
+    EXPECT_TRUE(RetrieveOffsets(segment,
+                                schema,
+                                "json_contains_any(struct_array[sub_int], [])")
+                    .empty());
+    EXPECT_EQ(
+        RetrieveOffsets(segment,
+                        schema,
+                        "not json_contains_any(struct_array[sub_int], [])"),
+        (std::set<int64_t>{0, 2, 3}));
+}
+
+std::shared_ptr<Schema>
+BuildNullableStructSchema(FieldId& int64_fid, FieldId& sub_int_fid) {
+    auto schema = std::make_shared<Schema>();
+    int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, true);
+    return schema;
+}
+
+}  // namespace
+
+TEST(MatchExprNullableStruct, SealedPropagatesStructRowValidity) {
+    FieldId int64_fid;
+    FieldId sub_int_fid;
+    auto schema = BuildNullableStructSchema(int64_fid, sub_int_fid);
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < 5; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    CheckNullableStructExpressions(segment.get(), schema);
+}
+
+TEST(MatchExprNullableStruct, GrowingPropagatesStructRowValidity) {
+    FieldId int64_fid;
+    FieldId sub_int_fid;
+    auto schema = BuildNullableStructSchema(int64_fid, sub_int_fid);
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid);
+
+    std::vector<idx_t> row_ids = {0, 1, 2, 3, 4};
+    std::vector<Timestamp> timestamps = {0, 1, 2, 3, 4};
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(row_ids.size());
+    segment->Insert(0,
+                    row_ids.size(),
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_data.get());
+
+    CheckNullableStructExpressions(segment.get(), schema);
+}
+
+TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
+    FieldId int64_fid;
+    FieldId sub_int_fid;
+    auto schema = BuildNullableStructSchema(int64_fid, sub_int_fid);
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < 5; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
+
+    std::vector<boost::container::vector<int32_t>> arrays = {
+        {1, 2}, {}, {}, {9001}, {}};
+    auto index = std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+    Config cfg;
+    cfg["is_array"] = true;
+    cfg["is_nested_index"] = true;
+    index->BuildWithRawDataForUT(arrays.size(), arrays.data(), cfg);
+    LoadIndexInfo info{};
+    info.field_id = sub_int_fid.get();
+    info.index_params = GenIndexParams(index.get());
+    info.cache_index =
+        CreateTestCacheIndex("nullable_sub_int", std::move(index));
+    segment->LoadIndex(info);
+
+    EXPECT_EQ(
+        RetrieveOffsets(segment.get(),
+                        schema,
+                        "not array_contains(struct_array[sub_int], 9001)"),
+        (std::set<int64_t>{0, 2}));
+}
+
+TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto base_sub_fid = schema->AddDebugArrayField(
+        "base_struct[sub_int]", DataType::INT32, true);
+    schema->set_schema_version(1);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    std::atomic<bool> stop{false};
+    std::atomic<int64_t> missing{0};
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                if (segment->GetArrayOffsets(base_sub_fid) == nullptr) {
+                    missing.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    auto latest_schema = schema;
+    for (int version = 2; version <= 32; ++version) {
+        auto next_schema = std::make_shared<Schema>(*latest_schema);
+        next_schema->AddDebugArrayField(
+            "struct_" + std::to_string(version) + "[sub_int]",
+            DataType::INT32,
+            true);
+        next_schema->set_schema_version(version);
+        segment->LazyCheckSchema(next_schema, nullptr);
+        latest_schema = std::move(next_schema);
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& reader : readers) {
+        reader.join();
+    }
+    EXPECT_EQ(missing.load(), 0);
 }
 
 class SealedMatchExprTest : public ::testing::Test {

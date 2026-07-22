@@ -215,7 +215,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
-	).Return(newSchemaInfo(newTestSchema()), nil)
+	).Return(mustNewSchemaInfo(newTestSchema()), nil)
 	mockCache.On("GetCollectionInfo",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),

@@ -184,8 +184,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             auto q = *(query.get() + i);
             auto last_dis = std::numeric_limits<float>::max();
             // we should see strict decreasing distances for brute force iterator.
-            while (it->HasNext()) {
-                auto [offset, dis] = it->Next();
+            while (it->HasNext().value()) {
+                auto [offset, dis] = it->Next().value();
                 ASSERT_LE(dis, last_dis);
                 last_dis = dis;
                 ASSERT_FLOAT_EQ(dis, base[offset].dot(q));
@@ -203,4 +203,44 @@ TEST_F(TestSparseFloatSearchBruteForce, NotSupported) {
 TEST_F(TestSparseFloatSearchBruteForce, IP) {
     Run(100, 10, 5, "IP");
     Run(100, 10, 5, "ip");
+}
+
+// Behavioral regression for #51366: a segment that predates a BM25 field added
+// by add_function_field keeps its original per-segment index meta, so the
+// brute-force path receives an empty index_info. k1/b then come from
+// brute_force_index_params_ (sourced from the collection meta at plan creation);
+// the search must run instead of tripping the missing-field assert.
+TEST(SparseBM25BruteForce, RunsWithEmptyIndexInfoUsingFallbackParams) {
+    const int nb = 100, nq = 5, topk = 5;
+    auto bitset = std::make_shared<BitsetType>();
+    bitset->resize(nb);
+    auto bitset_view = BitsetView(*bitset);
+
+    auto base = milvus::segcore::GenerateRandomSparseFloatVector(nb);
+    auto query = milvus::segcore::GenerateRandomSparseFloatVector(nq);
+    dataset::SearchDataset query_dataset{
+        knowhere::metric::BM25, nq, topk, -1, kTestSparseDim, query.get()};
+    auto raw_dataset =
+        query::dataset::RawDataset{0, kTestSparseDim, nb, base.get()};
+
+    SearchInfo search_info;
+    search_info.topk_ = topk;
+    search_info.metric_type_ = knowhere::metric::BM25;
+    // avgdl still rides the plan (typed field); k1/b come from the fallback.
+    search_info.search_params_[knowhere::meta::BM25_AVGDL] = 5.0;
+    search_info.brute_force_index_params_.bm25_k1_ = 1.2f;
+    search_info.brute_force_index_params_.bm25_b_ = 0.75f;
+
+    std::map<std::string, std::string> empty_index_info;
+    ASSERT_NO_THROW({
+        auto result = BruteForceSearch(query_dataset,
+                                       raw_dataset,
+                                       search_info,
+                                       empty_index_info,
+                                       bitset_view,
+                                       DataType::VECTOR_SPARSE_U32_F32,
+                                       DataType::NONE,
+                                       nullptr);
+        (void)result;
+    });
 }

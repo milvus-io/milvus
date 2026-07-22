@@ -33,6 +33,10 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	if len(replicas) == 0 {
 		return
 	}
+	// Promote load-config replicas all-or-nothing. Partially exposing ready
+	// replicas can let the query path enter a resource group while the load path
+	// is still moving the remaining replicas, causing the two paths to compete
+	// for resources during the switch.
 	for _, replica := range replicas {
 		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
 			return

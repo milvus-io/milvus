@@ -61,9 +61,11 @@ func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSch
 		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
 	}
 	fieldHelper := typeutil.CreateFieldSchemaHelper(field)
-	if fieldHelper.EnableMatch() || typeutil.IsBm25FunctionInputField(schema, field) {
+	if fieldHelper.EnableMatch() ||
+		typeutil.IsBm25FunctionInputField(schema, field) ||
+		typeutil.IsMinHashFunctionInputField(schema, field) {
 		return merr.WrapErrParameterInvalidMsg(
-			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",
+			"can not alter analyzer params for field %s after text match is enabled or a BM25/MinHash function depends on it",
 			fieldName,
 		)
 	}
@@ -118,6 +120,9 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 			}
 			break
 		}
+	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
 	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {

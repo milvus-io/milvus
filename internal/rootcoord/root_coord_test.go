@@ -1397,26 +1397,14 @@ func TestRootCoord_AddCollectionFunction(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("run ok", func(t *testing.T) {
+	// Deprecated legacy RPC: always rejects (add BM25/MinHash via add_function_field,
+	// define TextEmbedding at collection creation).
+	t.Run("rejected", func(t *testing.T) {
 		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(nil).Build()
-		defer mocker.UnPatch()
+		c := newTestCore(withHealthyCode())
 		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run failed", func(t *testing.T) {
-		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(fmt.Errorf("")).Build()
-		defer mocker.UnPatch()
-		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 
@@ -1429,26 +1417,13 @@ func TestRootCoord_DropCollectionFunction(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("run ok", func(t *testing.T) {
+	// Deprecated legacy RPC: always rejects (drop routes through drop_function_field).
+	t.Run("rejected", func(t *testing.T) {
 		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(nil).Build()
-		defer mocker.UnPatch()
+		c := newTestCore(withHealthyCode())
 		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run failed", func(t *testing.T) {
-		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(fmt.Errorf("")).Build()
-		defer mocker.UnPatch()
-		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 

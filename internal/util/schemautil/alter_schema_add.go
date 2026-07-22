@@ -113,10 +113,8 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 	function := plan.Function
 	switch plan.Kind {
 	case AlterSchemaAddFunction:
-		if function.GetType() == schemapb.FunctionType_BM25 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function must be added with its output field in add_function_field interface")
-		}
-		return nil
+		return merr.WrapErrParameterInvalidMsg(
+			"adding a function over existing fields is not supported; use add_function_field to add the function together with its new output field")
 	case AlterSchemaAddFunctionField:
 		if err := validateAddFunctionFieldAllowed(function); err != nil {
 			return err
@@ -172,4 +170,26 @@ func validateAddFunctionFieldInputOutput(function *schemapb.FunctionSchema) erro
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported function type in alter schema task: %s", function.GetType().String())
 	}
+}
+
+// CheckNoFunctionCascade rejects a new function whose input field is the output
+// field of an existing function. Cascade (function-on-function) is unsupported:
+// the executor has no topological execution and backfill has no dependency
+// ordering, so a chained output can never be materialized in a defined order.
+func CheckNoFunctionCascade(existingFunctions []*schemapb.FunctionSchema, newFunction *schemapb.FunctionSchema) error {
+	if newFunction == nil {
+		return nil
+	}
+	existingOutputs := typeutil.NewSet[string]()
+	for _, fn := range existingFunctions {
+		existingOutputs.Insert(fn.GetOutputFieldNames()...)
+	}
+	for _, input := range newFunction.GetInputFieldNames() {
+		if existingOutputs.Contain(input) {
+			return merr.WrapErrParameterInvalidMsg(
+				"function %s input field %s is the output of another function; function cascade is not supported",
+				newFunction.GetName(), input)
+		}
+	}
+	return nil
 }

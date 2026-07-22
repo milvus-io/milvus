@@ -1,12 +1,12 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260625075625-7262f8042a55
-	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
+	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/peterstace/simplefeatures v0.54.0
@@ -19,7 +19,7 @@ require (
 	google.golang.org/grpc v1.80.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ../../client
+replace github.com/milvus-io/milvus/client/v3 => ../../client
 
 require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
