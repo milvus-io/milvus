@@ -23,6 +23,7 @@
 #include "Utils.h"
 #include "bitset/bitset.h"
 #include "common/Types.h"
+#include "log/Log.h"
 #include "pb/schema.pb.h"
 #include "rescores/Murmur3.h"
 #include "segcore/SegmentInterface.h"
@@ -52,6 +53,7 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const TargetBitmap& bitmap,
                           std::vector<std::optional<float>>& boost_scores) {
     auto bitmap_size = bitmap.size();
+    size_t out_of_bounds = 0;
     for (auto i = 0; i < offsets.size(); i++) {
         auto offset = offsets[i];
         // Bounds check: offset must be within bitmap size.
@@ -61,8 +63,20 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
             if (bitmap[offset] > 0) {
                 set_score(boost_scores[i], mode);
             }
+        } else {
+            // Out of bounds: treat as "no match" (don't apply boost), but
+            // count it -- a silent skip here once masked a short filter
+            // bitset, so make any bitmap/offset desync observable.
+            ++out_of_bounds;
         }
-        // If offset is out of bounds, treat as "no match" (don't apply boost)
+    }
+    if (out_of_bounds > 0) {
+        LOG_WARN(
+            "WeightScorer::batch_score skipped {} of {} offsets outside the "
+            "filter bitmap (bitmap size {})",
+            out_of_bounds,
+            offsets.size(),
+            bitmap_size);
     }
 };
 
@@ -129,17 +143,31 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
     idx.reserve(offsets.size());
 
     auto bitmap_size = bitmap.size();
+    size_t out_of_bounds = 0;
     for (auto i = 0; i < offsets.size(); i++) {
         auto offset = offsets[i];
         // Bounds check: offset must be within bitmap size.
         // Race condition: text index may lag behind vector index,
         // causing offsets to reference rows not yet in text index.
-        if (offset >= 0 && static_cast<size_t>(offset) < bitmap_size &&
-            bitmap[offset] > 0) {
-            target_offsets.push_back(static_cast<int64_t>(offset));
-            idx.push_back(i);
+        if (offset >= 0 && static_cast<size_t>(offset) < bitmap_size) {
+            if (bitmap[offset] > 0) {
+                target_offsets.push_back(static_cast<int64_t>(offset));
+                idx.push_back(i);
+            }
+        } else {
+            // Out of bounds: treat as "no match" (don't apply boost), but
+            // count it -- a silent skip here once masked a short filter
+            // bitset, so make any bitmap/offset desync observable.
+            ++out_of_bounds;
         }
-        // If offset is out of bounds, treat as "no match" (don't apply boost)
+    }
+    if (out_of_bounds > 0) {
+        LOG_WARN(
+            "RandomScorer::batch_score skipped {} of {} offsets outside the "
+            "filter bitmap (bitmap size {})",
+            out_of_bounds,
+            offsets.size(),
+            bitmap_size);
     }
 
     // skip if empty
