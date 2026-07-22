@@ -91,6 +91,11 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     // path: MoveCursorForIndex() asserts sealed-only, while
     // EvalForIndexSegment() on a growing segment advances the global index
     // position together with the data cursor -- mirror that here.
+    // Unlike the base implementation, MoveCursorForData() is called without a
+    // HasFieldData() guard: this exec path already walks data chunks
+    // unconditionally (EvalForIndexSegment), and with no field data
+    // num_data_chunk_ is 0, making the call a no-op -- the omission is
+    // intentional, not an oversight.
     void
     MoveCursor() override {
         if (has_offset_input_ || execute_all_at_once_) {
