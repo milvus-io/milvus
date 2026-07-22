@@ -44,7 +44,11 @@ BuildFilterExprSet(const expr::TypedExprPtr& filter,
                    exec::ExecContext* exec_context) {
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter);
-    return std::make_unique<exec::ExprSet>(filters, exec_context);
+    // Boost scoring reads only the data bits of the filter output — an
+    // UNKNOWN (NULL) row never receives a boost, exactly like FALSE — so
+    // the consumer is null-rejecting, same as PhyIterativeFilterNode.
+    return std::make_unique<exec::ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
 }
 
 bool
@@ -190,6 +194,12 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                    filter->ToString());
         auto col_vec_size = col_vec->size();
         TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+        // Fold UNKNOWN (NULL) into FALSE (data &= valid) so a null row
+        // never receives a boost, keeping NULL policy identical on the
+        // native and non-native branches (PhyIterativeFilterNode folds on
+        // both of its branches too).
+        TargetBitmapView validview(col_vec->GetValidRawData(), col_vec_size);
+        bitsetview.inplace_and(validview, col_vec_size);
         scorer->batch_score(op_context,
                             segment,
                             function_mode,

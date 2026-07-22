@@ -473,6 +473,77 @@ TEST(BoostScoreRunnerTest, ComputeScorerScoresGISFilterCoversAllBatches) {
     EXPECT_FLOAT_EQ(scores[4].value(), 3.0F);
 }
 
+// NULL policy must be identical on the native and non-native branches of
+// ComputeScorerScores: an UNKNOWN (NULL) filter verdict never grants a
+// boost. The non-native branch folds the valid bitmap explicitly; this
+// pins the same contract for a native (offset-input) filter evaluated on
+// a nullable field.
+TEST(BoostScoreRunnerTest, NativeFilterGivesNullRowsNoBoost) {
+    const int64_t N = 1000;
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto age_fid =
+        schema->AddDebugField("age", DataType::INT64, /*nullable=*/true);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto raw_data = segcore::DataGen(schema, N);
+    proto::schema::FieldData* age_field_data = nullptr;
+    for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == age_fid.get()) {
+            age_field_data = &fd;
+            break;
+        }
+    }
+    ASSERT_NE(age_field_data, nullptr);
+    // Every row satisfies the filter on its data bits; odd rows are NULL.
+    auto* age_col =
+        age_field_data->mutable_scalars()->mutable_long_data()->mutable_data();
+    auto* valid_col = age_field_data->mutable_valid_data();
+    ASSERT_EQ(valid_col->size(), N);
+    for (int64_t i = 0; i < N; i++) {
+        age_col->at(i) = i;
+        valid_col->at(i) = (i % 2 == 0);
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    proto::plan::GenericValue val;
+    val.set_int64_val(0);
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(age_fid, DataType::INT64, {}, /*nullable=*/true),
+        proto::plan::OpType::GreaterEqual,
+        val);
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_scorer_native_null_fold", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    // Guard: this filter must resolve to the native branch, otherwise the
+    // assertions below silently degrade into another non-native case.
+    EXPECT_FALSE(
+        ComputeNonNativeFilterBitset(&exec_context, scorer).has_value());
+
+    FixedVector<int32_t> offsets = {0, 1, 2, 3, 500, 501};
+    std::vector<std::optional<float>> scores(offsets.size(), std::nullopt);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, offsets, scores);
+
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        if (offsets[i] % 2 == 0) {
+            ASSERT_TRUE(scores[i].has_value())
+                << "valid row " << offsets[i] << " must be boosted";
+            EXPECT_FLOAT_EQ(scores[i].value(), 2.0F);
+        } else {
+            EXPECT_FALSE(scores[i].has_value())
+                << "null row " << offsets[i] << " must not be boosted";
+        }
+    }
+}
+
 // The per-chunk scoring loop in boost_score.cpp must not re-evaluate a
 // non-native filter once per offset chunk; ComputeNonNativeFilterBitset is
 // its hoisting hook. Pin the contract: no filter and native filters yield
