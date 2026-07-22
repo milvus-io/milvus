@@ -844,7 +844,14 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 	log.Debug(ctx, "begin to retrieve")
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
-	result, err := s.csegment.Retrieve(ctx, plan)
+	result, err := retrySegmentReadGate(
+		ctx,
+		s.segmentType,
+		func() (*segcore.RetrieveResult, error) {
+			return s.csegment.Retrieve(ctx, plan)
+		},
+		waitSegmentReadGateRetry,
+	)
 	if err != nil {
 		log.Warn(ctx, "Retrieve failed")
 		return nil, err
@@ -890,7 +897,14 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 
 	log.Debug(ctx, "begin to retrieve by offsets")
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-	result, err := s.csegment.RetrieveByOffsets(ctx, plan)
+	result, err := retrySegmentReadGate(
+		ctx,
+		s.segmentType,
+		func() (*segcore.RetrieveResult, error) {
+			return s.csegment.RetrieveByOffsets(ctx, plan)
+		},
+		waitSegmentReadGateRetry,
+	)
 	if err != nil {
 		log.Warn(ctx, "RetrieveByOffsets failed")
 		return nil, err

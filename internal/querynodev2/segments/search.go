@@ -23,15 +23,59 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
+	segcoreutil "github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
+type searchResultsCleanup func([]*SearchResult)
+
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
 func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
+	return searchSegmentsWithRetry(ctx, mgr, segments, segType, searchReq, DeleteSearchResults, waitSegmentReadGateRetry)
+}
+
+func searchSegmentsWithRetry(
+	ctx context.Context,
+	mgr *Manager,
+	segments []Segment,
+	segType SegmentType,
+	searchReq *SearchRequest,
+	cleanup searchResultsCleanup,
+	waitRetry segmentReadGateRetryWait,
+) ([]*SearchResult, error) {
+	retryCount := 0
+	for {
+		searchResults, err := searchSegmentsAttempt(ctx, mgr, segments, segType, searchReq)
+		if err == nil {
+			return searchResults, nil
+		}
+
+		validResults := make([]*SearchResult, 0, len(searchResults))
+		for _, result := range searchResults {
+			if result != nil {
+				validResults = append(validResults, result)
+			}
+		}
+		cleanup(validResults)
+
+		if segType != SegmentTypeSealed || !segcoreutil.IsSegmentReadGateBusy(err) {
+			return nil, err
+		}
+
+		retryCount++
+		mlog.Debug(ctx, "retry sealed segment search after publish gate rejection",
+			mlog.Int("retryCount", retryCount))
+		if err := waitRetry(ctx, retryCount); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
 	searchLabel := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		searchLabel = metrics.GrowingSegmentLabel
@@ -92,15 +136,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	}
 
 	if err != nil {
-		// Collect non-nil results for cleanup
-		validResults := make([]*SearchResult, 0, len(segments))
-		for _, r := range searchResults {
-			if r != nil {
-				validResults = append(validResults, r)
-			}
-		}
-		DeleteSearchResults(validResults)
-		return nil, err
+		return searchResults, err
 	}
 
 	if len(segmentsWithoutIndex) > 0 {
