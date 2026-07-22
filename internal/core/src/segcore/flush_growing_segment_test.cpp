@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -81,12 +82,43 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         std::string manifest_json =
             "{\"base_path\":\"" + segment_path +
             "\",\"ver\":" + std::to_string(result.committed_version) + "}";
-        return storage::GetFieldDatasFromManifest(manifest_json,
-                                                  properties,
-                                                  field_meta,
-                                                  data_type,
-                                                  dim,
-                                                  element_type);
+        auto field_datas = storage::GetFieldDatasFromManifest(manifest_json,
+                                                              properties,
+                                                              field_meta,
+                                                              data_type,
+                                                              dim,
+                                                              element_type);
+
+        // Contract check for the streaming variant every caller of this
+        // helper implicitly covers: IterateFieldDataFromManifest must
+        // deliver identical batches, in order, on the calling thread, even
+        // though decode runs on a thread pool.
+        std::vector<FieldDataPtr> streamed;
+        auto caller_tid = std::this_thread::get_id();
+        storage::IterateFieldDataFromManifest(
+            manifest_json,
+            properties,
+            field_meta,
+            data_type,
+            dim,
+            element_type,
+            std::nullopt,
+            [&](FieldDataPtr fd) {
+                EXPECT_EQ(std::this_thread::get_id(), caller_tid);
+                streamed.push_back(std::move(fd));
+            });
+        EXPECT_EQ(streamed.size(), field_datas.size());
+        for (size_t i = 0; i < std::min(streamed.size(), field_datas.size());
+             ++i) {
+            EXPECT_EQ(streamed[i]->get_num_rows(),
+                      field_datas[i]->get_num_rows());
+            for (int64_t r = 0; r < streamed[i]->get_num_rows(); ++r) {
+                EXPECT_EQ(streamed[i]->is_valid(r),
+                          field_datas[i]->is_valid(r));
+            }
+        }
+
+        return field_datas;
     }
 
     void
@@ -2903,4 +2935,91 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
 
     EXPECT_NE(status.error_code, Success);
     free(const_cast<char*>(status.error_msg));
+}
+
+// The streaming reader decodes batches on a thread pool and delivers them on
+// the calling thread. Comparing it against GetFieldDatasFromManifest would be
+// circular (that helper now delegates to it), and single-batch cases cannot
+// expose ordering bugs at all. This test forces multiple record batches by
+// inserting well past loon's per-batch row limit (reader.record_batch_max_rows
+// defaults to 8192) and validates the concatenated result against the values
+// that were originally inserted, in order.
+TEST_F(FlushGrowingSegmentTest,
+       IterateFieldDataFromManifestMultiBatchOrdering) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto val_fid = schema->AddDebugField("val", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    // > 2x the default 8192-row batch limit, so the reader must produce
+    // several batches and their delivery order becomes observable.
+    const int N = 20000;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_multibatch";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+    auto field_meta = gen_field_meta(
+        1, 2, 3, val_fid.get(), DataType::INT64, DataType::NONE, false);
+    std::string manifest_json =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
+
+    std::vector<FieldDataPtr> streamed;
+    auto caller_tid = std::this_thread::get_id();
+    storage::IterateFieldDataFromManifest(
+        manifest_json,
+        properties,
+        field_meta,
+        DataType::INT64,
+        0,
+        DataType::NONE,
+        std::nullopt,
+        [&](FieldDataPtr fd) {
+            EXPECT_EQ(std::this_thread::get_id(), caller_tid);
+            streamed.push_back(std::move(fd));
+        });
+
+    // The point of the test: this must actually span multiple batches,
+    // otherwise ordering is trivially satisfied and nothing is verified.
+    ASSERT_GT(streamed.size(), 1u)
+        << "expected multiple record batches for " << N << " rows";
+
+    // Compare values against the originally inserted column, in order.
+    auto expected = dataset.get_col<int64_t>(val_fid);
+    ASSERT_EQ(expected.size(), static_cast<size_t>(N));
+    int64_t seen = 0;
+    for (const auto& fd : streamed) {
+        for (int64_t i = 0; i < fd->get_num_rows(); ++i) {
+            ASSERT_LT(seen, N);
+            EXPECT_EQ(*static_cast<const int64_t*>(fd->RawValue(i)),
+                      expected[seen])
+                << "value mismatch at row " << seen;
+            ++seen;
+        }
+    }
+    EXPECT_EQ(seen, N);
+
+    FreeFlushResult(&result);
 }
