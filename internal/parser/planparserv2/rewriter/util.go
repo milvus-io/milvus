@@ -210,17 +210,42 @@ func canFoldPredicateToBoolConstant(col *planpb.ColumnInfo) bool {
 		!hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
 }
 
-func hasMissingPathNotEqualSemantics(col *planpb.ColumnInfo, values ...*planpb.GenericValue) bool {
-	if col != nil && col.GetDataType() == schemapb.DataType_JSON {
-		for _, value := range values {
-			switch valueCaseWithNil(value) {
-			case "array", "nil", "other":
-				return true
-			}
-		}
+// canRewriteNotEqual reports whether NOT(col == value) can be rewritten as
+// col != value without changing UNKNOWN results. JSON scalar and array
+// comparisons preserve missing paths, nulls, and type mismatches as UNKNOWN.
+// Keep the existing conservative behavior for non-JSON nested access.
+func canRewriteNotEqual(col *planpb.ColumnInfo, value *planpb.GenericValue) bool {
+	if col == nil {
 		return false
 	}
-	return hasMissingPathSemantics(col)
+	switch valueCaseWithNil(value) {
+	case "nil", "other":
+		return false
+	}
+	if col.GetDataType() == schemapb.DataType_JSON {
+		return true
+	}
+	return !hasMissingPathSemantics(col)
+}
+
+// canBuildTermExpr reports whether values can be represented by one segcore
+// TermExpr. TermExpr selects one scalar executor for the entire value list, so
+// the values must be concrete, homogeneous scalars; array-valued literals are
+// lowered to equality expressions instead.
+func canBuildTermExpr(values ...*planpb.GenericValue) bool {
+	if len(values) == 0 {
+		return false
+	}
+	kind := valueCaseWithNil(values[0])
+	if kind == "nil" || kind == "other" || kind == "array" {
+		return false
+	}
+	for _, value := range values[1:] {
+		if valueCaseWithNil(value) != kind {
+			return false
+		}
+	}
+	return true
 }
 
 func newAlwaysFalseExpr() *planpb.Expr {
