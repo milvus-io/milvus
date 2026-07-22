@@ -125,13 +125,13 @@ func TestPrepareAutoIdempotencyKeyUsesFieldsBeforeMutation(t *testing.T) {
 		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
 	}
 
-	expectedKey, err := canonicalInsertPayloadKey(task.insertMsg.GetNumRows(), task.insertMsg.GetFieldsData(), schema, false)
+	expectedKey, err := canonicalInsertPayloadKey(insertIdempotencyScopeOf(task.insertMsg), task.insertMsg.GetNumRows(), task.insertMsg.GetFieldsData(), schema, false)
 	require.NoError(t, err)
 	require.NoError(t, task.prepareAutoIdempotencyKeyIfEnabled(context.Background(), properties, false))
 	require.Equal(t, expectedKey, task.idempotencyKey)
 
 	task.insertMsg.FieldsData = append(task.insertMsg.FieldsData, int64FieldData("generated", 3, []int64{200, 201}))
-	mutatedKey, err := canonicalInsertPayloadKey(task.insertMsg.GetNumRows(), task.insertMsg.GetFieldsData(), schema, false)
+	mutatedKey, err := canonicalInsertPayloadKey(insertIdempotencyScopeOf(task.insertMsg), task.insertMsg.GetNumRows(), task.insertMsg.GetFieldsData(), schema, false)
 	require.NoError(t, err)
 	require.NotEqual(t, mutatedKey, task.idempotencyKey)
 }
@@ -363,31 +363,116 @@ func TestCanonicalInsertPayloadKey(t *testing.T) {
 		int64FieldData("value", 2, []int64{10, 20}),
 	}
 
-	hash1, err := canonicalInsertPayloadKey(2, fields1, schema, true)
+	hash1, err := canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, fields1, schema, true)
 	require.NoError(t, err)
-	hash2, err := canonicalInsertPayloadKey(2, fields2, schema, true)
+	hash2, err := canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, fields2, schema, true)
 	require.NoError(t, err)
 	require.Equal(t, hash1, hash2)
 	require.Len(t, hash1, 64)
 
 	fields2[1] = int64FieldData("value", 2, []int64{10, 21})
-	hash3, err := canonicalInsertPayloadKey(2, fields2, schema, true)
+	hash3, err := canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, fields2, schema, true)
 	require.NoError(t, err)
 	require.NotEqual(t, hash1, hash3)
 
-	_, err = canonicalInsertPayloadKey(2, []*schemapb.FieldData{
+	_, err = canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, []*schemapb.FieldData{
 		int64FieldData("value", 2, []int64{10, 20}),
 		int64FieldData("other", 2, []int64{30, 40}),
 	}, schema, true)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "duplicate field id 2")
 
-	_, err = canonicalInsertPayloadKey(2, []*schemapb.FieldData{
+	_, err = canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, []*schemapb.FieldData{
 		int64FieldData("value", 2, []int64{10, 20}),
 		int64FieldData("value", 3, []int64{30, 40}),
 	}, schema, true)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "duplicate field name")
+}
+
+// The server-side dedup window is keyed by vchannel, which is per collection
+// shard and does not separate partitions or namespaces. An auto key derived from
+// the payload alone would therefore make the same rows sent to two different
+// destinations collide on one window entry, and the second insert would be
+// silently dropped as a duplicate.
+func TestCanonicalInsertPayloadKeySeparatesDestinations(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
+		},
+	}
+	fields := []*schemapb.FieldData{
+		int64FieldData("pk", 1, []int64{100, 101}),
+		int64FieldData("value", 2, []int64{10, 20}),
+	}
+	base := insertIdempotencyScope{dbName: "db", collectionName: "coll", partitionName: "p1"}
+	emptyNamespace := ""
+	otherNamespace := "ns"
+
+	keyOf := func(scope insertIdempotencyScope) string {
+		key, err := canonicalInsertPayloadKey(scope, 2, fields, schema, false)
+		require.NoError(t, err)
+		return key
+	}
+
+	baseKey := keyOf(base)
+	require.Equal(t, baseKey, keyOf(base), "same destination and payload must be stable")
+
+	otherPartition := base
+	otherPartition.partitionName = "p2"
+	require.NotEqual(t, baseKey, keyOf(otherPartition))
+
+	otherDB := base
+	otherDB.dbName = "db2"
+	require.NotEqual(t, baseKey, keyOf(otherDB))
+
+	otherCollection := base
+	otherCollection.collectionName = "coll2"
+	require.NotEqual(t, baseKey, keyOf(otherCollection))
+
+	// An unset namespace routes by primary key while an empty-string namespace
+	// routes by namespace, so the two must not share a key either.
+	unsetNamespace := keyOf(base)
+	withEmptyNamespace := base
+	withEmptyNamespace.namespace = &emptyNamespace
+	require.NotEqual(t, unsetNamespace, keyOf(withEmptyNamespace))
+
+	withOtherNamespace := base
+	withOtherNamespace.namespace = &otherNamespace
+	require.NotEqual(t, keyOf(withEmptyNamespace), keyOf(withOtherNamespace))
+
+	// Adjacent string fields must not be shiftable into each other.
+	shifted := insertIdempotencyScope{dbName: "db", collectionName: "col", partitionName: "lp1"}
+	require.NotEqual(t, baseKey, keyOf(shifted))
+}
+
+func TestPrepareAutoIdempotencyKeySeparatesPartitions(t *testing.T) {
+	paramtable.Init()
+	resetProxyIdempotencyParams(t)
+	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
+		},
+	}
+	properties := []*commonpb.KeyValuePair{
+		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
+	}
+
+	keyOf := func(partitionName string) string {
+		task := newInsertTaskForIdempotencyTest(nil, "")
+		task.schema = schema
+		task.insertMsg.PartitionName = partitionName
+		require.NoError(t, task.prepareAutoIdempotencyKeyIfEnabled(context.Background(), properties, false))
+		return task.idempotencyKey
+	}
+
+	require.Equal(t, keyOf("p1"), keyOf("p1"))
+	require.NotEqual(t, keyOf("p1"), keyOf("p2"))
 }
 
 func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled bool) *MockCache {
