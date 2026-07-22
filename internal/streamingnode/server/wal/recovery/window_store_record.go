@@ -165,6 +165,14 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 	if msg.MessageType() != message.MessageTypeInsert {
 		return nil, false
 	}
+	// A replicated insert inherits the SOURCE cluster's header verbatim,
+	// including its IdempotentInsertResult. Its committed-write record is keyless
+	// checkpoint bookkeeping only (see idempotencyKeyFromImmutableMessage), so a
+	// decoded result could never be served as a duplicate response — persisting
+	// its per-row PKs into the chunk would be pure write amplification.
+	if msg.ReplicateHeader() != nil {
+		return nil, false
+	}
 	insertMsg, err := message.AsImmutableInsertMessageV1(msg)
 	if err != nil {
 		return nil, false

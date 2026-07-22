@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func TestDIDWindowBeginCompleteAndDuplicate(t *testing.T) {
@@ -37,6 +38,31 @@ func TestDIDWindowBeginCompleteAndDuplicate(t *testing.T) {
 	require.NotNil(t, duplicate.Entry)
 	assert.Equal(t, "key-1", duplicate.Entry.GetKey())
 	assert.Equal(t, uint64(100), duplicate.Entry.GetCommitTimetick())
+}
+
+// The TTL eviction bound derives from the committing entry's timetick, not the
+// local wall clock, so the live window and the clock-free recovery-side window
+// retain the same key set under NTP skew.
+func TestWindowTTLEvictionUsesCommitTimetick(t *testing.T) {
+	window := NewWindow(WindowConfig{WindowTTL: 5 * time.Second})
+	oldTT := tsoutil.ComposeTS(1_000, 0)
+	newTT := tsoutil.ComposeTS(100_000, 0)
+
+	completeKey(t, window, "old", oldTT)
+	require.Contains(t, window.entries, IdempotencyKey("old"))
+
+	// An entry older than TTL relative to the NEW commit's timetick is evicted,
+	// with no wall clock involved.
+	completeKey(t, window, "new", newTT)
+	require.NotContains(t, window.entries, IdempotencyKey("old"))
+	require.Contains(t, window.entries, IdempotencyKey("new"))
+
+	// A commit timetick younger than the TTL must not underflow into an
+	// evict-everything bound.
+	tiny := NewWindow(WindowConfig{WindowTTL: 10 * time.Minute})
+	completeKey(t, tiny, "a", tsoutil.ComposeTS(1_000, 0))
+	completeKey(t, tiny, "b", tsoutil.ComposeTS(2_000, 0))
+	require.Len(t, tiny.entries, 2)
 }
 
 // Complete order is append-completion order, not commit-timetick order: the

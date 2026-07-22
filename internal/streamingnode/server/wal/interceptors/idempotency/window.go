@@ -164,7 +164,7 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	w.insertCommitOrderLocked(pending.Key, entry.GetCommitTimetick())
 	evicted := 0
 	if w.windowTTL > 0 {
-		evicted = w.evictLocked(tsoutil.ComposeTSByTimeWithLogical(w.now().Add(-w.windowTTL), 0))
+		evicted = w.evictLocked(evictBeforeCommitTT(entry.GetCommitTimetick(), w.windowTTL))
 	} else if w.maxEntries > 0 {
 		evicted = w.evictLocked(0)
 	}
@@ -215,6 +215,23 @@ func (w *Window) Evict(evictBeforeTT uint64, msg message.MutableMessage) int {
 	observeWindowEviction(msg, evicted)
 	observeWindowEntries(msg, len(w.entries))
 	return evicted
+}
+
+// evictBeforeCommitTT derives the TTL eviction bound from the just-committed
+// entry's timetick instead of the local wall clock, so the live window and the
+// clock-free recovery-side window (evictBeforeTimetick in the recovery package)
+// retain the same key set under NTP skew. The physical guard keeps a timetick
+// younger than the TTL from underflowing into an evict-everything bound.
+func evictBeforeCommitTT(commitTT uint64, ttl time.Duration) uint64 {
+	if ttl <= 0 {
+		return 0
+	}
+	physical, logical := tsoutil.ParseHybridTs(commitTT)
+	msecs := ttl.Milliseconds()
+	if physical <= msecs {
+		return 0
+	}
+	return tsoutil.ComposeTS(physical-msecs, logical)
 }
 
 // insertCommitOrderLocked keeps commitOrder sorted by commit timetick.

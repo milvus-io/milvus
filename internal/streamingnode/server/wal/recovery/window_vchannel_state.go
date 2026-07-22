@@ -385,11 +385,19 @@ func (s *vchannelWindow) evictPersisted() {
 	s.refreshMinRequiredGeneration()
 }
 
+// evictBeforeTimetick derives the TTL eviction bound from an observed message
+// timetick. Kept in sync with the live window's evictBeforeCommitTT (idempotency
+// package), including the underflow guard for timeticks younger than the TTL.
 func evictBeforeTimetick(nowTT uint64, ttl time.Duration) uint64 {
 	if ttl <= 0 {
 		return 0
 	}
-	return tsoutil.AddPhysicalDurationOnTs(nowTT, -ttl)
+	physical, logical := tsoutil.ParseHybridTs(nowTT)
+	msecs := ttl.Milliseconds()
+	if physical <= msecs {
+		return 0
+	}
+	return tsoutil.ComposeTS(physical-msecs, logical)
 }
 
 func (update *idempotencyWindowMetaUpdate) WithPersistedGeneration(generation uint64) *streamingpb.VChannelWindowMeta {
