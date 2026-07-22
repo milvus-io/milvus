@@ -13,6 +13,7 @@
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <chrono>
+#include <thread>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
@@ -41,6 +42,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "milvus-storage/thread_pool.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/minio/MinioChunkManager.h"
@@ -215,6 +217,32 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
               texts[0]);
     EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(2)),
               texts[2]);
+
+    // The streaming variant must deliver the same batches, in order, on the
+    // calling thread — GetFieldDatasFromManifest is a thin wrapper over it,
+    // but assert the contract directly too (decode runs on a thread pool;
+    // ordering and delivery-thread guarantees are what callers rely on).
+    std::vector<FieldDataPtr> streamed;
+    auto caller_tid = std::this_thread::get_id();
+    IterateFieldDataFromManifest(manifest_json,
+                                 properties,
+                                 field_meta,
+                                 DataType::TEXT,
+                                 0,
+                                 DataType::NONE,
+                                 std::nullopt,
+                                 [&](FieldDataPtr fd) {
+                                     EXPECT_EQ(std::this_thread::get_id(),
+                                               caller_tid);
+                                     streamed.push_back(std::move(fd));
+                                 });
+    ASSERT_EQ(streamed.size(), raw_datas.size());
+    for (size_t i = 0; i < streamed.size(); ++i) {
+        ASSERT_EQ(streamed[i]->get_num_rows(), raw_datas[i]->get_num_rows());
+        for (int64_t r = 0; r < streamed[i]->get_num_rows(); ++r) {
+            ASSERT_EQ(streamed[i]->is_valid(r), raw_datas[i]->is_valid(r));
+        }
+    }
 
     FreeFlushResult(&result);
     cleanup();
@@ -693,6 +721,190 @@ TEST_F(StorageTest, InitArrowReaderConfig) {
               default_cache_options.hole_size_limit);
     EXPECT_EQ(cache_options.range_size_limit,
               default_cache_options.range_size_limit);
+}
+
+// Freshly-built loon properties (index build / FFI reader paths construct
+// them per task via MakeInternalPropertiesFromStorageConfig, bypassing
+// LoonFFIPropertiesSingleton's cached map) must still carry the configured
+// arrow reader prebuffer limits — otherwise external-table index builds
+// silently fall back to arrow defaults regardless of
+// common.arrow.reader.* configuration.
+TEST_F(StorageTest, ArrowReaderConfigAppliesToFreshLoonProperties) {
+    auto status =
+        InitArrowReaderConfig(CArrowReaderConfig{32 * 1024, 4 * 1024 * 1024});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    auto properties =
+        MakeInternalPropertiesFromStorageConfig(get_azure_storage_config());
+    ASSERT_NE(properties, nullptr);
+
+    auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
+    EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
+
+    auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
+    EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
+
+    // Reset to unset: fresh properties must carry 0 (= keep arrow default
+    // downstream), not stale values from the previous configuration.
+    status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    properties =
+        MakeInternalPropertiesFromStorageConfig(get_azure_storage_config());
+    ASSERT_NE(properties, nullptr);
+
+    hole_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
+    EXPECT_EQ(hole_size_limit.ValueOrDie(), 0);
+
+    range_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
+    EXPECT_EQ(range_size_limit.ValueOrDie(), 0);
+}
+
+TEST_F(StorageTest, InitLoonReaderThreadPool) {
+    auto status = InitLoonReaderThreadPool(-1);
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+
+    // 0 = keep the pool uninitialized (sequential reads, prior behavior).
+    status = InitLoonReaderThreadPool(0);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    status = InitLoonReaderThreadPool(4);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(milvus_storage::ThreadPoolHolder::GetParallelism(), 4);
+
+    // Updates resize the existing pool.
+    status = InitLoonReaderThreadPool(8);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(milvus_storage::ThreadPoolHolder::GetParallelism(), 8);
+
+    // 0 after creation leaves the pool untouched.
+    status = InitLoonReaderThreadPool(0);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(milvus_storage::ThreadPoolHolder::GetParallelism(), 8);
+
+    // Restore the no-pool state so other tests keep sequential reads.
+    milvus_storage::ThreadPoolHolder::Release();
+    EXPECT_EQ(milvus_storage::ThreadPoolHolder::GetParallelism(), 1);
+}
+
+TEST_F(StorageTest, InitIndexBuildReadWindow) {
+    auto status = InitIndexBuildReadWindow(-1);
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+    status = InitIndexBuildReadWindow(5LL * 1024 * 1024 * 1024);
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+
+    status = InitIndexBuildReadWindow(512LL * 1024 * 1024);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(
+        LoonFFIPropertiesSingleton::GetInstance().GetIndexBuildReadWindow(),
+        512LL * 1024 * 1024);
+
+    // The configured window stamps into per-task properties.
+    milvus_storage::api::Properties props;
+    LoonFFIPropertiesSingleton::GetInstance().ApplyIndexBuildReadWindow(props);
+    auto window = milvus_storage::api::GetValue<int64_t>(
+        props, PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
+    ASSERT_TRUE(window.ok()) << window.status().ToString();
+    EXPECT_EQ(window.ValueOrDie(), 512LL * 1024 * 1024);
+
+    // Reset to 0: no stamping, the registry default (32MB) applies.
+    status = InitIndexBuildReadWindow(0);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    milvus_storage::api::Properties fresh;
+    LoonFFIPropertiesSingleton::GetInstance().ApplyIndexBuildReadWindow(fresh);
+    window = milvus_storage::api::GetValue<int64_t>(
+        fresh, PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
+    ASSERT_TRUE(window.ok()) << window.status().ToString();
+    EXPECT_EQ(window.ValueOrDie(), 32LL * 1024 * 1024);
+}
+
+// The two prebuffer limits are validated against each other downstream (the
+// parquet reader rejects range_size_limit <= hole_size_limit), so a task
+// building fresh properties must never observe one value from the new
+// generation and the other from the old one. Hot-reload concurrently with
+// property creation and assert every observed pair is self-consistent.
+TEST_F(StorageTest, ArrowReaderConfigSnapshotIsAtomicUnderHotReload) {
+    // Two generations, each individually valid, whose crosswise mixes are
+    // not: (8M, 16M) mixed with (1M, 4M) yields 8M/4M, which is rejected.
+    constexpr int64_t kHoleA = 1LL << 20, kRangeA = 4LL << 20;
+    constexpr int64_t kHoleB = 8LL << 20, kRangeB = 16LL << 20;
+
+    // Publish generation A before any reader starts. The singleton's
+    // pre-test state is the unset (0, 0) generation — StorageTest.
+    // InitArrowReaderConfig restores it — and a reader that samples that
+    // state before the writer thread is first scheduled would be counted as
+    // torn even though it observed one coherent generation. The invariant
+    // under test is "never a mix of two generations", not "the config is
+    // already set", so the initial generation must be excluded from the
+    // sample rather than raced against.
+    LoonFFIPropertiesSingleton::GetInstance().SetArrowReaderConfig(kHoleA,
+                                                                   kRangeA);
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> torn{0};
+    std::atomic<int> observations{0};
+
+    std::thread writer([&]() {
+        while (!stop.load(std::memory_order_relaxed)) {
+            LoonFFIPropertiesSingleton::GetInstance().SetArrowReaderConfig(
+                kHoleA, kRangeA);
+            LoonFFIPropertiesSingleton::GetInstance().SetArrowReaderConfig(
+                kHoleB, kRangeB);
+        }
+    });
+
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 4; ++t) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                auto properties = MakeInternalPropertiesFromStorageConfig(
+                    get_azure_storage_config());
+                auto hole = milvus_storage::api::GetValue<int64_t>(
+                    *properties,
+                    PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+                auto range = milvus_storage::api::GetValue<int64_t>(
+                    *properties,
+                    PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+                if (!hole.ok() || !range.ok()) {
+                    torn.fetch_add(1);
+                    continue;
+                }
+                auto h = hole.ValueOrDie(), r = range.ValueOrDie();
+                bool consistent = (h == kHoleA && r == kRangeA) ||
+                                  (h == kHoleB && r == kRangeB);
+                if (!consistent) {
+                    torn.fetch_add(1);
+                }
+                observations.fetch_add(1);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+    for (auto& r : readers) {
+        r.join();
+    }
+
+    EXPECT_GT(observations.load(), 0) << "no observations were made";
+    EXPECT_EQ(torn.load(), 0)
+        << "observed a mix of prebuffer limits from different generations";
+
+    // Restore the unset state for the tests that follow.
+    auto status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
 }
 
 class StorageUtilTest : public testing::Test {
