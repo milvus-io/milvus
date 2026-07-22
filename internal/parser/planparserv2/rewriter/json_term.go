@@ -144,6 +144,8 @@ func termGroupKey(term *planpb.TermExpr) (string, bool) {
 	if term.GetColumnInfo().GetDataType() != schemapb.DataType_JSON {
 		return key, true
 	}
+	// this for loop is for defensive. in practice after normalization, all values
+	// in a term should have the same kind. but we still check it here to be safe.
 	for _, value := range term.GetValues()[1:] {
 		if valueCaseWithNil(value) != kind {
 			return "", false

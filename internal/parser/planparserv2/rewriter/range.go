@@ -206,7 +206,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
-			if isEmpty && !canFoldBoolDomainToConstant(g.col) {
+			if isEmpty && !canFoldPredicateToBoolConstant(g.col) {
 				continue
 			}
 
@@ -608,7 +608,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				}
 			}
 			if isEmpty {
-				if !canFoldBoolDomainToConstant(g.col) {
+				if !canFoldPredicateToBoolConstant(g.col) {
 					continue
 				}
 				// Empty intersection → constant false
