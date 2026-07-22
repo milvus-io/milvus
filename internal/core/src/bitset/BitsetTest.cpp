@@ -2901,6 +2901,58 @@ INSTANTIATE_TYPED_TEST_SUITE_P(FillTest, FillSuite, Ttypes0);
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
+// read() must accept widths up to 8 * sizeof(data_type) bits: the old range
+// check compared nbits against sizeof(data_type), silently capping reads at
+// 8 bits for a 64-bit word and rejecting every wider (legal) read.
+template <typename BitsetT>
+void
+TestReadImpl() {
+    constexpr size_t n = 150;
+    BitsetT bitset(n);
+    // pattern: every 3rd bit set
+    for (size_t i = 0; i < n; i += 3) {
+        bitset[i] = true;
+    }
+
+    for (const size_t offset : {0, 1, 7, 63, 64, 86}) {
+        for (const size_t nbits : {1, 8, 9, 33, 64}) {
+            if (offset + nbits > n) {
+                continue;
+            }
+            const auto value = bitset.read(offset, nbits);
+            for (size_t j = 0; j < nbits; ++j) {
+                const bool expected = ((offset + j) % 3 == 0);
+                ASSERT_EQ(((value >> j) & 1) != 0, expected)
+                    << "offset=" << offset << " nbits=" << nbits << " j=" << j;
+            }
+        }
+    }
+}
+
+TEST(ReadTest, BitWise) {
+    TestReadImpl<typename RefImplTraits<uint64_t, uint8_t>::bitset_type>();
+}
+
+TEST(ReadTest, ElementWise) {
+    TestReadImpl<typename ElementImplTraits<uint64_t, uint8_t>::bitset_type>();
+}
+
+TEST(ReadTest, Dynamic) {
+    TestReadImpl<typename VectorizedImplTraits<
+        uint64_t,
+        uint8_t,
+        milvus::bitset::detail::VectorizedDynamic>::bitset_type>();
+}
+
+TEST(ReadTest, VecRef) {
+    TestReadImpl<typename VectorizedImplTraits<
+        uint64_t,
+        uint8_t,
+        milvus::bitset::detail::VectorizedRef>::bitset_type>();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
 int
 main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
