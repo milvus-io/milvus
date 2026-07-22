@@ -28,6 +28,7 @@
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/SearchBruteForce.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
 
@@ -62,8 +63,10 @@ CreateSearchPlanByExpr(CCollection c_col,
 
         auto field_index_meta =
             col_index_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
-        res->plan_node_->search_info_.metric_type_ =
-            field_index_meta.GeMetricType();
+        auto& search_info = res->plan_node_->search_info_;
+        search_info.metric_type_ = field_index_meta.GeMetricType();
+        milvus::query::PopulateBruteForceIndexParams(search_info,
+                                                     field_index_meta);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
