@@ -23,17 +23,21 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
+#include "index/ScalarIndexSort.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "query/PlanProto.h"
 #include "rescores/BoostScoreRunner.h"
 #include "rescores/Scorer.h"
+#include "segcore/Types.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -713,6 +717,118 @@ TEST(BoostScoreRunnerTest, NativeFilterHandsBackReusableExprSet) {
     ComputeScorerScores(
         &exec_context, &op_context, segment.get(), scorer, chunk2, fresh2);
 
+    EXPECT_EQ(reused1, fresh1);
+    EXPECT_EQ(reused2, fresh2);
+}
+
+// Cross-chunk ExprSet reuse must also hold on the ScalarIndex exec path --
+// the only path with a stateful index cursor that could in principle desync
+// across chunks. It cannot: the index branch is gated on !has_offset_input_
+// and MoveCursor() is a no-op while offset input is set, so offset-input
+// evaluation never touches the cursor. The sibling test above filters the
+// primary key, which resolves to PkIndex and skips that machinery entirely;
+// this variant loads a real STL_SORT index on a non-pk field and pins the
+// resolved path via UseIndexCursor() so the invariant is actually exercised.
+TEST(BoostScoreRunnerTest, NativeFilterExprSetReuseOnScalarIndexPath) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto age_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto raw_data = segcore::DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // DataGen fills the non-pk int64 column with the row index, so
+    // `age >= 5000` matches exactly the rows past the midpoint.
+    auto age_col = raw_data.get_col<int64_t>(age_fid);
+    auto age_index = milvus::index::CreateScalarIndexSort<int64_t>();
+    age_index->Build(N, age_col.data());
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = age_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_params = GenIndexParams(age_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test_age_index", std::move(age_index));
+    segment->LoadIndex(load_index_info);
+
+    proto::plan::GenericValue val;
+    val.set_int64_val(5000);
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(age_fid, DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        val);
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_native_expr_set_reuse_scalar_index",
+        segment.get(),
+        N,
+        MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    std::unique_ptr<exec::ExprSet> expr_set;
+    auto filter_bitset =
+        ComputeNonNativeFilterBitset(&exec_context, scorer, &expr_set);
+    EXPECT_FALSE(filter_bitset.has_value());
+    ASSERT_NE(expr_set, nullptr);
+
+    // Pin the exec path this variant exists for: with the index loaded the
+    // compiled expression must resolve to ScalarIndex, not RawData/PkIndex,
+    // or the reuse-under-index-cursor invariant goes untested.
+    ASSERT_EQ(expr_set->exprs().size(), 1u);
+    auto segment_expr =
+        std::dynamic_pointer_cast<exec::SegmentExpr>(expr_set->exprs()[0]);
+    ASSERT_NE(segment_expr, nullptr);
+    ASSERT_TRUE(segment_expr->UseIndexCursor())
+        << "filter did not resolve to the ScalarIndex path; the reuse "
+           "invariant is not being exercised";
+
+    // Two chunks straddling the expression batch boundary, scored against
+    // the single reused ExprSet.
+    FixedVector<int32_t> chunk1 = {0, 4999, 5000};
+    FixedVector<int32_t> chunk2 = {9000, 9001, static_cast<int32_t>(N - 1)};
+    std::vector<std::optional<float>> reused1(chunk1.size(), std::nullopt);
+    std::vector<std::optional<float>> reused2(chunk2.size(), std::nullopt);
+    ComputeScorerScores(&exec_context,
+                        &op_context,
+                        segment.get(),
+                        scorer,
+                        chunk1,
+                        reused1,
+                        nullptr,
+                        expr_set.get());
+    ComputeScorerScores(&exec_context,
+                        &op_context,
+                        segment.get(),
+                        scorer,
+                        chunk2,
+                        reused2,
+                        nullptr,
+                        expr_set.get());
+
+    // Semantic expectations, not just reuse==fresh: rows below 5000 get no
+    // boost, rows at or above it do.
+    EXPECT_FALSE(reused1[0].has_value());  // 0
+    EXPECT_FALSE(reused1[1].has_value());  // 4999
+    ASSERT_TRUE(reused1[2].has_value());   // 5000
+    EXPECT_FLOAT_EQ(reused1[2].value(), 2.0F);
+    for (size_t i = 0; i < reused2.size(); ++i) {
+        ASSERT_TRUE(reused2[i].has_value()) << "offset idx " << i;
+        EXPECT_FLOAT_EQ(reused2[i].value(), 2.0F);
+    }
+
+    // The same chunks, each compiling its own ExprSet, must agree.
+    std::vector<std::optional<float>> fresh1(chunk1.size(), std::nullopt);
+    std::vector<std::optional<float>> fresh2(chunk2.size(), std::nullopt);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, chunk1, fresh1);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, chunk2, fresh2);
     EXPECT_EQ(reused1, fresh1);
     EXPECT_EQ(reused2, fresh2);
 }
