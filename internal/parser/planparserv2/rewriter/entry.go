@@ -112,7 +112,7 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 			sortTermValues(te)
 			col := te.GetColumnInfo()
 			if v.optimizeEnabled && effectiveDataType(col) == schemapb.DataType_Bool {
-				if !canFoldBoolDomainToConstant(col) && boolValuesCoverDomain(te.GetValues()) {
+				if !canFoldPredicateToBoolConstant(col) && boolValuesCoverDomain(te.GetValues()) {
 					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
 				}
 				// Let other bool NOT IN flow through to visitTermExpr for bool-specific optimization.
@@ -188,7 +188,7 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 		values := expr.GetValues()
 		if allBoolVals(values) {
 			if boolValuesCoverDomain(values) {
-				if !canFoldBoolDomainToConstant(expr.GetColumnInfo()) {
+				if !canFoldPredicateToBoolConstant(expr.GetColumnInfo()) {
 					return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
 				}
 				return newAlwaysTrueExpr()
