@@ -44,7 +44,7 @@ func newCurrentSplit(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats
 	pendingGroup := localFormatGroup{
 		fields:      make([]int64, 0, len(fields)),
 		indices:     make([]int, 0, len(fields)),
-		localFormat: "",
+		localFormat: localFormatDefault,
 	}
 	for idx, field := range fields {
 		pendingGroup.fields = append(pendingGroup.fields, field.GetFieldID())
@@ -59,28 +59,8 @@ func newCurrentSplit(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats
 }
 
 func (c *currentSplit) SplitFields(groupID int64, fields []int64, indices []int) {
-	c.SplitFieldsWithFormat(groupID, fields, indices, c.columnGroupFormat(indices))
-}
-
-func (c *currentSplit) SplitFieldsWithFormat(groupID int64, fields []int64, indices []int, format string) {
 	c.processFields.Insert(fields...)
-	c.outputGroups = append(c.outputGroups, ColumnGroup{Columns: indices, GroupID: groupID, Fields: fields, Format: format})
-}
-
-func (c *currentSplit) columnGroupFormat(indices []int) string {
-	if len(indices) == 0 {
-		return ""
-	}
-	format := fieldLocalFormat(c.fields[indices[0]])
-	if format == common.LocalFormatRaw {
-		return ""
-	}
-	for _, idx := range indices[1:] {
-		if fieldLocalFormat(c.fields[idx]) != format {
-			return ""
-		}
-	}
-	return storageFormatForLocalFormat(format)
+	c.outputGroups = append(c.outputGroups, ColumnGroup{Columns: indices, GroupID: groupID, Fields: fields})
 }
 
 func (c *currentSplit) NextGroupID() int64 {
@@ -140,7 +120,7 @@ func (c *currentSplit) PartitionRemainingByLocalFormat() {
 	nextGroups := make([]localFormatGroup, 0, len(c.pendingGroups))
 	for _, pendingGroup := range c.RangeGroups(nil) {
 		groupsByFormat := make(map[string]*localFormatGroup)
-		formats := make([]string, 0, 2)
+		formats := make([]string, 0, 3)
 		for _, idx := range pendingGroup.indices {
 			field := c.fields[idx]
 			format := fieldLocalFormat(field)
@@ -182,7 +162,12 @@ func NewSelectedDataTypePolicy() ColumnGroupSplitPolicy {
 	return &selectedDataTypePolicy{}
 }
 
+// localFormatPolicy only partitions fields by local loading intent. It must not
+// set ColumnGroup.Format, which is physical writer metadata owned by the writer
+// configuration and existing manifests.
 type localFormatPolicy struct{}
+
+const localFormatDefault = ""
 
 type localFormatGroup struct {
 	fields      []int64
@@ -196,14 +181,9 @@ func fieldLocalFormat(field *schemapb.FieldSchema) string {
 			return kv.GetValue()
 		}
 	}
-	return common.LocalFormatRaw
-}
-
-func storageFormatForLocalFormat(format string) string {
-	if format == common.LocalFormatVortex {
-		return common.LocalFormatVortex
-	}
-	return ""
+	// Keep the default value distinct from explicit raw so a server-level default
+	// can be introduced without merging fields with different local intent.
+	return localFormatDefault
 }
 
 func (p *localFormatPolicy) Split(currentSplit *currentSplit) *currentSplit {
