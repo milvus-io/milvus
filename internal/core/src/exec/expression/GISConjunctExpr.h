@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -61,6 +62,10 @@ struct GISGroupState {
     //                   false => OR (union coarse / || refine).
     bool is_and{true};
     std::vector<Pred> preds;
+    // Denominator of both pruning ratios below: the segment's MVCC-visible row
+    // count, captured where the nodes are built (SplitFuseGISConjunct) so it is
+    // available even if neither node ever runs.
+    int64_t active_count{0};
 
     // B_coarse = combine(Ci) over all preds. Filled by the Coarse node, read by
     // the Refine node. Cached once per segment for the whole query.
@@ -74,8 +79,8 @@ struct GISGroupState {
     // The point of split-fusion is that Refine only evaluates survivors. That
     // contract is invisible to ON/OFF equivalence tests: making Refine
     // evaluate every active row keeps every result bit identical and only
-    // costs performance. These counters make the contract assertable (and
-    // greppable in production).
+    // costs performance. These counters carry the contract out of the operator
+    // -- see the destructor, which is the single place that reads them.
     //
     // Rows set in B_coarse after combining every predicate.
     int64_t coarse_selected{0};
@@ -83,9 +88,24 @@ struct GISGroupState {
     // of (scalars AND B_coarse). Must stay well below active_count for a
     // selective query, otherwise pruning is not happening.
     int64_t refined_rows{0};
+
+    // Reports the two counters above as ratios of active_count. This state is
+    // created per segment and shared only by that segment's Coarse/Refine
+    // nodes, so destruction is exactly "this query is done with this segment"
+    // -- the one point where both counters are final and every batch has been
+    // accounted for. Defined out-of-line so the Prometheus headers stay out of
+    // this one.
+    ~GISGroupState();
 };
 
 using GISGroupStatePtr = std::shared_ptr<GISGroupState>;
+
+// Test-only hook, invoked from ~GISGroupState alongside the metric emission so
+// tests observe exactly what production reports. Production never sets it.
+// Pass nullptr to clear. Set it before the query runs, from one thread.
+using GISGroupStateObserver = std::function<void(const GISGroupState&)>;
+void
+SetGISGroupStateObserverForTest(GISGroupStateObserver observer);
 
 // Coarse node: runs each predicate's R-Tree query once (segment-level), combines
 // per is_and into coarse_candidates, and emits the per-batch slice. Scheduled
