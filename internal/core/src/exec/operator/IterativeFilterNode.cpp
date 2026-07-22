@@ -139,7 +139,7 @@ PhyIterativeFilterNode::GetOutput() {
                 }
             } else {
                 ThrowInfo(
-                    ExprInvalid,
+                    UnexpectedError,
                     "PhyIterativeFilterNode result should be ColumnVector");
             }
         }

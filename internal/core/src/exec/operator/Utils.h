@@ -161,6 +161,12 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             }
             search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
+        } catch (const milvus::SegcoreError&) {
+            // A coded SegcoreError (transient S3Error / FileReadFailed /
+            // OOM, etc. thrown by the index) must keep its code so the
+            // driver can classify retriability; do not flatten it to
+            // Unsupported.
+            throw;
         } catch (const std::runtime_error& e) {
             std::string operator_type = "";
             if (search_info.has_group_by()) {
