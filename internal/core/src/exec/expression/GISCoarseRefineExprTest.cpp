@@ -29,6 +29,7 @@
 #include "exec/QueryContext.h"
 #include "index/Meta.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/GISConjunctExpr.h"
 #include "plan/PlanNode.h"
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -71,6 +72,30 @@ struct GISSplitFusionGuard {
     }
     ~GISSplitFusionGuard() {
         SegcoreConfig::default_config().set_enable_gis_split_fusion(false);
+    }
+};
+
+// Captures what ~GISGroupState reports -- the same two counters the
+// internal_core_gis_{coarse,refine}_ratio metrics carry -- so a test can assert
+// the pruning contract itself instead of only the result bits, which are
+// identical whether or not Refine prunes. One snapshot per group per segment.
+struct GISGroupStateCapture {
+    struct Snapshot {
+        int64_t active_count;
+        int64_t coarse_selected;
+        int64_t refined_rows;
+    };
+    std::vector<Snapshot> snapshots;
+
+    GISGroupStateCapture() {
+        milvus::exec::SetGISGroupStateObserverForTest(
+            [this](const milvus::exec::GISGroupState& st) {
+                snapshots.push_back(
+                    {st.active_count, st.coarse_selected, st.refined_rows});
+            });
+    }
+    ~GISGroupStateCapture() {
+        milvus::exec::SetGISGroupStateObserverForTest(nullptr);
     }
 };
 
@@ -175,6 +200,7 @@ AssertSelectiveShapeIsDiscriminating(const std::shared_ptr<Schema>& schema,
                                      const SegmentInternalInterface* seg,
                                      int64_t N) {
     const auto& e = EquivExprs().back();
+    GISGroupStateCapture capture;
     GISSplitFusionGuard on(true);
     auto res = RunFilter(schema, handle, seg, N, e);
     ASSERT_EQ(res.size(), static_cast<size_t>(N));
@@ -186,11 +212,88 @@ AssertSelectiveShapeIsDiscriminating(const std::shared_ptr<Schema>& schema,
         << "selective shape selected every row, the scalar mask is not "
            "pruning: "
         << e;
-    // The scalar predicate alone bounds the result: rows with age < threshold
-    // can never survive, so anything above this means the mask was dropped.
+    // The scalar predicate alone bounds the RESULT. This says nothing about
+    // whether Refine pruned -- the outer conjunction re-ANDs `age >= 900`
+    // anyway, so it holds even for a Refine that exact-evaluates every active
+    // row. It only pins that the shape stays selective.
     EXPECT_LE(hits, static_cast<size_t>(N - kSelectiveAgeThreshold))
-        << "more rows survived than the scalar predicate admits; "
-           "`survivors &= pre` is not being applied";
+        << "more rows survived than the scalar predicate admits, so the shape "
+           "is no longer selective: "
+        << e;
+
+    // The part the result bits cannot show: how many rows Refine actually
+    // built a geometry for. Dropping `survivors &= pre` or
+    // `survivors &= coarse_slice` (GISConjunctExpr.cpp) leaves every result
+    // bit identical and is visible ONLY here.
+    ASSERT_EQ(capture.snapshots.size(), 1u)
+        << "expected exactly one GIS split-fusion group for shape: " << e;
+    const auto& s = capture.snapshots.front();
+    EXPECT_EQ(s.active_count, N);
+    EXPECT_GT(s.refined_rows, 0)
+        << "Refine evaluated nothing; the split path did not run";
+    EXPECT_LE(s.refined_rows, N - kSelectiveAgeThreshold)
+        << "Refine evaluated more rows than the scalar mask admits ("
+        << s.refined_rows << " > " << (N - kSelectiveAgeThreshold)
+        << "); `survivors &= pre` is not reaching Refine";
+    EXPECT_LE(s.refined_rows, s.coarse_selected)
+        << "Refine evaluated more rows than B_coarse selected ("
+        << s.refined_rows << " > " << s.coarse_selected
+        << "); `survivors &= coarse_slice` is not reaching Refine";
+    // Every selected row must have been refined: the result is a subset of
+    // what Refine looked at.
+    EXPECT_GE(static_cast<size_t>(s.refined_rows), hits)
+        << "result has rows Refine never evaluated";
+}
+
+// The coarse half of the pruning contract, on a segment with a REAL R-Tree
+// (elsewhere in this file coarse_candidates is all-ones, so there is nothing to
+// observe). The scalar predicate is deliberately tautological (`age >= 0`), so
+// B_coarse is the only thing that can prune and the refine bound below cannot
+// be satisfied via the scalar mask instead.
+//
+// What this pins: that the R-Tree coarse pass really ran and really narrowed
+// the candidate set (a degrade to all-ones returns correct results and would
+// otherwise be invisible), and that Refine evaluated no more rows than
+// B_coarse admitted.
+//
+// What it deliberately does NOT pin: the `survivors &= coarse_slice` line in
+// PhyGISRefineConjunctExpr. That AND is redundant while Coarse is bucketed
+// ahead of Refine -- B_coarse reaches Refine through bitmap_input either way --
+// so deleting it leaves both the result bits and refined_rows unchanged.
+// Verified by deleting it: the entire suite, these assertions included, stays
+// green. See the comment at that line.
+constexpr const char* kCoarsePruningExpr =
+    R"expr(age >= 0 and st_intersects(geo, "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))"))expr";
+
+void
+AssertCoarseMaskActuallyPrunes(const std::shared_ptr<Schema>& schema,
+                               ScopedSchemaHandle& handle,
+                               const SegmentInternalInterface* seg,
+                               int64_t N) {
+    GISGroupStateCapture capture;
+    GISSplitFusionGuard on(true);
+    auto res = RunFilter(schema, handle, seg, N, kCoarsePruningExpr);
+    ASSERT_EQ(capture.snapshots.size(), 1u)
+        << "expected exactly one GIS split-fusion group";
+    const auto& s = capture.snapshots.front();
+    ASSERT_EQ(s.active_count, N);
+    // The R-Tree must have answered. A coarse bitmap that degenerated to
+    // all-ones (pin failure, index mid-load) still returns correct results, so
+    // nothing else in this file would notice -- and it would make the refine
+    // bound below vacuous.
+    EXPECT_GT(s.coarse_selected, 0)
+        << "B_coarse selected nothing; the shape no longer discriminates";
+    EXPECT_LT(s.coarse_selected, N)
+        << "B_coarse selected every row: the R-Tree coarse pass degraded to "
+           "all-ones, so pruning is gone even though results stay correct";
+    EXPECT_GT(s.refined_rows, 0)
+        << "Refine evaluated nothing; the split path did not run";
+    EXPECT_LE(s.refined_rows, s.coarse_selected)
+        << "Refine evaluated more rows than B_coarse selected ("
+        << s.refined_rows << " > " << s.coarse_selected
+        << "); `survivors &= coarse_slice` is not reaching Refine";
+    EXPECT_GE(static_cast<size_t>(s.refined_rows), res.count())
+        << "result has rows Refine never evaluated";
 }
 
 // For each shape, assert the fusion-ON bitset equals the fusion-OFF baseline on
@@ -373,6 +476,10 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionGrowingSegmentWithRTreeIndex) {
 
     // Full visibility: active_count == rows in the index.
     AssertFusionEquivalence(schema, handle, seg.get(), N);
+
+    // This is the only segment in this file with a real R-Tree, so it is the
+    // only place the coarse half of the pruning contract is observable.
+    AssertCoarseMaskActuallyPrunes(schema, handle, seg.get(), N);
 
     // Partial visibility: active_count < rows in the index -- the concurrent
     // ingestion shape (the insert path appends to the index before acking

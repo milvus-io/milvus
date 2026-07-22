@@ -11,6 +11,8 @@
 
 #include "exec/expression/GISConjunctExpr.h"
 
+#include <mutex>
+#include <utility>
 #include <vector>
 
 #include "common/EasyAssert.h"
@@ -24,10 +26,67 @@
 #include "index/ScalarIndex.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 
 namespace milvus {
 namespace exec {
+
+namespace {
+
+std::mutex&
+GISGroupStateObserverMutex() {
+    static std::mutex mu;
+    return mu;
+}
+
+GISGroupStateObserver&
+GISGroupStateObserverSlot() {
+    static GISGroupStateObserver observer;
+    return observer;
+}
+
+}  // namespace
+
+void
+SetGISGroupStateObserverForTest(GISGroupStateObserver observer) {
+    std::lock_guard<std::mutex> lock(GISGroupStateObserverMutex());
+    GISGroupStateObserverSlot() = std::move(observer);
+}
+
+GISGroupState::~GISGroupState() {
+    // active_count == 0 means the group was built but the segment held no
+    // visible row, so both ratios would be 0/0. Nothing to report.
+    if (active_count > 0) {
+        const double denom = static_cast<double>(active_count);
+        milvus::monitor::internal_core_gis_coarse_ratio.Observe(
+            static_cast<double>(coarse_selected) / denom);
+        milvus::monitor::internal_core_gis_refine_ratio.Observe(
+            static_cast<double>(refined_rows) / denom);
+        // Same numbers, greppable per segment. refined_rows is the one the
+        // equivalence tests cannot see: a Refine that ignores bitmap_input and
+        // evaluates every active row returns identical bits and only shows up
+        // here, as a ratio approaching 1.
+        LOG_DEBUG(
+            "GIS split-fusion pruning: field {} coarse {}/{} refined {}/{} "
+            "({} predicates)",
+            field_id.get(),
+            coarse_selected,
+            active_count,
+            refined_rows,
+            active_count,
+            preds.size());
+    }
+
+    GISGroupStateObserver observer;
+    {
+        std::lock_guard<std::mutex> lock(GISGroupStateObserverMutex());
+        observer = GISGroupStateObserverSlot();
+    }
+    if (observer) {
+        observer(*this);
+    }
+}
 
 // -------------------------------------------------------------------------
 // Coarse node: run each predicate's R-Tree query once (segment-level), combine
@@ -147,18 +206,11 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // active_count_-bit bitmap per predicate for the whole query life.
             p.coarse = TargetBitmap{};
         }
+        // Reported once per segment by ~GISGroupState, together with
+        // refined_rows: an all-ones coarse still returns correct results, so
+        // without that a permanently degraded deployment is indistinguishable
+        // from a healthy one.
         st_->coarse_selected = static_cast<int64_t>(cand.count());
-        // Once per segment. The whole point of split-fusion is that this ratio
-        // is well below 1; an all-ones coarse still returns correct results, so
-        // without this line a permanently degraded deployment is
-        // indistinguishable from a healthy one.
-        LOG_DEBUG(
-            "GIS coarse pruning: field {} selected {}/{} rows as candidates "
-            "({} predicates)",
-            st_->field_id.get(),
-            st_->coarse_selected,
-            active_count_,
-            st_->preds.size());
         st_->coarse_candidates =
             std::make_shared<TargetBitmap>(std::move(cand));
         st_->coarse_done = true;
@@ -231,6 +283,16 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         survivors &= pre;
     }
     if (st_->coarse_candidates != nullptr) {
+        // Redundant by construction TODAY: the Coarse node sits in an earlier
+        // bucket, so the conjunction has already folded B_coarse into
+        // bitmap_input by the time Refine runs, and `pre` above carries it.
+        // Kept as the safety net for the day that stops being true (a bucket
+        // change putting Refine ahead of Coarse would leave this as the only
+        // application of B_coarse). Being redundant, it is also the one part
+        // of the pruning contract no test can pin -- removing it changes
+        // neither the result bits NOR refined_rows, verified by deleting it
+        // and watching the whole suite, including the counter assertions, stay
+        // green. Do not "cover" it with a test that cannot fail.
         TargetBitmap coarse_slice;
         coarse_slice.append(
             *st_->coarse_candidates, seg_offset, real_batch_size);
