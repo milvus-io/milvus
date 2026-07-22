@@ -136,7 +136,6 @@ generate_load_conf(const milvus::IndexType& index_type,
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
-            {milvus::index::DISK_ANN_LOAD_THREAD_NUM, std::to_string(2)},
             {milvus::index::DISK_ANN_SEARCH_CACHE_BUDGET,
              std::to_string(0.05 * sizeof(DataType) * nb /
                             (1024.0 * 1024.0 * 1024.0))},
