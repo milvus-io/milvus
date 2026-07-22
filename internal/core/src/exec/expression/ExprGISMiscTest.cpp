@@ -1001,6 +1001,32 @@ RunGrowingConjunctSkipTest(bool with_rtree_index) {
                 raw_data.raw_);
     ASSERT_EQ(seg->HasIndex(geo_fid), with_rtree_index);
 
+    {
+        // HasIndex() alone does not guarantee the ScalarIndex exec path —
+        // DetermineExecPath() silently falls back to RawData when the pin
+        // comes up empty (Expr.h). Assert the resolved path directly so the
+        // with_rtree_index variant fails loudly instead of silently
+        // degrading into a duplicate of the raw-data variant.
+        milvus::expr::TypedExprPtr gis_leaf =
+            std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+                milvus::expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+                proto::plan::GISFunctionFilterExpr_GISOp_Within,
+                "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))");
+        std::vector<milvus::expr::TypedExprPtr> leaf_filters{gis_leaf};
+        auto leaf_query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+        milvus::exec::ExecContext leaf_exec_context(leaf_query_context.get());
+        milvus::exec::ExprSet leaf_expr_set(leaf_filters, &leaf_exec_context);
+        ASSERT_EQ(leaf_expr_set.exprs().size(), 1u);
+        auto segment_expr =
+            std::dynamic_pointer_cast<milvus::exec::SegmentExpr>(
+                leaf_expr_set.exprs()[0]);
+        ASSERT_NE(segment_expr, nullptr);
+        ASSERT_EQ(segment_expr->UseIndexCursor(), with_rtree_index)
+            << "GIS expr resolved to the wrong exec path (with_rtree_index: "
+            << with_rtree_index << ")";
+    }
+
     proto::plan::GenericValue val;
     val.set_int64_val(kBatch);
     auto age_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
