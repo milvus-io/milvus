@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -35,10 +37,75 @@ func (m *windowManager) windowBackgroundTask() {
 			if err := m.persistIdempotencySnapshot(m.windowBackgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
 				return
 			}
+			m.advanceIdleSourceCheckpoint(m.windowBackgroundTaskNotifier.Context())
+			m.drainDroppedWindowMetas(m.windowBackgroundTaskNotifier.Context())
 			if err := m.cleanPChannelWindow(m.windowBackgroundTaskNotifier.Context(), m.Logger()); err != nil {
 				m.Logger().Warn(context.TODO(), "failed to clean pchannel window", mlog.Err(err))
 			}
 		}
+	}
+}
+
+// advanceIdleSourceCheckpoint persists a meta-only SourceCheckpoint advance
+// when the window store is clean but the observed position moved on (an idle
+// pchannel sees only timeticks; nothing marks a window dirty, so no chunk is
+// written and the durable source checkpoint would freeze). Without it the
+// truncation clamp (truncateClampCheckpoint) pins WAL truncation at the last
+// busy period forever. Safe: a clean store means every keyed committed write
+// observed so far is already persisted, and any write arriving after the check
+// carries a timetick beyond the advanced position. Best-effort — a failure only
+// logs and the next tick retries.
+func (m *windowManager) advanceIdleSourceCheckpoint(ctx context.Context) {
+	if !m.cfg.idempotencyEnabled {
+		return
+	}
+	m.mu.Lock()
+	if !m.activeViewsInitialized || m.hasDirtyWindowUnsafe() || m.pendingIdempotencyPersistSnapshot != nil {
+		m.mu.Unlock()
+		return
+	}
+	current := m.getPChannelWindowSnapshotCheckpointUnsafe()
+	persisted := m.getPersistedPChannelWindowSnapshotCheckpointUnsafe()
+	m.mu.Unlock()
+	if current == nil || persisted == nil || current.TimeTick <= persisted.TimeTick {
+		return
+	}
+	catalog := resource.Resource().StreamingNodeCatalog()
+	metaPB, err := catalog.GetPChannelWindowMeta(ctx, m.pchannel)
+	if err != nil || metaPB == nil {
+		if err != nil {
+			m.Logger().Warn(ctx, "failed to load pchannel window meta for idle source checkpoint advance", mlog.Err(err))
+		}
+		return
+	}
+	metaPB.SourceCheckpointTimetick = current.TimeTick
+	if current.MessageID != nil {
+		metaPB.SourceCheckpointMessageId = current.MessageID.IntoProto()
+	}
+	if err := catalog.SavePChannelWindowMeta(ctx, m.pchannel, metaPB); err != nil {
+		m.Logger().Warn(ctx, "failed to advance idle pchannel window source checkpoint", mlog.Err(err))
+		return
+	}
+	m.markPChannelWindowSnapshotCheckpointPersisted(current)
+}
+
+// drainDroppedWindowMetas removes the persisted vchannel window metas of
+// vchannels reclaimed since the last tick — off the drop hot path, batched, and
+// retried on the next tick on failure. Without it every dropped vchannel leaves
+// a permanent etcd key behind.
+func (m *windowManager) drainDroppedWindowMetas(ctx context.Context) {
+	m.mu.Lock()
+	dropped := m.droppedWindowVChannels
+	m.droppedWindowVChannels = nil
+	m.mu.Unlock()
+	if len(dropped) == 0 {
+		return
+	}
+	if err := resource.Resource().StreamingNodeCatalog().RemoveVChannelWindowMetas(ctx, m.pchannel, common.VChannelWindowViewTypeIdempotency, dropped); err != nil {
+		m.Logger().Warn(ctx, "failed to remove dropped vchannel window metas; will retry next tick", mlog.Err(err))
+		m.mu.Lock()
+		m.droppedWindowVChannels = append(m.droppedWindowVChannels, dropped...)
+		m.mu.Unlock()
 	}
 }
 

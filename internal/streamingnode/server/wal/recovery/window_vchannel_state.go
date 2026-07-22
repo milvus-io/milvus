@@ -27,6 +27,9 @@ type vchannelWindow struct {
 	latestAppliedGeneration     uint64
 	minRequiredGeneration       uint64
 	dirty                       bool
+	// entryBytes tracks the total serialized size of materialized entries for the
+	// byte-cap eviction.
+	entryBytes int
 
 	// generationStats is the view's durable-retention ledger: one row per
 	// persisted chunk generation, tracking how many window entries it holds and
@@ -113,6 +116,7 @@ func newVChannelWindowFromSnapshot(snapshot *streamingpb.WindowSnapshot) (*vchan
 	sortWindowEntries(sortedEntries)
 	for _, entry := range sortedEntries {
 		state.entries[entry.GetKey()] = &windowEntry{entry: entry}
+		state.entryBytes += proto.Size(entry)
 		state.commitOrder = append(state.commitOrder, entry.GetKey())
 	}
 	state.refreshEvictedWatermark()
@@ -249,6 +253,7 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 		return merr.WrapErrServiceInternalMsg("committed write record cannot materialize idempotency window entry")
 	}
 	s.entries[key] = &windowEntry{entry: entry}
+	s.entryBytes += proto.Size(entry)
 	s.commitOrder = append(s.commitOrder, key)
 	if markDirty {
 		s.pendingEntries[key] = entry
@@ -467,7 +472,7 @@ func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 	return minRequired, true
 }
 
-func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxEntries int) {
+func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxEntries, maxBytes int) {
 	for len(s.entries) > minEntries && len(s.commitOrder) > 0 {
 		key := s.commitOrder[0]
 		e, ok := s.entries[key]
@@ -479,15 +484,33 @@ func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxE
 			break
 		}
 		s.commitOrder = s.commitOrder[1:]
+		s.dropEntryBytes(key)
 		delete(s.entries, key)
 	}
 	for maxEntries > 0 && len(s.entries) > maxEntries && len(s.commitOrder) > 0 {
 		key := s.commitOrder[0]
 		s.commitOrder = s.commitOrder[1:]
+		s.dropEntryBytes(key)
+		delete(s.entries, key)
+	}
+	// Hard byte cap, overriding the minEntries floor: an entry-count floor cannot
+	// bound memory when each entry carries a per-row PK list.
+	for maxBytes > 0 && s.entryBytes > maxBytes && len(s.commitOrder) > 0 {
+		key := s.commitOrder[0]
+		s.commitOrder = s.commitOrder[1:]
+		s.dropEntryBytes(key)
 		delete(s.entries, key)
 	}
 	s.refreshEvictedWatermark()
 	s.refreshMinRequiredGeneration()
+}
+
+// dropEntryBytes subtracts a to-be-removed entry's serialized size from the
+// window's byte accounting.
+func (s *vchannelWindow) dropEntryBytes(key string) {
+	if e, ok := s.entries[key]; ok && e.entry != nil {
+		s.entryBytes -= proto.Size(e.entry)
+	}
 }
 
 // evictPersisted drops every entry that has already been durably persisted (its
@@ -509,6 +532,7 @@ func (s *vchannelWindow) evictPersisted() {
 			break
 		}
 		s.commitOrder = s.commitOrder[1:]
+		s.dropEntryBytes(key)
 		delete(s.entries, key)
 	}
 	s.refreshEvictedWatermark()

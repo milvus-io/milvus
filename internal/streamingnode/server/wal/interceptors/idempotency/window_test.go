@@ -146,6 +146,30 @@ func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
 	require.Contains(t, capped.entries, IdempotencyKey("c"))
 }
 
+// The byte cap bounds retained memory where entry count cannot: each entry
+// carries the per-row PKs of its insert, so the cap overrides the minEntries
+// floor and evicts oldest-first until the window fits.
+func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
+	// Measure the serialized size of one entry so the cap below admits exactly
+	// one. Keys and commit timeticks are chosen so both entries serialize to
+	// the same number of bytes.
+	probe := NewWindow(WindowConfig{MinEntries: 1000})
+	completeKey(t, probe, "a", 100)
+	entrySize := probe.bytes
+	require.Positive(t, entrySize)
+
+	window := NewWindow(WindowConfig{MinEntries: 1000, MaxBytes: entrySize})
+	completeKey(t, window, "a", 100)
+	require.Contains(t, window.entries, IdempotencyKey("a"))
+	// The second entry pushes the window over the byte cap; the oldest entry
+	// is evicted despite the huge minEntries floor.
+	completeKey(t, window, "b", 101)
+	require.NotContains(t, window.entries, IdempotencyKey("a"))
+	require.Contains(t, window.entries, IdempotencyKey("b"))
+	require.Len(t, window.entries, 1)
+	require.Equal(t, entrySize, window.bytes)
+}
+
 func TestDIDWindowSameKeyAlwaysDuplicate(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 

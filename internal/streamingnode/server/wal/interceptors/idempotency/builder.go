@@ -22,6 +22,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		WindowTTL:    params.StreamingCfg.IdempotencyWindowTTL.GetAsDurationByParse(),
 		MinEntries:   params.StreamingCfg.IdempotencyMinEntriesPerWindow.GetAsInt(),
 		MaxEntries:   params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt(),
+		MaxBytes:     int(params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize()),
 		MaxKeyLength: params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(),
 	})
 	if param != nil && param.InitialRecoverSnapshot != nil {
@@ -39,7 +40,7 @@ func sanitizeWindowConfig(config WindowConfig) WindowConfig {
 	if !config.Enabled {
 		return config
 	}
-	if config.WindowTTL <= 0 && config.MaxEntries <= 0 {
+	if config.WindowTTL <= 0 && config.MaxEntries <= 0 && config.MaxBytes <= 0 {
 		fallback, err := time.ParseDuration(paramtable.Get().StreamingCfg.IdempotencyWindowTTL.DefaultValue)
 		if err != nil {
 			// The default is a compile-time literal; parsing it cannot fail.

@@ -111,9 +111,11 @@ func TestSanitizeIdempotencyFallsBack(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.IdempotencyWindowTTL.Key, "0s")
 	params.Save(params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key, "0")
+	params.Save(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key, "0")
 	defer func() {
 		params.Reset(params.StreamingCfg.IdempotencyWindowTTL.Key)
 		params.Reset(params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key)
+		params.Reset(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key)
 	}()
 	assert.NotPanics(t, func() {
 		cfg := newConfig()

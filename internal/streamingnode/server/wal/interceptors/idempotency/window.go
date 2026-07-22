@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -27,6 +29,7 @@ type WindowConfig struct {
 	WindowTTL    time.Duration
 	MinEntries   int
 	MaxEntries   int
+	MaxBytes     int
 	MaxKeyLength int
 	Now          func() time.Time
 }
@@ -48,8 +51,13 @@ type Window struct {
 
 	minEntries int
 	maxEntries int
-	windowTTL  time.Duration
-	now        func() time.Time
+	// maxBytes caps the total serialized size of retained entries (each entry
+	// carries the per-row PKs of its insert), overriding the minEntries floor —
+	// entry COUNT alone cannot bound dedup-metadata memory. 0 disables the cap.
+	maxBytes  int
+	bytes     int
+	windowTTL time.Duration
+	now       func() time.Time
 }
 
 type PendingEntry struct {
@@ -107,6 +115,7 @@ func NewWindow(config WindowConfig) *Window {
 		inflight:   make(map[IdempotencyKey]*PendingEntry),
 		minEntries: config.MinEntries,
 		maxEntries: config.MaxEntries,
+		maxBytes:   config.MaxBytes,
 		windowTTL:  config.WindowTTL,
 		now:        now,
 	}
@@ -125,6 +134,7 @@ func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.WindowSnap
 		}
 		key := IdempotencyKey(snapshotEntry.GetKey())
 		window.entries[key] = snapshotEntry
+		window.bytes += proto.Size(snapshotEntry)
 		window.commitOrder = append(window.commitOrder, key)
 	}
 	window.refreshEvictedWatermarkLocked()
@@ -189,11 +199,12 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	}
 	delete(w.inflight, pending.Key)
 	w.entries[pending.Key] = entry
+	w.bytes += proto.Size(entry)
 	w.insertCommitOrderLocked(pending.Key, entry.GetCommitTimetick())
 	evicted := 0
 	if w.windowTTL > 0 {
 		evicted = w.evictLocked(evictBeforeCommitTT(entry.GetCommitTimetick(), w.windowTTL))
-	} else if w.maxEntries > 0 {
+	} else if w.maxEntries > 0 || w.maxBytes > 0 {
 		evicted = w.evictLocked(0)
 	}
 	w.refreshEvictedWatermarkLocked()
@@ -307,6 +318,9 @@ func (w *Window) servableLocked(entry *streamingpb.WindowEntry) bool {
 // commit timetick, and a leftover old slot would resolve to that new entry and
 // stall eviction of everything queued behind it.
 func (w *Window) dropEntryLocked(key IdempotencyKey) {
+	if entry, ok := w.entries[key]; ok {
+		w.bytes -= proto.Size(entry)
+	}
 	delete(w.entries, key)
 	for i, ordered := range w.commitOrder {
 		if ordered == key {
@@ -333,6 +347,7 @@ func (w *Window) evictLocked(evictBeforeTT uint64) int {
 			w.commitOrder = append([]IdempotencyKey{key}, w.commitOrder...)
 			break
 		}
+		w.bytes -= proto.Size(entry)
 		delete(w.entries, key)
 		evicted++
 	}
@@ -340,7 +355,21 @@ func (w *Window) evictLocked(evictBeforeTT uint64) int {
 	for w.maxEntries > 0 && len(w.entries) > w.maxEntries && len(w.commitOrder) > 0 {
 		key := w.commitOrder[0]
 		w.commitOrder = w.commitOrder[1:]
-		if _, ok := w.entries[key]; ok {
+		if entry, ok := w.entries[key]; ok {
+			w.bytes -= proto.Size(entry)
+			delete(w.entries, key)
+			evicted++
+		}
+	}
+
+	// The byte cap is a hard bound like maxEntries: it overrides the minEntries
+	// floor, because a floor measured in entries cannot promise anything about
+	// memory when each entry carries an unbounded per-row PK list.
+	for w.maxBytes > 0 && w.bytes > w.maxBytes && len(w.commitOrder) > 0 {
+		key := w.commitOrder[0]
+		w.commitOrder = w.commitOrder[1:]
+		if entry, ok := w.entries[key]; ok {
+			w.bytes -= proto.Size(entry)
 			delete(w.entries, key)
 			evicted++
 		}

@@ -7612,6 +7612,7 @@ type streamingConfig struct {
 	IdempotencyWindowTTL           ParamItem `refreshable:"false"`
 	IdempotencyMinEntriesPerWindow ParamItem `refreshable:"false"`
 	IdempotencyMaxEntriesPerWindow ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow   ParamItem `refreshable:"false"`
 	IdempotencySnapshotInterval    ParamItem `refreshable:"false"`
 	IdempotencyMaxKeyLength        ParamItem `refreshable:"false"`
 
@@ -8072,12 +8073,22 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMaxEntriesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxEntriesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The maximum completed idempotency key entries retained for each vchannel window. Each entry holds the per-row primary keys of its insert, so this cap bounds dedup-metadata memory and window-store size; the oldest entries (by commit timetick) are evicted first. 0 means no count cap beyond TTL/minEntries.`,
+		Doc:          `The maximum completed idempotency key entries retained for each vchannel window; the oldest entries (by commit timetick) are evicted first. This caps entry COUNT only — each entry holds the per-row primary keys of its insert, so use maxBytesPerWindow to bound dedup-metadata memory. 0 means no count cap beyond TTL/minEntries.`,
 		DefaultValue: "10000",
 		FallbackKeys: []string{"idempotency.maxEntriesPerWindow"},
 		Export:       false,
 	}
 	p.IdempotencyMaxEntriesPerWindow.Init(base.mgr)
+
+	p.IdempotencyMaxBytesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.maxBytesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Oldest entries by commit timetick are evicted first; this hard cap overrides minEntriesPerWindow, since an entry-count floor cannot bound memory. 0 disables the byte cap.`,
+		DefaultValue: "16777216",
+		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
 
 	p.IdempotencySnapshotInterval = ParamItem{
 		Key:          "streaming.idempotency.snapshotInterval",

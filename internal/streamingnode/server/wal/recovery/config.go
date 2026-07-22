@@ -23,6 +23,7 @@ func newConfig() *config {
 		idempotencyWindowTTL:        params.StreamingCfg.IdempotencyWindowTTL.GetAsDurationByParse(),
 		idempotencyMinEntries:       params.StreamingCfg.IdempotencyMinEntriesPerWindow.GetAsInt(),
 		idempotencyMaxEntries:       params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt(),
+		idempotencyMaxBytes:         int(params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize()),
 		idempotencySnapshotInterval: params.StreamingCfg.IdempotencySnapshotInterval.GetAsDurationByParse(),
 	}
 	cfg.sanitizeIdempotency()
@@ -54,7 +55,7 @@ func (cfg *config) sanitizeIdempotency() {
 	}
 	// With neither a TTL nor a max entry cap the live window would grow without
 	// bound per key; fall back to the default TTL.
-	if cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxEntries <= 0 {
+	if cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxEntries <= 0 && cfg.idempotencyMaxBytes <= 0 {
 		fallback := defaultDuration(&params.StreamingCfg.IdempotencyWindowTTL)
 		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max entry cap; falling back to default TTL",
 			mlog.Duration("configuredTTL", cfg.idempotencyWindowTTL),
@@ -83,6 +84,7 @@ type config struct {
 	idempotencyWindowTTL        time.Duration // idempotencyWindowTTL is the TTL for evicting entries during recovery.
 	idempotencyMinEntries       int           // idempotencyMinEntries is the minimum entries to keep per window during eviction.
 	idempotencyMaxEntries       int           // idempotencyMaxEntries is the hard cap per window during eviction.
+	idempotencyMaxBytes         int           // idempotencyMaxBytes is the hard byte cap per window during eviction (0 disables).
 	idempotencySnapshotInterval time.Duration // idempotencySnapshotInterval is the interval to persist idempotency window snapshots. Non-positive disables periodic window snapshots.
 }
 

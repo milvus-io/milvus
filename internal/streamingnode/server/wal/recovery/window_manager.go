@@ -12,6 +12,7 @@ import (
 
 type windowEvictionConfig struct {
 	windowTTL  time.Duration
+	maxBytes   int
 	minEntries int
 	maxEntries int
 }
@@ -27,12 +28,15 @@ type windowManager struct {
 	// acquire rs.mu then call into windowManager (which takes mu), while
 	// windowManager holds no reference back to recoveryStorageImpl and never
 	// acquires rs.mu, so the ordering is one-directional and deadlock-free.
-	mu                                sync.Mutex
-	windowBackgroundTaskNotifier      *syncutil.AsyncTaskNotifier[struct{}]
-	windowSnapshotCheckpoint          trackedCheckpoint
-	persistedConsumeCheckpoint        *WALCheckpoint
-	windows                           map[string]*vchannelWindow
-	activeViewsInitialized            bool
+	mu                           sync.Mutex
+	windowBackgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
+	windowSnapshotCheckpoint     trackedCheckpoint
+	persistedConsumeCheckpoint   *WALCheckpoint
+	windows                      map[string]*vchannelWindow
+	activeViewsInitialized       bool
+	// droppedWindowVChannels queues vchannels whose windows were reclaimed; the
+	// background task removes their persisted window metas batched (guarded by mu).
+	droppedWindowVChannels            []string
 	recoveryMode                      bool
 	evictionConfig                    windowEvictionConfig
 	pendingIdempotencyPersistSnapshot *RecoverySnapshot
@@ -113,9 +117,10 @@ func (m *windowManager) getOrCreateIdempotencyWindow(vchannel string, checkpoint
 // removeIdempotencyWindow drops the in-memory window for a reclaimed (dropped)
 // vchannel. Without this, m.windows grows without bound under collection
 // create/drop churn and every per-message / per-timetick scan keeps walking dead
-// windows. The vchannel's persisted window meta is left behind on purpose: it is
-// harmless on recovery (no window is rebuilt for an inactive vchannel) and
-// removing it here would mean catalog IO on the drop hot path.
+// windows. The vchannel's persisted window meta is NOT removed here (that would
+// mean catalog IO on the drop hot path); the vchannel is queued and the window
+// background task drains the removals batched (drainDroppedWindowMetas), so
+// dropped vchannels do not leave permanent etcd keys behind either.
 func (m *windowManager) removeIdempotencyWindow(vchannel string) {
 	if m == nil || vchannel == "" {
 		return
@@ -123,6 +128,7 @@ func (m *windowManager) removeIdempotencyWindow(vchannel string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.windows, vchannel)
+	m.droppedWindowVChannels = append(m.droppedWindowVChannels, vchannel)
 }
 
 // ensureActiveIdempotencyWindows advances every existing window and creates a
@@ -185,7 +191,7 @@ func (m *windowManager) observeMessage(msg message.ImmutableMessage) {
 		if m.recoveryMode {
 			evictBeforeTT := evictBeforeTimetick(msg.TimeTick(), m.evictionConfig.windowTTL)
 			for _, window := range windows {
-				window.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxEntries)
+				window.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxEntries, m.evictionConfig.maxBytes)
 			}
 		}
 		return
