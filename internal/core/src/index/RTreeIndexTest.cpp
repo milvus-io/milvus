@@ -1506,3 +1506,109 @@ TEST_F(RTreeIndexTest, GrowingSparseNullOffsetsCountSpansRowSpace) {
     EXPECT_TRUE(is_null[5]);
     EXPECT_FALSE(is_null[0]);
 }
+
+// Candidate completeness of Query() WHILE writes are in flight -- the window
+// the two GrowingConcurrentMultiWriter* tests leave uncovered (their readers
+// only call Count()/IsNull()/IsNotNull(), and their offset sets are dense, so
+// Count() never diverges from the indexed-entry count mid-flight).
+//
+// The anchor row is published first at a high offset, so from the very first
+// insert the row space is kAnchor+1 while only ONE entry is in the rtree: with
+// the pre-fix Count() (wrapper->count() + nulls) every concurrent reader would
+// size its bitmap at 1 and the bound in Query() would clip the anchor away --
+// a false negative on a committed row, reproduced deterministically instead of
+// depending on thread interleaving.
+//
+// Only EVEN offsets carry a matching point; odd offsets are placed far away.
+// That makes the completeness assertion two-sided and order-independent: the
+// anchor must always be present (no live candidate clipped) and no odd offset
+// may ever appear (no fabricated / mis-bound candidate), whatever the writers
+// have published at the moment the reader takes its snapshot.
+TEST_F(RTreeIndexTest, GrowingConcurrentQueryKeepsPublishedCandidates) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int64_t kAnchor = 2000;  // even -> matches the query
+    constexpr int kWriters = 4;
+    // Even offsets sit inside the query polygon, odd offsets far outside it.
+    auto matches = [](int64_t off) { return off % 2 == 0; };
+    auto wkb_for = [&](int64_t off) {
+        return matches(off) ? CreatePointWKB(1.0, 1.0)
+                            : CreatePointWKB(1000.0, 1000.0);
+    };
+    auto make_query = []() {
+        auto ds = std::make_shared<milvus::Dataset>();
+        ds->Set(milvus::index::OPERATOR_TYPE,
+                ::milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects);
+        ds->Set(milvus::index::MATCH_VALUE,
+                CreateGeometryFromWkt("POLYGON((0 0, 0 2, 2 2, 2 0, 0 0))"));
+        return ds;
+    };
+
+    // Publish the anchor before anyone reads: it is committed for the whole
+    // run, so no snapshot is ever allowed to miss it.
+    rtree.AddGeometry(wkb_for(kAnchor), kAnchor, true);
+
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+    std::atomic<int64_t> reader_iters{0};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            // Round-robin so offsets reach the index out of order and the
+            // sparse anchor stays above everything still in flight.
+            for (int64_t off = w; off < kAnchor; off += kWriters) {
+                rtree.AddGeometry(wkb_for(off), off, true);
+            }
+        });
+    }
+
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 3; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                auto res = rtree.Query(make_query());
+                if (res.size() < static_cast<size_t>(kAnchor + 1)) {
+                    ADD_FAILURE()
+                        << "Count() under-reported the row space mid-flight: "
+                        << res.size() << " < " << (kAnchor + 1);
+                    break;
+                }
+                EXPECT_TRUE(res[kAnchor])
+                    << "committed anchor candidate was clipped away";
+                for (size_t off = 0; off < res.size(); ++off) {
+                    if (res[off] && !matches(static_cast<int64_t>(off))) {
+                        ADD_FAILURE() << "non-matching offset " << off
+                                      << " appeared as a candidate";
+                        break;
+                    }
+                }
+                reader_iters.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+
+    // After ingestion the answer is exact: every even offset in [0, kAnchor].
+    EXPECT_EQ(rtree.Count(), kAnchor + 1);
+    auto final_res = rtree.Query(make_query());
+    ASSERT_EQ(final_res.size(), static_cast<size_t>(kAnchor + 1));
+    for (int64_t off = 0; off <= kAnchor; ++off) {
+        EXPECT_EQ(final_res[off], matches(off)) << "offset " << off;
+    }
+    EXPECT_EQ(final_res.count(), static_cast<size_t>(kAnchor / 2 + 1));
+}
