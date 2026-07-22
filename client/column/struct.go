@@ -195,6 +195,11 @@ func (c *columnStructArray) AppendNull() error {
 		return errors.New("append null to not nullable struct array column")
 	}
 	for _, field := range c.fields {
+		if !field.Nullable() {
+			return errors.Newf("struct array AppendNull: sub-field %q is not nullable", field.Name())
+		}
+	}
+	for _, field := range c.fields {
 		if err := field.AppendNull(); err != nil {
 			return errors.Wrapf(err, "struct array AppendNull: sub-field %q", field.Name())
 		}
