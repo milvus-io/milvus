@@ -14,12 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
+#include <deque>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <memory>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
 #include "arrow/array/builder_nested.h"
+#include "arrow/util/byte_size.h"
 #include "arrow/array/builder_primitive.h"
 #include "arrow/array/concatenate.h"
 #include "arrow/buffer_builder.h"
@@ -1549,15 +1554,16 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     return field_data_list;
 }
 
-std::vector<FieldDataPtr>
-GetFieldDatasFromManifest(
+void
+IterateFieldDataFromManifest(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
-    std::optional<StorageColumnMapping> storage_column_mapping) {
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const std::function<void(FieldDataPtr)>& consumer) {
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
@@ -1594,19 +1600,20 @@ GetFieldDatasFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        return {};
+        return;
     }
 
     std::vector<std::string> needed_columns = {column_name};
 
     bool nullable = field_meta.field_schema.nullable();
-    std::optional<FieldMeta> normalize_field_meta;
+    std::shared_ptr<const FieldMeta> normalize_field_meta;
     if (is_external) {
         auto schema = field_meta.field_schema;
         if (schema.fieldid() == 0) {
             schema.set_fieldid(field_meta.field_id);
         }
-        normalize_field_meta.emplace(FieldMeta::ParseFrom(schema));
+        normalize_field_meta =
+            std::make_shared<const FieldMeta>(FieldMeta::ParseFrom(schema));
     }
 
     // External tables: schemaless reader - let the reader derive types from
@@ -1651,12 +1658,81 @@ GetFieldDatasFromManifest(
 
     auto record_batch_reader = reader_result.ValueOrDie();
 
-    std::vector<FieldDataPtr> field_datas;
+    // Decode batches on the MIDDLE thread pool while this thread keeps
+    // draining the record batch reader. ReadNext must stay single-threaded
+    // (the reader is not thread-safe), but everything after it — external
+    // normalization plus FieldData materialization — is pure per-batch work
+    // and is the dominant cost. Offloading it keeps the reader thread free
+    // to trigger the next prefetch round, so network fetch and decode
+    // overlap instead of strictly alternating. Results are delivered to
+    // `consumer` on this thread in batch order; the bounded in-flight
+    // window provides backpressure so decoded-but-undelivered batches
+    // cannot pile up without limit.
+    //
+    // The window is bounded by bytes, not by batch count: a count-based cap
+    // scales with the pool size and the per-batch size, so on a large pool
+    // with 64MB batches it would admit gigabytes of decoded data per build
+    // (and several builds may run concurrently). The byte budget below caps
+    // the decoded-but-undelivered bytes regardless of batch size and thread
+    // count; at least two batches are always admitted so decode can still
+    // overlap with fetch when a single batch exceeds the budget.
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    constexpr int64_t kMaxInflightBytes = 512LL << 20;
+    const size_t max_inflight_batches =
+        std::max<size_t>(2, pool.GetMaxThreadNum() * 2);
+    std::deque<std::pair<std::future<FieldDataPtr>, int64_t>> pending;
+    int64_t pending_bytes = 0;
+
+    // Phase accounting for the streaming loop, reported once at the end.
+    // fetch = ReadNext (network/prefetch wait), decode_wait = blocking on
+    // the decode future, consume = the consumer callback (for index build:
+    // the local disk write). The three phases run on this thread and are
+    // mutually exclusive, so comparing their totals against the wall time
+    // shows where the pipeline actually spends its time — in particular
+    // whether a blocking consumer is starving ReadNext (fetch_max grows)
+    // or the writes themselves are slow (consume dominates).
+    int64_t fetch_ns = 0, fetch_max_ns = 0;
+    int64_t decode_wait_ns = 0;
+    int64_t consume_ns = 0, consume_max_ns = 0;
+    int64_t total_batch_bytes = 0;
+    size_t batch_count = 0;
+    auto wall_start = std::chrono::steady_clock::now();
+    auto now_ns = []() {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    };
+
+    auto deliver_front = [&]() {
+        auto t0 = now_ns();
+        auto field_data = pending.front().first.get();
+        auto t1 = now_ns();
+        pending_bytes -= pending.front().second;
+        pending.pop_front();
+        consumer(std::move(field_data));
+        auto t2 = now_ns();
+        decode_wait_ns += t1 - t0;
+        consume_ns += t2 - t1;
+        consume_max_ns = std::max(consume_max_ns, t2 - t1);
+    };
+
+    auto data_type_v = data_type.value();
+    auto element_type_v = element_type.value();
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
+        auto fetch_start = now_ns();
         auto status = record_batch_reader->ReadNext(&batch);
-        AssertInfo(status.ok(),
-                   "Failed to read record batch: " + status.ToString());
+        auto fetch_elapsed = now_ns() - fetch_start;
+        fetch_ns += fetch_elapsed;
+        fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
+        if (!status.ok()) {
+            // Drain workers before throwing so no task outlives this scope.
+            for (auto& f : pending) {
+                f.first.wait();
+            }
+            AssertInfo(false,
+                       "Failed to read record batch: " + status.ToString());
+        }
         if (batch == nullptr) {
             break;
         }
@@ -1666,23 +1742,108 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto raw_column = batch->GetColumnByName(column_name);
-        if (is_external) {
-            raw_column =
-                NormalizeExternalArrowByType(raw_column,
-                                             data_type.value(),
-                                             dim,
-                                             nullable,
-                                             element_type.value(),
-                                             normalize_field_meta.value());
+        // Estimate the decoded footprint of this batch for the byte budget.
+        // The arrow buffers backing the batch are the best available proxy
+        // for the FieldData it will materialize into; fall back to the row
+        // count when the size cannot be computed.
+        int64_t batch_bytes = 0;
+        {
+            auto size_result = arrow::util::TotalBufferSize(*batch);
+            batch_bytes = size_result > 0 ? size_result : num_rows;
         }
-        auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
-        auto field_data = CreateFieldData(
-            data_type.value(), element_type.value(), nullable, dim, num_rows);
-        field_data->FillFieldData(chunked_array);
-        field_datas.push_back(field_data);
+
+        auto decode_future = pool.Submit([batch,
+                                          column_name,
+                                          is_external,
+                                          data_type_v,
+                                          element_type_v,
+                                          dim,
+                                          nullable,
+                                          normalize_field_meta,
+                                          num_rows]() -> FieldDataPtr {
+            auto raw_column = batch->GetColumnByName(column_name);
+            if (is_external) {
+                raw_column =
+                    NormalizeExternalArrowByType(raw_column,
+                                                 data_type_v,
+                                                 dim,
+                                                 nullable,
+                                                 element_type_v,
+                                                 *normalize_field_meta);
+            }
+            auto chunked_array =
+                std::make_shared<arrow::ChunkedArray>(raw_column);
+            auto field_data = CreateFieldData(
+                data_type_v, element_type_v, nullable, dim, num_rows);
+            field_data->FillFieldData(chunked_array);
+            return field_data;
+        });
+        pending.emplace_back(std::move(decode_future), batch_bytes);
+        pending_bytes += batch_bytes;
+        total_batch_bytes += batch_bytes;
+        ++batch_count;
+
+        // Backpressure: block on the oldest batch once the window is full
+        // by bytes or by count. Always keep at least one in flight so a
+        // single oversized batch cannot deadlock the loop.
+        while (pending.size() > 1 && (pending_bytes > kMaxInflightBytes ||
+                                      pending.size() >= max_inflight_batches)) {
+            deliver_front();
+        }
+        // Opportunistically deliver whatever is already done, keeping
+        // consumer-side work (e.g. disk writes) interleaved with fetching.
+        while (!pending.empty() &&
+               pending.front().first.wait_for(std::chrono::seconds(0)) ==
+                   std::future_status::ready) {
+            deliver_front();
+        }
     }
 
+    while (!pending.empty()) {
+        deliver_front();
+    }
+
+    if (batch_count > 0) {
+        auto wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - wall_start)
+                           .count();
+        LOG_INFO(
+            "[ManifestReadStats] column={} batches={} MB={} wall_ms={} "
+            "fetch_ms={} fetch_max_ms={} decode_wait_ms={} consume_ms={} "
+            "consume_max_ms={}",
+            column_name,
+            batch_count,
+            total_batch_bytes >> 20,
+            wall_ms,
+            fetch_ns / 1'000'000,
+            fetch_max_ns / 1'000'000,
+            decode_wait_ns / 1'000'000,
+            consume_ns / 1'000'000,
+            consume_max_ns / 1'000'000);
+    }
+}
+
+std::vector<FieldDataPtr>
+GetFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping) {
+    std::vector<FieldDataPtr> field_datas;
+    IterateFieldDataFromManifest(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        data_type,
+        dim,
+        element_type,
+        std::move(storage_column_mapping),
+        [&](FieldDataPtr field_data) {
+            field_datas.push_back(std::move(field_data));
+        });
     return field_datas;
 }
 

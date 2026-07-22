@@ -965,58 +965,35 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     uint32_t var_dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(var_dim);
 
-    std::vector<FieldDataPtr> field_datas;
-    auto manifest =
-        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    auto manifest_path_str = manifest.value_or("");
-    if (manifest_path_str != "") {
-        AssertInfo(
-            loon_ffi_properties_ != nullptr,
-            "loon ffi properties is null when build index with manifest");
-        field_datas = GetFieldDatasFromManifest(
-            manifest_path_str,
-            loon_ffi_properties_,
-            field_meta_,
-            data_type,
-            dim,
-            element_type,
-            GetStorageColumnMapping(field_meta_.field_id));
-    } else {
-        field_datas = GetFieldDatasFromStorageV2(all_remote_files,
-                                                 GetFieldDataMeta().field_id,
-                                                 data_type.value(),
-                                                 element_type.value(),
-                                                 dim,
-                                                 fs_);
-    }
-
     bool nullable = false;
     uint64_t total_num_rows = 0;
-    if (valid_data_path.has_value()) {
-        for (auto& field_data : field_datas) {
+    std::vector<uint8_t> valid_bitmap;
+
+    // Consumes one batch: accumulate row/validity bookkeeping, then append
+    // the batch to the local raw-data file. The validity bitmap grows
+    // incrementally (mirroring cache_raw_data_to_disk_internal) because in
+    // the streaming manifest path the total row count is unknown upfront.
+    // Nullability is uniform across batches of one column (it comes from
+    // the field schema), so growth from the first batch covers all rows.
+    auto consume_field_data = [&](const FieldDataPtr& field_data) {
+        num_rows += uint32_t(field_data->get_valid_rows());
+        if (valid_data_path.has_value()) {
+            auto rows = field_data->get_num_rows();
             if (field_data->IsNullable()) {
                 nullable = true;
             }
-            total_num_rows += field_data->get_num_rows();
-        }
-    }
-
-    std::vector<uint8_t> valid_bitmap;
-    if (nullable) {
-        valid_bitmap.resize((total_num_rows + 7) / 8, 0);
-    }
-
-    int64_t chunk_offset = 0;
-    for (auto& field_data : field_datas) {
-        num_rows += uint32_t(field_data->get_valid_rows());
-        if (nullable) {
-            auto rows = field_data->get_num_rows();
-            for (int64_t i = 0; i < rows; ++i) {
-                if (field_data->is_valid(i)) {
-                    set_bit(valid_bitmap, chunk_offset + i);
+            if (nullable && rows > 0) {
+                auto new_size = (total_num_rows + rows + 7) / 8;
+                if (new_size > static_cast<int64_t>(valid_bitmap.size())) {
+                    valid_bitmap.resize(new_size, 0);
+                }
+                for (int64_t i = 0; i < rows; ++i) {
+                    if (field_data->is_valid(i)) {
+                        set_bit(valid_bitmap, total_num_rows + i);
+                    }
                 }
             }
-            chunk_offset += rows;
+            total_num_rows += rows;
         }
 
         cache_raw_data_to_disk_common<T>(field_data,
@@ -1026,6 +1003,40 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                          var_dim,
                                          write_offset,
                                          is_vector_array ? &offsets : nullptr);
+    };
+
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto manifest_path_str = manifest.value_or("");
+    if (manifest_path_str != "") {
+        AssertInfo(
+            loon_ffi_properties_ != nullptr,
+            "loon ffi properties is null when build index with manifest");
+        // Stream batches straight to the local file instead of
+        // materializing the whole column in memory first, so this task's
+        // retention drops from the full raw column to the reader's prefetch
+        // window plus the bounded decode window, and the disk write
+        // overlaps with fetch/decode.
+        IterateFieldDataFromManifest(
+            manifest_path_str,
+            loon_ffi_properties_,
+            field_meta_,
+            data_type,
+            dim,
+            element_type,
+            GetStorageColumnMapping(field_meta_.field_id),
+            consume_field_data);
+    } else {
+        auto field_datas =
+            GetFieldDatasFromStorageV2(all_remote_files,
+                                       GetFieldDataMeta().field_id,
+                                       data_type.value(),
+                                       element_type.value(),
+                                       dim,
+                                       fs_);
+        for (auto& field_data : field_datas) {
+            consume_field_data(field_data);
+        }
     }
 
     // For vector arrays, num_rows should be the total flattened vector count,
