@@ -76,6 +76,34 @@ func (suite *ReplicaSuite) TestSNNodes() {
 	suite.Equal(0, r2.ROSQNodesCount())
 }
 
+func (suite *ReplicaSuite) TestGetChannelRWNodeMappingsReturnsDefensiveCopy() {
+	replica := newReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: 2,
+		ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+			"channel-a":     {RwNodes: []int64{1, 2}},
+			"stale-channel": {RwNodes: []int64{3}},
+		},
+	})
+
+	mappings := replica.GetChannelRWNodeMappings()
+	suite.Equal(map[string][]int64{
+		"channel-a":     {1, 2},
+		"stale-channel": {3},
+	}, mappings)
+
+	mappings["channel-a"][0] = 99
+	delete(mappings, "stale-channel")
+	mappings["new-channel"] = []int64{4}
+
+	suite.Equal(map[string][]int64{
+		"channel-a":     {1, 2},
+		"stale-channel": {3},
+	}, replica.GetChannelRWNodeMappings())
+	suite.NotNil(newReplica(&querypb.Replica{}).GetChannelRWNodeMappings())
+	suite.Empty(newReplica(&querypb.Replica{}).GetChannelRWNodeMappings())
+}
+
 func (suite *ReplicaSuite) TestReadOperations() {
 	r := newReplica(suite.replicaPB)
 	suite.testRead(r)

@@ -154,6 +154,11 @@ func (suite *ServerSuite) SetupTest() {
 	}
 }
 
+func (suite *ServerSuite) TestTaskSchedulerBalanceInspectorWiring() {
+	_, ok := suite.server.taskScheduler.(task.BalanceTaskInspector)
+	suite.True(ok)
+}
+
 func (suite *ServerSuite) TearDownTest() {
 	err := suite.server.Stop()
 	suite.Require().NoError(err)

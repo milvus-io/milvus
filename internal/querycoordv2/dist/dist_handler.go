@@ -184,8 +184,10 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 			session.WithMemCapacity(resp.GetMemCapacityInMB()),
 			session.WithCPUNum(resp.GetCpuNum()),
 		)
-		dh.updateSegmentsDistribution(ctx, resp)
-		dh.updateChannelsDistribution(ctx, resp)
+		segments := dh.buildSegmentsDistribution(ctx, resp)
+		channels := dh.buildChannelsDistribution(ctx, resp)
+		newLeaders := dh.dist.PublishNodeDistribution(resp.GetNodeID(), segments, channels)
+		dh.notifyNewDelegators(newLeaders)
 	}
 }
 
@@ -193,7 +195,7 @@ func (dh *distHandler) SetNotifyFunc(notifyFunc NotifyDelegatorChanges) {
 	dh.notifyFunc = notifyFunc
 }
 
-func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
+func (dh *distHandler) buildSegmentsDistribution(ctx context.Context, resp *querypb.GetDataDistributionResponse) []*meta.Segment {
 	updates := make([]*meta.Segment, 0, len(resp.GetSegments()))
 	for _, s := range resp.GetSegments() {
 		// To maintain compatibility with older versions of QueryNode,
@@ -224,10 +226,10 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 		})
 	}
 
-	dh.dist.SegmentDistManager.Update(resp.GetNodeID(), updates...)
+	return updates
 }
 
-func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
+func (dh *distHandler) buildChannelsDistribution(ctx context.Context, resp *querypb.GetDataDistributionResponse) []*meta.DmChannel {
 	channelMap := lo.SliceToMap(resp.GetChannels(), func(ch *querypb.ChannelVersionInfo) (string, *querypb.ChannelVersionInfo) {
 		return ch.GetChannel(), ch
 	})
@@ -298,7 +300,10 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 		}
 	}
 
-	newLeaderOnNode := dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
+	return updates
+}
+
+func (dh *distHandler) notifyNewDelegators(newLeaderOnNode []*meta.DmChannel) {
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
@@ -377,8 +382,7 @@ func (dh *distHandler) stop() {
 		dh.wg.Wait()
 
 		// clear dist
-		dh.dist.ChannelDistManager.Update(dh.nodeID)
-		dh.dist.SegmentDistManager.Update(dh.nodeID)
+		dh.dist.RemoveNodeDistribution(dh.nodeID)
 	})
 }
 

@@ -1,9 +1,13 @@
 package meta
 
 import (
+	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -12,6 +16,122 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+func receiveMetaTestSignal[T any](t *testing.T, ch <-chan T, label string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		var zero T
+		return zero
+	}
+}
+
+func closeMetaTestChannelOnCleanup(t *testing.T, ch chan struct{}) func() {
+	t.Helper()
+	var once sync.Once
+	closeChannel := func() { once.Do(func() { close(ch) }) }
+	t.Cleanup(closeChannel)
+	return closeChannel
+}
+
+func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
+	manager := NewDistributionManager(session.NewNodeManager())
+	oldSegments := []*Segment{SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "channel-old",
+		NumOfRows:     100,
+	})}
+	oldChannels := []*DmChannel{{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-old"},
+		Version:      1,
+		View: &LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "channel-old",
+			Version:      1,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	}}
+	manager.PublishNodeDistribution(1, oldSegments, oldChannels)
+
+	newSegments := []*Segment{SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  100,
+		PartitionID:   20,
+		InsertChannel: "channel-new",
+		NumOfRows:     200,
+	})}
+	newChannels := []*DmChannel{{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-new"},
+		Version:      2,
+		View: &LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "channel-new",
+			Version:      2,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	}}
+
+	segmentsWritten := make(chan struct{})
+	releasePublish := make(chan struct{})
+	releasePublisher := closeMetaTestChannelOnCleanup(t, releasePublish)
+	manager.publishHook = func(stage publishStage) {
+		if stage == publishStageSegmentsWritten {
+			close(segmentsWritten)
+			<-releasePublish
+		}
+	}
+	published := make(chan struct{})
+	go func() {
+		defer close(published)
+		manager.PublishNodeDistribution(1, newSegments, newChannels)
+	}()
+	receiveMetaTestSignal(t, segmentsWritten, "segments-written hook")
+
+	captureAttempted := make(chan struct{})
+	manager.captureHook = func(stage captureStage) {
+		if stage == captureStageBeforeLock {
+			close(captureAttempted)
+		}
+	}
+	captured := make(chan DistributionSnapshot, 1)
+	go func() {
+		captured <- manager.Capture()
+	}()
+	receiveMetaTestSignal(t, captureAttempted, "capture-before-lock hook")
+	releasePublisher()
+	snapshot := receiveMetaTestSignal(t, captured, "atomic distribution capture")
+	receiveMetaTestSignal(t, published, "distribution publisher completion")
+
+	segmentIDs, channelNames := distributionRecordsForNode(snapshot, 1)
+	wholeOld := assert.ObjectsAreEqual([]int64{1}, segmentIDs) && assert.ObjectsAreEqual([]string{"channel-old"}, channelNames)
+	wholeNew := assert.ObjectsAreEqual([]int64{2}, segmentIDs) && assert.ObjectsAreEqual([]string{"channel-new"}, channelNames)
+	require.True(t, wholeOld || wholeNew, "capture returned a mixed segment/channel pair")
+}
+
+func distributionRecordsForNode(snapshot DistributionSnapshot, nodeID int64) ([]int64, []string) {
+	segmentIDs := make([]int64, 0)
+	for _, segment := range snapshot.Segments {
+		if segment.NodeID == nodeID {
+			segmentIDs = append(segmentIDs, segment.SegmentID)
+		}
+	}
+	channelNames := make([]string, 0)
+	for _, channel := range snapshot.Channels {
+		if channel.NodeID == nodeID {
+			channelNames = append(channelNames, channel.Channel)
+		}
+	}
+	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
+	sort.Strings(channelNames)
+	return segmentIDs, channelNames
+}
 
 func TestGetDistributionJSON(t *testing.T) {
 	// Initialize DistributionManager

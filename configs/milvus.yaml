@@ -470,6 +470,17 @@ queryCoord:
   growingRowCountWeight: 4 # the memory weight of growing segment row count
   delegatorMemoryOverloadFactor: 0.1 # the factor of delegator overloaded memory
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
+  balanceEpoch:
+    enabled: false # Whether to enable resource-group balance epochs.
+    shadowMode: false # Whether to plan resource-group balance epochs without admitting tasks.
+    deadline: 120000 # Maximum balance epoch duration in milliseconds.
+    noProgressDeadline: 30000 # Maximum balance epoch duration without progress in milliseconds.
+    maxSegmentTasks: 5 # Maximum segment tasks admitted by one balance epoch wave.
+    maxChannelTasks: 1 # Maximum channel tasks admitted by one balance epoch wave.
+    maxTasksPerNode: 5 # Maximum balance epoch tasks charged to one node.
+    maxTasksPerCollection: 5 # Maximum balance epoch tasks admitted for one collection.
+    maxObjectRetries: 3 # Maximum failed attempts before quarantining a balance object.
+    quarantineBackoff: 60000 # Balance object quarantine duration in milliseconds.
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
   checkBalanceInterval: 300
