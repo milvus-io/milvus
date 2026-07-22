@@ -121,7 +121,7 @@ func TestEvictForRecoveryByTTL(t *testing.T) {
 	populateWindowEntries(state, timeticks)
 	require.Len(t, state.entries, 5)
 
-	state.evictForRecovery(350, 0, 0)
+	state.evictForRecovery(350, 0, 0, 0)
 	require.Len(t, state.entries, 2)
 	require.Contains(t, state.entries, "key-3")
 	require.Contains(t, state.entries, "key-4")
@@ -135,7 +135,7 @@ func TestEvictForRecoveryRespectsMinEntries(t *testing.T) {
 	populateWindowEntries(state, []uint64{100, 200, 300})
 	require.Len(t, state.entries, 3)
 
-	state.evictForRecovery(500, 2, 0)
+	state.evictForRecovery(500, 2, 0, 0)
 	require.Len(t, state.entries, 2)
 	require.Contains(t, state.entries, "key-1")
 	require.Contains(t, state.entries, "key-2")
@@ -153,7 +153,7 @@ func TestEvictForRecoveryEnforcesMaxEntries(t *testing.T) {
 	populateWindowEntries(state, timeticks)
 	require.Len(t, state.entries, 10)
 
-	state.evictForRecovery(0, 0, 5)
+	state.evictForRecovery(0, 0, 5, 0)
 	require.Len(t, state.entries, 5)
 }
 

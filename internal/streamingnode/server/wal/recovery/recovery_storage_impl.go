@@ -44,9 +44,11 @@ func RecoverRecoveryStorage(
 	}
 	// Recover the idempotency window cache before WAL replay. The chunk store is
 	// the source of truth when a chunk write succeeded but catalog metadata was
-	// not advanced before crash. recoverWindows is a no-op when idempotency is
-	// disabled and tolerates a corrupted (rebuildable) window store; it returns
-	// the (possibly rewound) checkpoint to resume consuming from.
+	// not advanced before crash. With idempotency disabled recoverWindows only
+	// drops a stale leftover store; corruption of REFERENCED window state fails
+	// the WAL open (the WAL may already be truncated past the store's coverage —
+	// see wrapWindowRecoveryError), while orphan-chunk corruption self-heals. It
+	// returns the (possibly rewound) checkpoint to resume consuming from.
 	rewoundCheckpoint, err := rs.windowManager.recoverWindows(ctx, recoveryStreamBuilder.Channel().Name, rs.checkpoint, rs.vchannels)
 	if err != nil {
 		rs.Logger().Warn(ctx, "recovery storage failed", mlog.Err(err))
@@ -93,6 +95,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 	}
 	rs.windowManager = newWindowManager(channel.Name, cfg, rs.metrics, cp, windowEvictionConfig{
 		windowTTL:  cfg.idempotencyWindowTTL,
+		maxBytes:   cfg.idempotencyMaxBytes,
 		minEntries: cfg.idempotencyMinEntries,
 		maxEntries: cfg.idempotencyMaxEntries,
 	})

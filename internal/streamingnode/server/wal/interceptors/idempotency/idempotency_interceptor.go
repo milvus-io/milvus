@@ -2,6 +2,7 @@ package idempotency
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -31,7 +33,14 @@ type idempotencyInterceptor struct {
 	// positively known to be still open. nil means "unknown" and skips the
 	// rollback (the txn then falls back to keepalive expiry as before).
 	txnActive idempotencyutils.TxnActiveChecker
+	// lastSweepPhysicalMs rate-limits the idle-vchannel TTL sweep (physical ms
+	// of the last sweep's timetick).
+	lastSweepPhysicalMs atomic.Int64
 }
+
+// idleSweepMinIntervalMs bounds how often the TimeTick-driven window sweep may
+// run; between sweeps a TimeTick append costs one atomic load.
+const idleSweepMinIntervalMs = 1000
 
 func (impl *idempotencyInterceptor) Name() string {
 	return interceptorName
@@ -132,6 +141,14 @@ func (impl *idempotencyInterceptor) sweepWindowsOnTimeTick(ctx context.Context) 
 	// message without the property would panic on TimeTick().
 	extra := utility.GetExtraAppendResult(ctx)
 	if extra == nil || extra.TimeTick == 0 {
+		return
+	}
+	// TimeTicks arrive several times per second per pchannel and the sweep walks
+	// every window; rate-limit it so the common no-op path costs one atomic load
+	// instead of an O(windows) pass per tick.
+	physical, _ := tsoutil.ParseHybridTs(extra.TimeTick)
+	last := impl.lastSweepPhysicalMs.Load()
+	if physical-last < idleSweepMinIntervalMs || !impl.lastSweepPhysicalMs.CompareAndSwap(last, physical) {
 		return
 	}
 	evictBefore := evictBeforeCommitTT(extra.TimeTick, impl.config.WindowTTL)

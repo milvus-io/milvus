@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type pchannelWindowStoreMeta struct {
@@ -42,13 +43,15 @@ const (
 // supplies the checkpoint and the active vchannel set so windowManager does not
 // reach into recoveryStorageImpl for them.
 //
-// The window store is a rebuildable cache, not a source of truth, so this must
-// never block normal WAL recovery:
+// Behavior by state:
 //   - when idempotency is disabled it skips recovery/bootstrap; it only probes
 //     the catalog to drop a store left behind by an earlier enabled run (a
 //     pchannel that never used idempotency pays one catalog read, no writes);
-//   - when the durable window store is corrupted it logs, drops the corrupted
-//     cache, and continues with an empty window set rather than failing.
+//   - transient catalog/object-storage read errors are retried bounded and, if
+//     persistent, abort the open with the transient cause;
+//   - corruption of REFERENCED window state FAILS the WAL open (the WAL may be
+//     truncated past the store's coverage — see wrapWindowRecoveryError), while
+//     orphan-chunk corruption self-heals inline.
 func (m *windowManager) recoverWindows(ctx context.Context, pchannel string, checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) (*WALCheckpoint, error) {
 	if !m.cfg.idempotencyEnabled {
 		// Any window store persisted by an earlier enabled run is stale while the
@@ -104,12 +107,21 @@ func (m *windowManager) recoverWindowInfoFromMeta(ctx context.Context, pchannel 
 }
 
 func (m *windowManager) loadWindowInfoFromMeta(ctx context.Context, pchannel string, allowBootstrap bool, checkpoint *WALCheckpoint) (*windowStoreRecoveryInfo, error) {
-	windowMetas, err := resource.Resource().StreamingNodeCatalog().ListVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency)
-	if err != nil {
+	// Bounded retry: transient catalog blips must not hard-fail the WAL open.
+	var windowMetas []*streamingpb.VChannelWindowMeta
+	if err := retry.Do(ctx, func() error {
+		var listErr error
+		windowMetas, listErr = resource.Resource().StreamingNodeCatalog().ListVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency)
+		return listErr
+	}, retry.Attempts(5)); err != nil {
 		return nil, errors.Wrap(err, "failed to list idempotency window meta")
 	}
-	storeMetaPB, err := resource.Resource().StreamingNodeCatalog().GetPChannelWindowMeta(ctx, pchannel)
-	if err != nil {
+	var storeMetaPB *streamingpb.PChannelWindowMeta
+	if err := retry.Do(ctx, func() error {
+		var getErr error
+		storeMetaPB, getErr = resource.Resource().StreamingNodeCatalog().GetPChannelWindowMeta(ctx, pchannel)
+		return getErr
+	}, retry.Attempts(5)); err != nil {
 		return nil, errors.Wrap(err, "failed to get pchannel window meta")
 	}
 	storeMeta := pchannelWindowStoreMetaFromCatalog(storeMetaPB)
@@ -117,10 +129,11 @@ func (m *windowManager) loadWindowInfoFromMeta(ctx context.Context, pchannel str
 		if !allowBootstrap || len(windowMetas) > 0 {
 			return nil, merr.WrapErrServiceInternalMsg("pchannel window meta missing for pchannel %s", pchannel)
 		}
-		storeMeta, err = m.bootstrapPChannelWindowStore(ctx, pchannel, checkpoint)
+		bootstrapped, err := m.bootstrapPChannelWindowStore(ctx, pchannel, checkpoint)
 		if err != nil {
 			return nil, err
 		}
+		storeMeta = bootstrapped
 	}
 	return &windowStoreRecoveryInfo{
 		windowMetas: windowMetas,
@@ -268,8 +281,16 @@ func (m *windowManager) recoverPChannelWindowChunk(
 	generation uint64,
 ) (*pchannelWindowChunkFooter, error) {
 	chunkKey := buildPChannelWindowChunkKey(pchannel, generation)
-	payload, err := resource.Resource().ChunkManager().Read(ctx, chunkKey)
-	if err != nil {
+	// Bounded retry on the raw read: a transient object-storage blip must not
+	// hard-fail the WAL open now that referenced-state corruption does — only a
+	// VERIFIED decode/checksum failure below is corruption; IO errors here are
+	// retried and, if persistent, abort with the transient cause intact.
+	var payload []byte
+	if err := retry.Do(ctx, func() error {
+		var readErr error
+		payload, readErr = resource.Resource().ChunkManager().Read(ctx, chunkKey)
+		return readErr
+	}, retry.Attempts(5)); err != nil {
 		return nil, errors.Wrapf(err, "failed to read pchannel window chunk %s", chunkKey)
 	}
 	recordsByVChannel, footer, _, err := unmarshalPChannelWindowChunk(payload)
@@ -299,7 +320,7 @@ func (m *windowManager) recoverPChannelWindowChunk(
 	}
 	evictBeforeTT := evictBeforeTimetick(footer.SourceCheckpointTimetick, m.evictionConfig.windowTTL)
 	for _, state := range m.idempotencyWindows() {
-		state.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxEntries)
+		state.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxEntries, m.evictionConfig.maxBytes)
 	}
 	return footer, nil
 }
