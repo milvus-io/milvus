@@ -2228,14 +2228,6 @@ func (m *meta) SetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID,
 	}
 }
 
-// SetSegmentLevel sets level for segment
-func (m *meta) SetSegmentLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-
-	m.segments.SetLevel(segmentID, level)
-}
-
 func getMinPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 	var minPos *msgpb.MsgPosition
 	for _, pos := range positions {
