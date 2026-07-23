@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -891,6 +893,81 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	err := segment.Reopen(context.Background(), newLoadInfo)
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
+}
+
+// TestLocalSegmentReopenInjectsDiskIndexLoadParams reproduces issue #51249:
+// the Reopen path must inject QueryNode-local index load params (e.g. DISKANN
+// num_load_thread) before handing the load info to segcore. Without the fix,
+// the DISKANN index params reaching segcore lack num_load_thread and segcore
+// asserts "param num_load_thread is empty".
+func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
+	paramtable.Init()
+
+	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	schema.Version = 1
+
+	collection := &Collection{}
+	collection.setSchema(schema, 1, 100, 101)
+
+	getParam := func(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
+		for _, kv := range kvs {
+			if kv.GetKey() == key {
+				return kv.GetValue(), true
+			}
+		}
+		return "", false
+	}
+
+	var captured *querypb.SegmentLoadInfo
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
+			captured = request.LoadInfo
+			return true
+		})).
+		Return(nil)
+
+	// DISKANN index carrying build-time params but NOT the QueryNode-local
+	// num_load_thread (the exact shape QueryCoord sends on a Reopen task).
+	newLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  10,
+		SegmentID:     20,
+		PartitionID:   30,
+		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID: 100,
+				IndexID: 1000,
+				NumRows: 5000,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "DISKANN"},
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(newLoadInfo),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo))
+	require.NotNil(t, captured)
+	require.Len(t, captured.GetIndexInfos(), 1)
+
+	// The load info handed to segcore must now carry num_load_thread.
+	numLoadThread, ok := getParam(captured.GetIndexInfos()[0].GetIndexParams(), indexparams.NumLoadThreadKey)
+	assert.True(t, ok, "num_load_thread must be injected into DISKANN index params on Reopen")
+	assert.NotEmpty(t, numLoadThread)
 }
 
 // TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.
