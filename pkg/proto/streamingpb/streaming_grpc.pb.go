@@ -840,9 +840,10 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingNodeManagerService_Assign_FullMethodName        = "/milvus.proto.streaming.StreamingNodeManagerService/Assign"
-	StreamingNodeManagerService_Remove_FullMethodName        = "/milvus.proto.streaming.StreamingNodeManagerService/Remove"
-	StreamingNodeManagerService_CollectStatus_FullMethodName = "/milvus.proto.streaming.StreamingNodeManagerService/CollectStatus"
+	StreamingNodeManagerService_Assign_FullMethodName          = "/milvus.proto.streaming.StreamingNodeManagerService/Assign"
+	StreamingNodeManagerService_Remove_FullMethodName          = "/milvus.proto.streaming.StreamingNodeManagerService/Remove"
+	StreamingNodeManagerService_CollectStatus_FullMethodName   = "/milvus.proto.streaming.StreamingNodeManagerService/CollectStatus"
+	StreamingNodeManagerService_ValidateRuntime_FullMethodName = "/milvus.proto.streaming.StreamingNodeManagerService/ValidateRuntime"
 )
 
 // StreamingNodeManagerServiceClient is the client API for StreamingNodeManagerService service.
@@ -866,6 +867,8 @@ type StreamingNodeManagerServiceClient interface {
 	// balance info on a log node. Used to recover channel info on log coord,
 	// collect balance info and health check.
 	CollectStatus(ctx context.Context, in *StreamingNodeManagerCollectStatusRequest, opts ...grpc.CallOption) (*StreamingNodeManagerCollectStatusResponse, error)
+	// ValidateRuntime validates runtime-dependent artifacts on a streaming node.
+	ValidateRuntime(ctx context.Context, in *StreamingNodeManagerValidateRuntimeRequest, opts ...grpc.CallOption) (*StreamingNodeManagerValidateRuntimeResponse, error)
 }
 
 type streamingNodeManagerServiceClient struct {
@@ -903,6 +906,15 @@ func (c *streamingNodeManagerServiceClient) CollectStatus(ctx context.Context, i
 	return out, nil
 }
 
+func (c *streamingNodeManagerServiceClient) ValidateRuntime(ctx context.Context, in *StreamingNodeManagerValidateRuntimeRequest, opts ...grpc.CallOption) (*StreamingNodeManagerValidateRuntimeResponse, error) {
+	out := new(StreamingNodeManagerValidateRuntimeResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeManagerService_ValidateRuntime_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StreamingNodeManagerServiceServer is the server API for StreamingNodeManagerService service.
 // All implementations should embed UnimplementedStreamingNodeManagerServiceServer
 // for forward compatibility
@@ -924,6 +936,8 @@ type StreamingNodeManagerServiceServer interface {
 	// balance info on a log node. Used to recover channel info on log coord,
 	// collect balance info and health check.
 	CollectStatus(context.Context, *StreamingNodeManagerCollectStatusRequest) (*StreamingNodeManagerCollectStatusResponse, error)
+	// ValidateRuntime validates runtime-dependent artifacts on a streaming node.
+	ValidateRuntime(context.Context, *StreamingNodeManagerValidateRuntimeRequest) (*StreamingNodeManagerValidateRuntimeResponse, error)
 }
 
 // UnimplementedStreamingNodeManagerServiceServer should be embedded to have forward compatible implementations.
@@ -938,6 +952,9 @@ func (UnimplementedStreamingNodeManagerServiceServer) Remove(context.Context, *S
 }
 func (UnimplementedStreamingNodeManagerServiceServer) CollectStatus(context.Context, *StreamingNodeManagerCollectStatusRequest) (*StreamingNodeManagerCollectStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CollectStatus not implemented")
+}
+func (UnimplementedStreamingNodeManagerServiceServer) ValidateRuntime(context.Context, *StreamingNodeManagerValidateRuntimeRequest) (*StreamingNodeManagerValidateRuntimeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateRuntime not implemented")
 }
 
 // UnsafeStreamingNodeManagerServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -1005,6 +1022,24 @@ func _StreamingNodeManagerService_CollectStatus_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamingNodeManagerService_ValidateRuntime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeManagerValidateRuntimeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeManagerServiceServer).ValidateRuntime(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeManagerService_ValidateRuntime_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeManagerServiceServer).ValidateRuntime(ctx, req.(*StreamingNodeManagerValidateRuntimeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StreamingNodeManagerService_ServiceDesc is the grpc.ServiceDesc for StreamingNodeManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1023,6 +1058,10 @@ var StreamingNodeManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CollectStatus",
 			Handler:    _StreamingNodeManagerService_CollectStatus_Handler,
+		},
+		{
+			MethodName: "ValidateRuntime",
+			Handler:    _StreamingNodeManagerService_ValidateRuntime_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

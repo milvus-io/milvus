@@ -17,7 +17,6 @@ func (m *VChannelRecoveryModule) AcquireQueryResource(req snview.AcquireResource
 	m.mu.Lock()
 	m.queryResources.AcquireLocked(req, m.queryWALViewLocked)
 	m.mu.Unlock()
-	go m.queryResources.WaitReady(req.Key, req.OnReady)
 }
 
 func (m *VChannelRecoveryModule) ReleaseQueryResource(req snview.ReleaseResource) {
@@ -60,23 +59,16 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	baseGrowingTimeTick := max(m.latestInsertTimeTick, baseTransformTimeTick)
 	dataVersion := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
 	segmentSnapshot := m.visibleSnapshot(baseGrowingTimeTick, dataVersion)
-	deleteReplay := newDeleteReplayScanner(
-		context.Background(),
-		m.queryTransformLogStream,
-		m.pchannel,
-		m.vchannel,
-		max(deleteReplayStartAfter(segmentSnapshot), meta.GetTransformStartAfterTimetick()),
-		baseTransformTimeTick,
-	)
 	return walview.VChannelWALView{
-		PChannel:              m.pchannel,
-		VChannel:              m.vchannel,
-		CollectionID:          vchannelSnapshot.CollectionID,
-		BaseGrowingTimeTick:   baseGrowingTimeTick,
-		BaseTransformTimeTick: baseTransformTimeTick,
-		LoadInfoVersion:       meta.GetLoadInfoVersion(),
-		Schema:                vchannelSnapshot.Schema,
-		SegmentSnapshot:       segmentSnapshot,
-		DeleteReplay:          deleteReplay,
+		PChannel:                       m.pchannel,
+		VChannel:                       m.vchannel,
+		CollectionID:                   vchannelSnapshot.CollectionID,
+		BaseGrowingTimeTick:            baseGrowingTimeTick,
+		BaseTransformTimeTick:          baseTransformTimeTick,
+		LoadInfoVersion:                meta.GetLoadInfoVersion(),
+		Schema:                         vchannelSnapshot.Schema,
+		SegmentSnapshot:                segmentSnapshot,
+		TransformLogStream:             m.queryTransformLogStream,
+		DeleteReplayStartAfterTimeTick: max(deleteReplayStartAfter(segmentSnapshot), meta.GetTransformStartAfterTimetick()),
 	}, true
 }

@@ -5,6 +5,7 @@ package qnview
 import (
 	"context"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 type fakeTransformSegment struct {
@@ -162,23 +164,31 @@ func (g *fakeTransformLogGuard) Release() {
 }
 
 type fakeQueryViewCollectionRuntimeManager struct {
-	mu          sync.Mutex
-	acquireView *qviews.QueryViewAtQueryNode
-	acquireErr  error
-	guard       *fakeCollectionRuntimeGuard
+	mu           sync.Mutex
+	acquireView  *qviews.QueryViewAtQueryNode
+	acquireErr   error
+	acquireErrs  []error
+	retryable    []bool
+	acquireCalls int
+	guard        *fakeCollectionRuntimeGuard
 }
 
-func (m *fakeQueryViewCollectionRuntimeManager) Acquire(_ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, error) {
+func (m *fakeQueryViewCollectionRuntimeManager) Acquire(_ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.acquireView = view
+	idx := m.acquireCalls
+	m.acquireCalls++
+	if idx < len(m.acquireErrs) && m.acquireErrs[idx] != nil {
+		return nil, idx < len(m.retryable) && m.retryable[idx], m.acquireErrs[idx]
+	}
 	if m.acquireErr != nil {
-		return nil, m.acquireErr
+		return nil, false, m.acquireErr
 	}
 	if m.guard == nil {
 		m.guard = &fakeCollectionRuntimeGuard{}
 	}
-	return m.guard, nil
+	return m.guard, false, nil
 }
 
 type fakeCollectionRuntimeGuard struct {
@@ -313,25 +323,29 @@ func (p *fakeQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(context.Context
 }
 
 type fakePhysicalLoader struct {
-	mu              sync.Mutex
-	loadInfos       []*querypb.SegmentLoadInfo
-	collections     []CollectionRuntime
-	updateSnapshots []SegmentLoadInfoSnapshot
-	updateActions   []SegmentUpdateAction
-	released        []int64
-	loaded          TransformSegment
-	loadErr         error
-	updateErr       error
-	releaseErr      error
-	loadFn          func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
-	updateFn        func(segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
+	mu                sync.Mutex
+	loadInfos         []*querypb.SegmentLoadInfo
+	collections       []CollectionRuntime
+	updateSnapshots   []SegmentLoadInfoSnapshot
+	updateActions     []SegmentUpdateAction
+	released          []int64
+	loaded            TransformSegment
+	loadErr           error
+	updateErr         error
+	releaseErr        error
+	loadFn            func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
+	loadFnWithContext func(context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (TransformSegment, error)
+	updateFn          func(segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
 }
 
-func (l *fakePhysicalLoader) Load(_ context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
+func (l *fakePhysicalLoader) Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
 	l.mu.Lock()
 	l.loadInfos = append(l.loadInfos, info)
 	l.collections = append(l.collections, collection)
 	l.mu.Unlock()
+	if l.loadFnWithContext != nil {
+		return l.loadFnWithContext(ctx, info, collection)
+	}
 	if l.loadFn != nil {
 		return l.loadFn(info, collection)
 	}
@@ -355,6 +369,17 @@ func (l *fakePhysicalLoader) Release(_ context.Context, segmentIDs []int64) erro
 	defer l.mu.Unlock()
 	l.released = append(l.released, segmentIDs...)
 	return l.releaseErr
+}
+
+func newTestQueryViewSegmentLoadScheduler(
+	t *testing.T,
+	_ QueryViewLoadMetadataProvider,
+	loader PhysicalSegmentLoader,
+	estimators ...SegmentResourceEstimator,
+) *QueryViewSegmentLoadScheduler {
+	nodeScheduler := nodescheduler.New(4)
+	t.Cleanup(nodeScheduler.Close)
+	return newQueryViewSegmentLoadScheduler(nodeScheduler, loader, estimators...)
 }
 
 type fakeResourceReservation struct {
@@ -384,9 +409,8 @@ func (e *fakeSegmentResourceEstimator) Reserve(_ context.Context, info *querypb.
 }
 
 type fakeSegmentLoadScheduler struct {
-	tasks    []SegmentLoadTask
-	updates  []SegmentUpdateTask
-	canceled []int64
+	tasks   []SegmentLoadTask
+	updates []SegmentUpdateTask
 }
 
 func (s *fakeSegmentLoadScheduler) Submit(task SegmentLoadTask) {
@@ -397,8 +421,21 @@ func (s *fakeSegmentLoadScheduler) Update(task SegmentUpdateTask) {
 	s.updates = append(s.updates, task)
 }
 
-func (s *fakeSegmentLoadScheduler) Cancel(segmentID int64) {
-	s.canceled = append(s.canceled, segmentID)
+func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
+	t.Helper()
+	scheduler := nodescheduler.New(4)
+	t.Cleanup(scheduler.Close)
+	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, collections...)
+}
+
+func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler SegmentLoadScheduler, watchers ...SegmentLoadInfoWatcher) *ViewScopedPhysicalSegmentManager {
+	t.Helper()
+	nodeScheduler := nodescheduler.New(4)
+	t.Cleanup(nodeScheduler.Close)
+	if len(watchers) > 0 {
+		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(nodeScheduler, scheduler, watchers[0])
+	}
+	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, scheduler)
 }
 
 type fakeSegmentLoadInfoWatcher struct {

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 // ModuleConfig contains the initial state and dependencies for one vchannel
@@ -47,9 +48,9 @@ type ModuleConfig struct {
 	TransformLogMaterialBytes uint64
 	OnSegmentSealed           func(walview.SegmentSealedEvent)
 
-	TransformLogStream         wal.TransformLogStreamManager
+	TransformLogStream         wal.TransformLogStream
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
-	QueryResourceScheduler     queryresource.Scheduler
+	NodeScheduler              nodescheduler.Scheduler
 	QueryRuntimeDispatcher     *queryresource.Dispatcher
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 }
@@ -77,7 +78,7 @@ type VChannelRecoveryModule struct {
 
 	metaAndData bool
 
-	queryTransformLogStream wal.TransformLogStreamManager
+	queryTransformLogStream wal.TransformLogStream
 	queryResources          *queryresource.Manager
 }
 
@@ -102,7 +103,7 @@ func NewModule(config ModuleConfig) (*VChannelRecoveryModule, error) {
 	}
 	module.queryResources = queryresource.NewManager(queryresource.Config{
 		Builders:         config.QueryRuntimeModuleBuilders,
-		Scheduler:        config.QueryResourceScheduler,
+		Scheduler:        config.NodeScheduler,
 		Dispatcher:       config.QueryRuntimeDispatcher,
 		LoadInfoProvider: config.QueryViewLoadInfoProvider,
 	})
@@ -659,5 +660,7 @@ func max(a, b uint64) uint64 {
 	return b
 }
 
-var _ moduleapi.Module = (*VChannelRecoveryModule)(nil)
-var _ moduleapi.DataFrontierProvider = (*VChannelRecoveryModule)(nil)
+var (
+	_ moduleapi.Module               = (*VChannelRecoveryModule)(nil)
+	_ moduleapi.DataFrontierProvider = (*VChannelRecoveryModule)(nil)
+)

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_manager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -66,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -1268,6 +1270,47 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 		collection := server.meta.GetCollection(ctx, id)
 		suite.False(collection.IsRefreshed())
 	}
+}
+
+func TestValidateAnalyzerUsesStreamingNodeManager(t *testing.T) {
+	mockey.PatchConvey("validate analyzer is routed to streamingnode manager", t, func() {
+		mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
+			Return(typeutil.NewUniqueSet(int64(101))).
+			Build()
+
+		manager := mock_manager.NewMockManagerClient(t)
+		server := &Server{
+			streamingNodeManager: manager,
+		}
+		server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		manager.EXPECT().ValidateRuntime(mock.Anything, int64(101), mock.MatchedBy(func(req *streamingpb.StreamingNodeManagerValidateRuntimeRequest) bool {
+			validation := req.GetAnalyzer()
+			if validation == nil || len(validation.GetAnalyzerInfos()) != 1 {
+				return false
+			}
+			info := validation.GetAnalyzerInfos()[0]
+			return info.GetField() == "test_field" &&
+				info.GetName() == "test_analyzer" &&
+				info.GetParams() == `{}`
+		})).Return(&streamingpb.StreamingNodeManagerValidateRuntimeResponse{
+			Status:      merr.Success(),
+			ResourceIds: []int64{10, 20},
+		}, nil).Once()
+
+		resp, err := server.ValidateAnalyzer(context.Background(), &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Name:   "test_analyzer",
+					Params: `{}`,
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []int64{10, 20}, resp.GetResourceIds())
+	})
 }
 
 func (suite *ServiceSuite) TestGetPartitionStates() {

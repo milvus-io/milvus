@@ -67,6 +67,12 @@ type fakeStream struct {
 	err           error
 	closeOnce     sync.Once
 	subscriptions []wal.TransformLogSubscriptionOption
+
+	subscribeStarted chan struct{}
+	subscribeRelease chan struct{}
+	subscribeErr     error
+	subscribeErrs    []error
+	subscribeEvent   *wal.TransformLogStreamEvent
 }
 
 func newFakeStream() *fakeStream {
@@ -76,6 +82,35 @@ func newFakeStream() *fakeStream {
 }
 
 func (s *fakeStream) Subscribe(_ context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+	if s.subscribeStarted != nil {
+		select {
+		case s.subscribeStarted <- struct{}{}:
+		default:
+		}
+	}
+	if s.subscribeRelease != nil {
+		<-s.subscribeRelease
+	}
+	s.mu.Lock()
+	var subscribeErr error
+	if len(s.subscribeErrs) > 0 {
+		subscribeErr = s.subscribeErrs[0]
+		s.subscribeErrs = s.subscribeErrs[1:]
+	}
+	if subscribeErr == nil {
+		subscribeErr = s.subscribeErr
+	}
+	s.mu.Unlock()
+	if subscribeErr != nil {
+		return nil, subscribeErr
+	}
+	if s.subscribeEvent != nil {
+		event := *s.subscribeEvent
+		if event.VChannel == "" {
+			event.VChannel = opt.VChannel
+		}
+		_ = opt.Handler.Handle(event)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscriptions = append(s.subscriptions, opt)
@@ -256,6 +291,142 @@ func TestBufferAcquireMultiplexesVChannelsOnOnePChannelStream(t *testing.T) {
 		Entry:    &streamingpb.TransformLogEntry{TimeTick: 60},
 	})
 	require.NoError(t, <-waitDone)
+}
+
+func TestBufferAcquireWaitsForSubscriptionResult(t *testing.T) {
+	streams := newFakeStreamManager()
+	stream := newFakeStream()
+	stream.subscribeStarted = make(chan struct{}, 1)
+	stream.subscribeRelease = make(chan struct{})
+	streams.streams["v1"] = stream
+	buffer := New(streams)
+
+	type acquireResult struct {
+		guard qnview.TransformLogGuard
+		err   error
+	}
+	acquireDone := make(chan acquireResult, 1)
+	go func() {
+		guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+		acquireDone <- acquireResult{guard: guard, err: err}
+	}()
+
+	select {
+	case result := <-acquireDone:
+		if result.guard != nil {
+			result.guard.Release()
+		}
+		t.Fatal("Acquire returned before subscription started")
+	case <-stream.subscribeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("subscription did not start")
+	}
+	select {
+	case result := <-acquireDone:
+		if result.guard != nil {
+			result.guard.Release()
+		}
+		t.Fatal("Acquire returned before subscription completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(stream.subscribeRelease)
+	result := <-acquireDone
+	require.NoError(t, result.err)
+	require.NotNil(t, result.guard)
+	defer result.guard.Release()
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+}
+
+func TestBufferAcquireWaitsForSameVChannelSubscriptionResult(t *testing.T) {
+	streams := newFakeStreamManager()
+	stream := newFakeStream()
+	stream.subscribeStarted = make(chan struct{}, 1)
+	stream.subscribeRelease = make(chan struct{})
+	streams.streams["v1"] = stream
+	buffer := New(streams)
+
+	type acquireResult struct {
+		guard qnview.TransformLogGuard
+		err   error
+	}
+	acquireDone := make(chan acquireResult, 2)
+	acquire := func(startFrom uint64) {
+		guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", startFrom))
+		acquireDone <- acquireResult{guard: guard, err: err}
+	}
+	go acquire(50)
+	require.Eventually(t, func() bool {
+		select {
+		case <-stream.subscribeStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	go acquire(80)
+
+	select {
+	case result := <-acquireDone:
+		if result.guard != nil {
+			result.guard.Release()
+		}
+		t.Fatal("Acquire returned before shared subscription completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(stream.subscribeRelease)
+	result1 := <-acquireDone
+	result2 := <-acquireDone
+	require.NoError(t, result1.err)
+	require.NoError(t, result2.err)
+	require.NotNil(t, result1.guard)
+	require.NotNil(t, result2.guard)
+	defer result1.guard.Release()
+	defer result2.guard.Release()
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+}
+
+func TestBufferAcquireReturnsUnrecoverableSubscriptionError(t *testing.T) {
+	streams := newFakeStreamManager()
+	stream := newFakeStream()
+	stream.subscribeErr = wal.ErrTransformLogStartPointTruncated
+	streams.streams["v1"] = stream
+	buffer := New(streams)
+
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.Nil(t, guard)
+	require.ErrorIs(t, err, wal.ErrTransformLogStartPointTruncated)
+}
+
+func TestBufferAcquireDoesNotPoisonBufferOnRecoverableSubscriptionError(t *testing.T) {
+	streams := newFakeStreamManager()
+	stream := newFakeStream()
+	stream.subscribeErrs = []error{errors.New("transient stream failure")}
+	streams.streams["v1"] = stream
+	buffer := New(streams)
+
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.Nil(t, guard)
+	require.ErrorContains(t, err, "transient stream failure")
+
+	guard, err = buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	require.NotNil(t, guard)
+	defer guard.Release()
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+}
+
+func TestBufferAcquireReturnsHandlerErrorBeforeSubscriptionReady(t *testing.T) {
+	streams := newFakeStreamManager()
+	stream := newFakeStream()
+	stream.subscribeEvent = &wal.TransformLogStreamEvent{Err: errors.New("catchup failed")}
+	streams.streams["v1"] = stream
+	buffer := New(streams)
+
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.Nil(t, guard)
+	require.ErrorContains(t, err, "catchup failed")
 }
 
 func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *testing.T) {

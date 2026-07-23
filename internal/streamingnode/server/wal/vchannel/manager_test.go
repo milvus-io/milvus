@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 func TestPChannelRecoveryManagerCreatesAndRoutesVChannelModules(t *testing.T) {
@@ -159,6 +160,14 @@ func TestPChannelRecoveryManagerProvidesTransformLogStream(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestPChannelRecoveryManagerSharesQueryTransformLogStream(t *testing.T) {
+	manager := newTestManager(t, "p1", "v1", "v2")
+
+	require.NotNil(t, manager.queryTransformLogStream)
+	require.Same(t, manager.queryTransformLogStream, manager.Module("v1").queryTransformLogStream)
+	require.Same(t, manager.queryTransformLogStream, manager.Module("v2").queryTransformLogStream)
+}
+
 func TestPChannelRecoveryManagerRemovesClosedVChannelTransformLog(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestManager(t, "p1", "v1")
@@ -211,6 +220,8 @@ func TestPChannelRecoveryManagerAcquireBuildsQueryRuntimeWithoutLoadConfigCallba
 
 func newTestManager(t *testing.T, pchannel string, vchannels ...string) *PChannelRecoveryManager {
 	t.Helper()
+	scheduler := nodescheduler.New(1)
+	t.Cleanup(scheduler.Close)
 	metas := make(map[string]*streamingpb.VChannelMeta, len(vchannels))
 	for _, vchannel := range vchannels {
 		metas[vchannel] = newTestVChannelMeta(vchannel)
@@ -219,12 +230,14 @@ func newTestManager(t *testing.T, pchannel string, vchannels ...string) *PChanne
 		PChannel:          pchannel,
 		VChannelMetas:     metas,
 		TransformLogMetas: map[string]*streamingpb.VChannelTransformLogMeta{},
+		NodeScheduler:     scheduler,
 		Runtime:           moduleapi.Runtime{},
 		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
 			testQueryRuntimeModuleBuilder{},
 		},
 	})
 	require.NoError(t, err)
+	t.Cleanup(manager.Close)
 	return manager
 }
 
@@ -278,7 +291,6 @@ func newTestVChannelMeta(vchannel string) *streamingpb.VChannelMeta {
 				},
 			},
 		},
-		LoadConfig: &streamingpb.VChannelLoadConfig{},
 	}
 }
 

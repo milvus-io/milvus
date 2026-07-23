@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -66,9 +67,12 @@ func TestRedoInterceptorWaitUntilGrowingSegmentReadyReturnsUnrecoverableForDropp
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			nodeScheduler := nodescheduler.New(1)
+			t.Cleanup(nodeScheduler.Close)
 			shardManager := shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
 				ChannelInfo: types.PChannelInfo{Name: "test-channel", Term: 1},
 				WAL:         syncutil.NewFuture[wal.WAL](),
+				Scheduler:   nodeScheduler,
 				InitialRecoverSnapshot: &recovery.RecoverySnapshot{
 					VChannels:          tt.vchannels,
 					SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},

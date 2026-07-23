@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 )
 
 type Config struct {
@@ -93,8 +92,8 @@ type TransformLog struct {
 	materializeMaxBytes   uint64
 	runtime               moduleapi.Runtime
 	metaAndData           bool
-	flushTasks            []scheduler.TaskHandle
-	materializeTasks      []scheduler.TaskHandle
+	flushTasks            []*transformFlushTask
+	materializeTasks      []*transformMaterializeTask
 	streamNotifier        func()
 
 	chunks []*chunkDescriptor

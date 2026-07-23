@@ -7,6 +7,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	viewpb "github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -322,6 +323,66 @@ func (_c *MockManagerClient_Remove_Call) Return(_a0 error) *MockManagerClient_Re
 }
 
 func (_c *MockManagerClient_Remove_Call) RunAndReturn(run func(context.Context, types.PChannelInfoAssigned) error) *MockManagerClient_Remove_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ValidateRuntime provides a mock function with given fields: ctx, serverID, req
+func (_m *MockManagerClient) ValidateRuntime(ctx context.Context, serverID int64, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error) {
+	ret := _m.Called(ctx, serverID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateRuntime")
+	}
+
+	var r0 *streamingpb.StreamingNodeManagerValidateRuntimeResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error)); ok {
+		return rf(ctx, serverID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *streamingpb.StreamingNodeManagerValidateRuntimeRequest) *streamingpb.StreamingNodeManagerValidateRuntimeResponse); ok {
+		r0 = rf(ctx, serverID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingNodeManagerValidateRuntimeResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *streamingpb.StreamingNodeManagerValidateRuntimeRequest) error); ok {
+		r1 = rf(ctx, serverID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManagerClient_ValidateRuntime_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateRuntime'
+type MockManagerClient_ValidateRuntime_Call struct {
+	*mock.Call
+}
+
+// ValidateRuntime is a helper method to define mock.On call
+//   - ctx context.Context
+//   - serverID int64
+//   - req *streamingpb.StreamingNodeManagerValidateRuntimeRequest
+func (_e *MockManagerClient_Expecter) ValidateRuntime(ctx interface{}, serverID interface{}, req interface{}) *MockManagerClient_ValidateRuntime_Call {
+	return &MockManagerClient_ValidateRuntime_Call{Call: _e.mock.On("ValidateRuntime", ctx, serverID, req)}
+}
+
+func (_c *MockManagerClient_ValidateRuntime_Call) Run(run func(ctx context.Context, serverID int64, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest)) *MockManagerClient_ValidateRuntime_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*streamingpb.StreamingNodeManagerValidateRuntimeRequest))
+	})
+	return _c
+}
+
+func (_c *MockManagerClient_ValidateRuntime_Call) Return(_a0 *streamingpb.StreamingNodeManagerValidateRuntimeResponse, _a1 error) *MockManagerClient_ValidateRuntime_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManagerClient_ValidateRuntime_Call) RunAndReturn(run func(context.Context, int64, *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error)) *MockManagerClient_ValidateRuntime_Call {
 	_c.Call.Return(run)
 	return _c
 }

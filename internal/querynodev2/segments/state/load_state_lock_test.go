@@ -278,6 +278,30 @@ func TestWaitOrPanic(t *testing.T) {
 		}
 		assert.True(t, executed)
 	})
+
+	t.Run("timeout_does_not_execute_after_late_state_change", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "0.01")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
+
+		l := NewLoadStateLock(LoadStateOnlyMeta)
+		executed := make(chan struct{})
+
+		l.waitOrPanic(func(state loadStateEnum) bool {
+			return state == LoadStateDataLoaded
+		}, func() {
+			close(executed)
+		})
+
+		g, err := l.StartLoadData()
+		assert.NoError(t, err)
+		g.Done(nil)
+
+		select {
+		case <-executed:
+			t.Fatal("callback must not execute after wait timeout")
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
 }
 
 func TestPinIf(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 func TestReadSyncsInitialFrontierBeforeFutureUpdates(t *testing.T) {
@@ -59,14 +59,13 @@ func TestObserveMessageOwnsAppendFlushAndMaterializeScheduling(t *testing.T) {
 	deleteResult := transformLog.ObserveMessage(context.Background(), newTransformLogTestDeleteMessage(t, 10))
 	require.NotNil(t, deleteResult.Data)
 	assert.Equal(t, uint64(0), deleteResult.Data.TimeTick())
-	assert.Empty(t, scheduler.taskNames())
+	assert.Empty(t, scheduler.tasks)
 
 	flushResult := transformLog.ObserveMessage(context.Background(), newTransformLogTestManualFlushMessage(t, 20))
 	require.NotNil(t, flushResult.Data)
-	assert.Equal(t, []string{
-		"vchan-transformlog-flush",
-		"vchan-transformlog-materialize",
-	}, scheduler.taskNames())
+	require.Len(t, scheduler.tasks, 2)
+	assert.IsType(t, &transformFlushTask{}, scheduler.tasks[0])
+	assert.IsType(t, &transformMaterializeTask{}, scheduler.tasks[1])
 }
 
 func TestReadStopsAtEndTimeTick(t *testing.T) {
@@ -481,28 +480,16 @@ func (m *recordingMaterializer) Materialize(_ context.Context, req MaterializeRe
 }
 
 type recordingScheduler struct {
-	tasks []scheduler.Task
+	tasks []nodescheduler.Task
 }
 
-func (s *recordingScheduler) Submit(task scheduler.Task) scheduler.TaskHandle {
+func (s *recordingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
 	s.tasks = append(s.tasks, task)
-	return recordingTaskHandle{done: true}
+	return recordingTaskHandle{}
 }
 
-func (s *recordingScheduler) Notify() {}
+type recordingTaskHandle struct{}
 
-func (s *recordingScheduler) taskNames() []string {
-	names := make([]string, 0, len(s.tasks))
-	for _, task := range s.tasks {
-		names = append(names, task.Name())
-	}
-	return names
-}
+func (recordingTaskHandle) Cancel() {}
 
-type recordingTaskHandle struct {
-	done bool
-}
-
-func (h recordingTaskHandle) Done() bool {
-	return h.done
-}
+func (recordingTaskHandle) Wait(context.Context) error { return nil }

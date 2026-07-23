@@ -12,7 +12,7 @@ func defaultQueryRuntimeModuleBuilders(builders []QueryRuntimeModuleBuilder) []Q
 	return append([]QueryRuntimeModuleBuilder(nil), builders...)
 }
 
-func minQueryViewDataVersion(refs map[qviews.QueryViewKey]struct{}) (qviews.DataVersion, bool) {
+func minQueryViewDataVersion(refs map[qviews.QueryViewKey]queryViewRef) (qviews.DataVersion, bool) {
 	var min qviews.DataVersion
 	ok := false
 	for key := range refs {
@@ -25,7 +25,7 @@ func minQueryViewDataVersion(refs map[qviews.QueryViewKey]struct{}) (qviews.Data
 	return min, ok
 }
 
-func cancelTask(task BuildTask) {
+func cancelTask(task *scheduledBuild) {
 	if task != nil {
 		task.Cancel()
 	}

@@ -4,9 +4,11 @@ package qnview
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -14,7 +16,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+type channelSegmentLoadScheduler struct {
+	tasks chan SegmentLoadTask
+}
+
+func (s *channelSegmentLoadScheduler) Submit(task SegmentLoadTask) {
+	s.tasks <- task
+}
+
+func (s *channelSegmentLoadScheduler) Update(SegmentUpdateTask) {}
 
 func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
@@ -26,7 +39,7 @@ func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) 
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	loadedCh := make(chan []TransformSegment, 2)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -56,6 +69,95 @@ func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) 
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestViewScopedPhysicalSegmentManager_ReleaseCompletesForQueuedCanceledLoad(t *testing.T) {
+	nodeScheduler := nodescheduler.New(1)
+	t.Cleanup(nodeScheduler.Close)
+
+	blockStarted := make(chan struct{})
+	releaseBlocker := make(chan struct{})
+	blocker := nodeScheduler.Submit(qnTaskFunc(func(context.Context) error {
+		close(blockStarted)
+		<-releaseBlocker
+		return nil
+	}))
+	<-blockStarted
+
+	segmentScheduler := newQueryViewSegmentLoadScheduler(nodeScheduler, &fakePhysicalLoader{})
+	mgr := newTestViewScopedPhysicalSegmentManager(t, segmentScheduler)
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key:        key,
+		Meta:       meta,
+		View:       view,
+		Collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
+		OnLoaded: func([]TransformSegment) {
+			t.Fatal("unexpected loaded segment")
+		},
+		OnUnrecoverable: func() {
+			t.Fatal("unexpected unrecoverable notification")
+		},
+	})
+
+	dropped := make(chan struct{})
+	mgr.Release(ReleaseSegments{
+		Key:       key,
+		OnDropped: func() { close(dropped) },
+	})
+	close(releaseBlocker)
+	require.NoError(t, blocker.Wait(context.Background()))
+
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued load cancellation")
+	}
+}
+
+func TestViewScopedPhysicalSegmentManager_ReleaseCompletesFromTaskFinishedCallback(t *testing.T) {
+	nodeScheduler := nodescheduler.New(1)
+	t.Cleanup(nodeScheduler.Close)
+	segmentScheduler := &channelSegmentLoadScheduler{tasks: make(chan SegmentLoadTask, 1)}
+	mgr := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, segmentScheduler)
+
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key: key, Meta: meta, View: view,
+		Collection:      &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
+		OnLoaded:        func([]TransformSegment) { t.Fatal("unexpected loaded") },
+		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
+	})
+	var task SegmentLoadTask
+	select {
+	case task = <-segmentScheduler.tasks:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for segment load task")
+	}
+
+	dropped := make(chan struct{})
+	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { close(dropped) }})
+	select {
+	case <-dropped:
+		t.Fatal("release completed before segment task finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+	task.OnFinished()
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("release did not complete from task callback")
+	}
+}
+
 func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentLoads(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
 	view := &viewpb.QueryViewOfQueryNode{
@@ -64,7 +166,7 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	loadedCh := make(chan []TransformSegment, 2)
 	failedCh := make(chan int64, 1)
@@ -122,7 +224,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForPendingRetryCallback(t 
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	mgr.Acquire(AcquirePhysicalSegments{
 		Key: key, Meta: meta, View: view,
@@ -145,9 +247,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForPendingRetryCallback(t 
 
 	dropped := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { dropped <- struct{}{} }})
-	require.Eventually(t, func() bool {
-		return assert.ObjectsAreEqual([]int64{1000}, scheduler.canceled)
-	}, time.Second, 10*time.Millisecond)
+	require.ErrorIs(t, scheduler.tasks[2].Context.Err(), context.Canceled)
 	select {
 	case <-dropped:
 		t.Fatal("release should wait for pending retry callback")
@@ -170,7 +270,7 @@ func TestViewScopedPhysicalSegmentManager_FailsResourceFailureWithoutOtherSegmen
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	failedCh := make(chan int64, 1)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -200,7 +300,7 @@ func TestViewScopedPhysicalSegmentManager_FailsNonResourceErrorWhileOtherSegment
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	failedCh := make(chan int64, 1)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -234,7 +334,7 @@ func TestViewScopedPhysicalSegmentManager_CancelsLoadingSegmentAfterLastViewRele
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	mgr.Acquire(AcquirePhysicalSegments{
 		Key: key, Meta: meta, View: view,
@@ -248,9 +348,7 @@ func TestViewScopedPhysicalSegmentManager_CancelsLoadingSegmentAfterLastViewRele
 	dropped := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { dropped <- struct{}{} }})
 
-	require.Eventually(t, func() bool {
-		return assert.ObjectsAreEqual([]int64{1000}, scheduler.canceled)
-	}, time.Second, 10*time.Millisecond)
+	require.ErrorIs(t, scheduler.tasks[0].Context.Err(), context.Canceled)
 	select {
 	case <-dropped:
 		t.Fatal("release should wait for canceled loading task callback")
@@ -272,7 +370,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForInFlightLoadCallback(t 
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	mgr.Acquire(AcquirePhysicalSegments{
 		Key: key, Meta: meta, View: view,
@@ -309,7 +407,7 @@ func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpd
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
 
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -350,10 +448,53 @@ func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpd
 	require.Equal(t, uint64(11), scheduler.updates[1].Snapshot.Revision.Revision)
 }
 
+func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTaskRetries(t *testing.T) {
+	nodeScheduler := &capturedNodeScheduler{}
+	var attempts atomic.Int32
+	loader := &fakePhysicalLoader{
+		updateFn: func(TransformSegment, CollectionRuntime, SegmentLoadInfoSnapshot, SegmentUpdateAction) error {
+			if attempts.Add(1) == 1 {
+				return errors.New("update failed")
+			}
+			return nil
+		},
+	}
+	segmentScheduler := newQueryViewSegmentLoadScheduler(nodeScheduler, loader)
+	managerScheduler := nodescheduler.New(1)
+	t.Cleanup(managerScheduler.Close)
+	mgr := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(managerScheduler, segmentScheduler)
+
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
+	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
+	mgr.segments[1000] = &physicalSegmentState{
+		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
+		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
+		requests:     map[qviews.QueryViewKey]segmentLoadRequest{key: {meta: meta, collection: runtime}},
+		revision:     SegmentLoadInfoRevision{Revision: 1},
+		collectionID: testCollectionID,
+	}
+
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 10}})
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 11}})
+	require.Len(t, nodeScheduler.tasks, 1)
+
+	current := nodeScheduler.tasks[0]
+	require.ErrorIs(t, current.Execute(context.Background()), nodescheduler.ErrDelay)
+	require.Len(t, nodeScheduler.tasks, 1)
+
+	require.NoError(t, current.Execute(context.Background()))
+	require.Len(t, nodeScheduler.tasks, 2)
+	next := nodeScheduler.tasks[1].(*segmentUpdateSchedulerTask)
+	assert.Equal(t, uint64(11), next.task.Snapshot.Revision.Revision)
+}
+
 func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease(t *testing.T) {
 	scheduler := &fakeSegmentLoadScheduler{}
 	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(scheduler, watcher)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler, watcher)
 
 	loadedCh := make(chan []TransformSegment, 1)
 	meta := buildHandlerTestMeta(1)
@@ -429,7 +570,7 @@ func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRel
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	loaded1 := make(chan []TransformSegment, 1)
 	loaded2 := make(chan []TransformSegment, 1)
@@ -495,7 +636,7 @@ func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view2).QueryViewKey()
 
 	scheduler := &fakeSegmentLoadScheduler{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
 	mgr.Acquire(AcquirePhysicalSegments{
 		Key: key1, Meta: meta1, View: view1,
@@ -519,10 +660,6 @@ func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(
 
 	dropped1 := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key1, OnDropped: func() { dropped1 <- struct{}{} }})
-	require.Eventually(t, func() bool {
-		return assert.ObjectsAreEqual([]int64{1001}, scheduler.canceled)
-	}, time.Second, 10*time.Millisecond)
-
 	assert.NoError(t, taskBySegment[1000].Context.Err())
 	assert.ErrorIs(t, taskBySegment[1001].Context.Err(), context.Canceled)
 
@@ -546,7 +683,7 @@ func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports
 		},
 	}
 	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, newTestQueryViewSegmentLoadScheduler(t, provider, loader), watcher)
 
 	loadedCh := make(chan []TransformSegment, 3)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -583,7 +720,7 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 		},
 	}
 	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, newTestQueryViewSegmentLoadScheduler(t, provider, loader), watcher)
 
 	loadedCh := make(chan []TransformSegment, 2)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -616,10 +753,10 @@ func TestViewScopedPhysicalSegmentManager_ReleaseAfterLastView(t *testing.T) {
 		},
 	}
 	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, newTestQueryViewSegmentLoadScheduler(t, provider, loader), watcher)
 
 	ready1 := make(chan []TransformSegment, 3)
-	ready2 := make(chan []TransformSegment, 1)
+	ready2 := make(chan []TransformSegment, 4)
 	mgr.Acquire(AcquirePhysicalSegments{Key: key1, Meta: meta1, View: view1, OnLoaded: func(loaded []TransformSegment) { ready1 <- loaded }, OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") }})
 	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
 	require.Eventually(t, func() bool {
@@ -650,7 +787,7 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 	provider := &fakeQueryViewLoadMetadataProvider{}
 	loader := &fakePhysicalLoader{loaded: &fakeTransformSegment{id: 1000, partitionID: 10}}
 	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
+	mgr := newTestViewScopedPhysicalSegmentManager(t, newTestQueryViewSegmentLoadScheduler(t, provider, loader), watcher)
 
 	loadedCh := make(chan []TransformSegment, 1)
 	unrecoverableCh := make(chan struct{}, 1)

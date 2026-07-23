@@ -776,6 +776,10 @@ service StreamingNodeManagerService {
     // collect balance info and health check.
     rpc CollectStatus(StreamingNodeManagerCollectStatusRequest)
         returns (StreamingNodeManagerCollectStatusResponse) {};
+
+    // ValidateRuntime validates runtime-dependent artifacts on a streaming node.
+    rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest)
+        returns (StreamingNodeManagerValidateRuntimeResponse) {};
 }
 
 // StreamingManagerAssignRequest is the request message of Assign RPC.
@@ -817,6 +821,27 @@ message StreamingNodeManagerCollectStatusResponse {
     StreamingNodeMetrics metrics = 1;
 }
 
+message StreamingNodeRuntimeAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeRuntimeAnalyzerValidation {
+    repeated StreamingNodeRuntimeAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeManagerValidateRuntimeRequest {
+    oneof validation {
+        StreamingNodeRuntimeAnalyzerValidation analyzer = 1;
+    }
+}
+
+message StreamingNodeManagerValidateRuntimeResponse {
+    common.Status status = 1;
+    repeated int64 resource_ids = 2;
+}
+
 ///
 /// VChannelMeta 
 ///
@@ -824,16 +849,14 @@ message StreamingNodeManagerCollectStatusResponse {
 // We need to add vchannel meta in wal meta, so the wal can recover the information of it.
 // The vchannel meta is also used to store the vchannel operation result, such as shard-splitting.
 message VChannelMeta {
+    reserved 5;
+    reserved "load_config";
+
     string vchannel = 1; // vchannel name.
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
-    VChannelLoadConfig load_config = 5; // latest load config observed by this vchannel.
     uint64 tombstone_time_tick = 6; // The timetick this retained vchannel meta starts filtering replay.
-}
-
-message VChannelLoadConfig {
-    messages.AlterLoadConfigMessageHeader header = 1;
 }
 
 message SegmentDataVersionSummary {

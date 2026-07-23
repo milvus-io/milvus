@@ -27,7 +27,7 @@ owns all inputs needed for a consistent VChannel-level snapshot:
 - `VChannelMeta` and schema history;
 - growing Segment metadata and insert buffers;
 - Segment DataVersion summaries;
-- TransformLog metadata and scanner construction;
+- TransformLog metadata and the shared PChannel stream;
 - the live DML observe path after recovery.
 
 `RecoveryStorage` only recovers and persists the module state. It does not
@@ -43,7 +43,8 @@ construct WAL views, register live observers, or expose a WALView ability.
   where needed;
 - collection schema;
 - visible growing segment snapshot at the selected QueryView DataVersion;
-- delete replay scanner for TransformLog entries needed by the snapshot.
+- the shared PChannel TransformLog stream and the vchannel delete replay
+  boundary needed by the snapshot.
 
 The view is a preparation input. `QueryRuntime` and its modules must not retain
 the view as an owned runtime resource after `Prepare` returns.
@@ -69,6 +70,8 @@ interface.
 The QueryView state machine provides the target QueryView meta during
 `Acquire`. `VChannelRecoveryModule` uses the QueryView DataVersion and
 TransformLog start boundary to build the visible segment snapshot and delete
-replay scanner. Multiple live QueryViews share the same VChannel singleton
-runtime; the runtime advances to the oldest DataVersion still referenced by
-active QueryViews.
+replay subscription parameters. `GrowingRuntime.Prepare` creates the bounded
+vchannel subscription on the PChannel-owned stream and closes only that
+subscription after replay. Multiple live QueryViews share the same VChannel
+singleton runtime; the runtime advances to the oldest DataVersion still
+referenced by active QueryViews.

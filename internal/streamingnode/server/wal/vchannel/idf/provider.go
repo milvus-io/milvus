@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -31,6 +32,7 @@ type Provider struct {
 	client       datapb.DataCoordClient
 	chunkManager storage.ChunkManager
 	sealedCache  *segmentCache
+	scheduler    nodescheduler.Scheduler
 }
 
 type ProviderOption func(*Provider)
@@ -38,6 +40,12 @@ type ProviderOption func(*Provider)
 func WithChunkManager(chunkManager storage.ChunkManager) ProviderOption {
 	return func(p *Provider) {
 		p.chunkManager = chunkManager
+	}
+}
+
+func WithNodeScheduler(scheduler nodescheduler.Scheduler) ProviderOption {
+	return func(p *Provider) {
+		p.scheduler = scheduler
 	}
 }
 
@@ -53,6 +61,7 @@ type FutureProvider struct {
 	client       *syncutil.Future[types.MixCoordClient]
 	chunkManager storage.ChunkManager
 	sealedCache  *segmentCache
+	scheduler    nodescheduler.Scheduler
 }
 
 func NewFutureProvider(client *syncutil.Future[types.MixCoordClient], opts ...ProviderOption) *FutureProvider {
@@ -64,6 +73,7 @@ func NewFutureProvider(client *syncutil.Future[types.MixCoordClient], opts ...Pr
 		client:       client,
 		chunkManager: provider.chunkManager,
 		sealedCache:  newSegmentCache(),
+		scheduler:    provider.scheduler,
 	}
 }
 
@@ -143,6 +153,7 @@ func (r *Runtime) resolveProvider(ctx context.Context) (*Provider, error) {
 		client:       client,
 		chunkManager: r.future.chunkManager,
 		sealedCache:  r.future.sealedCache,
+		scheduler:    r.future.scheduler,
 	}, nil
 }
 

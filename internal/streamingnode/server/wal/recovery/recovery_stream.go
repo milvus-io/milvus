@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"maps"
 
 	"github.com/cockroachdb/errors"
 
@@ -85,10 +86,22 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
 			switch typed := s.(type) {
 			case *moduleapi.VChannelModuleSnapshot:
-				snapshot.VChannels = typed.VChannels
+				if snapshot.VChannels == nil {
+					snapshot.VChannels = maps.Clone(typed.VChannels)
+				} else {
+					maps.Copy(snapshot.VChannels, typed.VChannels)
+				}
 			case *moduleapi.SegmentModuleSnapshot:
-				snapshot.SegmentAssignments = typed.Segments
-				snapshot.SegmentDataVersionSummaries = typed.DataVersionSummaries
+				if snapshot.SegmentAssignments == nil {
+					snapshot.SegmentAssignments = maps.Clone(typed.Segments)
+				} else {
+					maps.Copy(snapshot.SegmentAssignments, typed.Segments)
+				}
+				if snapshot.SegmentDataVersionSummaries == nil {
+					snapshot.SegmentDataVersionSummaries = maps.Clone(typed.DataVersionSummaries)
+				} else {
+					maps.Copy(snapshot.SegmentDataVersionSummaries, typed.DataVersionSummaries)
+				}
 			}
 		}
 	}
