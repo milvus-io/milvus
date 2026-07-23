@@ -119,10 +119,11 @@ type Core struct {
 	quotaCenter    *QuotaCenter
 	keyManager     *KeyManager
 
-	stateCode atomic.Int32
-	initOnce  sync.Once
-	startOnce sync.Once
-	session   sessionutil.SessionInterface
+	stateCode    atomic.Int32
+	initOnce     sync.Once
+	startOnce    sync.Once
+	session      sessionutil.SessionInterface
+	sessionOwned bool
 
 	factory dependency.Factory
 
@@ -309,6 +310,7 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 
 func (c *Core) SetSession(session sessionutil.SessionInterface) error {
 	c.session = session
+	c.sessionOwned = false
 	if c.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
@@ -706,7 +708,7 @@ func (c *Core) cancelIfNotNil() {
 }
 
 func (c *Core) revokeSession() {
-	if c.session != nil {
+	if c.sessionOwned && c.session != nil {
 		// wait at most one second to revoke
 		c.session.Stop()
 		log.Ctx(c.ctx).Info("rootcoord session stop")
