@@ -85,18 +85,21 @@ func flushPinyinRows(t *testing.T, ctx CtxT, mc MC, collectionName string) {
 	require.NoError(t, lastErr)
 }
 
-func queryPinyinIDs(t *testing.T, ctx CtxT, mc MC, collectionName, queryText string) []int64 {
-	result, err := mc.Query(ctx, client.NewQueryOption(collectionName).
+func searchPinyinIDs(t *testing.T, ctx CtxT, mc MC, collectionName, queryText string) []int64 {
+	result, err := mc.Search(ctx, client.NewSearchOption(collectionName, pinyinTotalCount,
+		[]entity.Vector{entity.FloatVector{0, 0}}).
+		WithANNSField("vector").
+		WithSearchParam("nprobe", "64").
 		WithFilter(`text_match(text, "`+queryText+`")`).
 		WithOutputFields("id", "text").
-		WithLimit(pinyinTotalCount).
 		WithConsistencyLevel(entity.ClStrong))
 	require.NoError(t, err)
+	require.Len(t, result, 1)
 
-	idColumn := result.GetColumn("id")
+	idColumn := result[0].GetColumn("id")
 	require.NotNil(t, idColumn)
-	ids := make([]int64, result.ResultCount)
-	for i := 0; i < result.ResultCount; i++ {
+	ids := make([]int64, result[0].ResultCount)
+	for i := 0; i < result[0].ResultCount; i++ {
 		value, err := idColumn.Get(i)
 		require.NoError(t, err)
 		ids[i] = value.(int64)
@@ -105,11 +108,11 @@ func queryPinyinIDs(t *testing.T, ctx CtxT, mc MC, collectionName, queryText str
 	return ids
 }
 
-func queryPinyinIDsUntilExpected(t *testing.T, ctx CtxT, mc MC, collectionName, queryText string) []int64 {
+func searchPinyinIDsUntilExpected(t *testing.T, ctx CtxT, mc MC, collectionName, queryText string) []int64 {
 	deadline := time.Now().Add(30 * time.Second)
 	var ids []int64
 	for time.Now().Before(deadline) {
-		ids = queryPinyinIDs(t, ctx, mc, collectionName, queryText)
+		ids = searchPinyinIDs(t, ctx, mc, collectionName, queryText)
 		if len(ids) == len(pinyinTargetIDs) {
 			matched := true
 			for i := range ids {
@@ -180,7 +183,7 @@ func TestPinyinFilterTextMatchAcrossDataPaths(t *testing.T) {
 		pinyinIndexedSealedCount+pinyinUnindexedSealedCount, pinyinGrowingCount)
 
 	for _, queryText := range []string{"zhongwen", "中文"} {
-		ids := queryPinyinIDsUntilExpected(t, ctx, mc, collectionName, queryText)
+		ids := searchPinyinIDsUntilExpected(t, ctx, mc, collectionName, queryText)
 		require.Equal(t, pinyinTargetIDs, ids)
 	}
 }
