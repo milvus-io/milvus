@@ -20,17 +20,27 @@ func (m *partitionManager) asyncFlushSegment(
 	ctx context.Context,
 	segment *segmentAllocManager,
 ) {
-	// create a new segment flush worker.
-	w := &segmentFlushWorker{
-		txnManager:   m.txnManager,
-		ctx:          ctx,
-		collectionID: m.collectionID,
-		vchannel:     m.vchannel,
-		segment:      segment,
-		wal:          m.wal.Get(),
-	}
-	w.SetLogger(m.Logger())
-	go w.do()
+	go func() {
+		l, err := m.wal.GetWithContext(ctx)
+		if err != nil {
+			m.Logger().Info(ctx, "stop flushing segment before wal is ready",
+				mlog.FieldSegmentID(segment.GetSegmentID()),
+				mlog.Err(err))
+			return
+		}
+
+		// create a new segment flush worker.
+		w := &segmentFlushWorker{
+			txnManager:   m.txnManager,
+			ctx:          ctx,
+			collectionID: m.collectionID,
+			vchannel:     m.vchannel,
+			segment:      segment,
+			wal:          l,
+		}
+		w.SetLogger(m.Logger())
+		w.do()
+	}()
 }
 
 // segmentFlusherWorker is the worker that flushes segments into the WAL.
