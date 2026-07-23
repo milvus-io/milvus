@@ -22,6 +22,8 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
@@ -34,12 +36,15 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -66,6 +71,59 @@ func importStateV2ToCopySegmentTaskState(state datapb.ImportTaskStateV2) datapb.
 	default:
 		return datapb.CopySegmentTaskState_CopySegmentTaskNone
 	}
+}
+
+type chunkManagerCopier struct {
+	cm storage.ChunkManager
+}
+
+func (c chunkManagerCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+	if c.cm == nil {
+		return merr.WrapErrServiceInternalMsg("chunk manager is nil")
+	}
+	// Same-bucket restore can use the normal ChunkManager copy path while still
+	// satisfying the CopySegment copier interface.
+	return c.cm.Copy(ctx, srcObject, dstObject)
+}
+
+func objectstorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectstorage.Config {
+	cfg := objectstorage.NewDefaultConfig()
+	if config == nil {
+		return cfg
+	}
+
+	cfg.Address = config.GetAddress()
+	cfg.BucketName = config.GetBucketName()
+	cfg.AccessKeyID = config.GetAccessKeyID()
+	cfg.SecretAccessKeyID = config.GetSecretAccessKey()
+	cfg.UseSSL = config.GetUseSSL()
+	cfg.SslCACert = config.GetSslCACert()
+	cfg.SslTLSMinVersion = config.GetSslTlsMinVersion()
+	cfg.CreateBucket = true
+	cfg.RootPath = config.GetRootPath()
+	cfg.UseIAM = config.GetUseIAM()
+	cfg.CloudProvider = config.GetCloudProvider()
+	cfg.IAMEndpoint = config.GetIAMEndpoint()
+	cfg.UseVirtualHost = config.GetUseVirtualHost()
+	cfg.Region = config.GetRegion()
+	cfg.RequestTimeoutMs = config.GetRequestTimeoutMs()
+	cfg.GcpCredentialJSON = config.GetGcpCredentialJSON()
+	return cfg
+}
+
+func firstExternalSourceURI(sources []*datapb.CopySegmentSource) (string, error) {
+	if len(sources) == 0 {
+		return "", merr.WrapErrParameterInvalidMsg("external snapshot source URI is required")
+	}
+	sourceRootPath := strings.TrimSpace(sources[0].GetSourceRootPath())
+	parsed, err := url.Parse(sourceRootPath)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", merr.WrapErrParameterInvalidMsg("external snapshot source URI is required")
+	}
+	if _, _, _, err := snapshotstorage.ParseForeignRootURI(sourceRootPath); err != nil {
+		return "", err
+	}
+	return sourceRootPath, nil
 }
 
 // WatchDmChannels is not in use
@@ -510,13 +568,26 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 }
 
 func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRequest) (*commonpb.Status, error) {
-	mlog.Info(context.TODO(), "datanode receive copy segment request")
+	// Extract collection ID from first target (all targets should have same collection)
+	var collectionID int64
+	if len(req.GetTargets()) > 0 {
+		collectionID = req.GetTargets()[0].GetCollectionId()
+	}
+
+	mlog.Info(ctx, "datanode receive copy segment request",
+		mlog.Int64("taskID", req.GetTaskID()),
+		mlog.Int64("jobID", req.GetJobID()),
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int("sourceSegmentCount", len(req.GetSources())),
+		mlog.Int("targetSegmentCount", len(req.GetTargets())),
+		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""),
+	)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	targetCM, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed",
 			mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -526,7 +597,57 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 		return merr.Status(err), nil
 	}
 
-	task := importv2.NewCopySegmentTask(req, node.importTaskMgr, cm)
+	sourceCM := targetCM
+	sourceStorageConfig := req.GetStorageConfig()
+	targetBucket := req.GetStorageConfig().GetBucketName()
+	sourceBucket := targetBucket
+	copier, ok := targetCM.(storage.CrossBucketCopier)
+	if !ok {
+		copier = chunkManagerCopier{cm: targetCM}
+	}
+
+	sourceURI, sourceURIErr := firstExternalSourceURI(req.GetSources())
+	// External copy tasks always carry a complete source root URI. Resolve it
+	// even when the bucket matches the target because StorageV3 manifest and LOB
+	// reads must use the source root rather than the target cluster root.
+	needForeignSource := req.GetExternalSpec() != "" || sourceURIErr == nil
+
+	if needForeignSource {
+		if sourceURIErr != nil {
+			mlog.Warn(ctx, "external snapshot restore source URI is missing", mlog.Err(sourceURIErr))
+			return merr.Status(sourceURIErr), nil
+		}
+
+		resolved, err := snapshotstorage.ResolveForeignStorage(
+			ctx,
+			objectstorageConfigFromIndexConfig(req.GetStorageConfig()),
+			snapshotstorage.DirectionCopySource,
+			sourceURI,
+			req.GetExternalSpec(),
+		)
+		if err != nil {
+			mlog.Warn(ctx, "resolve foreign source storage failed", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
+		sourceCM = resolved.ForeignCM
+		sourceStorageConfig = resolved.ForeignStorageConfig
+		copier = resolved.Copier
+		sourceBucket = resolved.ForeignBucket
+		targetBucket = req.GetStorageConfig().GetBucketName()
+	}
+
+	task := importv2.NewCopySegmentTask(
+		node.ctx,
+		req,
+		node.importTaskMgr,
+		sourceCM,
+		targetCM,
+		sourceStorageConfig,
+		copier,
+		sourceBucket,
+		targetBucket,
+	)
 	node.importTaskMgr.Add(task)
 
 	mlog.Info(context.TODO(), "datanode added copy segment task")

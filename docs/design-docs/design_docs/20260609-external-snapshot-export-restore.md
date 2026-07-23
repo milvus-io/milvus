@@ -11,15 +11,21 @@ bundles.
 
 Milvus snapshots were originally scoped to one cluster and one object-storage
 bucket. `RestoreSnapshot` restores a snapshot that already exists in the target
-cluster metadata. `ExportSnapshot` writes a self-contained bundle, but the copy
-path and path validation were still built around one configured bucket.
+cluster metadata. `RestoreExternalSnapshot` must restore from a metadata URI and
+support both snapshot layouts that Milvus can store: the normal referenced
+layout written by `CreateSnapshot`, and the self-contained bundle layout written
+by `ExportSnapshot`.
 
-The feature has four goals:
+The feature has five goals:
 
 - Support external snapshot restore from a metadata URI instead of from the
   target cluster snapshot registry.
-- Support `ExportSnapshot` and `RestoreExternalSnapshot` across buckets when the
-  object-storage provider can perform provider-side copy.
+- Support both referenced snapshots and exported self-contained snapshots as
+  first-class `RestoreExternalSnapshot` inputs.
+- Support `ExportSnapshot` to the source bucket or another bucket, and support
+  `RestoreExternalSnapshot` across buckets when the object-storage provider can
+  perform provider-side copy. A same-bucket export must not overwrite any
+  object that belongs to the source snapshot.
 - Support moving a complete exported bundle to any new root prefix when the
   bundle internal layout is unchanged.
 - Do not add any extra root-rewrite parameter; the restore metadata URI is the
@@ -38,11 +44,22 @@ The feature has explicit non-goals:
 
 Same-bucket external restore:
 
-1. A source cluster exports a snapshot under the same bucket or a path readable
-   by the target cluster.
-2. The target cluster calls `RestoreExternalSnapshot` with the exported metadata
+1. A source cluster creates a normal snapshot or exports a self-contained
+   snapshot under a path readable by the target cluster.
+2. The target cluster calls `RestoreExternalSnapshot` with the snapshot metadata
    URI.
 3. DataCoord reads the metadata and creates the normal asynchronous restore job.
+
+Referenced snapshot restore:
+
+1. The source cluster calls `CreateSnapshot`.
+2. The target cluster calls `RestoreExternalSnapshot` with the returned
+   `s3_location`.
+3. Restore reads the snapshot metadata and manifest files in place, then copies
+   the original referenced segment/index files into the target collection.
+4. The source snapshot and referenced files must stay readable until the restore
+   job finishes. If the source snapshot is dropped and GC removes referenced
+   files, restore fails.
 
 Manual bundle relocation:
 
@@ -54,18 +71,22 @@ Manual bundle relocation:
    export-time metadata and `newRoot` from the restore-time metadata URI, then
    rebases self-contained paths from `oldRoot` to `newRoot`.
 
-Export to a foreign bucket:
+Export to the source or a foreign bucket:
 
-1. The caller invokes `ExportSnapshot` with a `target_s3_path` in a foreign
-   bucket.
-2. Milvus resolves a foreign target storage config from the instance credential
-   or request `external_spec`.
-3. The provider performs copy from the local source bucket to the foreign target
-   bucket without streaming through Milvus.
+1. The caller invokes `ExportSnapshot` with a `target_s3_path` in the configured
+   source bucket or a foreign bucket.
+2. Milvus resolves the target storage config from the instance credential or
+   request `external_spec`.
+3. For a same-bucket export, Milvus rejects the request before copying if any
+   generated target metadata, segment manifest, or data object key would
+   overwrite an object used by the source snapshot.
+4. The provider performs object copy without streaming through Milvus.
 
 Restore from a foreign bucket:
 
-1. The caller invokes `RestoreExternalSnapshot` with a foreign metadata URI.
+1. The caller invokes `RestoreExternalSnapshot` with a foreign metadata URI. The
+   URI may point to either a referenced snapshot or a self-contained exported
+   snapshot.
 2. DataCoord reads metadata and manifests through a foreign-source storage
    manager.
 3. DataNode copies segment data into the local bucket using a credential that
@@ -94,7 +115,9 @@ The public request carrier for foreign storage information is only
 
 - `db_name`: database routing and namespace context.
 - `target_collection_name`: collection created by the restore job.
-- `snapshot_metadata_uri`: metadata file URI or object key.
+- `snapshot_metadata_uri`: complete metadata file URI, including scheme and
+  host, for either a referenced snapshot or a self-contained exported
+  snapshot. Object-key-only restore inputs are rejected.
 - `external_spec`: optional JSON storage spec for the foreign source.
 
 `RestoreExternalSnapshotResponse.job_id` is the asynchronous restore job ID. The
@@ -242,11 +265,16 @@ Layer 1: instance credential plus bucket policy.
 Layer 2: request `external_spec.extfs`.
 
 - The request may provide storage-config-compatible fields such as provider,
-  region, endpoint, TLS, virtual-host mode, `use_iam`, access key ID/value,
-  GCP service-account JSON for native GCS, or Azure account key fields when
-  those fields map to the same config structs Milvus already uses.
+  region, endpoint, TLS mode, virtual-host mode, `use_iam`, access key ID/value,
+  GCP service-account JSON through `credential_json` for native GCS, or Azure
+  account key fields when those fields map to the same config structs Milvus
+  already uses. Request-level `ssl_ca_cert` is accepted for external-spec
+  compatibility but ignored; custom CA trust must come from the Milvus instance
+  storage configuration.
 - The resolved config must still represent one principal/config that can satisfy
   the provider-side copy request.
+- An explicit request credential mode replaces inherited instance credentials.
+  `use_iam=true`, raw AK/SK, and `credential_json` are mutually exclusive.
 - Snapshot validation is stricter than a generic external spec parser. It must
   reject generic `role_arn`, `gcp_target_service_account`, SAS, anonymous auth,
   source-auth URLs, and independent dual credentials.
@@ -270,7 +298,23 @@ persisted through WAL/meta/job/task state. Operators should prefer Layer 1 or
 ambient identity fields such as `use_iam=true`. Logs and errors must use
 redacted specs.
 
-## 5. Bundle Layout & Root Relocation
+## 5. Snapshot Layouts & Root Relocation
+
+`RestoreExternalSnapshot` supports two snapshot layouts.
+
+Referenced snapshots are the normal output of `CreateSnapshot`:
+
+```text
+<root>/snapshots/{collectionID}/metadata/{snapshotID}.json
+<root>/snapshots/{collectionID}/manifests/...
+<root>/insert_log|stats_log|delta_log|index_files|...
+```
+
+The metadata and manifests reference the original segment and index files in
+place. Restore does not rebase referenced snapshot paths. It derives the source
+storage root from the metadata URI and uses that root only to remap copied files
+into the target cluster root. Referenced restore is valid only while every
+referenced object remains readable.
 
 Exported self-contained bundles use this layout:
 
@@ -280,13 +324,15 @@ Exported self-contained bundles use this layout:
 <root>/files/...
 ```
 
-The `snapshots` directory is the root anchor. Restore derives:
+For self-contained bundles, the `snapshots` directory is the root anchor.
+Restore derives:
 
 - `oldRoot` from the export-time metadata path stored in snapshot metadata.
 - `newRoot` from the restore-time `snapshot_metadata_uri`.
 
 When the layout is self-contained and `oldRoot != newRoot`, restore rebases
-paths from `oldRoot` to `newRoot`. This safely supports:
+paths from `oldRoot` to `newRoot`. The copied data source root is
+`<newRoot>/files`. This safely supports:
 
 ```text
 old:
@@ -298,7 +344,7 @@ restored/x/snapshots/100/metadata/1.json
 restored/x/files/...
 ```
 
-Root relocation is two-stage:
+Self-contained root relocation is two-stage:
 
 1. Rebase metadata manifest paths before manifest reads. Otherwise restore would
    attempt to load manifest files from `oldRoot`.
@@ -306,10 +352,12 @@ Root relocation is two-stage:
    manifest paths carry a base path; rebasing that base path is enough for
    manifest-relative data and LOB listing.
 
-The design intentionally rejects metadata URIs that do not contain the
-`snapshots/.../metadata/...` structure. Supporting arbitrary layouts would
-require a new request parameter or a new persisted bundle-root field, and this
-feature explicitly avoids both.
+Both layouts require metadata URIs that contain the
+`snapshots/.../metadata/...` structure. Referenced snapshots need that anchor to
+derive the source storage root. Self-contained snapshots additionally need it to
+derive the bundle root for relocation. Supporting arbitrary layouts would require
+a new request parameter or a new persisted root field, and this feature
+explicitly avoids both.
 
 ## 6. Cross-Bucket Copy Design
 
@@ -338,6 +386,23 @@ Provider limitations fail closed:
 
 Metadata reads/writes and large object copy can use different helper objects,
 but the large object move itself must be one provider-side copy request.
+Export schedules object copies with the refreshable DataCoord configuration
+`dataCoord.snapshot.exportCopyConcurrency`, which defaults to `16`. Each export
+reads the limit once when it starts, so configuration changes affect new export
+requests without changing in-flight work. Invalid or non-positive values fall
+back to `16`. Snapshot metadata is written only after every object copy
+succeeds. Exports to the same normalized bucket and target root are serialized
+within one DataCoord process. A failed attempt may leave unreferenced objects;
+Milvus does not remove them because their paths may be shared by an older
+published bundle.
+
+Same-bucket export is supported, but source protection is an object-level
+invariant. Before copy starts, DataCoord builds the complete source object set:
+the source metadata file, snapshot segment manifests, StorageV2 manifests, and
+all concrete data/index objects. It also builds the destination object set for
+the exported metadata, manifests, and `files/...` data. If the sets intersect,
+the request fails with an input error. Equal object keys in different buckets
+do not intersect and must still be copied.
 
 ## 7. Internal Architecture
 
@@ -354,17 +419,27 @@ DataCoord:
   job creation, and WAL restore message emission.
 - For external restore, reads metadata/manifests from the foreign source before
   broadcasting the restore message.
+- The WAL ACK callback retries transient source failures. If the source is
+  permanently unavailable after the preflight read, it persists a failed
+  restore job and returns successfully so broadcaster resource locks are
+  released.
 - Persists enough external storage information for restore jobs and DataNode
   copy tasks.
-- For export, resolves the foreign target and writes the self-contained bundle
-  metadata.
+- For export, resolves the target, prevents same-bucket source-object overwrite,
+  and copies data before manifests and metadata. Metadata is the publication
+  marker and is written last.
+- Computes a deterministic fingerprint of external snapshot metadata and loaded
+  segment manifests after preflight. The fingerprint is carried through WAL and
+  copy-job state so ACK and task assembly reject metadata that changed between
+  phases. It does not hash referenced object contents.
 
 DataNode:
 
 - Executes copy segment tasks.
 - Rebuilds source storage config for external restore tasks.
-- Enumerates StorageV2/V3 files and copies referenced data into local target
-  paths.
+- Copies StorageV1 PB paths, treats a StorageV2 manifest as a concrete object,
+  and enumerates StorageV3 manifest objects and LOB files before copying them
+  into local target paths.
 
 `snapshotstorage`:
 
@@ -397,8 +472,11 @@ copy segment job -> DataNode -> provider-side copies into local bucket
 
 Path validation:
 
-- Reject URI userinfo, unsupported schemes, empty object keys, and path traversal
-  forms.
+- Reject URI userinfo, query parameters, fragments, unsupported schemes, empty
+  object keys, and path traversal forms. Presigned URLs and SAS URLs are not
+  accepted credential mechanisms.
+- Require restore metadata locations to be complete URIs with a scheme and
+  host. Export targets may still use object keys in the instance bucket.
 - Require metadata URIs to expose `snapshots/.../metadata/...`.
 - Validate self-contained metadata after root relocation against `newRoot`.
 
@@ -412,9 +490,14 @@ Endpoint/provider compatibility validation:
 Access probing:
 
 - Probe source read access before restore scheduling.
-- Probe target write access before export writes.
-- Prefer failing during request handling over failing after a WAL message or
-  long-running copy job is created.
+- Export does not issue a separate target write probe. The first provider-side
+  copy request is the end-to-end check for source read, target write, copy API,
+  and KMS permissions.
+- A permission failure therefore aborts export before metadata is written.
+- A failed attempt may leave unreferenced data or manifest objects. Export does
+  not delete them because object paths may already be shared by an older
+  published bundle; deleting them could corrupt that bundle. A later retry can
+  safely overwrite the immutable snapshot objects.
 
 Secret handling:
 
@@ -429,6 +512,8 @@ Fail-closed behavior:
 - If parsing, compatibility validation, access probing, metadata read,
   manifest read, path validation, or provider-side copy resolution is ambiguous,
   reject the request.
+- After a restore has entered WAL processing, permanent source errors produce a
+  terminal failed job; transient errors continue through broadcaster retry.
 - Do not silently fall back to streaming.
 
 ## 9. Test Plan
@@ -446,8 +531,12 @@ Resolver and validator tests:
 
 - Empty `external_spec` resolves Layer 1 instance credential.
 - `external_spec.extfs` resolves allowed storage-config-compatible fields.
-- `role_arn`, `gcp_target_service_account`, SAS, anonymous auth, and dual
-  credentials are rejected.
+- Request-level `ssl_ca_cert` does not override the instance CA configuration.
+- Native GCS `credential_json` maps to the object-storage service-account JSON
+  field, while `role_arn`, `gcp_target_service_account`, SAS, anonymous auth,
+  and dual credentials are rejected.
+- URI query parameters and fragments are rejected and removed from defensive
+  log redaction output.
 - Redacted spec output never contains secret values.
 
 Root relocation tests:
@@ -465,12 +554,22 @@ Restore tests:
   paths.
 - Failure to read source metadata or manifests fails before scheduling unsafe
   work.
+- Go-client e2e covers both referenced restore from `DescribeSnapshot.s3Location`
+  and self-contained restore from the `ExportSnapshot` metadata URI.
 
 Export tests:
 
-- Export to a foreign target writes self-contained metadata and data mappings.
+- Export to the same bucket succeeds when destination objects do not overlap the
+  source snapshot and fails before copy when metadata, manifest, or data objects
+  would overlap.
+- Export to a foreign target copies equal object keys instead of treating them
+  as already present.
+- StorageV2 manifests are copied and rewritten as ordinary objects; StorageV3
+  manifest objects and LOB files remain manifest-owned.
 - Provider/endpoint mismatch rejects before copying.
-- Target write probe failure aborts the request.
+- Object copies use bounded concurrency, and any copy failure prevents metadata
+  from being written without deleting objects that may belong to an older
+  published bundle.
 
 Standalone client build:
 

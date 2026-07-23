@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	kv_datacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -78,8 +79,8 @@ func createTestSnapshotInfoForMeta() *datapb.SnapshotInfo {
 	}
 }
 
-func createTestSnapshotDataForMeta() *SnapshotData {
-	return &SnapshotData{
+func createTestSnapshotDataForMeta() *snapshotstorage.SnapshotData {
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: createTestSnapshotInfoForMeta(),
 		Collection: &datapb.CollectionDescription{
 			Schema: &schemapb.CollectionSchema{
@@ -127,8 +128,56 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
-		reader:                       NewSnapshotReader(tempChunkManager),
-		writer:                       NewSnapshotWriter(tempChunkManager),
+		reader:                       snapshotstorage.NewSnapshotReader(tempChunkManager),
+		writer:                       snapshotstorage.NewSnapshotWriter(tempChunkManager),
+	}
+}
+
+func TestDeriveSnapshotRootPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		location  string
+		want      string
+		wantFound bool
+	}{
+		{
+			name:      "s3 uri",
+			location:  "s3://bucket/files/snapshots/100/metadata/1.json",
+			want:      "files",
+			wantFound: true,
+		},
+		{
+			name:      "relative path",
+			location:  "files/snapshots/100/metadata/1.json",
+			want:      "files",
+			wantFound: true,
+		},
+		{
+			name:      "root snapshots",
+			location:  "snapshots/100/metadata/1.json",
+			want:      "",
+			wantFound: true,
+		},
+		{
+			name:      "incomplete snapshot anchor",
+			location:  "files/snapshots/meta.json",
+			want:      "",
+			wantFound: false,
+		},
+		{
+			name:      "no snapshot marker",
+			location:  "s3://bucket/files/meta.json",
+			want:      "",
+			wantFound: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, found := snapshotstorage.DeriveSnapshotRootPath(tt.location)
+			assert.Equal(t, tt.want, root)
+			assert.Equal(t, tt.wantFound, found)
+		})
 	}
 }
 
@@ -166,9 +215,9 @@ func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs,
 // saveTestSnapshots saves multiple snapshots to snapshotMeta using mocked catalog and writer.
 // This is the preferred way to set up test data as it exercises the real SaveSnapshot logic.
 // Returns cleanup function that must be deferred by the caller.
-func saveTestSnapshots(t *testing.T, sm *snapshotMeta, snapshots ...*SnapshotData) func() {
+func saveTestSnapshots(t *testing.T, sm *snapshotMeta, snapshots ...*snapshotstorage.SnapshotData) func() {
 	// Mock SnapshotWriter.Save
-	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, s *SnapshotData) (string, error) {
+	mock1 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, s *snapshotstorage.SnapshotData) (string, error) {
 		return fmt.Sprintf("s3://bucket/snapshots/%d/metadata.json", s.SnapshotInfo.GetId()), nil
 	}).Build()
 
@@ -440,7 +489,7 @@ func TestNewSnapshotMeta_ReaderError_AsyncLoading_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotReader.ReadSnapshot to return error
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, path string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, path string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		return nil, errors.New("reader failed")
 	}).Build()
 	defer mock2.UnPatch()
@@ -490,7 +539,7 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotReader.ReadSnapshot - now called with metadataFilePath instead of collection/snapshot IDs
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		assert.Equal(t, snapshotInfo.S3Location, metadataFilePath)
 		assert.False(t, includeSegments) // Fast path: includeSegments=false
 		return snapshotData, nil
@@ -555,7 +604,7 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 	for i := 0; i < numSnapshots; i++ {
 		snapshotID := int64(1000 + i)
 		collectionID := int64(100)
-		snapshotData := &SnapshotData{
+		snapshotData := &snapshotstorage.SnapshotData{
 			SnapshotInfo: &datapb.SnapshotInfo{
 				Id:           snapshotID,
 				Name:         fmt.Sprintf("test_snapshot_%d", i),
@@ -583,7 +632,7 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotReader.ReadSnapshot - will be called with metadataFilePath (fast path)
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		// Find snapshot by S3Location - iterate over a copy to avoid data race
 		for _, info := range snapshotInfos {
 			if info.S3Location == metadataFilePath {
@@ -592,8 +641,8 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 					return nil, errors.New("snapshot not found in map")
 				}
 				// Return a deep copy to avoid data race when reload modifies SnapshotInfo.S3Location
-				original := data.(*SnapshotData)
-				return &SnapshotData{
+				original := data.(*snapshotstorage.SnapshotData)
+				return &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Id:           original.SnapshotInfo.Id,
 						Name:         original.SnapshotInfo.Name,
@@ -632,7 +681,7 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 		assert.True(t, exists)
 
 		expectedData, _ := snapshotDataMap.Load(snapshotInfo.Id)
-		for _, segID := range expectedData.(*SnapshotData).SegmentIDs {
+		for _, segID := range expectedData.(*snapshotstorage.SnapshotData).SegmentIDs {
 			assert.True(t, refIndex.ContainsSegment(segID))
 		}
 	}
@@ -659,14 +708,14 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotReader.ReadSnapshot - fail on second snapshot (s3://bucket/1002)
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		if metadataFilePath == "s3://bucket/1002" {
 			return nil, errors.New("s3 read error")
 		}
 		// Find snapshot by S3Location
 		for _, info := range snapshotInfos {
 			if info.S3Location == metadataFilePath {
-				return &SnapshotData{
+				return &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{Id: info.Id, CollectionId: info.CollectionId, S3Location: info.S3Location},
 					Segments:     []*datapb.SegmentDescription{{SegmentId: info.Id * 10}},
 					Indexes:      []*indexpb.IndexInfo{{IndexID: info.Id * 100}},
@@ -734,7 +783,7 @@ func TestSnapshotMeta_Reload_EmptyList_WithMockey(t *testing.T) {
 // setupSnapshotViaSaveSnapshot creates a snapshot using SaveSnapshot with mocked dependencies.
 // This function mocks catalog.SaveSnapshot and SnapshotWriter.Save, executes SaveSnapshot,
 // then unpatches the mocks so the actual test can set up its own mocks.
-func setupSnapshotViaSaveSnapshot(t *testing.T, sm *snapshotMeta, snapshotData *SnapshotData) {
+func setupSnapshotViaSaveSnapshot(t *testing.T, sm *snapshotMeta, snapshotData *snapshotstorage.SnapshotData) {
 	ctx := context.Background()
 	metadataFilePath := "s3://bucket/snapshots/test/metadata.json"
 
@@ -744,7 +793,7 @@ func setupSnapshotViaSaveSnapshot(t *testing.T, sm *snapshotMeta, snapshotData *
 	}).Build()
 
 	// Mock SnapshotWriter.Save to succeed
-	mock2 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, snapshot *snapshotstorage.SnapshotData) (string, error) {
 		return metadataFilePath, nil
 	}).Build()
 
@@ -770,7 +819,7 @@ func TestSnapshotMeta_SaveSnapshot_Success_WithMockey(t *testing.T) {
 	catalogSaveCalls := 0
 
 	// Mock SnapshotWriter.Save (2PC uses snapshot ID for path computation)
-	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	mock1 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, snapshot *snapshotstorage.SnapshotData) (string, error) {
 		return metadataFilePath, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -822,7 +871,7 @@ func TestSnapshotMeta_SaveSnapshot_WriterError_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotWriter.Save to return error (S3 write fails after Phase 1)
-	mock2 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, snapshot *snapshotstorage.SnapshotData) (string, error) {
 		return "", expectedErr
 	}).Build()
 	defer mock2.UnPatch()
@@ -878,7 +927,7 @@ func TestSnapshotMeta_SaveSnapshot_CatalogPhase2Error_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotWriter.Save to succeed
-	mock2 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, snapshot *snapshotstorage.SnapshotData) (string, error) {
 		return metadataFilePath, nil
 	}).Build()
 	defer mock2.UnPatch()
@@ -924,7 +973,7 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotWriter.Drop - now takes metadataFilePath instead of collectionID/snapshotID
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
 		assert.Equal(t, snapshotData.SnapshotInfo.GetS3Location(), metadataFilePath)
 		return nil
 	}).Build()
@@ -979,7 +1028,7 @@ func TestSnapshotMeta_DropSnapshot_CatalogDropError_WithMockey(t *testing.T) {
 	defer mock0.UnPatch()
 
 	// Mock SnapshotWriter.Drop to succeed (S3 deletion succeeds)
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
 		return nil
 	}).Build()
 	defer mock2.UnPatch()
@@ -1024,7 +1073,7 @@ func TestSnapshotMeta_DropSnapshot_WriterError_WithMockey(t *testing.T) {
 
 	// Mock SnapshotWriter.Drop to return error - now takes metadataFilePath
 	// Two-phase delete: S3 error should NOT fail the operation, GC will retry
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
 		return writerErr
 	}).Build()
 	defer mock2.UnPatch()
@@ -1237,7 +1286,7 @@ func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 	}
 
 	// Legacy snapshot data without pre-computed IDs
-	legacySnapshotData := &SnapshotData{
+	legacySnapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: snapshotInfo,
 		Segments:     nil, // Not populated when includeSegments=false
 		Indexes:      nil,
@@ -1251,7 +1300,7 @@ func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotReader.ReadSnapshot - only called once with metadataFilePath
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		assert.Equal(t, snapshotInfo.S3Location, metadataFilePath)
 		assert.False(t, includeSegments) // Should only read metadata, not full segments
 		return legacySnapshotData, nil
@@ -1312,7 +1361,7 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 
 	// Track calls for each snapshot by S3Location using sync.Map for concurrent safety
 	var callCounts sync.Map
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		// Increment call count atomically
 		val, _ := callCounts.LoadOrStore(metadataFilePath, new(int32))
 		count := val.(*int32)
@@ -1320,7 +1369,7 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 
 		if metadataFilePath == newFormatInfo.S3Location {
 			// New format: return pre-computed IDs with deep copy
-			return &SnapshotData{
+			return &snapshotstorage.SnapshotData{
 				SnapshotInfo: &datapb.SnapshotInfo{
 					Id:           newFormatInfo.Id,
 					Name:         newFormatInfo.Name,
@@ -1332,7 +1381,7 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 		}
 
 		// Legacy format: no pre-computed IDs with deep copy
-		return &SnapshotData{
+		return &snapshotstorage.SnapshotData{
 			SnapshotInfo: &datapb.SnapshotInfo{
 				Id:           legacyFormatInfo.Id,
 				Name:         legacyFormatInfo.Name,
@@ -1415,10 +1464,10 @@ func TestSnapshotMeta_Reload_SkipPendingAndDeletingState_WithMockey(t *testing.T
 
 	// Mock SnapshotReader.ReadSnapshot - should only be called for committed snapshot
 	readCalled := false
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		assert.Equal(t, committedSnapshot.S3Location, metadataFilePath)
 		readCalled = true
-		return &SnapshotData{
+		return &snapshotstorage.SnapshotData{
 			SnapshotInfo: committedSnapshot,
 			SegmentIDs:   []int64{1001},
 		}, nil
@@ -1639,7 +1688,7 @@ func TestSnapshotMeta_Reload_PartialFailure_SetsFailed(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Mock SnapshotReader.ReadSnapshot to always fail
-	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(sr *SnapshotReader, ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(func(sr *snapshotstorage.SnapshotReader, ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 		return nil, errors.New("S3 read failed")
 	}).Build()
 	defer mock2.UnPatch()
@@ -1690,13 +1739,13 @@ func TestSnapshotMeta_LoadUnloadedRefIndexes_HungReadIsBoundedByTimeout(t *testi
 
 	// Mock ReadSnapshot to BLOCK indefinitely on hung's path until ctx is canceled,
 	// and return a successful (empty) result on fast's path.
-	mockRead := mockey.Mock((*SnapshotReader).ReadSnapshot).To(
-		func(sr *SnapshotReader, ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	mockRead := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).To(
+		func(sr *snapshotstorage.SnapshotReader, ctx context.Context, metadataFilePath string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 			if metadataFilePath == "s3://bucket/hung" {
 				<-ctx.Done()
 				return nil, ctx.Err()
 			}
-			return &SnapshotData{
+			return &snapshotstorage.SnapshotData{
 				SnapshotInfo: &datapb.SnapshotInfo{Id: 2},
 				SegmentIDs:   []int64{2001},
 				BuildIDs:     []int64{3001},
@@ -1744,7 +1793,7 @@ func TestSnapshotMeta_SaveSnapshot_CollectsBuildIDs_AllIndexTypes(t *testing.T) 
 	sm := createTestSnapshotMetaLoaded(t)
 	metadataFilePath := "s3://bucket/snapshots/1/metadata/test-uuid.json"
 
-	snapshotData := &SnapshotData{
+	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: createTestSnapshotInfoForMeta(),
 		Collection: &datapb.CollectionDescription{
 			Schema: &schemapb.CollectionSchema{Name: "test_collection"},
@@ -1769,7 +1818,7 @@ func TestSnapshotMeta_SaveSnapshot_CollectsBuildIDs_AllIndexTypes(t *testing.T) 
 	}
 
 	// Mock SnapshotWriter.Save
-	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	mock1 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, snapshot *snapshotstorage.SnapshotData) (string, error) {
 		return metadataFilePath, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -1806,7 +1855,7 @@ func TestSnapshotMeta_SaveSnapshot_SkipsZeroBuildIDs(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 	metadataFilePath := "s3://bucket/snapshots/1/metadata/test-uuid.json"
 
-	snapshotData := &SnapshotData{
+	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: createTestSnapshotInfoForMeta(),
 		Collection: &datapb.CollectionDescription{
 			Schema: &schemapb.CollectionSchema{Name: "test_collection"},
@@ -1831,7 +1880,7 @@ func TestSnapshotMeta_SaveSnapshot_SkipsZeroBuildIDs(t *testing.T) {
 	}
 
 	// Mock SnapshotWriter.Save
-	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	mock1 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, snapshot *snapshotstorage.SnapshotData) (string, error) {
 		return metadataFilePath, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -1858,7 +1907,7 @@ func TestSnapshotMeta_SaveSnapshot_SkipsZeroBuildIDs(t *testing.T) {
 	// Zero build IDs should NOT be in the refIndex
 	assert.False(t, refIndex.ContainsBuildID(0))
 
-	// Verify BuildIDs slice on SnapshotData: should have 3001, 4001, 5001 only (3 items)
+	// Verify BuildIDs slice on snapshotstorage.SnapshotData: should have 3001, 4001, 5001 only (3 items)
 	assert.Len(t, snapshotData.BuildIDs, 3)
 	assert.Contains(t, snapshotData.BuildIDs, int64(3001))
 	assert.Contains(t, snapshotData.BuildIDs, int64(4001))
@@ -2400,7 +2449,7 @@ func TestSnapshotMeta_SaveSnapshot_RollbackProtectionOnCommitFailure(t *testing.
 	segID := snapshot.Segments[0].GetSegmentId()
 
 	// Mock S3 writer to succeed
-	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, s *SnapshotData) (string, error) {
+	mock1 := mockey.Mock((*snapshotstorage.SnapshotWriter).Save).To(func(ctx context.Context, s *snapshotstorage.SnapshotData) (string, error) {
 		return fmt.Sprintf("s3://bucket/snapshots/%d/metadata.json", s.SnapshotInfo.GetId()), nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -2462,7 +2511,7 @@ func TestSnapshotMeta_DropSnapshot_ClearsProtection(t *testing.T) {
 	defer mock0.UnPatch()
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mock1.UnPatch()
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
 	// Drop the snapshot
@@ -2503,7 +2552,7 @@ func TestSnapshotMeta_DropSnapshot_ClearsGCProtectionForTTL0(t *testing.T) {
 	defer mock0.UnPatch()
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mock1.UnPatch()
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
 	err := sm.DropSnapshot(ctx, 100, "ttl0_drop")
@@ -2545,7 +2594,7 @@ func TestSnapshotMeta_DropSnapshot_RetainsProtectionFromOtherSnapshot(t *testing
 	defer mock0.UnPatch()
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mock1.UnPatch()
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
 	err := sm.DropSnapshot(ctx, 100, "snap1")
@@ -2594,7 +2643,7 @@ func TestSnapshotMeta_DropSnapshot_ClearsBlockWhenRefIndexFailed(t *testing.T) {
 	defer mock0.UnPatch()
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mock1.UnPatch()
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
 	err := sm.DropSnapshot(ctx, collectionID, "stuck_snapshot")
@@ -2636,7 +2685,7 @@ func TestNewSnapshotMeta_BlockStateReadyBeforeReturn(t *testing.T) {
 	// assertion below is race-free: even if the async loader goroutine races ahead of
 	// our assertion, a Failed RefIndex still keeps the collection blocked (IsLoaded()
 	// returns false), which is the exact same state a Pending RefIndex produces.
-	mockRead := mockey.Mock((*SnapshotReader).ReadSnapshot).Return(
+	mockRead := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).Return(
 		nil, errors.New("simulated S3 load failure")).Build()
 	defer mockRead.UnPatch()
 
@@ -2884,7 +2933,7 @@ func TestSnapshotMeta_DropSnapshotsByCollection_DeletesAllForCollection(t *testi
 	defer mock1.UnPatch()
 
 	// Mock SnapshotWriter.Drop
-	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mock2 := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
 	// Act
@@ -3037,7 +3086,7 @@ func TestSnapshotMeta_DropSnapshotsByCollection_PartialFailureReturnsError(t *te
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
 
-	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriter.UnPatch()
 
 	// Act
@@ -3110,7 +3159,7 @@ func TestSnapshotMeta_SameNameDifferentCollections(t *testing.T) {
 	defer mockSave.UnPatch()
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
-	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriter.UnPatch()
 
 	err = sm.DropSnapshot(ctx, 100, "backup")
@@ -3169,7 +3218,7 @@ func TestSnapshotMeta_DropSnapshot_CollectionScoped(t *testing.T) {
 	defer mockSave.UnPatch()
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
-	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriter.UnPatch()
 
 	// Act: Drop "weekly" from collection 300
@@ -3418,7 +3467,7 @@ func TestSnapshotMeta_DropSnapshotsByCollection_WithMixedStates(t *testing.T) {
 	defer mockSave.UnPatch()
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
-	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriter.UnPatch()
 
 	// Act: drop all snapshots for collection 100
@@ -3585,7 +3634,7 @@ func TestSnapshotMeta_DropSnapshotsByCollection_SnapshotAlreadyRemovedFromMemory
 	defer mockSave.UnPatch()
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
-	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriter.UnPatch()
 
 	// Act: DropSnapshotsByCollection should handle the missing snapshot gracefully
@@ -4011,13 +4060,13 @@ func TestSnapshotMeta_DropSnapshot_ExpiredPinAllowsDrop(t *testing.T) {
 	defer mockSave.UnPatch()
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
-	mockWriterDrop := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriterDrop := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriterDrop.UnPatch()
 
 	now := time.Now().UnixMilli()
 	sm := &snapshotMeta{
 		catalog:                &kv_datacoord.Catalog{},
-		writer:                 &SnapshotWriter{},
+		writer:                 &snapshotstorage.SnapshotWriter{},
 		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
 		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
@@ -4053,7 +4102,7 @@ func TestSnapshotMeta_DropSnapshot_CatalogFailure_RollbackPins(t *testing.T) {
 	now := time.Now().UnixMilli()
 	sm := &snapshotMeta{
 		catalog:                &kv_datacoord.Catalog{},
-		writer:                 &SnapshotWriter{},
+		writer:                 &snapshotstorage.SnapshotWriter{},
 		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
 		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
@@ -4117,12 +4166,12 @@ func TestSnapshotMeta_DropSnapshotsByCollection_SkipPinned(t *testing.T) {
 	defer mockSave.UnPatch()
 	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
 	defer mockDrop.UnPatch()
-	mockWriterDrop := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	mockWriterDrop := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 	defer mockWriterDrop.UnPatch()
 
 	sm := &snapshotMeta{
 		catalog:                &kv_datacoord.Catalog{},
-		writer:                 &SnapshotWriter{},
+		writer:                 &snapshotstorage.SnapshotWriter{},
 		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
 		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),

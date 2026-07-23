@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -98,12 +99,42 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 		mlog.String("snapshotName", header.SnapshotName),
 		mlog.FieldCollectionID(header.CollectionId),
 		mlog.FieldJobID(header.JobId),
+		mlog.Bool("external", header.External),
+		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(header.SnapshotS3Location)),
+		mlog.Bool("externalSpecSet", header.GetExternalSpec() != ""),
 	)
 	log.Info(ctx, "restoreSnapshotV2AckCallback received")
 
 	// Restore data (create copy segment job)
 	// Use the pre-allocated jobID from the WAL message for idempotency
-	jobID, err := s.snapshotManager.RestoreData(ctx, header.SourceCollectionId, header.SnapshotName, header.CollectionId, header.JobId, header.PinId)
+	var (
+		jobID int64
+		err   error
+	)
+	if header.GetExternal() {
+		// External restores do not have a local snapshot catalog entry or pin.
+		// The WAL header carries the metadata URI and external_spec needed to
+		// recreate the source storage in the async copy job.
+		jobID, err = s.snapshotManager.RestoreExternalData(
+			ctx,
+			header.SourceCollectionId,
+			header.SnapshotName,
+			header.SnapshotS3Location,
+			header.CollectionId,
+			header.JobId,
+			header.GetExternalSpec(),
+			header.GetSnapshotFingerprint(),
+		)
+	} else {
+		jobID, err = s.snapshotManager.RestoreData(
+			ctx,
+			header.SourceCollectionId,
+			header.SnapshotName,
+			header.CollectionId,
+			header.JobId,
+			header.PinId,
+		)
+	}
 	if err != nil {
 		log.Error(ctx, "failed to restore data", mlog.Err(err))
 		return err

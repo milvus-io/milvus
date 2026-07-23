@@ -27,6 +27,9 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +37,74 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestWaitAzureCopyComplete(t *testing.T) {
+	t.Run("wait until success", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}
+		client, calls := mockAzureCopyStatuses(t, statuses, "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst")
+		require.NoError(t, err)
+		require.Equal(t, 2, *calls)
+	})
+
+	t.Run("failed status returns error", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypeFailed}
+		client, _ := mockAzureCopyStatuses(t, statuses, "copy failed")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst")
+		require.Error(t, err)
+	})
+
+	t.Run("aborted status returns error", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypeAborted}
+		client, _ := mockAzureCopyStatuses(t, statuses, "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst")
+		require.Error(t, err)
+	})
+
+	t.Run("context canceled returns context error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitAzureCopyComplete(ctx, new(blockblob.Client), "dst")
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("pending copy respects caller deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		client, _ := mockAzureCopyStatuses(t, statuses, "")
+
+		err := waitAzureCopyComplete(ctx, client, "dst")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+func mockAzureCopyStatuses(t *testing.T, statuses []blob.CopyStatusType, description string) (*blockblob.Client, *int) {
+	t.Helper()
+	calls := 0
+	patch := mockey.Mock((*blockblob.Client).GetProperties).To(
+		func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+			idx := calls
+			calls++
+			if len(statuses) == 0 {
+				return blob.GetPropertiesResponse{}, nil
+			}
+			if idx >= len(statuses) {
+				idx = len(statuses) - 1
+			}
+			status := statuses[idx]
+			return blob.GetPropertiesResponse{
+				CopyStatus:            &status,
+				CopyStatusDescription: &description,
+			}, nil
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return new(blockblob.Client), &calls
+}
 
 func TestAzureObjectStorage(t *testing.T) {
 	ctx := context.Background()
@@ -248,7 +319,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination object exists and has correct content
@@ -277,7 +348,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			srcKey := "copy_test/not_exist/file"
 			dstKey := "copy_test/dst/file"
 
-			err := testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err := testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.Error(t, err)
 		})
 
@@ -297,7 +368,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy (should overwrite)
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination has new content
@@ -329,7 +400,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy large object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify content
@@ -357,7 +428,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy empty object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination exists and has size 0
@@ -383,7 +454,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy to nested path
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination exists and has correct content

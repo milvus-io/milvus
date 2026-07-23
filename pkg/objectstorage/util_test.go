@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -126,6 +128,27 @@ func TestNewTLSHTTPClientRejectsLowerVersion(t *testing.T) {
 		assert.Equal(t, uint16(tls.VersionTLS12), resp.TLS.Version)
 		t.Logf("confirmed: negotiated %s", tlsVersionName(resp.TLS.Version))
 	})
+}
+
+func TestNewMinioClientSkipsBucketCheck(t *testing.T) {
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		http.Error(w, "bucket-level access denied", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client, err := NewMinioClient(context.Background(), &Config{
+		Address:           strings.TrimPrefix(server.URL, "http://"),
+		BucketName:        "restricted-bucket",
+		AccessKeyID:       "access-key",
+		SecretAccessKeyID: "secret-key",
+		SkipBucketCheck:   true,
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.Zero(t, requestCount.Load())
 }
 
 func tlsVersionName(v uint16) string {

@@ -151,6 +151,12 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.BucketName == "" {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
+	}
+	if c.SkipBucketCheck {
+		return minIOClient, nil
+	}
 	var bucketExists bool
 	// check valid in first query
 	checkBucketFn := func() error {
@@ -231,6 +237,9 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 	}
 	if c.BucketName == "" {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
+	}
+	if c.SkipBucketCheck {
+		return client, nil
 	}
 	// check valid in first query
 	checkBucketFn := func() error {
@@ -337,6 +346,9 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 
 	if c.BucketName == "" {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
+	}
+	if c.SkipBucketCheck {
+		return client, nil
 	}
 	// Check bucket validity
 	checkBucketFn := func() error {
