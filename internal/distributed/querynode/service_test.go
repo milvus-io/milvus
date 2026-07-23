@@ -134,9 +134,7 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	nodescheduler.Init(4)
 	code := m.Run()
-	nodescheduler.Close()
 	os.Exit(code)
 }
 
