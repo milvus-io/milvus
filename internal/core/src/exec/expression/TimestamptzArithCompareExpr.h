@@ -50,6 +50,11 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    DetermineExecPath() override {
+        exec_path_ = ExprExecPath::RawData;
+    }
+
     std::string
     ToString() const override;
 
