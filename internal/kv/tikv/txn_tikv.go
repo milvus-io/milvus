@@ -606,37 +606,67 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPagination error", mlog.String("prefix", prefix))
 
-	// Since only reading, use Snapshot for less overhead
-	ss := getSnapshot(kv.txn, paginationSize)
+	pageSize := paginationSize
+	if pageSize <= 0 {
+		pageSize = txnsnapshot.DefaultScanBatchSize
+	}
+	scanBatchSize := pageSize
+	if pageSize < int(^uint(0)>>1) {
+		scanBatchSize = pageSize + 1
+	}
+
+	// Since only reading, use Snapshot for less overhead. Fetch one lookahead
+	// key per page so exactly full pages can be detected without another
+	// iterator.
+	ss := getSnapshot(kv.txn, scanBatchSize)
 
 	// Retrieve key-value pairs with the specified prefix
-	startKey := []byte(prefix)
+	pageStart := []byte(prefix)
 	endKey := tikv.PrefixNextKey([]byte(prefix))
-	iter, err := ss.Iter(startKey, endKey)
-	if err != nil {
-		loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create iterater for %s during WalkWithPrefix", prefix), err.Error())
-		return loggingErr
-	}
-	defer iter.Close()
 
-	// Iterate over the key-value pairs
-	for iter.Valid() {
-		// Grab value for empty check
-		byteVal := iter.Value()
-		// Check if empty val and replace with placeholder
-		if isEmptyByte(byteVal) {
-			byteVal = []byte{}
-		}
-		err = fn(iter.Key(), byteVal)
+	for {
+		pageCount, lastKey, hasMore, err := func() (int, []byte, bool, error) {
+			iter, err := ss.Iter(pageStart, endKey)
+			if err != nil {
+				loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create iterater for %s during WalkWithPrefix", prefix), err.Error())
+				return 0, nil, false, loggingErr
+			}
+			defer iter.Close()
+
+			pageCount := 0
+			var lastKey []byte
+			for iter.Valid() && pageCount < pageSize {
+				key := iter.Key()
+				// Grab value for empty check
+				byteVal := iter.Value()
+				// Check if empty val and replace with placeholder
+				if isEmptyByte(byteVal) {
+					byteVal = []byte{}
+				}
+				err = fn(key, byteVal)
+				if err != nil {
+					loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to apply fn to (%s;%s)", string(key), string(byteVal)))
+					return pageCount, nil, false, loggingErr
+				}
+
+				lastKey = append([]byte(nil), key...)
+				pageCount++
+				err = iter.Next()
+				if err != nil {
+					loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to move Iterator after key %s for WalkWithPrefix", string(key)), err.Error())
+					return pageCount, nil, false, loggingErr
+				}
+			}
+
+			return pageCount, lastKey, iter.Valid(), nil
+		}()
 		if err != nil {
-			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to apply fn to (%s;%s)", string(iter.Key()), string(byteVal)))
-			return loggingErr
+			return err
 		}
-		err = iter.Next()
-		if err != nil {
-			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to move Iterator after key %s for WalkWithPrefix", string(iter.Key())), err.Error())
-			return loggingErr
+		if pageCount < pageSize || !hasMore {
+			break
 		}
+		pageStart = append(lastKey, 0x00)
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV WalkWithPagination() operation", mlog.String("prefix", prefix))
 	return nil
