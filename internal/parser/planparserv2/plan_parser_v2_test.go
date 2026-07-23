@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -2640,6 +2641,8 @@ func Test_ArrayExpr(t *testing.T) {
 
 	exprs := []string{
 		`ArrayField == [1,2,3,4]`,
+		`ArrayField != [1,2,3,4]`,
+		`[1,2,3,4] == ArrayField`,
 		`ArrayField[0] == 1`,
 		`ArrayField[0] > 1`,
 		`1 < ArrayField[0] < 3`,
@@ -2678,6 +2681,25 @@ func Test_ArrayExpr(t *testing.T) {
 			RoundDecimal: 0,
 		}, nil, nil)
 		assert.NoError(t, err, expr)
+	}
+
+	unsupportedFieldComparisons := []string{
+		`ArrayField == ArrayField`,
+		`ArrayField != ArrayField`,
+		`ArrayField == Int64Field`,
+		`Int64Field != ArrayField`,
+		`ArrayField[0] == Int64Field`,
+		`ArrayField[0] < Int64Field`,
+	}
+	for _, expr = range unsupportedFieldComparisons {
+		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+		assert.Contains(t, err.Error(), "field-to-field comparison involving ARRAY fields is not supported", expr)
 	}
 
 	invalidExprs := []string{
