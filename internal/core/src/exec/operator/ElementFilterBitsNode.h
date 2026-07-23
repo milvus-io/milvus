@@ -95,6 +95,10 @@ class PhyElementFilterBitsNode : public Operator {
 
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;
+    // Schema captured at construction so this wrapper resolves the struct's
+    // array field against the same generation as the child expressions'
+    // construction-time snapshots.
+    SchemaPtr schema_snapshot_;
     std::string struct_name_;
     bool is_finished_{false};
 };

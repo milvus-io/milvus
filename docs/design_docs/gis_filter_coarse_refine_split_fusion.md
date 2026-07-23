@@ -104,8 +104,9 @@ void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
     // the finest granularity that is safe. This is still K→1 within the batch.
     GEOSContextHandle_t qctx = GetThreadLocalGEOSContext();
     auto [qgeoms, preps] = build_query_geoms(qctx, st_->preds); // once per batch
-    auto* gcache = SimpleGeometryCacheManager::Instance()
-                     .GetCache(segment_->get_segment_id(), st_->field_id);
+    // The returned shared_ptr pins the selected cache for the complete
+    // refinement pass.
+    auto gcache = segment_->GetGeometryCache(st_->field_id);
     auto wkb = gcache ? nullptr
                       : segment_->bulk_subscript(op_ctx_, st_->field_id, hits); // one bulk fetch
     for (size i : hits) {
@@ -145,7 +146,7 @@ The `bitmap_input` chain: `B_coarse` contributes early → intermediate scalars 
 - Null geometry: `GetByOffsetUnsafe` returns nullptr → false according to the op.
 - No R-Tree index: coarse = full set (no pruning), but refine still consumes `bitmap_input` and fuses, so the win is not lost.
 - growing / mmap: keeps the existing `std::string` vs `std::string_view` branches.
-- Orthogonal to the cache: this design is fast for bbox data even with the cache off; it does not depend on `enableGeometryCache`.
+- Orthogonal to the cache: this design is fast for bbox data even with the cache off; it does not depend on `enableGeometryCache`. When enabled, `GetGeometryCache()` returns a `shared_ptr`, so a refinement pass keeps the selected cache alive while it reads. Sealed caches are owned by the published runtime state; growing caches remain segment-owned, and complete growing schema/resource publication is tracked by [#51781](https://github.com/milvus-io/milvus/issues/51781).
 
 ## 10. Delivery Phases
 
