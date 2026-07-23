@@ -63,51 +63,17 @@ AllSupportOffsetInput(const exec::ExprSet& expr_set) {
 
 // Without offset-input support each Eval only advances the expression by one
 // internal batch (DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE rows), while the scorer
-// offsets may reference any row of the segment. Accumulate every batch so the
-// bitset covers all active rows.
+// offsets may reference any row of the segment. The shared helper
+// accumulates every batch so the bitset covers all active rows and folds
+// UNKNOWN (NULL) into FALSE so null rows never receive a boost, matching
+// PhyIterativeFilterNode's handling.
 TargetBitmap
 EvalFilterOverAllBatches(exec::ExecContext* exec_context,
-                         exec::ExprSet& expr_set,
-                         const expr::TypedExprPtr& filter) {
-    std::vector<VectorPtr> results;
+                         exec::ExprSet& expr_set) {
     exec::EvalCtx eval_ctx(exec_context);
     auto active_count = exec_context->get_query_context()->get_active_count();
-    TargetBitmap bitset;
-    TargetBitmap valid_bitset;
-    while (static_cast<int64_t>(bitset.size()) < active_count) {
-        expr_set.Eval(0, 1, true, eval_ctx, results);
-
-        AssertInfo(!results.empty() && results[0] != nullptr,
-                   "ComputeScorerScores: filter expr returned null result, "
-                   "filter: {}",
-                   filter->ToString());
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-        AssertInfo(col_vec != nullptr,
-                   "ComputeScorerScores: failed to cast result to "
-                   "ColumnVector, filter: {}",
-                   filter->ToString());
-        auto col_vec_size = col_vec->size();
-        AssertInfo(col_vec_size > 0,
-                   "ComputeScorerScores: filter expr returned empty batch "
-                   "after {} of {} rows, filter: {}",
-                   bitset.size(),
-                   active_count,
-                   filter->ToString());
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        bitset.append(view);
-        TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
-        valid_bitset.append(valid_view);
-    }
-    AssertInfo(static_cast<int64_t>(bitset.size()) == active_count,
-               "ComputeScorerScores: filter bitset size {} must match "
-               "active count {}, filter: {}",
-               bitset.size(),
-               active_count,
-               filter->ToString());
-    // Fold UNKNOWN (NULL) into FALSE explicitly so null rows never
-    // receive a boost, matching PhyIterativeFilterNode's handling.
-    bitset.inplace_and(valid_bitset, bitset.size());
-    return bitset;
+    return exec::EvalExprSetOverAllBatches(
+        expr_set, eval_ctx, active_count, "ComputeScorerScores");
 }
 
 }  // namespace
@@ -129,7 +95,7 @@ ComputeNonNativeFilterBitset(exec::ExecContext* exec_context,
         }
         return std::nullopt;
     }
-    auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set, filter);
+    auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set);
     // The non-native path is fully answered by the bitset; the expressions
     // have been advanced to the end of the segment and must not be reused.
     if (out_expr_set != nullptr) {
@@ -207,7 +173,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                             bitsetview,
                             output_scores);
     } else {
-        auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set, filter);
+        auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set);
         scorer->batch_score(
             op_context, segment, function_mode, offsets, bitset, output_scores);
     }

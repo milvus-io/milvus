@@ -675,5 +675,49 @@ OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
     milvus::monitor::internal_core_optimize_expr_latency.Observe(cost / 1000);
 }
 
+TargetBitmap
+EvalExprSetOverAllBatches(ExprSet& expr_set,
+                          EvalCtx& eval_ctx,
+                          int64_t total_rows,
+                          const char* what) {
+    std::vector<VectorPtr> results;
+    TargetBitmap bitset;
+    TargetBitmap valid_bitset;
+    while (static_cast<int64_t>(bitset.size()) < total_rows) {
+        expr_set.Eval(0, 1, true, eval_ctx, results);
+
+        AssertInfo(results.size() == 1 && results[0] != nullptr,
+                   "{}: filter expr returned null result",
+                   what);
+        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        if (col_vec == nullptr) {
+            ThrowInfo(
+                UnexpectedError, "{}: result should be ColumnVector", what);
+        }
+        if (!col_vec->IsBitmap()) {
+            ThrowInfo(UnexpectedError, "{}: result should be bitmap", what);
+        }
+        auto col_vec_size = col_vec->size();
+        AssertInfo(col_vec_size > 0,
+                   "{}: filter expr returned empty batch after {} of {} rows",
+                   what,
+                   bitset.size(),
+                   total_rows);
+        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+        bitset.append(view);
+        TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
+        valid_bitset.append(valid_view);
+    }
+    AssertInfo(static_cast<int64_t>(bitset.size()) == total_rows,
+               "{}: filter bitset size {} must match total rows {}",
+               what,
+               bitset.size(),
+               total_rows);
+    // Fold UNKNOWN (NULL) into FALSE explicitly (data &= valid) instead of
+    // relying on the convention that UNKNOWN rows carry data=0.
+    bitset.inplace_and(valid_bitset, bitset.size());
+    return bitset;
+}
+
 }  // namespace exec
 }  // namespace milvus

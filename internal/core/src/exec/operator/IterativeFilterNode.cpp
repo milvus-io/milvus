@@ -117,43 +117,12 @@ PhyIterativeFilterNode::GetOutput() {
     // get bitset of whole segment first
     if (!is_native_supported_) {
         EvalCtx eval_ctx(operator_context_->get_exec_context());
-
-        TargetBitmap valid_bitset;
-        while (num_processed_rows_ < need_process_rows_) {
-            exprs_->Eval(0, 1, true, eval_ctx, results_);
-
-            AssertInfo(
-                results_.size() == 1 && results_[0] != nullptr,
-                "PhyIterativeFilterNode result size should be size one and not "
-                "be nullptr");
-
-            if (auto col_vec =
-                    std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
-                if (col_vec->IsBitmap()) {
-                    auto col_vec_size = col_vec->size();
-                    TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                    bitset.append(view);
-                    TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                                col_vec_size);
-                    valid_bitset.append(valid_view);
-                    num_processed_rows_ += col_vec_size;
-                } else {
-                    ThrowInfo(UnexpectedError,
-                              "PhyIterativeFilterNode result should be bitmap");
-                }
-            } else {
-                ThrowInfo(
-                    UnexpectedError,
-                    "PhyIterativeFilterNode result should be ColumnVector");
-            }
-        }
-        Assert(bitset.size() == need_process_rows_);
-        Assert(valid_bitset.size() == need_process_rows_);
-        // Rows are included below on the data bit alone, so fold UNKNOWN
-        // into FALSE explicitly (data &= valid) instead of relying on the
-        // convention that UNKNOWN rows carry data=0. This is what makes
-        // this operator a null-rejecting consumer by construction.
-        bitset.inplace_and(valid_bitset, need_process_rows_);
+        // Rows are included below on the data bit alone; the helper folds
+        // UNKNOWN into FALSE (data &= valid), which is what makes this
+        // operator a null-rejecting consumer by construction.
+        bitset = EvalExprSetOverAllBatches(
+            *exprs_, eval_ctx, need_process_rows_, "PhyIterativeFilterNode");
+        num_processed_rows_ = need_process_rows_;
     }
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
