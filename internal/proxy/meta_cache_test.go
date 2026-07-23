@@ -26,9 +26,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -53,6 +56,130 @@ import (
 )
 
 var dbName = GetCurDBNameFromContextOrDefault(context.Background())
+
+func histogramSampleCount(t *testing.T, observer prometheus.Observer) uint64 {
+	t.Helper()
+	metric, ok := observer.(prometheus.Metric)
+	require.True(t, ok)
+	pb := &dto.Metric{}
+	require.NoError(t, metric.Write(pb))
+	return pb.GetHistogram().GetSampleCount()
+}
+
+func TestMetaCacheFillGateMetrics(t *testing.T) {
+	cache := &MetaCache{}
+	nodeID := paramtable.GetStringNodeID()
+	readObserver := metrics.ProxyMetaCacheLockWaitLatency.WithLabelValues(nodeID, "read", metaCacheOpCollectionFill)
+	writeObserver := metrics.ProxyMetaCacheLockWaitLatency.WithLabelValues(nodeID, "write", metaCacheOpCollectionInvalidate)
+	invalidationObserver := metrics.ProxyMetaCacheInvalidationLatency.WithLabelValues(nodeID, metaCacheOpCollectionInvalidate)
+
+	readBefore := histogramSampleCount(t, readObserver)
+	readUnlock := cache.lockFillRead(metaCacheOpCollectionFill)
+	readUnlock()
+	assert.Equal(t, readBefore+1, histogramSampleCount(t, readObserver))
+
+	writeBefore := histogramSampleCount(t, writeObserver)
+	writeUnlock := cache.lockFillWrite(metaCacheOpCollectionInvalidate)
+	writeUnlock()
+	assert.Equal(t, writeBefore+1, histogramSampleCount(t, writeObserver))
+
+	invalidationBefore := histogramSampleCount(t, invalidationObserver)
+	observeMetaCacheInvalidation(metaCacheOpCollectionInvalidate)()
+	assert.Equal(t, invalidationBefore+1, histogramSampleCount(t, invalidationObserver))
+}
+
+func TestMetaCacheGlobalFillGateBlocksAcrossDatabases(t *testing.T) {
+	cache := &MetaCache{
+		collections: make(map[UniqueID]*collectionInfo),
+		nameIdx:     make(map[string]map[string]UniqueID),
+		aliasInfo:   make(map[string]map[string]string),
+	}
+	seedCollection(cache, "db-c", "cached", 1)
+
+	// DB-A has a slow fill in progress. Holding the shared gate directly keeps
+	// the test independent of coordinator timing while exercising the same gate
+	// used by collection, partition, and database fills.
+	releaseDBAFill := cache.lockFillRead(metaCacheOpCollectionFill)
+
+	// DB-B queues an invalidation writer behind DB-A's fill and deliberately
+	// holds the writer gate once acquired so DB-C's later fill can be observed.
+	writerAcquired := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		unlock := cache.lockFillWrite(metaCacheOpCollectionInvalidate)
+		close(writerAcquired)
+		<-releaseWriter
+		unlock()
+	}()
+
+	// TryRLock succeeds while only readers exist and fails once an RWMutex
+	// writer is queued. This gives a deterministic queued-writer gate without a
+	// scheduler-dependent sleep.
+	require.Eventually(t, func() bool {
+		if cache.fillMu.TryRLock() {
+			cache.fillMu.RUnlock()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond, "DB-B invalidation did not queue behind DB-A fill")
+
+	// A DB-C cache hit uses only m.mu and must remain available even while the
+	// global fill writer is queued.
+	hitDone := make(chan struct{})
+	go func() {
+		defer close(hitDone)
+		entry, ok := cache.getCollection("db-c", "cached", 0)
+		assert.True(t, ok)
+		assert.Equal(t, UniqueID(1), entry.collID)
+	}()
+	select {
+	case <-hitDone:
+	case <-time.After(time.Second):
+		t.Fatal("DB-C cache hit was blocked by the global fill gate")
+	}
+
+	// A new DB-C fill arrives after DB-B's writer is queued. Go's RWMutex gives
+	// the queued writer priority, so this unrelated database is blocked too.
+	dbcFillAcquired := make(chan struct{})
+	dbcFillDone := make(chan struct{})
+	go func() {
+		defer close(dbcFillDone)
+		unlock := cache.lockFillRead(metaCacheOpCollectionFill)
+		close(dbcFillAcquired)
+		unlock()
+	}()
+	select {
+	case <-dbcFillAcquired:
+		t.Fatal("DB-C fill bypassed the queued DB-B invalidation writer")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	releaseDBAFill()
+	select {
+	case <-writerAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("DB-B invalidation did not acquire after DB-A fill released")
+	}
+	select {
+	case <-dbcFillAcquired:
+		t.Fatal("DB-C fill acquired while DB-B invalidation held the writer gate")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseWriter)
+	select {
+	case <-writerDone:
+	case <-time.After(time.Second):
+		t.Fatal("DB-B invalidation did not release the writer gate")
+	}
+	select {
+	case <-dbcFillDone:
+	case <-time.After(time.Second):
+		t.Fatal("DB-C fill did not proceed after the invalidation released")
+	}
+}
 
 type MockMixCoordClientInterface struct {
 	types.MixCoordClient
