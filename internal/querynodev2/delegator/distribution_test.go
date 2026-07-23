@@ -646,6 +646,7 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 		input       []SegmentEntry
 		offlines    []int64
 		serviceable bool
+		notify      bool
 	}
 
 	cases := []testCase{
@@ -663,6 +664,7 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 			},
 			offlines:    []int64{2},
 			serviceable: false,
+			notify:      true,
 		},
 		{
 			tag: "offlineMissed",
@@ -682,6 +684,7 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 			},
 			offlines:    []int64{4},
 			serviceable: true,
+			notify:      false,
 		},
 	}
 
@@ -699,9 +702,18 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 				SealedSegmentRowCount: sealedSegmentRowCount,
 				DroppedInTarget:       nil,
 			}, nil)
+			var notifiedChannels []string
+			s.dist.leaderViewUpdatedCallback = func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			}
 			s.dist.MarkOfflineSegments(tc.offlines...)
 			s.dist.Flush()
 			s.Equal(tc.serviceable, s.dist.Serviceable())
+			if tc.notify {
+				s.Equal([]string{s.dist.channelName}, notifiedChannels)
+			} else {
+				s.Empty(notifiedChannels)
+			}
 
 			for _, offline := range tc.offlines {
 				s.dist.mut.RLock()
@@ -895,6 +907,30 @@ func TestDistribution_UpdateServiceable(t *testing.T) {
 	assert.False(t, dist.Serviceable())
 	dist.queryView.syncedByCoord = true
 	assert.True(t, dist.Serviceable())
+}
+
+func TestDistribution_UpdateServiceableNotifiesOnChange(t *testing.T) {
+	channelName := "test_channel"
+	view := NewChannelQueryView(nil, map[int64]int64{4: 100}, nil, 10)
+	dist := NewDistribution(channelName, view)
+	defer dist.Close()
+
+	var notifiedChannels []string
+	dist.leaderViewUpdatedCallback = func(channel string) {
+		notifiedChannels = append(notifiedChannels, channel)
+	}
+
+	dist.queryView.syncedByCoord = true
+	dist.sealedSegments[4] = SegmentEntry{SegmentID: 4}
+	dist.updateServiceable("test")
+	dist.updateServiceable("test")
+
+	assert.Equal(t, []string{channelName}, notifiedChannels)
+
+	dist.sealedSegments[4] = SegmentEntry{SegmentID: 4, Offline: true}
+	dist.updateServiceable("test")
+
+	assert.Equal(t, []string{channelName, channelName}, notifiedChannels)
 }
 
 func TestDistribution_SyncTargetVersion(t *testing.T) {

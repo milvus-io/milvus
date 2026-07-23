@@ -483,6 +483,7 @@ queryCoord:
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
+  enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
   checkHandoffInterval: 5000
   enableActiveStandby: false
   checkInterval: 1000
