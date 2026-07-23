@@ -26,6 +26,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "gtest/gtest.h"
 #include "index/InvertedIndexTantivy.h"
 #include "knowhere/comp/index_param.h"
@@ -286,6 +287,34 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayEqual) {
 
     auto parser = ProtoParser(this->schema_);
     auto typed_expr = parser.ParseExprs(*expr);
+    milvus::test::ExprBatchSizeGuard batch_size_guard(1024);
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        typed_expr, this->seg_.get(), this->N_));
+    EXPECT_EQ(milvus::test::EvalExprBatchSizes(
+                  typed_expr, this->seg_.get(), this->N_),
+              (std::vector<int64_t>{1024, 1024, 952}));
+
+    auto unary_expr =
+        std::dynamic_pointer_cast<const expr::UnaryRangeFilterExpr>(typed_expr);
+    ASSERT_NE(unary_expr, nullptr);
+    auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        unary_expr->column_,
+        proto::plan::OpType::GreaterThan,
+        unary_expr->val_,
+        std::vector<proto::plan::GenericValue>{});
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        greater_expr, this->seg_.get(), this->N_));
+
+    auto empty_value = unary_expr->val_;
+    empty_value.mutable_array_val()->clear_array();
+    auto empty_equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        unary_expr->column_,
+        proto::plan::OpType::Equal,
+        empty_value,
+        std::vector<proto::plan::GenericValue>{});
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        empty_equal_expr, this->seg_.get(), this->N_));
+
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
