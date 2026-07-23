@@ -233,6 +233,35 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     return LoadBuiltJsonStatsIndex(built_index);
 }
 
+TEST(JsonStatsSharedFallbackPruningTest,
+     ExactTypedColumnsCanSkipSharedFallback) {
+    const auto json_fid = FieldId(100);
+    const std::vector<std::string> json_raw_data = {
+        R"({"s": "a", "b": true, "arr": [1, 2], "n": 1})",
+        R"({"s": "b", "b": false, "arr": [3, 4], "n": 2})",
+        R"({"s": "c", "b": true, "arr": [5, 6], "n": 3})",
+    };
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1110,
+                                          2110,
+                                          3110,
+                                          json_fid.get(),
+                                          5110,
+                                          1);
+
+    EXPECT_TRUE(stats->HasAllShreddingFields("/s", {JSONType::STRING}));
+    EXPECT_TRUE(stats->HasAllShreddingFields("/b", {JSONType::BOOL}));
+    EXPECT_TRUE(stats->HasAllShreddingFields("/arr", {JSONType::ARRAY}));
+
+    EXPECT_TRUE(stats->HasAllShreddingFields("/n", {JSONType::INT64}));
+    EXPECT_FALSE(stats->HasAllShreddingFields(
+        "/n", {JSONType::INT64, JSONType::DOUBLE}));
+    EXPECT_FALSE(stats->HasAllShreddingFields("/missing", {JSONType::STRING}));
+}
+
 std::string
 FindFirstShreddingDataFile(const BuiltJsonStatsIndex& built_index) {
     auto it =
@@ -718,6 +747,75 @@ TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     EXPECT_TRUE(result[6]);
     EXPECT_FALSE(result[7]);
     EXPECT_EQ(result.count(), 2);
+}
+
+TEST(JsonStatsUnaryRangeTest, UsesStatsValidityWithoutReadingRawJsonValidity) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    const std::vector<std::string> json_raw_data = {
+        R"({"a": 1})",
+        R"({"a": 2})",
+        R"({"b": 1})",
+        R"({"a": 1})",
+    };
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1102,
+                                          2102,
+                                          3102,
+                                          json_fid.get(),
+                                          5102,
+                                          1);
+    ASSERT_FALSE(stats->GetShreddingField("/a", JSONType::INT64).empty());
+
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+
+    // Deliberately make raw top-level JSON validity disagree with the stats.
+    // The stats path must rely on shredding/shared validity only; otherwise row
+    // 0 would be masked out by ApplyFieldValidData on the raw JSON field.
+    const std::vector<uint8_t> raw_valid_data{0b00001110};
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->FillFieldData(
+        MakeNullableJsonArray(json_raw_data, raw_valid_data));
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    proto::plan::GenericValue val;
+    val.set_int64_val(1);
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::Equal,
+        val,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    auto result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+
+    TargetBitmapView result_view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    ASSERT_EQ(result->size(), json_raw_data.size());
+
+    EXPECT_TRUE(valid_view[0]);
+    EXPECT_TRUE(result_view[0]);
+    EXPECT_TRUE(valid_view[1]);
+    EXPECT_FALSE(result_view[1]);
+    EXPECT_FALSE(valid_view[2]);
+    EXPECT_FALSE(result_view[2]);
+    EXPECT_TRUE(valid_view[3]);
+    EXPECT_TRUE(result_view[3]);
 }
 
 TEST(JsonStatsThreeValuedAuditTest,
