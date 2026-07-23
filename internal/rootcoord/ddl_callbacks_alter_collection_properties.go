@@ -178,8 +178,14 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		// Build schema snapshot with updated properties. Every DDL that broadcasts a
+		// schema snapshot bumps schema.Version: it is now the single monotonic schema
+		// version QueryNode/segcore gate on, so a properties/ttl_field alter must
+		// advance it like a structural DDL. Otherwise the same-version snapshot would
+		// be gated away as a no-op and the runtime property (e.g. ttl_field) never
+		// refreshes.
 		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
 		schema.Properties = newPropsKeyValuePairs
 		// Preserve ExternalSource/ExternalSpec from current collection state
 		// unless this alter is itself updating them (refresh-completion sync).

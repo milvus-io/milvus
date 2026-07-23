@@ -63,7 +63,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -184,9 +183,8 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		LoadType:        querypb.LoadType_LoadCollection,
-		PartitionIDs:    []int64{1001, 1002},
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
+		LoadType:     querypb.LoadType_LoadCollection,
+		PartitionIDs: []int64{1001, 1002},
 	})
 }
 
@@ -218,9 +216,8 @@ func (s *DelegatorDataSuite) genTextCollection() {
 			},
 		},
 	}, nil, &querypb.LoadMetaInfo{
-		LoadType:        querypb.LoadType_LoadCollection,
-		PartitionIDs:    []int64{1001},
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
+		LoadType:     querypb.LoadType_LoadCollection,
+		PartitionIDs: []int64{1001},
 	})
 }
 
@@ -257,7 +254,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			InputFieldIds:  []int64{102},
 			OutputFieldIds: []int64{101},
 		}},
-	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
+	}, nil, &querypb.LoadMetaInfo{})
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
@@ -752,6 +749,12 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
+			// Carry the collection's current schema.Version. The delegator's served
+			// schema version is now initialized from the loaded collection (version 1
+			// here, from genCollectionWithFunction), and the load fence rejects a load
+			// whose schema.Version is older. A schema-less request (version 0) would be
+			// fenced as stale and never reach the distribution.
+			Schema: s.delegator.collection.Schema(),
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:     100,
@@ -1251,15 +1254,28 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	err := s.delegator.syncCollectionIndexMeta(ctx, &querypb.LoadSegmentsRequest{
 		CollectionID:  s.collectionID,
 		Schema:        schema,
-		LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: 1},
+		LoadMeta:      &querypb.LoadMetaInfo{},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
 	})
 	s.Require().NoError(err)
 
-	// The load path has already advanced the collection snapshot, so the DDL
-	// event is skipped as a no-op. The function runner key must still point at
-	// the schema installed by the load path.
-	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
+	// The load path advanced the SHARED collection snapshot and registered the
+	// function runner. UpdateSchema no longer no-ops just because the shared
+	// collection already advanced: it gates on THIS delegator's servedSchemaVersion
+	// (still 0 from SetupTest's version-0 collection). So the DDL event converges
+	// the delegator's own state: it issues worker sub-tasks over the online
+	// distribution (empty here, so only the always-issued streaming sub-task on the
+	// local node), re-applies the schema to the collection manager (a same-version
+	// no-op on the real manager), and refreshes the function runner. Assert
+	// convergence, not skip.
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil)
+
+	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema))
+	// The delegator committed its own served schema version.
+	s.Equal(uint64(1), s.delegator.servedSchemaVersion)
+	// The function runner is usable after convergence.
 	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
 		return nil
 	})

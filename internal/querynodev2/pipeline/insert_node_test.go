@@ -413,7 +413,7 @@ func TestInsertNodeBlocksSchemaUpdateUntilGrowingInsertCompletes(t *testing.T) {
 	updateStarted = true
 	go func() {
 		defer close(updateDone)
-		updateErr <- manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951, 951)
+		updateErr <- manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951)
 	}()
 	require.True(t, collection.WaitForSchemaTransitionWriterForTest(5*time.Second), "schema writer did not queue behind old-schema payload conversion")
 
@@ -438,7 +438,7 @@ func TestInsertNodeBlocksSchemaUpdateUntilGrowingInsertCompletes(t *testing.T) {
 
 func TestInsertNodeSkipsDroppedFieldAfterSchemaUpdate(t *testing.T) {
 	manager, collection, schemaV950, schemaV951, insertMsg := setupSchemaTransitionInsertNodeTest(t)
-	require.NoError(t, manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951, 951))
+	require.NoError(t, manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951))
 
 	var (
 		insertErr        error

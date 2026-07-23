@@ -148,10 +148,24 @@ func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegm
 	)
 
 	log.Info(ctx, "start to reopen segments")
-	err := node.loader.ReopenSegments(ctx, req.GetInfos())
+	err := node.loader.ReopenSegments(ctx, req.GetInfos(), req.GetSchema())
 	if err != nil {
 		log.Warn(ctx, "failed to reopen segments", mlog.Err(err))
 		return merr.Status(err)
+	}
+	// Refresh the collection index meta so newly-indexed fields pass segcore's
+	// search-plan HasField check. Reopen deliberately does not advance the served
+	// schema, and the SyncType_UpdateVersion path for already-loaded segments carries
+	// no index info, so this is the only place the worker's CollectionIndexMeta learns
+	// the reopened index. Restrict to LoadScope_Reopen (the Stats scope shares this
+	// handler but never changes indexes) and skip an empty list so an index-less
+	// reopen cannot clobber existing meta.
+	if req.GetLoadScope() == querypb.LoadScope_Reopen && len(req.GetIndexInfoList()) > 0 {
+		if err := node.manager.Collection.UpdateIndexMeta(req.GetCollectionID(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema())); err != nil {
+			log.Warn(ctx, "failed to update collection index meta after reopen", mlog.Err(err))
+			return merr.Status(err)
+		}
 	}
 	return merr.Success()
 }

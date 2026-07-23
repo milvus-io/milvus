@@ -973,7 +973,7 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 				LoadScope:     querypb.LoadScope_Reopen,
 				IndexInfoList: indexInfos,
 			}
-			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos(), mock.Anything).Return(test.reopenErr).Once()
 
 			time.Sleep(time.Nanosecond)
 			status, err := suite.node.LoadSegments(ctx, req)
@@ -2837,28 +2837,30 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	suite.node.manager.Collection = mockManager
 
 	suite.Run("normal", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
-	suite.Run("passes_barrier_to_collection_manager", func() {
+	suite.Run("ignores_dead_barrier_and_passes_schema_to_collection_manager", func() {
 		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		schema.Version = 2
+		// The RPC must ignore SchemaBarrierTs and forward only the schema
+		// (ordered by schema.Version).
 		req := &querypb.UpdateSchemaRequest{
 			CollectionID:    suite.collectionID,
 			Schema:          schema,
 			SchemaBarrierTs: uint64(100),
 		}
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
 	suite.Run("manager_returns_error", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))

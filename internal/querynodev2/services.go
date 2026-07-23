@@ -536,13 +536,25 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
-	if err != nil {
-		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
-		return merr.Status(err), nil
+	// A reopened segment must NOT advance the delegator's SERVED collection schema: the
+	// served schema advances only via the stream UpdateSchema, so its derived-state
+	// rebuild (idfOracle / function runners) is not skipped — not advancing served on
+	// reopen is the #50989/#51062 load-wins fix. The segment carries its own
+	// schema.Version explicitly (from the load request). Reopen DOES still refresh the
+	// collection index meta (reopenSegments -> Collection.UpdateIndexMeta) so search-plan
+	// HasField sees newly-indexed fields, but that path only updates index meta, not the
+	// served schema. So reopen skips the PutOrRef below (which would advance served): the
+	// collection stays alive via the channel's persistent ref (WatchDmChannels) plus the
+	// reopened segments' own refs, and no temporary ref is taken here.
+	// All other scopes ref the collection (PutOrRef) for the duration of the load.
+	if req.GetLoadScope() != querypb.LoadScope_Reopen {
+		if err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta()); err != nil {
+			log.Warn(ctx, "failed to ref collection", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
-	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	switch req.GetLoadScope() {
 	case querypb.LoadScope_Delta:
@@ -604,15 +616,13 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
-		mlog.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
 		mlog.Int32("schemaVersion", req.GetSchema().GetVersion()),
 	)
 
 	log.Info(ctx, "querynode received update schema request")
 
-	// Pass the barrier timestamp through; collectionManager derives the logical
-	// schema version from the schema payload when it is present.
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
+	// Ordering is by schema.Version, the single monotonic schema version.
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema())
 	if err != nil {
 		log.Warn(ctx, "failed to update schema", mlog.Err(err))
 	}

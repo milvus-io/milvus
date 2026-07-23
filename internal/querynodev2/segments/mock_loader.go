@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -270,17 +271,17 @@ func (_c *MockLoader_LoadDeltaLogs_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// ReopenSegments provides a mock function with given fields: ctx, loadInfos
-func (_m *MockLoader) ReopenSegments(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo) error {
-	ret := _m.Called(ctx, loadInfos)
+// ReopenSegments provides a mock function with given fields: ctx, loadInfos, schema
+func (_m *MockLoader) ReopenSegments(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) error {
+	ret := _m.Called(ctx, loadInfos, schema)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ReopenSegments")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*querypb.SegmentLoadInfo) error); ok {
-		r0 = rf(ctx, loadInfos)
+	if rf, ok := ret.Get(0).(func(context.Context, []*querypb.SegmentLoadInfo, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(ctx, loadInfos, schema)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -296,13 +297,14 @@ type MockLoader_ReopenSegments_Call struct {
 // ReopenSegments is a helper method to define mock.On call
 //   - ctx context.Context
 //   - loadInfos []*querypb.SegmentLoadInfo
-func (_e *MockLoader_Expecter) ReopenSegments(ctx interface{}, loadInfos interface{}) *MockLoader_ReopenSegments_Call {
-	return &MockLoader_ReopenSegments_Call{Call: _e.mock.On("ReopenSegments", ctx, loadInfos)}
+//   - schema *schemapb.CollectionSchema
+func (_e *MockLoader_Expecter) ReopenSegments(ctx interface{}, loadInfos interface{}, schema interface{}) *MockLoader_ReopenSegments_Call {
+	return &MockLoader_ReopenSegments_Call{Call: _e.mock.On("ReopenSegments", ctx, loadInfos, schema)}
 }
 
-func (_c *MockLoader_ReopenSegments_Call) Run(run func(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo)) *MockLoader_ReopenSegments_Call {
+func (_c *MockLoader_ReopenSegments_Call) Run(run func(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema)) *MockLoader_ReopenSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]*querypb.SegmentLoadInfo))
+		run(args[0].(context.Context), args[1].([]*querypb.SegmentLoadInfo), args[2].(*schemapb.CollectionSchema))
 	})
 	return _c
 }
@@ -312,7 +314,7 @@ func (_c *MockLoader_ReopenSegments_Call) Return(_a0 error) *MockLoader_ReopenSe
 	return _c
 }
 
-func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context, []*querypb.SegmentLoadInfo) error) *MockLoader_ReopenSegments_Call {
+func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context, []*querypb.SegmentLoadInfo, *schemapb.CollectionSchema) error) *MockLoader_ReopenSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -322,7 +324,8 @@ func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context,
 func NewMockLoader(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockLoader {
+},
+) *MockLoader {
 	mock := &MockLoader{}
 	mock.Mock.Test(t)
 

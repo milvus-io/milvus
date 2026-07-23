@@ -1282,7 +1282,7 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
@@ -1295,11 +1295,25 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	// Decode this segment with ITS data's actual schema, passed in explicitly from
+	// the load request so the segment adopts the version-ahead schema while the
+	// served collection schema stays behind — the reopen does NOT touch s.collection
+	// for schema. Fall back to the served schema only when the caller carried none.
+	// schema.Version is the single monotonic version, so the segcore version is taken
+	// straight from it.
+	// Take whichever schema is NEWER. The request's schema is normally the
+	// version-ahead one, but QueryCoord can snapshot an older collection version
+	// (DescribeCollection singleflight) while this node has already advanced the
+	// segment from the WAL — and segcore rejects a reopen whose version is strictly
+	// lower ("stale reopen segment"). Falling back to the served schema also covers
+	// a caller that carried none.
+	if served := s.collection.Schema(); schema == nil || served.GetVersion() > schema.GetVersion() {
+		schema = served
+	}
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,
-		SchemaVersion: schemaVersion,
+		SchemaVersion: uint64(schema.GetVersion()),
 	})
 	if err != nil {
 		return err

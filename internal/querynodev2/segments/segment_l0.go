@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -188,7 +189,7 @@ func (s *L0Segment) Load(ctx context.Context) error {
 	return nil
 }
 
-func (s *L0Segment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+func (s *L0Segment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) error {
 	return merr.WrapErrServiceInternal("unexpected reopen on l0 segment")
 }
 

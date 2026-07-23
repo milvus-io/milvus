@@ -307,17 +307,17 @@ func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32)
 	return _c
 }
 
-// UpdateSchema provides a mock function with given fields: collectionID, schema, schemaBarrierTs
-func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
-	ret := _m.Called(collectionID, schema, schemaBarrierTs)
+// UpdateSchema provides a mock function with given fields: collectionID, schema
+func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error {
+	ret := _m.Called(collectionID, schema)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateSchema")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, uint64) error); ok {
-		r0 = rf(collectionID, schema, schemaBarrierTs)
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(collectionID, schema)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -333,14 +333,13 @@ type MockCollectionManager_UpdateSchema_Call struct {
 // UpdateSchema is a helper method to define mock.On call
 //   - collectionID int64
 //   - schema *schemapb.CollectionSchema
-//   - schemaBarrierTs uint64
-func (_e *MockCollectionManager_Expecter) UpdateSchema(collectionID interface{}, schema interface{}, schemaBarrierTs interface{}) *MockCollectionManager_UpdateSchema_Call {
-	return &MockCollectionManager_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", collectionID, schema, schemaBarrierTs)}
+func (_e *MockCollectionManager_Expecter) UpdateSchema(collectionID interface{}, schema interface{}) *MockCollectionManager_UpdateSchema_Call {
+	return &MockCollectionManager_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", collectionID, schema)}
 }
 
-func (_c *MockCollectionManager_UpdateSchema_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64)) *MockCollectionManager_UpdateSchema_Call {
+func (_c *MockCollectionManager_UpdateSchema_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema)) *MockCollectionManager_UpdateSchema_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema))
 	})
 	return _c
 }
@@ -350,7 +349,54 @@ func (_c *MockCollectionManager_UpdateSchema_Call) Return(_a0 error) *MockCollec
 	return _c
 }
 
-func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, uint64) error) *MockCollectionManager_UpdateSchema_Call {
+func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema) error) *MockCollectionManager_UpdateSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateIndexMeta provides a mock function with given fields: collectionID, meta
+func (_m *MockCollectionManager) UpdateIndexMeta(collectionID int64, meta *segcorepb.CollectionIndexMeta) error {
+	ret := _m.Called(collectionID, meta)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndexMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *segcorepb.CollectionIndexMeta) error); ok {
+		r0 = rf(collectionID, meta)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_UpdateIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexMeta'
+type MockCollectionManager_UpdateIndexMeta_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexMeta is a helper method to define mock.On call
+//   - collectionID int64
+//   - meta *segcorepb.CollectionIndexMeta
+func (_e *MockCollectionManager_Expecter) UpdateIndexMeta(collectionID interface{}, meta interface{}) *MockCollectionManager_UpdateIndexMeta_Call {
+	return &MockCollectionManager_UpdateIndexMeta_Call{Call: _e.mock.On("UpdateIndexMeta", collectionID, meta)}
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) Run(run func(collectionID int64, meta *segcorepb.CollectionIndexMeta)) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*segcorepb.CollectionIndexMeta))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) Return(_a0 error) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) RunAndReturn(run func(int64, *segcorepb.CollectionIndexMeta) error) *MockCollectionManager_UpdateIndexMeta_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -360,7 +406,8 @@ func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, 
 func NewMockCollectionManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockCollectionManager {
+},
+) *MockCollectionManager {
 	mock := &MockCollectionManager{}
 	mock.Mock.Test(t)
 

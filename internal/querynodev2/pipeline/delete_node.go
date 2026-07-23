@@ -19,7 +19,9 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -27,7 +29,9 @@ import (
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type deleteNode struct {
@@ -95,13 +99,43 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 
 	if nodeMsg.schema != nil {
 		ctx := context.TODO()
-		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
-			mlog.Warn(ctx, "failed to update schema in delete node",
-				mlog.Int64("collectionID", dNode.collectionID),
-				mlog.String("channel", dNode.channel),
-				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
-				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
-				mlog.Err(err))
+		// UpdateSchema is the ONLY path that advances the served schema (reopen no
+		// longer does), and the flowgraph cannot report an error (Operate returns no
+		// error), so a swallowed failure consumes the WAL schema event and serves a
+		// stale schema until the next DDL or release/load.
+		//
+		// The errors reaching us here are the transient/external class by design: the
+		// delegator already panics internally on unrecoverable metadata errors, while
+		// an unreachable worker surfaces as a plain error. So retry a bounded number of
+		// times to ride out rolling restarts and RPC blips, and only panic (for WAL
+		// replay) if it still fails. TSafe is never advanced on that path.
+		err := retry.Handle(ctx, func() (bool, error) {
+			err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema)
+			if err == nil {
+				return false, nil
+			}
+			// A Stopped/closing delegator will never succeed — stop retrying.
+			return !errors.Is(err, merr.ErrChannelNotAvailable), err
+		}, retry.Attempts(5), retry.Sleep(200*time.Millisecond), retry.MaxSleepTime(2*time.Second))
+		if err != nil {
+			if errors.Is(err, merr.ErrChannelNotAvailable) {
+				// The delegator is Stopped/closing (the Initializing startup window is
+				// accepted and applied, so a startup event is not rejected here). It is
+				// being released, so skipping its schema update is safe; panicking would
+				// abort the pipeline teardown.
+				mlog.Warn(ctx, "skip schema update, delegator is closing",
+					mlog.Int64("collectionID", dNode.collectionID),
+					mlog.String("channel", dNode.channel),
+					mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+					mlog.Err(err))
+			} else {
+				mlog.Warn(ctx, "failed to update schema in delete node after retries, panic for WAL replay",
+					mlog.Int64("collectionID", dNode.collectionID),
+					mlog.String("channel", dNode.channel),
+					mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+					mlog.Err(err))
+				panic(err)
+			}
 		}
 	}
 

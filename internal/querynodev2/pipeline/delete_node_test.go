@@ -149,23 +149,51 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	suite.Nil(out)
 }
 
-func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotPanic() {
+func (suite *DeleteNodeSuite) TestUpdateSchemaErrorPanics() {
 	manager := &segments.Manager{
 		Collection: segments.NewMockCollectionManager(suite.T()),
 		Segment:    segments.NewMockSegmentManager(suite.T()),
 	}
 	delegator := delegator.NewMockShardDelegator(suite.T())
 	schema := &schemapb.CollectionSchema{Version: 2}
-	expectedErr := merr.WrapErrServiceUnavailableMsg("delegator is not ready")
-	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+	// A genuine schema-apply failure (not a lifecycle not-ready error). UpdateSchema
+	// is the only path that advances the served schema (reopen no longer does), so a
+	// swallowed failure would serve the stale schema forever. The node must panic for
+	// WAL replay and must NOT advance TSafe past the failed event (no UpdateTSafe
+	// expectation).
+	// Retried a bounded number of times before the panic, so no .Once() here.
+	expectedErr := merr.WrapErrServiceInternal("update schema failed")
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema).Return(expectedErr)
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	suite.Panics(func() {
+		node.Operate(&deleteNodeMsg{
+			schema:    schema,
+			timeRange: TimeRange{timestampMax: 10},
+		})
+	})
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaOnClosingDelegatorDoesNotPanic() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	// UpdateSchema gates on NotStopped, so ChannelNotAvailable means the delegator is
+	// Stopped/closing (the Initializing startup window applies the schema instead of
+	// rejecting it). Skipping a closing delegator's schema update is safe; panicking
+	// would abort pipeline teardown. TSafe still advances.
+	closingErr := merr.WrapErrChannelNotAvailable(suite.channel, "delegator is not ready")
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema).Return(closingErr).Once()
 	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
 
 	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
 	suite.NotPanics(func() {
 		suite.Nil(node.Operate(&deleteNodeMsg{
-			schema:          schema,
-			schemaBarrierTs: 10,
-			timeRange:       TimeRange{timestampMax: 10},
+			schema:    schema,
+			timeRange: TimeRange{timestampMax: 10},
 		}))
 	})
 }
