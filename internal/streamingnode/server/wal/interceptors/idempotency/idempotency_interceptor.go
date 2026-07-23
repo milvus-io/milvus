@@ -252,8 +252,14 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			// session's timetick-driven one under concurrent non-txn traffic).
 			// Completing with a nil result would permanently persist an entry
 			// whose duplicates return the retry's own unpersisted IDs; fail the
-			// commit instead so the client retries the whole transaction.
-			err := status.NewInner("idempotent txn commit lost its buffered insert results; retry the transaction")
+			// commit with TransactionExpired instead. The classification matters:
+			// this failure is deterministic on a bare commit retry (the buffer is
+			// gone and Fail below reopens the Owner slot), so a recoverable code
+			// would make the streaming producer hot-retry the commit forever.
+			// TransactionExpired is unrecoverable for the resumable producer and
+			// makes produceTxn rebuild the whole transaction — re-appending the
+			// bodies repopulates this buffer, so the rebuilt commit converges.
+			err := status.NewTransactionExpired("idempotent txn commit lost its buffered insert results; rebuild the transaction")
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}

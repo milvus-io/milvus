@@ -32,9 +32,13 @@ type pchannelWindowSourceCheckpoint struct {
 }
 
 type pchannelWindowChunkFooter struct {
-	CodecVersion              int                        `json:"codec_version"`
-	PChannel                  string                     `json:"pchannel"`
-	Generation                uint64                     `json:"generation"`
+	CodecVersion int    `json:"codec_version"`
+	PChannel     string `json:"pchannel"`
+	Generation   uint64 `json:"generation"`
+	// The WAL assignment term of the writer. Used to arbitrate a same-generation
+	// write conflict between two owners (split-brain): the newer term wins, the
+	// older term is fenced. Chunks written before this field decode as term 0.
+	Term                      int64                      `json:"term,omitempty"`
 	SourceCheckpointMessageID *commonpb.MessageID        `json:"source_checkpoint_message_id,omitempty"`
 	SourceCheckpointTimetick  uint64                     `json:"source_checkpoint_timetick,omitempty"`
 	SourceStartMessageID      *commonpb.MessageID        `json:"source_start_message_id,omitempty"`
@@ -84,6 +88,7 @@ func newPChannelWindowSourceCheckpoint(checkpoint *WALCheckpoint) *pchannelWindo
 func marshalPChannelWindowChunk(
 	pchannel string,
 	generation uint64,
+	term int64,
 	sourceCheckpoint *WALCheckpoint,
 	recordsByVChannel map[string][]committedWriteRecord,
 ) ([]byte, *pchannelWindowChunkFooter, string, error) {
@@ -100,6 +105,7 @@ func marshalPChannelWindowChunk(
 		CodecVersion: pchannelWindowCodecVersion,
 		PChannel:     pchannel,
 		Generation:   generation,
+		Term:         term,
 		Chunks:       make([]vchannelWindowChunkIndex, 0, len(vchannels)),
 	}
 	if checkpoint := newPChannelWindowSourceCheckpoint(sourceCheckpoint); checkpoint != nil {

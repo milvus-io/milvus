@@ -21,7 +21,7 @@ import (
 // the footer JSON into a byte-different but semantically identical form (indented)
 // and refreshing the trailer checksum: decode must still accept it.
 func TestPChannelWindowFooterChecksumCoversStoredBytes(t *testing.T) {
-	payload, _, checksum, err := marshalPChannelWindowChunk("p1", 3, &utility.WALCheckpoint{
+	payload, _, checksum, err := marshalPChannelWindowChunk("p1", 3, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(200),
 		TimeTick:  200,
 	}, nil)

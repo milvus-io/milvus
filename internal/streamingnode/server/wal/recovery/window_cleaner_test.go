@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storage"
@@ -182,10 +183,12 @@ func TestPChannelWindowCleanerReDeletesIdempotentlyAfterCrashBeforeSave(t *testi
 	chunkManager := newTestPChannelWindowCleanerChunkManager()
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 	writeTestPChannelWindowChunks(t, ctx, "p1", chunkManager, 0, 3)
-	catalogState.storeMeta = testPChannelWindowStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
-	// A prior cleaner cycle deleted chunk 0 from [MinAvailableGeneration, MinInUse)
-	// but crashed before persisting the advanced MinAvailableGeneration, so the meta
-	// still says 0. The next cycle must re-delete the range idempotently.
+	// A prior cleaner cycle persisted the advanced MinInUseGeneration (2), then
+	// deleted chunk 0 from [MinAvailableGeneration, MinInUseGeneration) but
+	// crashed before completing the deletions and advancing
+	// MinAvailableGeneration, so the meta still says MinAvailable=0. The next
+	// cycle must re-delete the range idempotently and finish the advance.
+	catalogState.storeMeta = testPChannelWindowStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 2)
 	require.NoError(t, chunkManager.Remove(ctx, buildPChannelWindowChunkKey("p1", 0)))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -203,6 +206,58 @@ func TestPChannelWindowCleanerReDeletesIdempotentlyAfterCrashBeforeSave(t *testi
 	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 1, false) // reclaimed this cycle
 	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 2, true)
 	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 3, true)
+}
+
+// removeFailingChunkManager fails every Remove, freezing chunk deletion to
+// simulate a cleaner interrupted between the in-use advance and the deletions.
+type removeFailingChunkManager struct {
+	storage.ChunkManager
+}
+
+func (f removeFailingChunkManager) Remove(ctx context.Context, key string) error {
+	return errors.New("injected remove failure")
+}
+
+// The crash-consistency contract of the cleaner: the advanced
+// MinInUseGeneration must be durable BEFORE any chunk deletion, because
+// recovery replays chunks from the persisted MinInUseGeneration upward and
+// hard-fails on a missing chunk. An interruption after the deletions started
+// must therefore never leave the persisted meta pointing into the deleted
+// range — WAL open would fail permanently with no self-heal.
+func TestPChannelWindowCleanerPersistsMinInUseBeforeDeleting(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	chunkManager := newTestPChannelWindowCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(removeFailingChunkManager{chunkManager}))
+	writeTestPChannelWindowChunks(t, ctx, "p1", chunkManager, 0, 3)
+	catalogState.storeMeta = testPChannelWindowStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 0)
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(300),
+		TimeTick:  300,
+	})
+	addTestIdempotencyWindowPinnedAtGeneration(rs.windowManager, "v1", 2)
+	rs.windowManager.markActiveViewsInitialized()
+	rs.SetLogger(resource.Resource().Logger())
+
+	// The cycle aborts on the injected deletion failure...
+	require.Error(t, rs.windowManager.cleanPChannelWindow(ctx, resource.Resource().Logger()))
+	// ...but the in-use advance is already durable, the low-water is not, and
+	// no chunk is missing below the persisted MinInUseGeneration.
+	require.Equal(t, uint64(2), catalogState.storeMeta.GetMinInUseGeneration())
+	require.Equal(t, uint64(0), catalogState.storeMeta.GetMinAvailableGeneration())
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 2, true)
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 3, true)
+
+	// A restart in this state must recover: the replay range persisted in the
+	// meta only references live chunks.
+	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(300),
+		TimeTick:  300,
+	})
+	recovered.SetLogger(resource.Resource().Logger())
+	_, err := recovered.windowManager.recoverIdempotencyWindowsFromPChannelWindowStore(ctx, "p1", pchannelWindowStoreMetaFromCatalog(catalogState.storeMeta))
+	require.NoError(t, err)
 }
 
 // addTestIdempotencyWindowPinnedAtGeneration injects an idempotency window whose

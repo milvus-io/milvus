@@ -477,6 +477,13 @@ func TestInterceptorOwnerCommitFailsOnLostInsertResults(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "lost its buffered insert results")
+	// Must classify as TransactionExpired: it is unrecoverable for the resumable
+	// producer (a bare commit retry deterministically fails again) and triggers
+	// produceTxn's whole-transaction rebuild, which repopulates the buffer.
+	sErr := status.AsStreamingError(err)
+	require.NotNil(t, sErr)
+	require.True(t, sErr.IsTxnExpired())
+	require.True(t, sErr.IsUnrecoverable())
 	require.Zero(t, appendCount)
 	// The key is released: a whole-txn retry (with rebuffered bodies) re-owns it.
 	require.Equal(t, 0, interceptor.window("v1").Len())

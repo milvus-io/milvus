@@ -2,7 +2,14 @@ package recovery
 
 import "github.com/cockroachdb/errors"
 
-var ErrPChannelWindowStoreCorrupted = errors.New("pchannel window store corrupted")
+var (
+	ErrPChannelWindowStoreCorrupted = errors.New("pchannel window store corrupted")
+	// ErrPChannelWindowStoreFenced marks a write refused because the durable
+	// store already carries a newer WAL assignment term: this owner is stale
+	// (split-brain) and must stop persisting rather than overwrite the current
+	// owner's window state. Terminal — never retried.
+	ErrPChannelWindowStoreFenced = errors.New("pchannel window store fenced by a newer term")
+)
 
 type markedRecoveryError struct {
 	err    error
@@ -33,4 +40,11 @@ func markPChannelWindowStoreCorrupted(err error) error {
 
 func pchannelWindowStoreCorruptedf(format string, args ...any) error {
 	return markPChannelWindowStoreCorrupted(errors.Errorf(format, args...))
+}
+
+func pchannelWindowStoreFencedf(format string, args ...any) error {
+	return &markedRecoveryError{
+		err:    errors.Errorf(format, args...),
+		target: ErrPChannelWindowStoreFenced,
+	}
 }

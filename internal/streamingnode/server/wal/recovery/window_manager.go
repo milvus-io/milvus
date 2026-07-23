@@ -20,8 +20,13 @@ type windowEvictionConfig struct {
 type windowManager struct {
 	mlog.Binder
 	pchannel string
-	cfg      *config
-	metrics  *recoveryMetrics
+	// term is this owner's WAL assignment term, persisted into every chunk
+	// footer and pchannel window meta it writes. Used for best-effort
+	// split-brain fencing: a durable term newer than ours means another owner
+	// took over and our writes must stop.
+	term    int64
+	cfg     *config
+	metrics *recoveryMetrics
 
 	// mu guards all window state below. The lock order is always
 	// recoveryStorageImpl.mu -> windowManager.mu: recoveryStorageImpl methods
@@ -42,9 +47,10 @@ type windowManager struct {
 	pendingIdempotencyPersistSnapshot *RecoverySnapshot
 }
 
-func newWindowManager(pchannel string, cfg *config, metrics *recoveryMetrics, persistedConsumeCheckpoint *WALCheckpoint, evictionCfg windowEvictionConfig) *windowManager {
+func newWindowManager(pchannel string, term int64, cfg *config, metrics *recoveryMetrics, persistedConsumeCheckpoint *WALCheckpoint, evictionCfg windowEvictionConfig) *windowManager {
 	return &windowManager{
 		pchannel:                     pchannel,
+		term:                         term,
 		cfg:                          cfg,
 		metrics:                      metrics,
 		windowBackgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),

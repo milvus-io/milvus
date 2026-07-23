@@ -348,6 +348,35 @@ func TestDIDWindowWatermarkFallsBackToSnapshotCheckpoint(t *testing.T) {
 	assert.Equal(t, uint64(100), window.EvictedWatermarkTT())
 }
 
+// The recovery-side store retains past-TTL entries via the minEntries floor, so
+// a restored window can hold entries whose TTL has already elapsed. The restore
+// must seed the TTL visibility bound from the snapshot checkpoint so such an
+// entry stops answering duplicates at WAL open, not only after the first
+// TimeTick-driven sweep.
+func TestDIDWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.T) {
+	ttl := 10 * time.Minute
+	checkpointTT := tsoutil.ComposeTS(time.Hour.Milliseconds(), 0)
+	expiredTT := tsoutil.ComposeTS((30 * time.Minute).Milliseconds(), 0)
+	freshTT := tsoutil.ComposeTS((59 * time.Minute).Milliseconds(), 0)
+
+	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &streamingpb.WindowSnapshot{
+		SnapshotCheckpointTimetick: checkpointTT,
+		Entries: []*streamingpb.WindowEntry{
+			{Key: "expired", CommitTimetick: expiredTT},
+			{Key: "fresh", CommitTimetick: freshTT},
+		},
+	})
+
+	// The expired entry is retained by the floor but must not be servable: the
+	// retry becomes a fresh Owner, matching post-TTL semantics on every shard.
+	begin := window.Begin("expired", nil)
+	require.Equal(t, BeginDecisionOwner, begin.Decision)
+
+	// An in-TTL entry keeps answering duplicates.
+	dup := window.Begin("fresh", nil)
+	require.Equal(t, BeginDecisionDuplicate, dup.Decision)
+}
+
 func TestDIDWindowRestoreFromSnapshot(t *testing.T) {
 	window := NewWindowFromSnapshot(WindowConfig{}, &streamingpb.WindowSnapshot{
 		SnapshotCheckpointTimetick: 100,

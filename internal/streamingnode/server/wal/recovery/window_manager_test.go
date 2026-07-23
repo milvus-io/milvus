@@ -17,7 +17,7 @@ import (
 )
 
 func TestWindowManagerMinRequiredGenerationAggregatesIdempotencyWindows(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 
 	idempotencyWindow := newEmptyVChannelWindow("p1", "v1", nil)
 	idempotencyWindow.latestAppliedGeneration = 7
@@ -43,7 +43,7 @@ func TestWindowManagerMinRequiredGenerationAggregatesIdempotencyWindows(t *testi
 }
 
 func TestWindowManagerCleanerWaitsForActiveViewInitialization(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 	require.False(t, manager.canCleanPChannelWindow())
 
 	manager.markActiveViewsInitialized()
@@ -51,7 +51,7 @@ func TestWindowManagerCleanerWaitsForActiveViewInitialization(t *testing.T) {
 }
 
 func TestWindowManagerMaintainsPChannelWindowSnapshotCheckpoint(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 
 	manager.setPChannelWindowSnapshotCheckpoint(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
@@ -88,7 +88,7 @@ func TestWindowManagerMaintainsPChannelWindowSnapshotCheckpoint(t *testing.T) {
 }
 
 func TestWindowManagerTracksPersistedConsumeCheckpoint(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, &WALCheckpoint{
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, &WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}, windowEvictionConfig{})
@@ -225,7 +225,7 @@ func TestEvictPersistedStopsAtEntryWithoutGeneration(t *testing.T) {
 
 func TestObserveTimeTickTriggersRecoveryEviction(t *testing.T) {
 	ttl := 5 * time.Second
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
 		windowTTL:  ttl,
 		minEntries: 0,
 		maxEntries: 0,
@@ -248,7 +248,7 @@ func TestObserveTimeTickTriggersRecoveryEviction(t *testing.T) {
 
 func TestObserveTimeTickNoEvictionInNormalMode(t *testing.T) {
 	ttl := 5 * time.Second
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
 		windowTTL:  ttl,
 		minEntries: 0,
 		maxEntries: 0,
@@ -270,7 +270,7 @@ func TestObserveTimeTickNoEvictionInNormalMode(t *testing.T) {
 }
 
 func TestEvictPersistedEntriesInNormalMode(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 	manager.setNormalMode()
 	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
@@ -290,7 +290,7 @@ func TestEvictPersistedEntriesInNormalMode(t *testing.T) {
 }
 
 func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
@@ -307,7 +307,7 @@ func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
 }
 
 func TestGetWindowSnapshotCheckpointSkipsNilCheckpoint(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 
 	windowWithCP := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(50),
@@ -325,7 +325,7 @@ func TestGetWindowSnapshotCheckpointSkipsNilCheckpoint(t *testing.T) {
 }
 
 func TestGetWindowSnapshotCheckpointAllNilReturnsNil(t *testing.T) {
-	manager := newWindowManager("p1", &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
 
 	window1 := newEmptyVChannelWindow("p1", "v1", nil)
 	window2 := newEmptyVChannelWindow("p1", "v2", nil)

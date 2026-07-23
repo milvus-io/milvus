@@ -102,6 +102,11 @@ func (m *windowManager) cleanPChannelWindow(ctx context.Context, logger *mlog.Lo
 	if meta == nil {
 		return nil
 	}
+	if meta.Term > m.term {
+		// Another owner with a newer assignment term took over the store; this
+		// stale cleaner must neither delete its chunks nor rewrite its meta.
+		return pchannelWindowStoreFencedf("pchannel window store of %s already owned by term %d, cleaner term %d stops", m.pchannel, meta.Term, m.term)
+	}
 	if meta.MinAvailableGeneration > meta.LatestGeneration {
 		return pchannelWindowStoreCorruptedf("pchannel window generation range mismatch, min available %d, latest %d", meta.MinAvailableGeneration, meta.LatestGeneration)
 	}
@@ -124,24 +129,53 @@ func (m *windowManager) cleanPChannelWindow(ctx context.Context, logger *mlog.Lo
 	updatedMeta := *meta
 	updatedMeta.MinInUseGeneration = targetMinInUse
 	updatedMeta.MinAvailableGeneration = targetMinAvailable
-
-	// Reclaim [MinAvailableGeneration, MinInUseGeneration): these chunks sit below
-	// the in-use boundary and are never read on recovery (which replays from
-	// MinInUseGeneration upward), so they can be deleted. [MinInUseGeneration,
-	// LatestGeneration] is still in use. Delete BEFORE persisting the advanced
-	// MinAvailableGeneration so the low-water never runs ahead of the actual
-	// deletions: if we crash in between, the meta still points at the old
-	// MinAvailableGeneration and the next cycle re-deletes the same range
-	// (idempotent via the Exist check). This also bounds each cycle's work to the
-	// newly reclaimable range instead of re-probing every generation from 0.
-	if err := m.deletePChannelWindowChunks(ctx, logger, meta.MinAvailableGeneration, updatedMeta.MinAvailableGeneration, updatedMeta.LatestGeneration); err != nil {
-		return err
-	}
+	updatedMeta.Term = m.term
 
 	if updatedMeta.MinAvailableGeneration == meta.MinAvailableGeneration &&
 		updatedMeta.MinInUseGeneration == meta.MinInUseGeneration {
 		return nil
 	}
+
+	// Persist the advanced MinInUseGeneration BEFORE deleting anything, keeping
+	// MinAvailableGeneration at its old value for now. Recovery replays chunks
+	// from the persisted MinInUseGeneration upward and hard-fails on a missing
+	// chunk, so deletion must never run ahead of that durable boundary: an
+	// interruption between a delete and the meta save — a crash, or this
+	// background task's context being canceled on WAL close — would otherwise
+	// leave the persisted MinInUseGeneration pointing into the deleted range and
+	// permanently fail every subsequent WAL open. With the advance durable
+	// first, an interruption only leaks chunks below the new boundary, and the
+	// next cycle re-deletes them idempotently (Exist check in the delete loop).
+	if updatedMeta.MinInUseGeneration != meta.MinInUseGeneration {
+		intermediateMeta := updatedMeta
+		intermediateMeta.MinAvailableGeneration = meta.MinAvailableGeneration
+		if err := retryOperationWithBackoff(ctx,
+			logger.With(
+				mlog.String("op", "advancePChannelWindowMinInUseGeneration"),
+				mlog.Uint64("minInUseGeneration", intermediateMeta.MinInUseGeneration),
+				mlog.Bool("hasActiveViewMinBoundary", boundary.hasActiveViewMinBoundary),
+			),
+			func(ctx context.Context) error {
+				return resource.Resource().StreamingNodeCatalog().SavePChannelWindowMeta(ctx, m.pchannel, intermediateMeta.intoCatalogMeta())
+			}); err != nil {
+			return err
+		}
+	}
+
+	// Reclaim [MinAvailableGeneration, MinInUseGeneration): these chunks sit
+	// below the durably-persisted in-use boundary and are never read on recovery.
+	// [MinInUseGeneration, LatestGeneration] is still in use. Starting from the
+	// old MinAvailableGeneration also bounds each cycle's work to the newly
+	// reclaimable range instead of re-probing every generation from 0.
+	if err := m.deletePChannelWindowChunks(ctx, logger, meta.MinAvailableGeneration, updatedMeta.MinAvailableGeneration, updatedMeta.LatestGeneration); err != nil {
+		return err
+	}
+
+	if updatedMeta.MinAvailableGeneration == meta.MinAvailableGeneration {
+		return nil
+	}
+	// Only after the deletions succeeded may the low-water advance: everything
+	// below the persisted MinAvailableGeneration is promised to be gone.
 	return retryOperationWithBackoff(ctx,
 		logger.With(
 			mlog.String("op", "cleanPChannelWindowMeta"),

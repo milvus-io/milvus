@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -212,6 +213,12 @@ func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func
 		// so we cannot use errors.IsAny(err, context.Canceled, context.DeadlineExceeded) to check the error.
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		// Terminal window-store states never heal by retrying: a fenced writer
+		// stays fenced (a newer term owns the store) and a same-term payload
+		// mismatch stays corrupted. Retrying would spin until WAL close.
+		if errors.Is(err, ErrPChannelWindowStoreFenced) || errors.Is(err, ErrPChannelWindowStoreCorrupted) {
+			return err
 		}
 
 		nextInterval := backoff.NextBackOff()

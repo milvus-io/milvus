@@ -93,7 +93,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
 	}
-	rs.windowManager = newWindowManager(channel.Name, cfg, rs.metrics, cp, windowEvictionConfig{
+	rs.windowManager = newWindowManager(channel.Name, channel.Term, cfg, rs.metrics, cp, windowEvictionConfig{
 		windowTTL:  cfg.idempotencyWindowTTL,
 		maxBytes:   cfg.idempotencyMaxBytes,
 		minEntries: cfg.idempotencyMinEntries,
