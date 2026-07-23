@@ -194,7 +194,7 @@ class TestGpuHnswSQFilteredSearch(TestMilvusClientV2Base):
 
     GPU_HNSW_SQ is an alias of GPU_HNSW and shares its GPU search/filter path, so
     it must apply the delete/TTL/partition BitsetView too (design doc
-    20260718-gpu-hnsw-filtered-search.md): a search after a delete excludes the
+    20260619-gpu-hnsw.md, "Filtered search"): a search after a delete excludes the
     deleted rows and keeps the live ones, with no invalid_args error.
     """
 

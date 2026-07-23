@@ -186,7 +186,7 @@ class TestGpuHnswFilteredSearch(TestMilvusClientV2Base):
     """Delete-then-query / filtered-search parity for GPU_HNSW.
 
     GPU_HNSW now applies the delete/TTL/partition BitsetView on the GPU (design
-    doc 20260718-gpu-hnsw-filtered-search.md), so a search after a delete must
+    doc 20260619-gpu-hnsw.md, "Filtered search"), so a search after a delete must
     exclude the deleted rows and keep the live ones, with no invalid_args error —
     matching CPU HNSW. Earlier the index rejected any non-empty bitset.
     """
