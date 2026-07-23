@@ -1221,3 +1221,135 @@ TEST_P(ExprTest, TestGeometrySpatialExprOnGrowingWithRTreeIndex) {
         }
     }
 }
+
+// Regression for the short-circuit path on a growing segment:
+// PhyConjunctFilterExpr skips the following exprs of an all-false batch via
+// MoveCursor() instead of Eval(), and PhyGISFunctionFilterExpr::MoveCursor()
+// used to no-op on growing segments. With `int64 >= N/2` evaluated first,
+// every early batch is all-false (DataGen fills the pk column with 0..N-1 in
+// row order), so the GIS expr is skipped -- with a stalled cursor -- until the
+// first batch containing rows >= N/2, where it finally evaluates and used to
+// re-append the index bitmap from row 0 against the conjunction's current row
+// range: silent misalignment, caught below against a ground truth derived
+// from a standalone spatial run. The test above cannot see this: a standalone
+// geometry expr executes all-at-once, so MoveCursor() is never called there.
+TEST_P(ExprTest, TestGeometryConjunctionShortCircuitOnGrowingWithRTreeIndex) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    // Small batch so the conjunction iterates several all-false batches
+    // before the first active one.
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } batch_guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(128);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_fid = schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+    schema->set_primary_field_id(int64_fid);
+
+    const int64_t N = 1000;
+    auto dataset =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, true, true /*random_valid*/);
+
+    auto build_segment = [&](bool with_rtree_index) {
+        std::shared_ptr<CollectionIndexMeta> index_meta;
+        if (with_rtree_index) {
+            std::map<std::string, std::string> index_params = {
+                {"index_type", "RTREE"}};
+            std::map<std::string, std::string> type_params = {};
+            FieldIndexMeta geo_index_meta(
+                geo_fid, std::move(index_params), std::move(type_params));
+            std::map<FieldId, FieldIndexMeta> metas = {
+                {geo_fid, geo_index_meta}};
+            index_meta =
+                std::make_shared<CollectionIndexMeta>(100000, std::move(metas));
+        } else {
+            index_meta = std::make_shared<CollectionIndexMeta>(
+                100000, std::map<FieldId, FieldIndexMeta>{});
+        }
+        auto config = SegcoreConfig::default_config();
+        config.set_chunk_rows(128);
+        config.set_enable_interim_segment_index(true);
+        auto seg = CreateGrowingSegment(schema, index_meta, 1, config);
+        auto* impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+        auto offset = impl->PreInsert(N);
+        impl->Insert(offset,
+                     N,
+                     dataset.row_ids_.data(),
+                     dataset.timestamps_.data(),
+                     dataset.raw_);
+        return seg;
+    };
+
+    auto indexed_seg = build_segment(true);
+    auto raw_seg = build_segment(false);
+    ASSERT_TRUE(dynamic_cast<SegmentGrowingImpl*>(indexed_seg.get())
+                    ->HasIndex(geo_fid));
+    ASSERT_FALSE(
+        dynamic_cast<SegmentGrowingImpl*>(raw_seg.get())->HasIndex(geo_fid));
+
+    const std::string viewport =
+        "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))";
+    const auto op = proto::plan::GISFunctionFilterExpr_GISOp_Intersects;
+
+    auto make_gis_expr = [&] {
+        return std::make_shared<expr::GISFunctionFilterExpr>(
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY, {}, true),
+            op,
+            viewport);
+    };
+
+    // Ground truth from a standalone spatial run on the raw segment: no
+    // conjunction, so no short-circuit and no MoveCursor() involvement --
+    // correct regardless of the bug under test. A differential
+    // indexed-vs-raw check alone could pass with both conjunctions equally
+    // misaligned; anchoring on the standalone result cannot.
+    auto standalone = [&] {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           make_gis_expr());
+        return ExecuteQueryExpr(plan, raw_seg.get(), N, MAX_TIMESTAMP);
+    }();
+    ASSERT_EQ(standalone.size(), static_cast<size_t>(N));
+
+    // Non-vacuity: the active half must actually select something, otherwise
+    // the skipped GIS expr is never evaluated and the test cannot fail.
+    int64_t active_hits = 0;
+    for (int64_t i = N / 2; i < N; i++) {
+        active_hits += standalone[i] ? 1 : 0;
+    }
+    ASSERT_GT(active_hits, 0)
+        << "viewport selects nothing in rows [N/2, N); widen it";
+
+    proto::plan::GenericValue half;
+    half.set_int64_val(N / 2);
+    for (auto* seg : {indexed_seg.get(), raw_seg.get()}) {
+        auto int_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(int64_fid, DataType::INT64),
+            proto::plan::OpType::GreaterEqual,
+            half,
+            std::vector<proto::plan::GenericValue>{});
+        // int_expr FIRST so it decides the short-circuit; the GIS expr is
+        // the one skipped on the all-false early batches.
+        auto expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, int_expr, make_gis_expr());
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto result = ExecuteQueryExpr(plan, seg, N, MAX_TIMESTAMP);
+        ASSERT_EQ(result.size(), static_cast<size_t>(N));
+        for (int64_t i = 0; i < N; i++) {
+            const bool expected = (i >= N / 2) && standalone[i];
+            ASSERT_EQ(result[i], expected)
+                << "row " << i << " on the "
+                << (seg == indexed_seg.get() ? "indexed" : "raw")
+                << " growing segment";
+        }
+    }
+}
