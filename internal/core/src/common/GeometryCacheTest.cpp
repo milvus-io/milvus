@@ -55,7 +55,7 @@ TEST(GeometryCacheLifetime, SharedPtrOutlivesSegmentRemoval) {
     const std::string wkb = MakePointWkb(1.0, 1.0);
 
     auto cache = mgr.GetOrCreateCache(seg_id, field_id);
-    cache->AppendData(wkb.data(), wkb.size());
+    cache->AppendDataAt(0, wkb.data(), wkb.size());
     ASSERT_EQ(cache->Size(), 1u);
 
     // Segment torn down: entry removed from the manager map.
@@ -82,8 +82,8 @@ TEST(GeometryCacheLifetime, CacheOwnsItsContext) {
     const std::string wkb = MakePointWkb(2.0, 2.0);
 
     auto cache = mgr.GetOrCreateCache(seg_id, field_id);
-    cache->AppendData(wkb.data(), wkb.size());
-    cache->AppendData(nullptr, 0);  // null geometry
+    cache->AppendDataAt(0, wkb.data(), wkb.size());
+    cache->AppendDataAt(1, nullptr, 0);  // null geometry
     EXPECT_EQ(cache->Size(), 2u);
     {
         auto lock = cache->AcquireReadLock();
@@ -122,7 +122,7 @@ TEST(GeometryCacheLifetime, ConcurrentGetAndRemove) {
 
     for (int i = 0; i < 300; ++i) {
         auto c = mgr.GetOrCreateCache(seg_id, field_id);
-        c->AppendData(wkb.data(), wkb.size());
+        c->AppendDataAt(0, wkb.data(), wkb.size());
         mgr.RemoveSegmentCaches(nullptr, seg_id);
     }
 
@@ -131,10 +131,10 @@ TEST(GeometryCacheLifetime, ConcurrentGetAndRemove) {
     mgr.RemoveSegmentCaches(nullptr, seg_id);
 }
 
-// Regression for PR #50951 review (GeometryCache.h AppendData): a corrupt
+// Regression for PR #50951 review (GeometryCache.h AppendDataAt): a corrupt
 // (unparseable, non-empty) WKB row must be cached as an INVALID placeholder
 // entry -- readers see nullptr and skip it -- instead of throwing. Before the
-// fix AppendData rethrew UnexpectedError, so with the geometry cache enabled a
+// fix AppendDataAt rethrew UnexpectedError, so with the geometry cache enabled a
 // single corrupt row failed the entire segment load (LoadFieldData ->
 // LoadGeometryCache), the exact row shape the placeholder-MBR write paths
 // deliberately keep. Offsets of later rows must stay aligned.
@@ -148,9 +148,9 @@ TEST(GeometryCacheLifetime, CorruptWkbCachedAsInvalidPlaceholder) {
 
     auto cache = mgr.GetOrCreateCache(seg_id, field_id);
     ASSERT_NO_THROW({
-        cache->AppendData(good.data(), good.size());
-        cache->AppendData(corrupt.data(), corrupt.size());
-        cache->AppendData(good.data(), good.size());
+        cache->AppendDataAt(0, good.data(), good.size());
+        cache->AppendDataAt(1, corrupt.data(), corrupt.size());
+        cache->AppendDataAt(2, good.data(), good.size());
     });
     // The corrupt row occupies its offset (no shift of later rows).
     ASSERT_EQ(cache->Size(), 3u);
@@ -212,8 +212,8 @@ TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
     const std::vector<bool> expect_intersects = {true, true, true, false};
 
     auto cache = mgr.GetOrCreateCache(seg_id, field_id);
-    for (const auto& wkb : wkbs) {
-        cache->AppendData(wkb.data(), wkb.size());
+    for (size_t i = 0; i < wkbs.size(); ++i) {
+        cache->AppendDataAt(i, wkbs[i].data(), wkbs[i].size());
     }
     ASSERT_EQ(cache->Size(), wkbs.size());
 
@@ -260,6 +260,94 @@ TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
     }
 
     EXPECT_EQ(failures.load(), 0);
+    mgr.RemoveSegmentCaches(nullptr, seg_id);
+}
+
+// Regression for PR #50951 review (round Df4a298c5f4): the cache is published
+// in the manager map before it is populated, and AppendDataAt can throw a
+// retriable MemAllocateFailed mid-batch. With the old tail append, a retry
+// after such a partial write appended AFTER the leftover prefix, shifting
+// every subsequent row's absolute offset -- GetByOffsetUnsafe returned the
+// wrong geometry with no error. Offset-addressed writes must instead be
+// idempotent: re-running the same batch overwrites the same slots and
+// alignment never drifts.
+TEST(GeometryCacheLifetime, RetryAfterPartialWriteKeepsOffsetsAligned) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000007;
+    const FieldId field_id(17);
+    const std::vector<std::string> wkbs = {
+        MakePointWkb(0.0, 0.0),
+        MakePointWkb(1.0, 1.0),
+        MakePointWkb(2.0, 2.0),
+        MakePointWkb(3.0, 3.0),
+    };
+
+    auto cache = mgr.GetOrCreateCache(seg_id, field_id);
+    // Simulate a first attempt that dies mid-batch (rows 0-1 written, then a
+    // retriable throw before rows 2-3).
+    cache->AppendDataAt(0, wkbs[0].data(), wkbs[0].size());
+    cache->AppendDataAt(1, wkbs[1].data(), wkbs[1].size());
+
+    // The retry re-runs the WHOLE batch from row 0, exactly like a re-driven
+    // LoadGeometryCache/BuildGeometryCacheFor{Load,Insert} would.
+    for (size_t i = 0; i < wkbs.size(); ++i) {
+        cache->AppendDataAt(i, wkbs[i].data(), wkbs[i].size());
+    }
+
+    // No duplicated prefix, no shifted offsets: row i still holds point (i,i).
+    ASSERT_EQ(cache->Size(), wkbs.size());
+    auto ctx = GEOS_init_r();
+    {
+        auto lock = cache->AcquireReadLock();
+        for (size_t i = 0; i < wkbs.size(); ++i) {
+            const Geometry* g = cache->GetByOffsetUnsafe(i);
+            ASSERT_NE(g, nullptr) << "offset " << i;
+            Geometry probe(
+                ctx,
+                ("POINT (" + std::to_string(i) + " " + std::to_string(i) + ")")
+                    .c_str());
+            EXPECT_TRUE(g->equals(probe, ctx)) << "offset " << i;
+        }
+    }
+    GEOS_finish_r(ctx);
+    mgr.RemoveSegmentCaches(nullptr, seg_id);
+}
+
+// Offset-addressed writes tolerate out-of-order arrival: a later batch may
+// land before an earlier one (or an earlier batch may have failed and not yet
+// been retried). Slots that were skipped over stay default-invalid -- readers
+// see nullptr and skip the row -- and are filled in place once their write
+// arrives.
+TEST(GeometryCacheLifetime, OutOfOrderWritesFillGapsInPlace) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000008;
+    const FieldId field_id(19);
+    const std::string early = MakePointWkb(1.0, 1.0);
+    const std::string late = MakePointWkb(9.0, 9.0);
+
+    auto cache = mgr.GetOrCreateCache(seg_id, field_id);
+    // Row 3 arrives first; rows 0-2 are still gaps.
+    cache->AppendDataAt(3, late.data(), late.size());
+    ASSERT_EQ(cache->Size(), 4u);
+    {
+        auto lock = cache->AcquireReadLock();
+        EXPECT_EQ(cache->GetByOffsetUnsafe(0), nullptr);
+        EXPECT_EQ(cache->GetByOffsetUnsafe(2), nullptr);
+        EXPECT_NE(cache->GetByOffsetUnsafe(3), nullptr);
+    }
+
+    // The earlier batch lands afterwards and fills its own slots.
+    cache->AppendDataAt(0, early.data(), early.size());
+    cache->AppendDataAt(1, nullptr, 0);
+    cache->AppendDataAt(2, early.data(), early.size());
+    ASSERT_EQ(cache->Size(), 4u);
+    {
+        auto lock = cache->AcquireReadLock();
+        EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
+        EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);  // real null row
+        EXPECT_NE(cache->GetByOffsetUnsafe(2), nullptr);
+        EXPECT_NE(cache->GetByOffsetUnsafe(3), nullptr);
+    }
     mgr.RemoveSegmentCaches(nullptr, seg_id);
 }
 

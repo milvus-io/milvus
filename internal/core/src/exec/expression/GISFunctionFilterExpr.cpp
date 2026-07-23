@@ -69,7 +69,7 @@ namespace exec {
                 auto cached_geometry =                                           \
                     geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
                 /* nullptr = empty/corrupt placeholder row (the write paths    \
-                 * keep such rows, see SimpleGeometryCache::AppendData); it     \
+                 * keep such rows, see SimpleGeometryCache::AppendDataAt); it   \
                  * can never satisfy the predicate, so evaluate it to false     \
                  * instead of failing the whole query. */ \
                 if (cached_geometry == nullptr) {                                \

@@ -7869,15 +7869,21 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
-        // Iterate through all chunks and collect WKB data
+        // Iterate through all chunks and collect WKB data, writing each row
+        // at its absolute segment offset so a retried load overwrites the
+        // same slots in place instead of appending after a partial prefix
+        // left by a mid-load retriable throw (offset misalignment -- see
+        // SimpleGeometryCache::AppendDataAt).
         auto num_chunks = column->num_chunks();
+        size_t absolute_offset = 0;
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             // Get all string views from this chunk
             auto pw = column->StringViews(nullptr, chunk_id);
             auto [string_views, valid_data] = pw.get();
 
             // Add each string view to the geometry cache
-            for (size_t i = 0; i < string_views.size(); ++i) {
+            for (size_t i = 0; i < string_views.size();
+                 ++i, ++absolute_offset) {
                 // Guard valid_data[i] like FieldIndexing.cpp's accessor does:
                 // nothing here establishes that valid_data spans every view,
                 // so an unchecked index is an out-of-bounds read that would
@@ -7889,11 +7895,11 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
                     (i < valid_data.size() && valid_data[i])) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache->AppendData(wkb_data.data(),
-                                               wkb_data.size());
+                    geometry_cache->AppendDataAt(
+                        absolute_offset, wkb_data.data(), wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache->AppendData(nullptr, 0);
+                    geometry_cache->AppendDataAt(absolute_offset, nullptr, 0);
                 }
             }
         }

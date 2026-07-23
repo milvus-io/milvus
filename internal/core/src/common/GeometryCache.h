@@ -67,28 +67,48 @@ class SimpleGeometryCache {
     SimpleGeometryCache&
     operator=(const SimpleGeometryCache&) = delete;
 
-    // Append WKB data during field loading.
+    // Store the WKB for one row at its ABSOLUTE segment offset.
     //
-    // A row with corrupt (unparseable) WKB is appended as an INVALID entry --
+    // Offset-addressed on purpose (this used to be a tail append): readers
+    // resolve rows by absolute segment offset (GetByOffsetUnsafe), while a
+    // write can throw a retriable MemAllocateFailed mid-batch (TryParseFromWkb
+    // on a transient GEOS reader-allocation failure). With a tail append the
+    // rows already written before the throw stayed in the vector, so the
+    // retried load/insert appended AFTER them and every later row shifted to
+    // the wrong offset -- silently returning the wrong geometry. Writing at
+    // the reserved absolute offset makes the operation idempotent: a retry
+    // overwrites the same slots and alignment can never drift, which is also
+    // why publishing the cache in the manager map before it is fully
+    // populated (GetOrCreateCache) is safe. Slots skipped over by an
+    // out-of-order or failed batch stay default-invalid and readers skip
+    // them; such rows are never acked/readable until their write lands.
+    // See PR #50951 review (round Df4a298c5f4).
+    //
+    // A row with corrupt (unparseable) WKB is stored as an INVALID entry --
     // GetByOffsetUnsafe() returns nullptr for it and every reader skips it --
     // instead of throwing. Throwing here would make a single corrupt row fail
     // the whole segment load whenever the geometry cache is enabled (the write
     // paths deliberately keep such rows: add_geometry / bulk_load index a
     // placeholder MBR rather than dropping them, so they DO reach the cache).
-    // The entry must still be appended: the cache is addressed by absolute
-    // segment offset, so dropping it would shift every later row. A transient
-    // resource failure (reader allocation) still throws a retriable system
-    // error via TryParseFromWkb -- that is not bad data. One exception we
-    // cannot tell apart: an OOM INSIDE GEOS parsing surfaces as the same
-    // nullptr as corrupt WKB and is deliberately classified as bad data here
-    // (see the KNOWN LIMIT note on TryParseFromWkb). See PR #50951 review.
+    // A transient resource failure (reader allocation) still throws a
+    // retriable system error via TryParseFromWkb -- that is not bad data. One
+    // exception we cannot tell apart: an OOM INSIDE GEOS parsing surfaces as
+    // the same nullptr as corrupt WKB and is deliberately classified as bad
+    // data here (see the KNOWN LIMIT note on TryParseFromWkb).
     void
-    AppendData(const char* wkb_data, size_t size) {
+    AppendDataAt(size_t absolute_offset, const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);
 
+        if (geometries_.size() <= absolute_offset) {
+            // Default-constructed gap entries are invalid; a reader that
+            // somehow reaches one skips the row, and the owning batch's
+            // (re)write fills it in place.
+            geometries_.resize(absolute_offset + 1);
+        }
+
         if (size == 0 || wkb_data == nullptr) {
-            // Handle null/empty geometry - add invalid geometry
-            geometries_.emplace_back();
+            // Null/empty geometry - store an invalid entry
+            geometries_[absolute_offset] = Geometry();
             return;
         }
         Geometry geometry;
@@ -96,11 +116,11 @@ class SimpleGeometryCache {
             LOG_WARN(
                 "unparseable WKB at cache offset {}; caching an invalid "
                 "placeholder entry, readers will skip it",
-                geometries_.size());
-            geometries_.emplace_back();
+                absolute_offset);
+            geometries_[absolute_offset] = Geometry();
             return;
         }
-        geometries_.push_back(std::move(geometry));
+        geometries_[absolute_offset] = std::move(geometry);
     }
 
     // Get shared lock for batch operations (RAII)

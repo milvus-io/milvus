@@ -1123,10 +1123,10 @@ TEST_F(RTreeIndexTest, GIS_BruteForce_ToleratesCorruptRow_CacheOff) {
     }
 }
 
-// Regression for PR #50951 review (GeometryCache.h AppendData, the critical
+// Regression for PR #50951 review (GeometryCache.h AppendDataAt, the critical
 // finding): with the geometry cache ENABLED, loading a segment containing one
 // corrupt WKB row used the throwing Geometry ctor inside
-// SimpleGeometryCache::AppendData, so LoadFieldData -> LoadGeometryCache
+// SimpleGeometryCache::AppendDataAt, so LoadFieldData -> LoadGeometryCache
 // failed the ENTIRE segment load -- exactly the row shape the placeholder-MBR
 // write paths deliberately keep. Now the corrupt row is cached as an invalid
 // entry; the load succeeds and the cache branch of the filter macros skips the

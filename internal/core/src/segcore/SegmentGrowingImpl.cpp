@@ -824,6 +824,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             BuildGeometryCacheForInsert(
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
+                reserved_offset,
                 num_rows);
         }
 
@@ -1215,7 +1216,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
             if (schema_->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
-                BuildGeometryCacheForLoad(field_id, field_data);
+                BuildGeometryCacheForLoad(
+                    field_id, field_data, reserved_offset);
             }
         }
     }
@@ -2859,7 +2861,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
             if (schema_->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
-                BuildGeometryCacheForLoad(field_id, field_data);
+                BuildGeometryCacheForLoad(
+                    field_id, field_data, reserved_offset);
             }
         }
     }
@@ -3067,19 +3070,17 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 void
 SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 const DataArray* data_array,
+                                                int64_t reserved_offset,
                                                 int64_t num_rows) {
-    // ORDERING DEPENDENCY: this appends rows to the TAIL of the cache
-    // (SimpleGeometryCache::AppendData carries no offset), while readers
-    // address the cache by absolute segment offset (GetByOffsetUnsafe).
-    // Tail-append lines up with segment offsets only because Insert() is
-    // serialized per growing segment (one flowgraph consumer per vchannel;
-    // recovery load completes before consumption starts) and rows arrive in
-    // reserved-offset order. Unlike the R-Tree index path -- AddGeometry is
-    // offset-addressed and tolerates any arrival order -- this cache does
-    // NOT support concurrent inserts: interleaved appends would bind
-    // geometries to wrong offsets and silently corrupt query results. If
-    // Insert() ever becomes concurrent per segment, AppendData must take the
-    // reserved offset and place rows at absolute indices.
+    // Rows are written at their reserved ABSOLUTE offsets
+    // (SimpleGeometryCache::AppendDataAt), matching how readers address the
+    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // works. This makes the write idempotent: a batch retried after a
+    // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
+    // overwrites its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset. It also
+    // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
+    // in-order Insert() batches.
     try {
         // Get geometry cache for this segment+field
         auto geometry_cache =
@@ -3106,10 +3107,11 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
             if (is_valid && i < geometry_data.data_size()) {
                 // Valid geometry data
                 const auto& wkb_data = geometry_data.data(i);
-                geometry_cache->AppendData(wkb_data.data(), wkb_data.size());
+                geometry_cache->AppendDataAt(
+                    reserved_offset + i, wkb_data.data(), wkb_data.size());
             } else {
                 // Null/invalid geometry
-                geometry_cache->AppendData(nullptr, 0);
+                geometry_cache->AppendDataAt(reserved_offset + i, nullptr, 0);
             }
         }
 
@@ -3138,27 +3140,32 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
 
 void
 SegmentGrowingImpl::BuildGeometryCacheForLoad(
-    FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
+    FieldId field_id,
+    const std::vector<FieldDataPtr>& field_data,
+    int64_t reserved_offset) {
     try {
         // Get geometry cache for this segment+field
         auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
-        // Process each field data chunk
+        // Process each field data chunk, writing rows at their reserved
+        // absolute offsets so a retried load overwrites in place (see
+        // BuildGeometryCacheForInsert).
+        int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
             auto num_rows = data->get_num_rows();
 
-            for (int64_t i = 0; i < num_rows; ++i) {
+            for (int64_t i = 0; i < num_rows; ++i, ++absolute_offset) {
                 if (data->is_valid(i)) {
                     // Valid geometry data
                     auto wkb_data =
                         static_cast<const std::string*>(data->RawValue(i));
-                    geometry_cache->AppendData(wkb_data->data(),
-                                               wkb_data->size());
+                    geometry_cache->AppendDataAt(
+                        absolute_offset, wkb_data->data(), wkb_data->size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache->AppendData(nullptr, 0);
+                    geometry_cache->AppendDataAt(absolute_offset, nullptr, 0);
                 }
             }
         }
