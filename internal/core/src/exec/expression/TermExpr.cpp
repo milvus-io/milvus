@@ -923,11 +923,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     if (!arg_inited_) {
         std::vector<IndexInnerType> vals;
@@ -977,11 +978,12 @@ template <>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     using Index = index::ScalarIndex<bool>;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     if (!arg_inited_) {
         std::vector<uint8_t> vals;
@@ -1013,11 +1015,12 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
 
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),

@@ -346,6 +346,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
                                            HighPrecisionType& val2,
                                            bool& lower_inclusive,
                                            bool& upper_inclusive,
+                                           int64_t batch_size,
                                            OffsetVector* input) {
     lower_inclusive = expr_->lower_inclusive_;
     upper_inclusive = expr_->upper_inclusive_;
@@ -358,21 +359,19 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val1 = lower_arg_.GetValue<HighPrecisionType>();
     val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
-        [this](OffsetVector* input) -> ColumnVectorPtr {
-        int64_t batch_size;
-        if (input != nullptr) {
-            batch_size = input->size();
+        [this, batch_size](OffsetVector* input) -> ColumnVectorPtr {
+        TargetBitmap valid_res;
+        if (expr_->column_.element_level_) {
+            valid_res = TargetBitmap(batch_size, true);
+            if (input == nullptr) {
+                MoveCursor();
+            }
         } else {
-            batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                             ? active_count_ - overflow_check_pos_
-                             : batch_size_;
-            overflow_check_pos_ += batch_size;
+            valid_res = (input != nullptr)
+                            ? ProcessChunksForValidByOffsets<T>(
+                                  UseIndexCursor(), *input)
+                            : ProcessChunksForValid<T>(UseIndexCursor());
         }
-        auto valid_res =
-            (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
-                : ProcessChunksForValid<T>(UseIndexCursor());
-
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
         return res_vec;
@@ -413,15 +412,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     HighPrecisionType val2;
     bool lower_inclusive = false;
     bool upper_inclusive = false;
-    if (auto res =
-            PreCheckOverflow<T>(val1, val2, lower_inclusive, upper_inclusive)) {
-        return res;
-    }
-
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = PreCheckOverflow<T>(
+            val1, val2, lower_inclusive, upper_inclusive, real_batch_size)) {
+        return res;
     }
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
@@ -458,15 +457,19 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     HighPrecisionType val2;
     bool lower_inclusive = false;
     bool upper_inclusive = false;
-    if (auto res = PreCheckOverflow<T>(
-            val1, val2, lower_inclusive, upper_inclusive, input)) {
-        return res;
-    }
-
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = PreCheckOverflow<T>(val1,
+                                       val2,
+                                       lower_inclusive,
+                                       upper_inclusive,
+                                       real_batch_size,
+                                       input)) {
+        return res;
     }
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),

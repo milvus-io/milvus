@@ -532,15 +532,28 @@ class SegmentExpr : public Expr {
                    : batch_size_;
     }
 
-    int64_t
+    std::optional<int64_t>
     GetNextRealBatchSize(const OffsetVector* input, bool element_level) {
         if (input != nullptr) {
+            if (input->empty()) {
+                return std::nullopt;
+            }
             return input->size();
         } else if (element_level) {
-            auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+            auto [batch_rows, elem_count] = GetNextBatchSizeForElementLevel();
+            // A non-empty row batch can legitimately contain no logical
+            // elements. Keep 0 distinct from exhaustion so callers still
+            // advance their row cursor for this batch.
+            if (batch_rows == 0) {
+                return std::nullopt;
+            }
             return elem_count;
         }
-        return GetNextBatchSize();
+        auto batch_size = GetNextBatchSize();
+        if (batch_size == 0) {
+            return std::nullopt;
+        }
+        return batch_size;
     }
 
     // Get the next batch size for element-level processing

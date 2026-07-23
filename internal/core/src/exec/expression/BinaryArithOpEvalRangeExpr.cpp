@@ -1246,11 +1246,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                int64_t,
                                T>
         HighPrecisionType;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
     if (!arg_inited_) {
         value_arg_.SetValue<HighPrecisionType>(expr_->value_);
         right_operand_arg_.SetValue<HighPrecisionType>(expr_->right_operand_);
@@ -2002,11 +2003,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                T>
         HighPrecisionType;
 
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),

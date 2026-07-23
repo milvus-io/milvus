@@ -1539,13 +1539,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;
     }
-    if (auto res = PreCheckOverflow<T>()) {
-        return res;
-    }
-
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
+    }
+    if (auto res = PreCheckOverflow<T>(real_batch_size)) {
+        return res;
     }
 
     if (cached_index_chunk_id_ != 0) {
@@ -1580,14 +1579,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;
     }
-    if (auto res = PreCheckOverflow<T>()) {
-        return res;
-    }
-
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = PreCheckOverflow<T>(real_batch_size)) {
+        return res;
     }
     auto op_type = expr_->op_type_;
     auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
@@ -1668,24 +1667,24 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
 
 template <typename T>
 ColumnVectorPtr
-PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
+PhyUnaryRangeFilterExpr::PreCheckOverflow(int64_t batch_size,
+                                          OffsetVector* input) {
     if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
         auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
-            int64_t batch_size;
-            if (input != nullptr) {
-                batch_size = input->size();
+            TargetBitmap valid;
+            if (expr_->column_.element_level_) {
+                valid = TargetBitmap(batch_size, true);
+                if (input == nullptr) {
+                    MoveCursor();
+                }
             } else {
-                batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                                 ? active_count_ - overflow_check_pos_
-                                 : batch_size_;
-                overflow_check_pos_ += batch_size;
+                valid = (input != nullptr)
+                            ? ProcessChunksForValidByOffsets<T>(
+                                  UseIndexCursor(), *input)
+                            : ProcessChunksForValid<T>(UseIndexCursor());
             }
-            auto valid = (input != nullptr)
-                             ? ProcessChunksForValidByOffsets<T>(
-                                   UseIndexCursor(), *input)
-                             : ProcessChunksForValid<T>(UseIndexCursor());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1738,14 +1737,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
 
-    if (auto res = PreCheckOverflow<T>(input)) {
-        return res;
-    }
-
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = PreCheckOverflow<T>(real_batch_size, input)) {
+        return res;
     }
 
     if (!arg_inited_) {
