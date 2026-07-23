@@ -52,8 +52,9 @@ type Window struct {
 	minEntries int
 	maxEntries int
 	// maxBytes caps the total serialized size of retained entries (each entry
-	// carries the per-row PKs of its insert), overriding the minEntries floor —
-	// entry COUNT alone cannot bound dedup-metadata memory. 0 disables the cap.
+	// carries the per-row PKs of its insert), overriding both the minEntries floor
+	// and the TTL horizon: entry COUNT alone cannot bound dedup-metadata memory.
+	// 0 disables the cap.
 	maxBytes  int
 	bytes     int
 	windowTTL time.Duration
@@ -161,18 +162,11 @@ func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResu
 			return BeginResult{Decision: BeginDecisionDuplicate, Entry: entry}
 		}
 		// TTL-expired but still held by the minEntries floor: serving it would make
-		// "is this key still deduplicated" a per-vchannel LOAD function instead of a
-		// request-level one. One client key fans out to every vchannel the insert
-		// touches, each with its own window; under shard skew a busy window is
-		// already above minEntries and drops the key at the TTL bound while a quiet
-		// window stays below the floor and keeps it forever. A retry would then be
-		// re-appended on the busy shard (duplicate rows) and deduplicated on the
-		// quiet one, and the proxy merges that mix into one silently-successful
-		// response. Ending duplicate visibility exactly at the TTL — a bound derived
-		// from cluster timeticks, identical on every shard — makes the outcome
-		// uniform: past the TTL every shard treats the retry as a new write, which
-		// is the documented TTL semantics. The floor keeps bounding memory, it just
-		// no longer extends the dedup answer.
+		// the floor extend duplicate visibility forever on quiet shards. For entries
+		// still retained in memory, duplicate visibility ends at the TTL bound. The
+		// hard maxEntries/maxBytes caps below are stricter capacity limits and may
+		// remove an entry before TTL; that is a documented retention limitation, not
+		// an extension of the TTL answer.
 		w.dropEntryLocked(key)
 	}
 
@@ -313,9 +307,10 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 }
 
 // servableLocked reports whether an entry may still answer a duplicate hit.
-// Retention (minEntries / maxEntries) is per-window and load dependent, so it
-// must not decide this; only the TTL bound, which every window of the request's
-// fan-out advances from the same timetick clock, may.
+// For entries still retained in memory, the minEntries floor must not extend
+// duplicate visibility beyond the TTL bound. Hard capacity caps are different:
+// maxEntries/maxBytes may delete entries before TTL to bound memory, at which
+// point there is no entry left to serve.
 func (w *Window) servableLocked(entry *streamingpb.WindowEntry) bool {
 	if w.windowTTL <= 0 || w.ttlEvictBoundTT == 0 {
 		return true
@@ -366,6 +361,8 @@ func (w *Window) evictLocked(evictBeforeTT uint64) int {
 		key := w.commitOrder[0]
 		w.commitOrder = w.commitOrder[1:]
 		if entry, ok := w.entries[key]; ok {
+			// Hard capacity limit: maxEntries may shorten the effective dedup
+			// horizon below TTL on a hot vchannel.
 			w.bytes -= proto.Size(entry)
 			delete(w.entries, key)
 			evicted++
@@ -373,8 +370,9 @@ func (w *Window) evictLocked(evictBeforeTT uint64) int {
 	}
 
 	// The byte cap is a hard bound like maxEntries: it overrides the minEntries
-	// floor, because a floor measured in entries cannot promise anything about
-	// memory when each entry carries an unbounded per-row PK list.
+	// floor and may shorten the effective dedup horizon below TTL, because a floor
+	// measured in entries cannot promise anything about memory when each entry
+	// carries an unbounded per-row PK list.
 	for w.maxBytes > 0 && w.bytes > w.maxBytes && len(w.commitOrder) > 0 {
 		key := w.commitOrder[0]
 		w.commitOrder = w.commitOrder[1:]

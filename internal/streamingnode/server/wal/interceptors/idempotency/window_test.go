@@ -65,14 +65,10 @@ func TestWindowTTLEvictionUsesCommitTimetick(t *testing.T) {
 	require.Len(t, tiny.entries, 2)
 }
 
-// One client idempotency key fans out to a window per vchannel, so "is this key
-// still deduplicated" must not depend on how loaded each individual shard is.
-// Under shard skew the busy window sits above the minEntries floor and drops the
-// key at the TTL bound while the quiet window stays below the floor and keeps it:
-// a retry would then be appended again on the busy shard (duplicate rows) and
-// deduplicated on the quiet one, and the proxy merges that mix into one
-// successful response. Duplicate visibility must therefore end at the TTL on
-// every shard alike.
+// One client idempotency key fans out to a window per vchannel, so the
+// minEntries floor must not extend duplicate visibility past TTL on quiet
+// shards after busy shards have dropped the same key. Hard capacity caps are a
+// separate retention limit and may shorten the effective horizon before TTL.
 func TestWindowDuplicateVisibilityIsUniformAcrossSkewedShards(t *testing.T) {
 	const ttl = 10 * time.Minute
 	// Both shards run the SAME config; only their load differs.
@@ -87,7 +83,8 @@ func TestWindowDuplicateVisibilityIsUniformAcrossSkewedShards(t *testing.T) {
 	completeKey(t, busy, "other-2", commitTT+2)
 	completeKey(t, busy, "other-3", commitTT+3)
 
-	// Within the TTL both shards deduplicate the retry.
+	// Within the TTL, while the entries are still retained, both shards
+	// deduplicate the retry.
 	require.Equal(t, BeginDecisionDuplicate, busy.Begin("shared-key", nil).Decision)
 	require.Equal(t, BeginDecisionDuplicate, quiet.Begin("shared-key", nil).Decision)
 
@@ -136,19 +133,22 @@ func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
 	require.Equal(t, uint64(90), window.EvictedWatermarkTT())
 
 	// Count-cap eviction drops the oldest entry by commit timetick ("b"), not
-	// the first-completed one ("a").
-	capped := NewWindow(WindowConfig{MaxEntries: 2})
+	// the first-completed one ("a"). The cap is hard: it may evict a key that is
+	// still within TTL.
+	capped := NewWindow(WindowConfig{WindowTTL: time.Hour, MaxEntries: 2})
 	completeKey(t, capped, "a", 100)
 	completeKey(t, capped, "b", 90)
 	completeKey(t, capped, "c", 95)
 	require.NotContains(t, capped.entries, IdempotencyKey("b"))
 	require.Contains(t, capped.entries, IdempotencyKey("a"))
 	require.Contains(t, capped.entries, IdempotencyKey("c"))
+	require.Equal(t, BeginDecisionOwner, capped.Begin("b", nil).Decision)
 }
 
 // The byte cap bounds retained memory where entry count cannot: each entry
 // carries the per-row PKs of its insert, so the cap overrides the minEntries
-// floor and evicts oldest-first until the window fits.
+// floor and evicts oldest-first until the window fits. Like the count cap, this
+// may shorten the effective dedup horizon before TTL on a hot vchannel.
 func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	// Measure the serialized size of one entry so the cap below admits exactly
 	// one. Keys and commit timeticks are chosen so both entries serialize to
@@ -158,7 +158,7 @@ func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{MinEntries: 1000, MaxBytes: entrySize})
+	window := NewWindow(WindowConfig{WindowTTL: time.Hour, MinEntries: 1000, MaxBytes: entrySize})
 	completeKey(t, window, "a", 100)
 	require.Contains(t, window.entries, IdempotencyKey("a"))
 	// The second entry pushes the window over the byte cap; the oldest entry
@@ -168,6 +168,7 @@ func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	require.Contains(t, window.entries, IdempotencyKey("b"))
 	require.Len(t, window.entries, 1)
 	require.Equal(t, entrySize, window.bytes)
+	require.Equal(t, BeginDecisionOwner, window.Begin("a", nil).Decision)
 }
 
 func TestDIDWindowSameKeyAlwaysDuplicate(t *testing.T) {

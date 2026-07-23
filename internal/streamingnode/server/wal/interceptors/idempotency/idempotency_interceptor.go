@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -33,6 +34,12 @@ type idempotencyInterceptor struct {
 	// positively known to be still open. nil means "unknown" and skips the
 	// rollback (the txn then falls back to keepalive expiry as before).
 	txnActive idempotencyutils.TxnActiveChecker
+	// replicateRole is intentionally dynamic: AlterReplicateConfig can switch the
+	// WAL role while this interceptor instance stays alive. On SECONDARY, native
+	// client writes must reach the inner replicate interceptor so it can reject
+	// them; a duplicate short-circuit here would otherwise acknowledge data that
+	// is neither persisted nor replicated.
+	replicateRole func() replicateutil.Role
 	// lastSweepPhysicalMs rate-limits the idle-vchannel TTL sweep (physical ms
 	// of the last sweep's timetick).
 	lastSweepPhysicalMs atomic.Int64
@@ -69,10 +76,16 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 			return err == nil
 		}
 	}
+	var replicateRole func() replicateutil.Role
+	if param != nil && param.ReplicateManager != nil {
+		replicateManager := param.ReplicateManager
+		replicateRole = replicateManager.Role
+	}
 	return &idempotencyInterceptor{
 		windows:                typeutil.NewConcurrentMap[string, *Window](),
 		txnInsertResultBuffers: idempotencyutils.NewTxnInsertResultBuffers(currentTimeTick, txnActive),
 		txnActive:              txnActive,
+		replicateRole:          replicateRole,
 		config:                 config,
 	}
 }
@@ -106,6 +119,10 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 		return msgID, err
 	}
 
+	if impl.shouldLetReplicateGateHandle(msg) {
+		return append(ctx, msg)
+	}
+
 	if msg.MessageType() == message.MessageTypeDropCollection {
 		msgID, err := append(ctx, msg)
 		if err == nil {
@@ -126,6 +143,16 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 		return impl.appendTxnMessage(ctx, msg, append)
 	}
 	return impl.appendSingleMessage(ctx, msg, append)
+}
+
+func (impl *idempotencyInterceptor) shouldLetReplicateGateHandle(msg message.MutableMessage) bool {
+	if impl.replicateRole == nil || impl.replicateRole() != replicateutil.RoleSecondary {
+		return false
+	}
+	if msg.ReplicateHeader() != nil || msg.MessageType().IsSelfControlled() {
+		return false
+	}
+	return true
 }
 
 // sweepWindowsOnTimeTick evicts TTL-expired entries from every window on the

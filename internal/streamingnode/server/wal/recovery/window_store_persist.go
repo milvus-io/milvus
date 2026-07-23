@@ -161,10 +161,12 @@ func (m *windowManager) persistPChannelWindowMeta(
 	return retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelWindowMeta")),
 		func(ctx context.Context) error {
-			// Best-effort split-brain fence (the save itself is not a CAS): a
-			// durable meta stamped with a newer term means another owner took
-			// over — overwriting it would rewind the current owner's window
-			// boundaries. Fenced errors are terminal in the retry loop.
+			// The channel assignment model gives one active StreamingNode owner
+			// per pchannel/term, so this path normally has a single writer. This
+			// check is a best-effort split-brain fence (the save itself is not a
+			// CAS): a durable meta stamped with a newer term means another owner
+			// took over, and overwriting it would rewind the current owner's
+			// window boundaries. Fenced errors are terminal in the retry loop.
 			currentPB, err := resource.Resource().StreamingNodeCatalog().GetPChannelWindowMeta(ctx, m.pchannel)
 			if err != nil {
 				return err
