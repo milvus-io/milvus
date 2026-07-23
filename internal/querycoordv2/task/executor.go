@@ -186,7 +186,6 @@ func (ex *Executor) Execute(task Task, step int) bool {
 
 		case *LeaderAction:
 			ex.executeLeaderAction(task.(*LeaderTask), step)
-
 		}
 	}()
 
