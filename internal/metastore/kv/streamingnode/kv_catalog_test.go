@@ -346,6 +346,46 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, meta)
 	})
+
+	t.Run("compare_and_swap", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv).(*catalog)
+		key := buildPChannelWindowMetaKey("p1")
+		current := &streamingpb.PChannelWindowMeta{
+			Pchannel:                 "p1",
+			SourceCheckpointTimetick: 100,
+			LatestGeneration:         1,
+		}
+		currentData, err := proto.Marshal(current)
+		assert.NoError(t, err)
+		target := &streamingpb.PChannelWindowMeta{
+			Pchannel:                 "p1",
+			SourceCheckpointTimetick: 200,
+			LatestGeneration:         2,
+		}
+		targetData, err := proto.Marshal(target)
+		assert.NoError(t, err)
+
+		kv.EXPECT().CompareVersionAndSwap(mock.Anything, key, int64(0), string(currentData)).Return(true, nil).Once()
+		swapped, err := catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", nil, current)
+		assert.NoError(t, err)
+		assert.True(t, swapped)
+
+		kv.EXPECT().CompareVersionAndSwap(mock.Anything, key, int64(0), string(currentData)).Return(false, nil).Once()
+		swapped, err = catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", nil, current)
+		assert.NoError(t, err)
+		assert.False(t, swapped)
+
+		kv.EXPECT().MultiSaveAndRemove(mock.Anything, map[string]string{key: string(targetData)}, mock.Anything, mock.Anything).Return(nil).Once()
+		swapped, err = catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", current, target)
+		assert.NoError(t, err)
+		assert.True(t, swapped)
+
+		kv.EXPECT().MultiSaveAndRemove(mock.Anything, map[string]string{key: string(targetData)}, mock.Anything, mock.Anything).Return(merr.WrapErrIoFailedReason("failed to execute transaction")).Once()
+		swapped, err = catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", current, target)
+		assert.NoError(t, err)
+		assert.False(t, swapped)
+	})
 }
 
 func TestCatalogVChannel(t *testing.T) {

@@ -4,9 +4,12 @@ import (
 	"context"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -84,13 +87,19 @@ func (m *windowManager) advanceIdleSourceCheckpoint(ctx context.Context) {
 		// current owner. Stop silently; this WAL is about to close anyway.
 		return
 	}
-	metaPB.SourceCheckpointTimetick = current.TimeTick
+	updated := proto.Clone(metaPB).(*streamingpb.PChannelWindowMeta)
+	updated.SourceCheckpointTimetick = current.TimeTick
 	if current.MessageID != nil {
-		metaPB.SourceCheckpointMessageId = current.MessageID.IntoProto()
+		updated.SourceCheckpointMessageId = current.MessageID.IntoProto()
 	}
-	metaPB.Term = m.term
-	if err := catalog.SavePChannelWindowMeta(ctx, m.pchannel, metaPB); err != nil {
+	updated.Term = m.term
+	swapped, err := compareAndSwapPChannelWindowMeta(ctx, m.Logger(), m.pchannel, metaPB, updated)
+	if err != nil {
 		m.Logger().Warn(ctx, "failed to advance idle pchannel window source checkpoint", mlog.Err(err))
+		return
+	}
+	if !swapped {
+		m.Logger().Warn(ctx, "pchannel window source checkpoint advance lost CAS race")
 		return
 	}
 	m.markPChannelWindowSnapshotCheckpointPersisted(current)
@@ -126,6 +135,46 @@ func (m *windowManager) persistIdempotencySnapshotWhenClosing() error {
 		}
 	}
 	return m.cleanPChannelWindow(ctx, m.Logger())
+}
+
+func (r *recoveryStorageImpl) ForcePersistIdempotencyWindowToTimeTick(ctx context.Context, targetTimeTick uint64) (*WALCheckpoint, error) {
+	return r.windowManager.forcePersistIdempotencyWindowToTimeTick(ctx, targetTimeTick)
+}
+
+func (m *windowManager) forcePersistIdempotencyWindowToTimeTick(ctx context.Context, targetTimeTick uint64) (*WALCheckpoint, error) {
+	if m == nil || !m.cfg.idempotencyEnabled {
+		return &WALCheckpoint{TimeTick: targetTimeTick}, nil
+	}
+	for {
+		m.mu.Lock()
+		persisted := m.getPersistedPChannelWindowSnapshotCheckpointUnsafe()
+		if persisted != nil && persisted.TimeTick >= targetTimeTick {
+			m.mu.Unlock()
+			return persisted, nil
+		}
+		current := m.getPChannelWindowSnapshotCheckpointUnsafe()
+		if current == nil || current.TimeTick < targetTimeTick {
+			m.mu.Unlock()
+			return persisted, nil
+		}
+		snapshot := m.pendingIdempotencyPersistSnapshot
+		if snapshot == nil {
+			if m.hasDirtyWindowUnsafe() {
+				snapshot = m.consumeIdempotencySnapshotLocked()
+			} else {
+				snapshot = &RecoverySnapshot{
+					Checkpoint:                     current,
+					pchannelWindowSourceCheckpoint: current,
+				}
+			}
+			m.pendingIdempotencyPersistSnapshot = snapshot
+		}
+		m.mu.Unlock()
+
+		if err := m.persistIdempotencySnapshotData(ctx, mlog.InfoLevel, snapshot); err != nil {
+			return nil, err
+		}
+	}
 }
 
 func (m *windowManager) isIdempotencyWindowDirty() bool {

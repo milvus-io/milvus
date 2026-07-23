@@ -139,7 +139,7 @@ func writeTestBootstrapPChannelWindowMeta(
 	}
 	payload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, 0, checkpoint, nil)
 	require.NoError(t, err)
-	key := buildPChannelWindowChunkKey(pchannel, footer.Generation)
+	key := buildPChannelWindowChunkKey(pchannel, footer.Generation, footer.Term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 	return newPChannelWindowStoreMetaFromChunk(pchannel, footer, 0, 0).intoCatalogMeta()
 }
@@ -153,12 +153,25 @@ func writeTestPChannelWindowChunk(
 	checkpoint *utility.WALCheckpoint,
 	records map[string][]committedWriteRecord,
 ) (*pchannelWindowChunkFooter, string, string) {
+	return writeTestPChannelWindowChunkWithTerm(ctx, t, pchannel, generation, 0, chunkManager, checkpoint, records)
+}
+
+func writeTestPChannelWindowChunkWithTerm(
+	ctx context.Context,
+	t require.TestingT,
+	pchannel string,
+	generation uint64,
+	term int64,
+	chunkManager storage.ChunkManager,
+	checkpoint *utility.WALCheckpoint,
+	records map[string][]committedWriteRecord,
+) (*pchannelWindowChunkFooter, string, string) {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	payload, footer, checksum, err := marshalPChannelWindowChunk(pchannel, generation, 0, checkpoint, records)
+	payload, footer, checksum, err := marshalPChannelWindowChunk(pchannel, generation, term, checkpoint, records)
 	require.NoError(t, err)
-	key := buildPChannelWindowChunkKey(pchannel, generation)
+	key := buildPChannelWindowChunkKey(pchannel, generation, term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 	return footer, key, checksum
 }
@@ -189,6 +202,35 @@ type testPChannelWindowCatalogState struct {
 	windowMetas map[string]*streamingpb.VChannelWindowMeta
 	storeMeta   *streamingpb.PChannelWindowMeta
 	operations  []string
+}
+
+type testPChannelWindowCASCatalog struct {
+	*mock_metastore.MockStreamingNodeCataLog
+	state *testPChannelWindowCatalogState
+}
+
+func newTestPChannelWindowCASCatalog(t *testing.T) (*testPChannelWindowCASCatalog, *testPChannelWindowCatalogState) {
+	catalog, state := newTestPChannelWindowCatalog(t)
+	return &testPChannelWindowCASCatalog{
+		MockStreamingNodeCataLog: catalog,
+		state:                    state,
+	}, state
+}
+
+func (c *testPChannelWindowCASCatalog) CompareAndSwapPChannelWindowMeta(ctx context.Context, pchannelName string, expected *streamingpb.PChannelWindowMeta, target *streamingpb.PChannelWindowMeta) (bool, error) {
+	if target == nil {
+		return true, nil
+	}
+	if expected == nil {
+		if c.state.storeMeta != nil {
+			return false, nil
+		}
+	} else if c.state.storeMeta == nil || !proto.Equal(c.state.storeMeta, expected) {
+		return false, nil
+	}
+	c.state.operations = append(c.state.operations, "pchannel-window-meta")
+	c.state.storeMeta = proto.Clone(target).(*streamingpb.PChannelWindowMeta)
+	return true, nil
 }
 
 func newTestPChannelWindowCatalog(t *testing.T) (*mock_metastore.MockStreamingNodeCataLog, *testPChannelWindowCatalogState) {
@@ -960,8 +1002,8 @@ func TestPChannelWindowChunkCodecDetectsVChannelBlockChecksumMismatch(t *testing
 }
 
 func TestPChannelWindowChunkKeyIsDeterministic(t *testing.T) {
-	key := buildPChannelWindowChunkKey("by-dev-rootcoord-dml_0", 42)
-	require.Contains(t, key, "/streamingnode/window-store/by-dev-rootcoord-dml_0/chunks/chunk.42.pwc")
+	key := buildPChannelWindowChunkKey("by-dev-rootcoord-dml_0", 42, 7)
+	require.Contains(t, key, "/streamingnode/window-store/by-dev-rootcoord-dml_0/chunks/chunk.42.term7.pwc")
 	require.NotContains(t, key, "manifests")
 	require.NotContains(t, key, "checksum")
 }
@@ -1196,7 +1238,7 @@ func TestPChannelWindowRecoverFailsWhenGenerationHasHole(t *testing.T) {
 	err := recoverTestIdempotencyWindowsWithError(ctx, recovered, "p1", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to read pchannel window chunk")
-	require.Contains(t, err.Error(), "chunk.1.pwc")
+	require.Contains(t, err.Error(), "chunk.1.term0.pwc")
 }
 
 func TestPChannelWindowRecoverFailsWhenChunkMissing(t *testing.T) {
@@ -1295,7 +1337,7 @@ func TestPChannelWindowRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T) 
 	corruptPayload := rewritePChannelWindowFooterPayload(t, payload, func(footer *pchannelWindowChunkFooter) {
 		footer.SourceCheckpointTimetick = 999999
 	})
-	orphanKey := buildPChannelWindowChunkKey("p1", 1)
+	orphanKey := buildPChannelWindowChunkKey("p1", 1, 0)
 	require.NoError(t, chunkManager.Write(ctx, orphanKey, corruptPayload))
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, initialCheckpoint)
@@ -1596,8 +1638,7 @@ func TestPChannelWindowRecoverFailsWhenLatestGenerationChunkMissing(t *testing.T
 
 	err = recoverTestIdempotencyWindowsWithError(ctx, recovered, "p1", false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to read pchannel window chunk")
-	require.Contains(t, err.Error(), "chunk.1.pwc")
+	require.Contains(t, err.Error(), "pchannel window chunk manifest misses latest generation 2")
 }
 
 func TestPChannelWindowBootstrapCreatesGenerationZeroChunk(t *testing.T) {
@@ -1623,7 +1664,7 @@ func TestPChannelWindowBootstrapCreatesGenerationZeroChunk(t *testing.T) {
 	require.Equal(t, uint64(0), meta.GetMinInUseGeneration())
 	require.Equal(t, uint64(10), meta.GetSourceCheckpointTimetick())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", meta.GetLatestGeneration()))
+	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
 	require.NoError(t, err)
 	records, footer, _, err := unmarshalPChannelWindowChunk(payload)
 	require.NoError(t, err)
@@ -1678,7 +1719,7 @@ func TestPChannelWindowPersistsCheckpointOnlyGeneration(t *testing.T) {
 	require.Equal(t, uint64(0), meta.GetMinAvailableGeneration())
 	require.Equal(t, uint64(0), meta.GetMinInUseGeneration())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", meta.GetLatestGeneration()))
+	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
 	require.NoError(t, err)
 	records, footer, _, err := unmarshalPChannelWindowChunk(payload)
 	require.NoError(t, err)
@@ -1686,6 +1727,67 @@ func TestPChannelWindowPersistsCheckpointOnlyGeneration(t *testing.T) {
 	require.Equal(t, uint64(200), footer.SourceCheckpointTimetick)
 	require.Empty(t, records)
 	require.Equal(t, []string{"pchannel-window-meta"}, catalogState.operations)
+}
+
+func TestForcePersistIdempotencyWindowToTimeTickPersistsCleanCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  1,
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	checkpoint100 := &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	}
+	rs.windowManager.setPChannelWindowSnapshotCheckpoint(checkpoint100)
+	_, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, checkpoint100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), generation)
+	rs.windowManager.markPChannelWindowSnapshotCheckpointPersisted(checkpoint100)
+
+	checkpoint150 := &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(150),
+		TimeTick:  150,
+	}
+	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(checkpoint150)
+	persisted, err := rs.ForcePersistIdempotencyWindowToTimeTick(ctx, checkpoint150.TimeTick)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	require.Equal(t, uint64(150), persisted.TimeTick)
+	require.NotNil(t, catalogState.storeMeta)
+	require.Equal(t, uint64(1), catalogState.storeMeta.GetLatestGeneration())
+	require.Equal(t, uint64(150), catalogState.storeMeta.GetSourceCheckpointTimetick())
+	require.Equal(t, int64(0), catalogState.storeMeta.GetTerm())
+
+	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", 1, 0))
+	require.NoError(t, err)
+	records, footer, _, err := unmarshalPChannelWindowChunk(payload)
+	require.NoError(t, err)
+	require.Empty(t, records)
+	require.Equal(t, uint64(1), footer.Generation)
+	require.Equal(t, uint64(150), footer.SourceCheckpointTimetick)
+}
+
+func TestForcePersistIdempotencyWindowToTimeTickNoopsWhenDisabled(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
+	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  1,
+	})
+
+	persisted, err := rs.ForcePersistIdempotencyWindowToTimeTick(context.Background(), 150)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	require.Equal(t, uint64(150), persisted.TimeTick)
 }
 
 func TestPChannelWindowPersistWritesContinuousGenerationsWhenCheckpointAdvances(t *testing.T) {
@@ -1712,7 +1814,7 @@ func TestPChannelWindowPersistWritesContinuousGenerationsWhenCheckpointAdvances(
 	}
 
 	for generation := uint64(0); generation <= 2; generation++ {
-		chunkKey := buildPChannelWindowChunkKey("p1", generation)
+		chunkKey := buildPChannelWindowChunkKey("p1", generation, 0)
 		exists, err := chunkManager.Exist(ctx, chunkKey)
 		require.NoError(t, err)
 		require.True(t, exists)
@@ -1723,7 +1825,7 @@ func TestPChannelWindowPersistWritesContinuousGenerationsWhenCheckpointAdvances(
 		require.Empty(t, records)
 		require.Equal(t, generation, footer.Generation)
 	}
-	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey("p1", 3))
+	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey("p1", 3, 0))
 	require.NoError(t, err)
 	require.False(t, exists)
 }
@@ -1830,7 +1932,7 @@ func TestPChannelWindowPersistRetryDoesNotAllocateNextGenerationWhenCheckpointCo
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
-	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey("p1", 1))
+	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey("p1", 1, 0))
 	require.NoError(t, err)
 	require.False(t, exists)
 }

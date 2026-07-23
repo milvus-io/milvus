@@ -189,7 +189,7 @@ func TestPChannelWindowCleanerReDeletesIdempotentlyAfterCrashBeforeSave(t *testi
 	// MinAvailableGeneration, so the meta still says MinAvailable=0. The next
 	// cycle must re-delete the range idempotently and finish the advance.
 	catalogState.storeMeta = testPChannelWindowStoreMeta(t, ctx, "p1", chunkManager, 3, 0, 2)
-	require.NoError(t, chunkManager.Remove(ctx, buildPChannelWindowChunkKey("p1", 0)))
+	require.NoError(t, chunkManager.Remove(ctx, buildPChannelWindowChunkKey("p1", 0, 0)))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(300),
@@ -310,7 +310,7 @@ func testPChannelWindowStoreMeta(
 
 func requirePChannelWindowChunkExists(t *testing.T, ctx context.Context, chunkManager storage.ChunkManager, pchannel string, generation uint64, expected bool) {
 	t.Helper()
-	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey(pchannel, generation))
+	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey(pchannel, generation, 0))
 	require.NoError(t, err)
 	require.Equal(t, expected, exists)
 }

@@ -19,8 +19,10 @@ type pchannelWindowStoreMeta struct {
 	MinAvailableGeneration uint64
 	MinInUseGeneration     uint64
 	SourceCheckpoint       *WALCheckpoint
+	ChunkManifest          *streamingpb.PChannelWindowChunkManifest
 	// Term is the WAL assignment term of the owner that last persisted the
-	// meta; writers with an older term are fenced (best-effort, no CAS).
+	// meta; writers publish updates through catalog CAS and older terms are
+	// fenced before they can advance the manifest.
 	Term int64
 }
 
@@ -185,7 +187,7 @@ func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchann
 	if err != nil {
 		return nil, err
 	}
-	chunkKey := buildPChannelWindowChunkKey(pchannel, footer.Generation)
+	chunkKey := buildPChannelWindowChunkKey(pchannel, footer.Generation, m.term)
 	logger := m.Logger().With(mlog.String("op", "bootstrapPChannelWindowStore"), mlog.Uint64("generation", footer.Generation))
 	// Bootstrap only runs with no catalog meta and no vchannel window metas, so
 	// nothing references any chunk of this pchannel: whatever is left under the
@@ -239,14 +241,29 @@ func (m *windowManager) recoverIdempotencyWindowsFromPChannelWindowStore(ctx con
 	if meta.MinAvailableGeneration > meta.MinInUseGeneration || meta.MinInUseGeneration > meta.LatestGeneration {
 		return nil, pchannelWindowStoreCorruptedf("pchannel window generation range mismatch, min available %d, min in use %d, latest %d", meta.MinAvailableGeneration, meta.MinInUseGeneration, meta.LatestGeneration)
 	}
+	if err := validatePChannelWindowManifest(meta); err != nil {
+		return nil, err
+	}
+	sealedMeta, err := m.sealPreviousPChannelWindowTerm(ctx, pchannel, meta)
+	if err != nil {
+		return nil, err
+	}
+	if sealedMeta != nil {
+		meta = sealedMeta
+	}
 	actualMeta := meta
 	for generation := meta.MinInUseGeneration; generation <= meta.LatestGeneration; generation++ {
-		footer, err := m.recoverPChannelWindowChunk(ctx, pchannel, generation)
+		termRange, ok := pchannelWindowManifestRangeForGeneration(meta, generation)
+		if !ok {
+			return nil, pchannelWindowStoreCorruptedf("pchannel window chunk manifest misses generation %d", generation)
+		}
+		footer, err := m.recoverPChannelWindowChunk(ctx, pchannel, generation, termRange.GetTerm())
 		if err != nil {
 			return nil, err
 		}
 		if generation == meta.LatestGeneration {
 			actualMeta = newPChannelWindowStoreMetaFromChunk(pchannel, footer, meta.MinAvailableGeneration, meta.MinInUseGeneration)
+			actualMeta.ChunkManifest = clonePChannelWindowChunkManifest(meta.ChunkManifest)
 			break
 		}
 	}
@@ -255,7 +272,7 @@ func (m *windowManager) recoverIdempotencyWindowsFromPChannelWindowStore(ctx con
 		return actualMeta, nil
 	}
 	for generation := meta.LatestGeneration + 1; ; generation++ {
-		chunkKey := buildPChannelWindowChunkKey(pchannel, generation)
+		chunkKey := buildPChannelWindowChunkKey(pchannel, generation, m.term)
 		exists, err := resource.Resource().ChunkManager().Exist(ctx, chunkKey)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to probe pchannel window chunk %s", chunkKey)
@@ -263,7 +280,7 @@ func (m *windowManager) recoverIdempotencyWindowsFromPChannelWindowStore(ctx con
 		if !exists {
 			break
 		}
-		footer, err := m.recoverPChannelWindowChunk(ctx, pchannel, generation)
+		footer, err := m.recoverPChannelWindowChunk(ctx, pchannel, generation, m.term)
 		if err != nil {
 			if errors.Is(err, ErrPChannelWindowStoreCorrupted) {
 				// A chunk above the durable LatestGeneration is an orphan from a
@@ -282,7 +299,13 @@ func (m *windowManager) recoverIdempotencyWindowsFromPChannelWindowStore(ctx con
 			}
 			return nil, err
 		}
+		previousManifest := actualMeta.ChunkManifest
 		actualMeta = newPChannelWindowStoreMetaFromChunk(pchannel, footer, meta.MinAvailableGeneration, meta.MinInUseGeneration)
+		manifest, err := pchannelWindowManifestWithChunk(previousManifest, m.term, generation, footer.SourceCheckpointTimetick)
+		if err != nil {
+			return nil, err
+		}
+		actualMeta.ChunkManifest = manifest
 		if generation == ^uint64(0) {
 			break
 		}
@@ -294,32 +317,11 @@ func (m *windowManager) recoverPChannelWindowChunk(
 	ctx context.Context,
 	pchannel string,
 	generation uint64,
+	expectedTerm int64,
 ) (*pchannelWindowChunkFooter, error) {
-	chunkKey := buildPChannelWindowChunkKey(pchannel, generation)
-	// Bounded retry on the raw read: a transient object-storage blip must not
-	// hard-fail the WAL open now that referenced-state corruption does — only a
-	// VERIFIED decode/checksum failure below is corruption; IO errors here are
-	// retried and, if persistent, abort with the transient cause intact.
-	var payload []byte
-	if err := retry.Do(ctx, func() error {
-		var readErr error
-		payload, readErr = resource.Resource().ChunkManager().Read(ctx, chunkKey)
-		return readErr
-	}, retry.Attempts(5)); err != nil {
-		return nil, errors.Wrapf(err, "failed to read pchannel window chunk %s", chunkKey)
-	}
-	recordsByVChannel, footer, _, err := unmarshalPChannelWindowChunk(payload)
+	recordsByVChannel, footer, chunkKey, err := m.readPChannelWindowChunk(ctx, pchannel, generation, expectedTerm)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to unmarshal pchannel window chunk %s", chunkKey)
-	}
-	if footer.PChannel != "" && footer.PChannel != pchannel {
-		return nil, pchannelWindowStoreCorruptedf("pchannel window chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.PChannel)
-	}
-	if footer.Generation != generation {
-		return nil, pchannelWindowStoreCorruptedf("pchannel window chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
-	}
-	if footer.Term > m.term {
-		return nil, pchannelWindowStoreFencedf("pchannel window chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
+		return nil, err
 	}
 	for vchannel, records := range recordsByVChannel {
 		if !hasIdempotencyCommittedWriteRecords(records) {
@@ -343,10 +345,112 @@ func (m *windowManager) recoverPChannelWindowChunk(
 	return footer, nil
 }
 
+func (m *windowManager) readPChannelWindowChunk(
+	ctx context.Context,
+	pchannel string,
+	generation uint64,
+	expectedTerm int64,
+) (map[string][]committedWriteRecord, *pchannelWindowChunkFooter, string, error) {
+	chunkKey := buildPChannelWindowChunkKey(pchannel, generation, expectedTerm)
+	// Bounded retry on the raw read: a transient object-storage blip must not
+	// hard-fail the WAL open now that referenced-state corruption does — only a
+	// VERIFIED decode/checksum failure below is corruption; IO errors here are
+	// retried and, if persistent, abort with the transient cause intact.
+	var payload []byte
+	if err := retry.Do(ctx, func() error {
+		var readErr error
+		payload, readErr = resource.Resource().ChunkManager().Read(ctx, chunkKey)
+		return readErr
+	}, retry.Attempts(5)); err != nil {
+		return nil, nil, chunkKey, errors.Wrapf(err, "failed to read pchannel window chunk %s", chunkKey)
+	}
+	recordsByVChannel, footer, _, err := unmarshalPChannelWindowChunk(payload)
+	if err != nil {
+		return nil, nil, chunkKey, errors.Wrapf(err, "failed to unmarshal pchannel window chunk %s", chunkKey)
+	}
+	if footer.PChannel != "" && footer.PChannel != pchannel {
+		return nil, nil, chunkKey, pchannelWindowStoreCorruptedf("pchannel window chunk pchannel mismatch, meta %s, chunk %s", pchannel, footer.PChannel)
+	}
+	if footer.Generation != generation {
+		return nil, nil, chunkKey, pchannelWindowStoreCorruptedf("pchannel window chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
+	}
+	if footer.Term > m.term {
+		return nil, nil, chunkKey, pchannelWindowStoreFencedf("pchannel window chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
+	}
+	if footer.Term != expectedTerm {
+		return nil, nil, chunkKey, pchannelWindowStoreCorruptedf("pchannel window chunk %s term mismatch, manifest %d, footer %d", chunkKey, expectedTerm, footer.Term)
+	}
+	return recordsByVChannel, footer, chunkKey, nil
+}
+
+func (m *windowManager) sealPreviousPChannelWindowTerm(ctx context.Context, pchannel string, meta *pchannelWindowStoreMeta) (*pchannelWindowStoreMeta, error) {
+	lastRange := pchannelWindowManifestLastRange(meta)
+	if lastRange == nil || lastRange.GetSealed() || lastRange.GetTerm() >= m.term {
+		return meta, nil
+	}
+	actual := &pchannelWindowStoreMeta{
+		PChannel:               meta.PChannel,
+		LatestGeneration:       meta.LatestGeneration,
+		MinAvailableGeneration: meta.MinAvailableGeneration,
+		MinInUseGeneration:     meta.MinInUseGeneration,
+		SourceCheckpoint:       cloneWALCheckpoint(meta.SourceCheckpoint),
+		Term:                   m.term,
+		ChunkManifest:          clonePChannelWindowChunkManifest(meta.ChunkManifest),
+	}
+	scanned := 0
+	for generation := lastRange.GetEndGeneration() + 1; ; generation++ {
+		chunkKey := buildPChannelWindowChunkKey(pchannel, generation, lastRange.GetTerm())
+		exists, err := resource.Resource().ChunkManager().Exist(ctx, chunkKey)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to probe previous-term pchannel window chunk %s", chunkKey)
+		}
+		if !exists {
+			break
+		}
+		_, footer, _, err := m.readPChannelWindowChunk(ctx, pchannel, generation, lastRange.GetTerm())
+		if err != nil {
+			return nil, err
+		}
+		manifest, err := pchannelWindowManifestWithChunk(actual.ChunkManifest, lastRange.GetTerm(), generation, footer.SourceCheckpointTimetick)
+		if err != nil {
+			return nil, err
+		}
+		actual.ChunkManifest = manifest
+		actual.LatestGeneration = generation
+		actual.SourceCheckpoint = pchannelWindowSourceCheckpointToWALCheckpoint(&pchannelWindowSourceCheckpoint{
+			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageID),
+			TimeTick:  footer.SourceCheckpointTimetick,
+		})
+		scanned++
+		if scanned%pchannelWindowTermSealProgressInterval == 0 {
+			if err := m.repairPChannelWindowMeta(ctx, actual); err != nil {
+				return nil, err
+			}
+		}
+		if generation == ^uint64(0) {
+			break
+		}
+	}
+	manifest, err := markPChannelWindowRangeSealed(actual.ChunkManifest, lastRange.GetTerm())
+	if err != nil {
+		return nil, err
+	}
+	actual.ChunkManifest = manifest
+	actual.Term = m.term
+	if err := m.repairPChannelWindowMeta(ctx, actual); err != nil {
+		return nil, err
+	}
+	return actual, nil
+}
+
 func (m *windowManager) repairPChannelWindowMeta(ctx context.Context, storeMeta *pchannelWindowStoreMeta) error {
-	return retryOperationWithBackoff(ctx,
+	return updatePChannelWindowMetaWithCAS(ctx,
 		m.Logger().With(mlog.String("op", "repairPChannelWindowMeta")),
-		func(ctx context.Context) error {
-			return resource.Resource().StreamingNodeCatalog().SavePChannelWindowMeta(ctx, m.pchannel, storeMeta.intoCatalogMeta())
+		m.pchannel,
+		func(currentPB *streamingpb.PChannelWindowMeta, current *pchannelWindowStoreMeta) (*streamingpb.PChannelWindowMeta, error) {
+			if current != nil && current.Term > m.term {
+				return nil, pchannelWindowStoreFencedf("pchannel window meta of %s already owned by term %d, own term %d", m.pchannel, current.Term, m.term)
+			}
+			return storeMeta.intoCatalogMeta(), nil
 		})
 }
