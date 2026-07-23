@@ -22,6 +22,10 @@ type Config struct {
 	GcpCredentialJSON    string
 	GcpNativeWithoutAuth bool // used for Unit Testing
 	ReadRetryAttempts    uint
+
+	// SkipBucketCheck is for request-scoped clients whose permissions are
+	// validated by the first object read, write, or copy operation.
+	SkipBucketCheck bool
 }
 
 func NewDefaultConfig() *Config {

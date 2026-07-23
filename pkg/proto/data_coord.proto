@@ -1164,6 +1164,9 @@ message CopySegmentSource {
   // When set, DataNode rewrites this prefix to the target root path before
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
+
+  // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
+  int64 num_of_rows = 16;
 }
 
 message CopySegmentTarget {
@@ -1357,6 +1360,7 @@ message CopySegmentJob {
   bool external = 19;
   string snapshot_s3_location = 20;
   string external_spec = 21;
+  string snapshot_fingerprint = 22;
 }
 
 message ImportJob {
@@ -1712,11 +1716,11 @@ message SnapshotInfo {
   repeated msg.MsgPosition channel_seek_positions = 13;
 }
 
-// StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
-// StorageV2 is Milvus's newer storage format that uses Lance/Arrow for better performance.
+// StorageV2SegmentManifest maps a segment ID to its plain manifest object path.
+// Unlike StorageV3, this path is not a packed manifest descriptor.
 message StorageV2SegmentManifest {
   int64 segment_id = 1;
-  string manifest = 2;
+  string manifest = 2; // Plain StorageV2 manifest object path.
 }
 
 enum SnapshotLayout {

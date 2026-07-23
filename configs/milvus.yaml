@@ -812,6 +812,8 @@ dataCoord:
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
+    crossBucketEndpointAllowlist:  # Comma/space separated endpoint host[:port] allowlist for snapshot server-side cross-bucket copy with custom object storage endpoints. Canonical cloud endpoints derived from cloud_provider and region are allowed without this list.
+    exportCopyConcurrency: 16 # Maximum concurrent provider-side object copy requests for ExportSnapshot. Invalid or non-positive values are coerced to the default value 16.
   enableActiveStandby: false
   taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.

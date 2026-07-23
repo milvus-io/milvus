@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -149,9 +150,31 @@ func (s *Server) startRestoreSnapshotLock(
 	return b, nil
 }
 
+func (s *Server) startExternalRestoreSnapshotLock(
+	ctx context.Context,
+	targetDbName, targetCollectionName string,
+) (broadcaster.BroadcastAPI, error) {
+	// External restore has no source snapshot name to lock in this cluster. The
+	// phase-0 lock only reserves the target collection name while the external
+	// metadata is read and validated.
+	b, err := broadcast.StartBroadcastWithResourceKeys(
+		ctx,
+		message.NewSharedDBNameResourceKey(targetDbName),
+		message.NewExclusiveCollectionNameResourceKey(targetDbName, targetCollectionName),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	mlog.Info(ctx, "phase 0 external restore lock acquired",
+		mlog.String("targetDbName", targetDbName),
+		mlog.String("targetCollectionName", targetCollectionName))
+	return b, nil
+}
+
 // validateRestoreSnapshotResources validates that all required resources exist for restore.
 // This includes snapshot, collection, partitions, and indexes.
-func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	// ========== Validate Snapshot Exists ==========
@@ -165,6 +188,12 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	}
 	log.Info(ctx, "snapshot validated", mlog.String("snapshotName", snapshot.GetName()))
 
+	return s.validateRestoredCollectionResources(ctx, collectionID, snapshotData)
+}
+
+func (s *Server) validateRestoredCollectionResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
+	logger := mlog.With(mlog.Int64("collectionID", collectionID))
+
 	// ========== Validate Collection Exists ==========
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -172,7 +201,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
-	log.Info(ctx, "collection validated",
+	logger.Info(ctx, "collection validated",
 		mlog.FieldDbName(dbName),
 		mlog.FieldCollectionName(collectionName))
 
@@ -194,7 +223,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 			return merr.WrapErrPartitionNotFound(partName, fmt.Sprintf("partition does not exist in collection %d", collectionID))
 		}
 	}
-	log.Info(ctx, "partitions validated", mlog.Int("count", len(existingPartitions)))
+	logger.Info(ctx, "partitions validated", mlog.Int("count", len(existingPartitions)))
 
 	// ========== Validate Indexes Exist ==========
 	for _, indexInfo := range snapshotData.Indexes {
@@ -212,7 +241,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 			return merr.WrapErrIndexNotFound(indexInfo.GetIndexName(), fmt.Sprintf("index for field %d does not exist in collection %d", indexInfo.GetFieldID(), collectionID))
 		}
 	}
-	log.Info(ctx, "indexes validated", mlog.Int("count", len(snapshotData.Indexes)))
+	logger.Info(ctx, "indexes validated", mlog.Int("count", len(snapshotData.Indexes)))
 
 	return nil
 }

@@ -249,11 +249,15 @@ Returns:
 ### Export Snapshot
 
 Export a snapshot as a self-contained object-storage bundle. The returned
-`snapshotMetadataURI` points to the exported metadata file and can be used for
-external restore in another cluster that can access the same object storage
-location. The export target may be in another bucket when the object-storage
-provider supports server-side copy and one resolved credential can read the
-source bucket and write the target bucket.
+`snapshotMetadataURI` points to the exported metadata file. When `targetS3Path`
+is a complete URI, the returned value can be passed directly to
+`RestoreExternalSnapshot`; an object-key result must first be qualified with the
+configured bucket URI. The export target may be in another bucket when the
+object-storage provider supports server-side copy and one resolved credential
+can read the source bucket and write the target bucket. Exporting to the source
+bucket is also supported, provided the generated target metadata, segment
+manifest, and data object keys do not overwrite any object used by the source
+snapshot. Milvus rejects such overlap before the first copy.
 
 **Go SDK Example:**
 ```go
@@ -283,17 +287,33 @@ POST /v2/vectordb/jobs/snapshot/export
 }
 ```
 
+`dataCoord.snapshot.exportCopyConcurrency` controls the maximum number of
+provider-side object copy requests executed concurrently by each export. The
+default is `16`. The setting is refreshable and affects new export requests;
+invalid or non-positive values use the default.
+
+StorageV2 manifest files are copied as ordinary objects; StorageV3 manifest and
+LOB objects are discovered from the packed manifest path.
+
 ### Restore External Snapshot
 
 Restore a snapshot from a metadata URI instead of from the target cluster's
-local snapshot registry. This is intended for cross-cluster restore after a
-snapshot has been exported.
+local snapshot registry. `RestoreExternalSnapshot` supports both snapshot
+layouts:
 
-A self-contained snapshot generated from an existing snapshot and an explicit
-file mapping can be restored with the same external restore API. The metadata
-URI must point to the generated snapshot metadata file, and every file reference
-inside that metadata must be readable from the target cluster object storage
-configuration before the restore job is created.
+- A referenced snapshot created by `CreateSnapshot`. Use the `s3Location`
+  returned by `DescribeSnapshot`. The metadata references the original segment
+  and index files, so the source snapshot and all referenced files must stay
+  readable until restore completes.
+- A self-contained bundle created by `ExportSnapshot`. The bundle contains its
+  own metadata, manifests, and copied data files. It can be moved to another root
+  prefix as long as the internal `snapshots/...` and `files/...` layout stays the
+  same.
+
+For both layouts, the metadata URI must contain
+`snapshots/{collectionID}/metadata/{snapshotID}.json`. Milvus uses that anchor to
+derive the source root; arbitrary metadata locations such as `root/meta.json` are
+not supported.
 
 **Go SDK Example:**
 ```go
@@ -321,13 +341,21 @@ POST /v2/vectordb/jobs/snapshot/restore_external
 }
 ```
 
-`targetS3Path` and `snapshotMetadataURI` can be object keys or `s3://bucket/key`
-URIs. `externalSpec` is optional. When it is empty, Milvus uses the instance
-object-storage credential and relies on bucket policy to authorize the other
-bucket. When it is set, only storage-config-compatible `extfs` fields are
-accepted. Avoid raw access keys in restore `externalSpec` unless operationally
-required, because restore job state must propagate the spec through persistent
-metadata before DataNode can execute the copy.
+`targetS3Path` can be an object key in the instance bucket or a complete
+supported storage URI. `snapshotMetadataURI` must be a complete URI with a
+scheme and host; object keys are rejected before Milvus reads metadata or starts
+restore work. URI query parameters and fragments are rejected, so presigned URLs
+and Azure SAS URLs cannot be used as snapshot credential mechanisms. If export
+used an object-key `targetS3Path`, qualify the returned
+metadata path with the configured bucket URI before restore. `externalSpec` is
+optional. When it is empty, Milvus uses the instance object-storage credential
+and relies on bucket policy to authorize the other bucket. When it is set, only
+storage-config-compatible `extfs` fields are accepted. Supported credential
+modes are `use_iam=true`, raw `access_key_id`/`access_key_value`, or native GCS
+service-account JSON in `credential_json`; these modes are mutually exclusive.
+Avoid raw access keys or `credential_json` in restore `externalSpec` unless
+operationally required, because restore job state must propagate the spec
+through persistent metadata before DataNode can execute the copy.
 
 ### Drop Snapshot
 

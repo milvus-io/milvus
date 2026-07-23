@@ -18,14 +18,15 @@ package importv2
 
 import (
 	"context"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -37,8 +38,9 @@ import (
 )
 
 // SegmentFiles organizes source files by type for copy operations.
-// InsertBinlogs come from manifest (when storage_version >= StorageV3) or pb (otherwise).
-// Other types are always from pb.
+// InsertBinlogs come from manifest (when storage_version >= StorageV3) or PB
+// (otherwise). V3 text/JSON physical files are also manifest-owned; the PB
+// fields remain metadata only.
 type SegmentFiles struct {
 	// From manifest (when storage_version >= StorageV3) or pb (when < StorageV3)
 	InsertBinlogs []string
@@ -46,57 +48,19 @@ type SegmentFiles struct {
 	// LOB files at partition level (only for StorageV3+ with TEXT fields)
 	LobFiles []string
 
-	// Always from pb
+	// Always from PB
 	DeltaBinlogs      []string
 	StatsBinlogs      []string
 	Bm25Binlogs       []string
 	VectorScalarIndex []string
-	TextIndex         []string
-	JSONKeyIndex      []string
-	JSONStats         []string
+
+	// From PB before StorageV3; manifest-owned from StorageV3 onward.
+	TextIndex    []string
+	JSONKeyIndex []string
+	JSONStats    []string
 }
 
-// Copy Mode Implementation for Snapshot/Backup Import
-//
-// This file implements high-performance segment import by copying files directly
-// instead of reading, parsing, and rewriting data. This is specifically designed
-// for snapshot restore and backup import scenarios where data format is identical.
-//
-// IMPLEMENTATION APPROACH:
-// 1. Pre-calculate all file path mappings (source -> target) in one pass
-// 2. Copy files sequentially using ChunkManager.Copy()
-// 3. Preserve all binlog metadata (EntriesNum, Timestamps, LogSize) from source
-// 4. Build complete index metadata (vector/scalar, text, JSON) from source
-// 5. Generate complete segment metadata with accurate row counts
-//
-// SUPPORTED FILE TYPES:
-// - Binlogs: Insert (required), Delta, Stats, BM25
-// - Indexes: Vector/Scalar indexes, Text indexes, JSON Key indexes
-//
-// WHY THIS APPROACH:
-// - Direct file copying is 10-100x faster than data parsing/rewriting
-// - Snapshot/backup scenarios guarantee data format compatibility
-// - All metadata is preserved from source (binlogs, indexes, row counts, timestamps)
-// - Simplified error handling - any copy failure aborts the entire operation
-//
-// SAFETY:
-// - All file operations are validated and logged
-// - Copy failures are properly detected and reported with full context
-// - Fail-fast behavior prevents partial/inconsistent imports
-//
 // CopySegmentAndIndexFiles copies all segment files and index files sequentially.
-//
-// Process flow:
-// 1. Collect all source files (from manifest or pb)
-// 2. Generate src->dst path mappings
-// 3. Execute file copy operations
-// 3.5. For manifest segments (StorageV3+), add logical pb path mappings after physical
-//      files are copied (needed for metadata generation which expects pb paths)
-// 4. Build index metadata from source
-// 5. Generate segment metadata with path mappings
-// 6. Compress paths for RPC efficiency
-// 7. Build result with all metadata
-// 8. Transform manifest path if present
 
 // transformManifestPath replaces source IDs in manifest path with target IDs.
 //
@@ -129,7 +93,11 @@ func transformManifestPath(
 // Returns (nil, error) if the walk fails.
 func listAllFiles(ctx context.Context, cm storage.ChunkManager, basePath string) ([]string, error) {
 	var files []string
-	err := cm.WalkWithPrefix(ctx, basePath, true, func(info *storage.ChunkObjectInfo) bool {
+	walkPrefix := basePath
+	if !strings.HasSuffix(walkPrefix, "/") {
+		walkPrefix += "/"
+	}
+	err := cm.WalkWithPrefix(ctx, walkPrefix, true, func(info *storage.ChunkObjectInfo) bool {
 		files = append(files, info.FilePath)
 		return true
 	})
@@ -137,11 +105,6 @@ func listAllFiles(ctx context.Context, cm storage.ChunkManager, basePath string)
 		return nil, err
 	}
 	return files, nil
-}
-
-// copyFile copies a single file from src to dst using the chunk manager.
-func copyFile(ctx context.Context, cm storage.ChunkManager, src, dst string) error {
-	return cm.Copy(ctx, src, dst)
 }
 
 // extractFromPb extracts file paths from FieldBinlog list (insert/delta/stats/bm25).
@@ -214,10 +177,12 @@ func extractJSONFiles(jsonIndexInfos map[int64]*datapb.JsonKeyStats) ([]string, 
 //     manifest_path missing → error. Listing fails → error. Empty file list → OK (no binlogs).
 //   - storage_version < StorageV3: use pb paths (traditional non-packed format).
 //
-// For other 7 types: always from pb (not yet in manifest).
+// Delta/stats/BM25 and vector/scalar indexes still come from PB. Text/JSON
+// physical files come from PB only before StorageV3.
 func collectSegmentFiles(
 	ctx context.Context,
-	cm storage.ChunkManager,
+	sourceCM storage.ChunkManager,
+	sourceStorageConfig *indexpb.StorageConfig,
 	source *datapb.CopySegmentSource,
 ) (*SegmentFiles, error) {
 	files := &SegmentFiles{}
@@ -234,8 +199,9 @@ func collectSegmentFiles(
 		if err != nil {
 			return nil, merr.Wrapf(err, "failed to unmarshal manifest path %q for segment %d", manifestPath, source.GetSegmentId())
 		}
+		basePath = snapshotstorage.NormalizeSnapshotObjectPath(basePath)
 
-		allFiles, listErr := listAllFiles(ctx, cm, basePath)
+		allFiles, listErr := listAllFiles(ctx, sourceCM, basePath)
 		if listErr != nil {
 			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
 		}
@@ -252,12 +218,9 @@ func collectSegmentFiles(
 		// but multiple segments share that directory. We must only copy the files
 		// referenced by this segment's manifest to preserve the invariant that
 		// each LOB file belongs to exactly one segment.
-		storageConfig := compaction.CreateStorageConfig()
-		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
+		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, sourceStorageConfig)
 		if lobErr != nil {
-			mlog.Debug(context.TODO(), "no LOB files found in manifest (may not have TEXT fields)",
-				mlog.String("manifestPath", manifestPath),
-				mlog.Err(lobErr))
+			return nil, merr.Wrapf(lobErr, "failed to collect LOB files from manifest for segment %d", source.GetSegmentId())
 		} else if len(lobFileInfos) > 0 {
 			// GetManifestLobFiles returns absolute paths (the manifest
 			// deserializer calls ToAbsolute internally), so use them directly.
@@ -355,17 +318,30 @@ func generateMappingsFromFiles(
 	if err := addMappings(files.LobFiles, FileTypeLOB); err != nil {
 		return nil, err
 	}
+	if source.GetStorageVersion() == storage.StorageV2 && source.GetManifestPath() != "" {
+		if err := addMappings([]string{source.GetManifestPath()}, BinlogTypeInsert); err != nil {
+			return nil, err
+		}
+	}
 
 	return mappings, nil
 }
 
 func CopySegmentAndIndexFiles(
 	ctx context.Context,
-	cm storage.ChunkManager,
+	sourceCM storage.ChunkManager,
+	sourceStorageConfig *indexpb.StorageConfig,
+	copier storage.CrossBucketCopier,
+	sourceBucket string,
+	targetBucket string,
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 	logFields []mlog.Field,
 ) (*datapb.CopySegmentResult, []string, error) {
+	if copier == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("cross-bucket copier is nil")
+	}
+
 	segmentID := source.GetSegmentId()
 	useManifest := source.GetStorageVersion() >= storage.StorageV3
 
@@ -376,7 +352,7 @@ func CopySegmentAndIndexFiles(
 		mlog.Bool("isExternalCollection", source.GetIsExternalCollection()))
 
 	// Step 1: Collect all files to copy
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, sourceCM, sourceStorageConfig, source)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to collect segment files")
 	}
@@ -386,20 +362,20 @@ func CopySegmentAndIndexFiles(
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to generate file mappings")
 	}
-
 	// Step 3: Execute all copy operations
 	copiedFiles := make([]string, 0, len(mappings))
 	for src, dst := range mappings {
+		copySource := snapshotstorage.NormalizeSnapshotObjectPath(src)
 		mlog.Debug(context.TODO(), "copying file",
-			mlog.String("src", src),
+			mlog.String("src", snapshotstorage.RedactSnapshotObjectPath(src)),
 			mlog.String("dst", dst))
 
-		if err := copyFile(ctx, cm, src, dst); err != nil {
+		if err := copier.CopyCrossBucket(ctx, sourceBucket, copySource, targetBucket, dst); err != nil {
 			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
-			fields = append(fields, mlog.String("src", src), mlog.String("dst", dst), mlog.Err(err))
+			fields = append(fields, mlog.String("src", snapshotstorage.RedactSnapshotObjectPath(src)), mlog.String("dst", dst), mlog.Err(err))
 			mlog.Warn(context.TODO(), "failed to copy file", fields...)
-			return nil, copiedFiles, merr.Wrapf(err, "failed to copy file from %s to %s", src, dst)
+			return nil, copiedFiles, merr.Wrapf(err, "failed to copy file from %s to %s", snapshotstorage.RedactSnapshotObjectPath(src), dst)
 		}
 		copiedFiles = append(copiedFiles, dst)
 	}
@@ -469,11 +445,20 @@ func CopySegmentAndIndexFiles(
 		JsonKeyIndexInfos: jsonKeyIndexInfos,
 	}
 
-	// Step 8: Transform and propagate manifest_path for StorageV3+ segments
+	// Step 8: Transform and propagate manifest_path.
 	if useManifest {
 		targetManifestPath, err := transformManifestPath(source.GetManifestPath(), source, target)
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to transform manifest path")
+		}
+		result.ManifestPath = targetManifestPath
+	} else if source.GetStorageVersion() == storage.StorageV2 && source.GetManifestPath() != "" {
+		targetManifestPath, ok := mappings[source.GetManifestPath()]
+		if !ok {
+			return nil, copiedFiles, merr.WrapErrDataIntegrityMsg(
+				"missing copied StorageV2 manifest mapping for segment %d",
+				source.GetSegmentId(),
+			)
 		}
 		result.ManifestPath = targetManifestPath
 	}
@@ -586,6 +571,9 @@ func generateSegmentInfoFromSource(
 	}
 	segmentInfo.Binlogs = binlogs
 	segmentInfo.ImportedRows = totalRows
+	if source.GetStorageVersion() >= storage.StorageV3 && source.GetNumOfRows() > 0 {
+		segmentInfo.ImportedRows = source.GetNumOfRows()
+	}
 
 	// Process stats binlogs (no row counting)
 	statslogs, _, err := transformFieldBinlogs(source.GetStatsBinlogs(), mappings, false, false)
@@ -611,10 +599,80 @@ func generateSegmentInfoFromSource(
 	return segmentInfo, nil
 }
 
+func remapSourceRootPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	rawSourceRoot := strings.TrimSpace(source.GetSourceRootPath())
+	if rawSourceRoot == "" {
+		return sourcePath, nil
+	}
+
+	rootBucket, rootObject, rootEndpoint, err := snapshotstorage.ParseForeignRootURI(rawSourceRoot)
+	if err != nil {
+		return "", merr.Wrap(err, "invalid copy segment source root")
+	}
+	pathBucket, pathObject, pathEndpoint, err := snapshotstorage.ParseForeignURI(sourcePath)
+	if err != nil {
+		return "", merr.Wrap(err, "invalid snapshot file path")
+	}
+
+	rootURI, err := url.Parse(rawSourceRoot)
+	if err != nil {
+		return "", merr.WrapErrDataIntegrity(err, "invalid copy segment source root")
+	}
+	pathURI, err := url.Parse(sourcePath)
+	if err != nil {
+		return "", merr.WrapErrDataIntegrity(err, "invalid snapshot file path")
+	}
+	rootIsCompleteURI := rootURI.Scheme != "" && rootURI.Host != ""
+	pathIsCompleteURI := pathURI.Scheme != "" && pathURI.Host != ""
+	if rootIsCompleteURI && pathIsCompleteURI &&
+		(snapshotstorage.CanonicalForeignScheme(rootURI.Scheme) != snapshotstorage.CanonicalForeignScheme(pathURI.Scheme) ||
+			rootBucket != pathBucket ||
+			!strings.EqualFold(rootEndpoint, pathEndpoint)) {
+		return "", merr.WrapErrDataIntegrityMsg(
+			"snapshot file URI %q does not match source root %q",
+			snapshotstorage.RedactSnapshotObjectPath(sourcePath),
+			snapshotstorage.RedactSnapshotObjectPath(rawSourceRoot),
+		)
+	}
+
+	rootObject = strings.Trim(rootObject, "/")
+	pathObject = strings.Trim(pathObject, "/")
+	relativePath := pathObject
+	if rootObject != "" {
+		switch {
+		case pathObject == rootObject:
+			relativePath = ""
+		case strings.HasPrefix(pathObject, rootObject+"/"):
+			relativePath = strings.TrimPrefix(pathObject, rootObject+"/")
+		default:
+			return "", merr.WrapErrDataIntegrityMsg(
+				"snapshot file path %q is outside source root %q",
+				snapshotstorage.RedactSnapshotObjectPath(sourcePath),
+				snapshotstorage.RedactSnapshotObjectPath(rawSourceRoot),
+			)
+		}
+	}
+
+	targetRootPath := strings.Trim(target.GetTargetRootPath(), "/")
+	if targetRootPath == "" {
+		return relativePath, nil
+	}
+	if relativePath == "" {
+		return targetRootPath, nil
+	}
+	return path.Join(targetRootPath, relativePath), nil
+}
+
 // generateTargetPath converts source file path to target path by replacing collection/partition/segment IDs
 // Binlog path format: {rootPath}/{log_type}/{collectionID}/{partitionID}/{segmentID}/{fieldID}/{logID}
 // Example: files/insert_log/111/222/333/444/555.log -> files/insert_log/aaa/bbb/ccc/444/555.log
 func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	var err error
+	sourcePath, err = remapSourceRootPath(sourcePath, source, target)
+	if err != nil {
+		return "", err
+	}
+
 	// Convert IDs to strings for replacement
 	targetCollectionIDStr := strconv.FormatInt(target.GetCollectionId(), 10)
 	targetPartitionIDStr := strconv.FormatInt(target.GetPartitionId(), 10)
@@ -653,6 +711,12 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 // LOB path structure: {root}/insert_log/{coll}/{part}/lobs/{field}/_data/{file}.vx
 // Unlike segment paths, LOB paths have no segment ID component.
 func generateTargetLOBPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	var err error
+	sourcePath, err = remapSourceRootPath(sourcePath, source, target)
+	if err != nil {
+		return "", err
+	}
+
 	parts := strings.Split(sourcePath, "/")
 
 	logTypeIndex := -1
@@ -871,6 +935,12 @@ func generateTargetIndexPath(
 	indexType string,
 	pathVersion indexpb.IndexStorePathVersion,
 ) (string, error) {
+	var err error
+	sourcePath, err = remapSourceRootPath(sourcePath, source, target)
+	if err != nil {
+		return "", err
+	}
+
 	// Split path into parts
 	parts := strings.Split(sourcePath, "/")
 
@@ -995,11 +1065,7 @@ const (
 func shortenIndexFilePaths(fullPaths []string) []string {
 	result := make([]string, 0, len(fullPaths))
 	for _, fullPath := range fullPaths {
-		// Extract base filename (last segment after final '/')
-		parts := strings.Split(fullPath, "/")
-		if len(parts) > 0 {
-			result = append(result, parts[len(parts)-1])
-		}
+		result = append(result, path.Base(fullPath))
 	}
 	return result
 }

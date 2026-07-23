@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -34,6 +35,13 @@ import (
 type AzureObjectStorage struct {
 	*service.Client
 }
+
+const (
+	azureCopyPollInterval = 200 * time.Millisecond
+	// Caller deadlines are honored. This default only applies when the caller
+	// passes a context without a deadline, so pending Azure copies cannot hang forever.
+	azureCopyDefaultTimeout = 24 * time.Hour
+)
 
 func newAzureObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*AzureObjectStorage, error) {
 	client, err := objectstorage.NewAzureObjectStorageClient(ctx, c)
@@ -195,15 +203,64 @@ func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, 
 	return mapObjectStorageError(objectName, err)
 }
 
-func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
-	containerClient := AzureObjectStorage.NewContainerClient(bucketName)
-	srcBlobClient := containerClient.NewBlockBlobClient(srcObjectName)
-	dstBlobClient := containerClient.NewBlockBlobClient(dstObjectName)
+func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
+	srcURL := AzureObjectStorage.NewContainerClient(srcContainer).NewBlockBlobClient(srcObjectName).URL()
+	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
 
-	// Get source blob URL
-	srcURL := srcBlobClient.URL()
-
-	// Start copy operation
+	// Azure starts blob copy asynchronously. Wait here so callers can treat
+	// CopyCrossBucket as completed only after the destination object is readable.
 	_, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
-	return mapObjectStorageError(dstObjectName, err)
+	if err != nil {
+		return mapObjectStorageError(dstObjectName, err)
+	}
+	return waitAzureCopyComplete(ctx, dstBlobClient, dstObjectName)
+}
+
+func waitAzureCopyComplete(ctx context.Context, dstBlobClient *blockblob.Client, dstObjectName string) error {
+	if _, ok := ctx.Deadline(); !ok {
+		timeoutCtx, cancel := context.WithTimeout(ctx, azureCopyDefaultTimeout)
+		defer cancel()
+		ctx = timeoutCtx
+	}
+
+	ticker := time.NewTicker(azureCopyPollInterval)
+	defer ticker.Stop()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		props, err := dstBlobClient.GetProperties(ctx, &blob.GetPropertiesOptions{})
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return mapObjectStorageError(dstObjectName, err)
+		}
+		if props.CopyStatus == nil {
+			return merr.WrapErrIoFailedReason(fmt.Sprintf("azure copy status for %s is empty", dstObjectName))
+		}
+
+		switch *props.CopyStatus {
+		case blob.CopyStatusTypeSuccess:
+			return nil
+		case blob.CopyStatusTypeFailed, blob.CopyStatusTypeAborted:
+			statusDescription := ""
+			if props.CopyStatusDescription != nil {
+				statusDescription = *props.CopyStatusDescription
+			}
+			return merr.WrapErrIoFailedReason(
+				fmt.Sprintf("azure copy for %s finished with status %s: %s", dstObjectName, *props.CopyStatus, statusDescription))
+		case blob.CopyStatusTypePending:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		default:
+			return merr.WrapErrIoFailedReason(
+				fmt.Sprintf("azure copy for %s returned unknown status %s", dstObjectName, *props.CopyStatus))
+		}
+	}
 }
