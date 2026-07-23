@@ -4864,6 +4864,20 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionNormal() {
 	})
 }
 
+func (s *CollectionFunctionSuite) TestAddCollectionFunctionInvalidType() {
+	// no expectation on s.mp: an invalid function type must be rejected
+	// before any AddCollectionFunction RPC is issued
+	addFunctionTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, AddFunctionAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "test_function", "type": "InvalidType", "inputFieldNames": [], "OutputFieldNames": []}}`),
+			errCode:     1100,
+			errMsg:      "Unsupported function type: InvalidType: invalid parameter",
+		},
+	}
+	validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+}
+
 func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 	s.Run("success", func() {
 		alterFunctionTestCases := []requestBodyTestCase{
@@ -4896,6 +4910,20 @@ func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
 	})
+}
+
+func (s *CollectionFunctionSuite) TestAlterCollectionFunctionInvalidType() {
+	// no expectation on s.mp: an invalid function type must be rejected
+	// before any AlterCollectionFunction RPC is issued
+	alterFunctionTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, AlterFunctionAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "test_function", "function": {"name": "test_function", "type": "InvalidType", "inputFieldNames": [], "OutputFieldNames": []}}`),
+			errCode:     1100,
+			errMsg:      "Unsupported function type: InvalidType: invalid parameter",
+		},
+	}
+	validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
 }
 
 func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
