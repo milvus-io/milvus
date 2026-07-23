@@ -694,7 +694,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 }
             }
         };
-        {
+        if (!index->HasAllShreddingFields(pointer,
+                                          {milvus::index::JSONType::ARRAY})) {
             milvus::ScopedTimer timer(
                 "json_contains_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -934,7 +935,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             }
             res_view[row_offset] = false;
         };
-        {
+        if (!index->HasAllShreddingFields(pointer,
+                                          {milvus::index::JSONType::ARRAY})) {
             milvus::ScopedTimer timer(
                 "json_contains_array_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -1321,73 +1323,78 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                                                      active_count_);
             }
         }
-        // process shared data
-        ContainsAllMatcher<GetType> shared_matcher(*elements);
-        std::vector<uint64_t> shared_found_large(
-            shared_matcher.use_small() ? 0 : shared_matcher.num_words());
-        auto shared_executor = [&shared_matcher,
-                                &res_view,
-                                &valid_res_view,
-                                &shared_found_large](milvus::BsonView bson,
-                                                     uint32_t row_offset,
-                                                     uint32_t value_offset) {
-            auto val = bson.ParseAsArrayAtOffset(value_offset);
+        const bool need_shared_data = !index->HasAllShreddingFields(
+            pointer, {milvus::index::JSONType::ARRAY});
+        if (need_shared_data) {
+            // process shared data
+            ContainsAllMatcher<GetType> shared_matcher(*elements);
+            std::vector<uint64_t> shared_found_large(
+                shared_matcher.use_small() ? 0 : shared_matcher.num_words());
+            auto shared_executor = [&shared_matcher,
+                                    &res_view,
+                                    &valid_res_view,
+                                    &shared_found_large](
+                                       milvus::BsonView bson,
+                                       uint32_t row_offset,
+                                       uint32_t value_offset) {
+                auto val = bson.ParseAsArrayAtOffset(value_offset);
 
-            if (!val.has_value()) {
-                return;
-            }
-            valid_res_view[row_offset] = true;
+                if (!val.has_value()) {
+                    return;
+                }
+                valid_res_view[row_offset] = true;
 
-            if (shared_matcher.use_small()) {
-                uint64_t found = 0;
-                for (const auto& element : val.value()) {
-                    auto value = [&]() -> std::optional<GetType> {
-                        if constexpr (std::is_same_v<GetType, int64_t> ||
-                                      std::is_same_v<GetType, double>) {
-                            return GetBsonNumberExact<GetType>(
-                                element.get_value());
-                        } else {
-                            return milvus::BsonView::GetValueFromBsonView<
-                                GetType>(element.get_value());
+                if (shared_matcher.use_small()) {
+                    uint64_t found = 0;
+                    for (const auto& element : val.value()) {
+                        auto value = [&]() -> std::optional<GetType> {
+                            if constexpr (std::is_same_v<GetType, int64_t> ||
+                                          std::is_same_v<GetType, double>) {
+                                return GetBsonNumberExact<GetType>(
+                                    element.get_value());
+                            } else {
+                                return milvus::BsonView::GetValueFromBsonView<
+                                    GetType>(element.get_value());
+                            }
+                        }();
+                        if (!value.has_value()) {
+                            continue;
                         }
-                    }();
-                    if (!value.has_value()) {
-                        continue;
-                    }
-                    if (shared_matcher.set_if_found(value.value(), found)) {
-                        res_view[row_offset] = true;
-                        return;
-                    }
-                }
-                res_view[row_offset] = (found == shared_matcher.full_mask());
-            } else {
-                std::fill(
-                    shared_found_large.begin(), shared_found_large.end(), 0);
-                size_t remaining = shared_matcher.target_count();
-                for (const auto& element : val.value()) {
-                    auto value = [&]() -> std::optional<GetType> {
-                        if constexpr (std::is_same_v<GetType, int64_t> ||
-                                      std::is_same_v<GetType, double>) {
-                            return GetBsonNumberExact<GetType>(
-                                element.get_value());
-                        } else {
-                            return milvus::BsonView::GetValueFromBsonView<
-                                GetType>(element.get_value());
+                        if (shared_matcher.set_if_found(value.value(), found)) {
+                            res_view[row_offset] = true;
+                            return;
                         }
-                    }();
-                    if (!value.has_value()) {
-                        continue;
                     }
-                    if (shared_matcher.set_if_found(
-                            value.value(), shared_found_large, remaining)) {
-                        res_view[row_offset] = true;
-                        return;
+                    res_view[row_offset] =
+                        (found == shared_matcher.full_mask());
+                } else {
+                    std::fill(shared_found_large.begin(),
+                              shared_found_large.end(),
+                              0);
+                    size_t remaining = shared_matcher.target_count();
+                    for (const auto& element : val.value()) {
+                        auto value = [&]() -> std::optional<GetType> {
+                            if constexpr (std::is_same_v<GetType, int64_t> ||
+                                          std::is_same_v<GetType, double>) {
+                                return GetBsonNumberExact<GetType>(
+                                    element.get_value());
+                            } else {
+                                return milvus::BsonView::GetValueFromBsonView<
+                                    GetType>(element.get_value());
+                            }
+                        }();
+                        if (!value.has_value()) {
+                            continue;
+                        }
+                        if (shared_matcher.set_if_found(
+                                value.value(), shared_found_large, remaining)) {
+                            res_view[row_offset] = true;
+                            return;
+                        }
                     }
+                    res_view[row_offset] = (remaining == 0);
                 }
-                res_view[row_offset] = (remaining == 0);
-            }
-        };
-        {
+            };
             milvus::ScopedTimer timer(
                 "json_contains_all_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -1743,7 +1750,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             }
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
-        {
+        if (!index->HasAllShreddingFields(pointer,
+                                          {milvus::index::JSONType::ARRAY})) {
             milvus::ScopedTimer timer(
                 "json_contains_all_difftype_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -1989,7 +1997,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             res_view[row_offset] =
                 exist_elements_index.size() == elements.size();
         };
-        {
+        if (!index->HasAllShreddingFields(pointer,
+                                          {milvus::index::JSONType::ARRAY})) {
             milvus::ScopedTimer timer(
                 "json_contains_all_array_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -2318,7 +2327,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 }
             }
         };
-        {
+        if (!index->HasAllShreddingFields(pointer,
+                                          {milvus::index::JSONType::ARRAY})) {
             milvus::ScopedTimer timer(
                 "json_contains_difftype_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });

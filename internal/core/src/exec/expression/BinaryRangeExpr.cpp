@@ -929,7 +929,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 }
             }
         };
-        {
+        bool skip_shared_data = false;
+        if constexpr (std::is_same_v<GetType, int64_t> ||
+                      std::is_same_v<GetType, double>) {
+            skip_shared_data =
+                index->HasAllShreddingFields(pointer,
+                                             {milvus::index::JSONType::INT64,
+                                              milvus::index::JSONType::DOUBLE});
+        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                             std::is_same_v<GetType, std::string>) {
+            skip_shared_data = index->HasAllShreddingFields(
+                pointer, {milvus::index::JSONType::STRING});
+        }
+
+        if (!skip_shared_data) {
             milvus::ScopedTimer timer(
                 "binary_range_json_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
