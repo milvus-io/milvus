@@ -294,6 +294,47 @@ func (s *CopySegmentMetaSuite) TestUpdateJob_Success() {
 	s.Equal("executing", updatedJob.GetReason())
 }
 
+func (s *CopySegmentMetaSuite) TestUpdateJobInState_AppliesOnlyWhenStateMatches() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// Expected state mismatch (job is Failed, expected Pending): the update
+	// must be skipped without touching the catalog, so a stale caller cannot
+	// resurrect a terminal job.
+	updated, err := s.copyMeta.UpdateJobInState(context.TODO(), 100,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.False(updated)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		s.copyMeta.GetJob(context.TODO(), 100).GetState())
+
+	// Missing job: skipped, no error.
+	updated, err = s.copyMeta.UpdateJobInState(context.TODO(), 999,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.False(updated)
+
+	// Matching expected state: the update applies.
+	updated, err = s.copyMeta.UpdateJobInState(context.TODO(), 100,
+		datapb.CopySegmentJobState_CopySegmentJobFailed,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.True(updated)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		s.copyMeta.GetJob(context.TODO(), 100).GetState())
+}
+
 func (s *CopySegmentMetaSuite) TestUpdateJob_NotFound() {
 	// Try to update non-existent job (should not error, just no-op)
 	err := s.copyMeta.UpdateJob(context.TODO(), 999,
@@ -551,6 +592,36 @@ func (s *CopySegmentMetaSuite) TestUpdateTask_Success() {
 	updatedTask := s.copyMeta.GetTask(context.TODO(), 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
 	s.Equal("executing", updatedTask.GetReason())
+}
+
+func (s *CopySegmentMetaSuite) TestUpdateTask_SaveFailureLeavesCacheUnchanged() {
+	// AddTask persists fine; the subsequent UpdateTask save fails.
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable")).Once()
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+	})
+	err := s.copyMeta.AddTask(context.TODO(), task)
+	s.NoError(err)
+
+	err = s.copyMeta.UpdateTask(context.TODO(), 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskReason("should not stick"))
+	s.Error(err)
+
+	// The in-memory cache must still reflect the persisted (old) state.
+	cachedTask := s.copyMeta.GetTask(context.TODO(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, cachedTask.GetState())
+	s.Empty(cachedTask.GetReason())
 }
 
 func (s *CopySegmentMetaSuite) TestUpdateTask_NotFound() {
@@ -1044,4 +1115,215 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_CatalogError() {
 	// Job should still be in Executing state (catalog write failed, in-memory unchanged)
 	savedJob := s.copyMeta.GetJob(context.TODO(), 600)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, savedJob.GetState())
+}
+
+// TestUpdateJobStateAndReleaseRef_SkipsTerminalJob covers the terminal-state
+// guard: a caller holding a stale non-terminal snapshot must not rewrite the
+// outcome a concurrent path already persisted. This is the review-reported race
+// where tryTimeoutJob runs after checkCopyingJob completed the job in the same
+// checker round and would flip Completed -> Failed.
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_SkipsTerminalJob() {
+	// Only the AddJob write is expected; the guarded update must not reach the catalog.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        700,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			TotalRows:    42,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 700,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("timeout"))
+	s.NoError(err)
+
+	saved := s.copyMeta.GetJob(context.TODO(), 700)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, saved.GetState())
+	s.Empty(saved.GetReason())
+	s.Equal(int64(42), saved.GetTotalRows())
+}
+
+// TestUpdateJobStateAndReleaseRef_AppliesOnNonTerminalJob is the positive
+// counterpart: the guard must not block the legitimate Executing -> Failed
+// transition that the timeout and fail-fast paths rely on.
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_AppliesOnNonTerminalJob() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        701,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 701,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("timeout")))
+
+	saved := s.copyMeta.GetJob(context.TODO(), 701)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, saved.GetState())
+	s.Equal("timeout", saved.GetReason())
+}
+
+// addJobWithTask is a helper for the UpdateTaskInStateIfJobActive cases.
+func (s *CopySegmentMetaSuite) addJobWithTask(jobID, taskID int64,
+	jobState datapb.CopySegmentJobState, taskState datapb.CopySegmentTaskState,
+) {
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			State:        jobState,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       taskID,
+		JobId:        jobID,
+		CollectionId: s.collectionID,
+		State:        taskState,
+		NodeId:       7,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+}
+
+// TestUpdateTaskInStateIfJobActive_AppliesWhenJobActive: the worker-loss reset
+// must go through while the parent job is still Executing.
+func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_AppliesWhenJobActive() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	s.addJobWithTask(710, 1710,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
+
+	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1710,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID))
+	s.NoError(err)
+	s.True(applied)
+
+	saved := s.copyMeta.GetTask(context.TODO(), 1710)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, saved.GetState())
+	s.EqualValues(NullNodeID, saved.GetNodeId())
+}
+
+// TestUpdateTaskInStateIfJobActive_SkipsWhenJobTerminal is the review-reported
+// case: a delayed worker-loss response must not revive a task whose parent job
+// already failed, which would earn the scheduler one extra dispatch.
+func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_SkipsWhenJobTerminal() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	// Only the AddTask write; the guarded update must not reach the catalog.
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	s.addJobWithTask(711, 1711,
+		datapb.CopySegmentJobState_CopySegmentJobFailed,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
+
+	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1711,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID))
+	s.NoError(err)
+	s.False(applied)
+
+	saved := s.copyMeta.GetTask(context.TODO(), 1711)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, saved.GetState())
+	s.Equal(int64(7), saved.GetNodeId())
+}
+
+// TestUpdateTaskInStateIfJobActive_SkipsWhenTaskStateMismatch: a task that has
+// already left InProgress (e.g. checkFailedJob marked it Failed) must not be
+// reset back to Pending by a late worker-loss response.
+func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_SkipsWhenTaskStateMismatch() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	s.addJobWithTask(712, 1712,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
+
+	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1712,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID))
+	s.NoError(err)
+	s.False(applied)
+
+	saved := s.copyMeta.GetTask(context.TODO(), 1712)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
+}
+
+// TestUpdateTaskInStateIfJobActive_MissingTaskOrJob covers the lookup misses.
+func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_MissingTaskOrJob() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	// Task does not exist at all.
+	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 9999,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending))
+	s.NoError(err)
+	s.False(applied)
+
+	// Task exists but its parent job is absent from meta.
+	orphan := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	orphan.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1713,
+		JobId:        713, // no such job
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), orphan))
+
+	applied, err = s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1713,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending))
+	s.NoError(err)
+	s.False(applied)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		s.copyMeta.GetTask(context.TODO(), 1713).GetState())
+}
+
+// TestUpdateTaskInStateIfJobActive_CatalogErrorLeavesTaskUnchanged ensures a
+// failed persist does not mutate the in-memory task.
+func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_CatalogErrorLeavesTaskUnchanged() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).
+		Return(errors.New("catalog down")).Once()
+
+	s.addJobWithTask(714, 1714,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
+
+	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1714,
+		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID))
+	s.Error(err)
+	s.False(applied)
+
+	saved := s.copyMeta.GetTask(context.TODO(), 1714)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, saved.GetState())
+	s.Equal(int64(7), saved.GetNodeId())
 }

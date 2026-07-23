@@ -180,6 +180,155 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_CreateTasks() {
 	s.Equal([]int{1, 2}, mappingCounts, "should have one task with 1 mapping and one with 2 mappings")
 }
 
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_ResumesPartialTaskCreation() {
+	// Simulate a previous round that persisted only the first task before
+	// failing (etcd hiccup / DataCoord restart): checkPendingJob must create
+	// tasks for the remaining uncovered segments and move the job to Executing
+	// instead of returning early and leaving the job Pending forever.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.alloc.EXPECT().AllocID(mock.Anything).Return(int64(1002), nil).Times(1)
+
+	idMappings := []*datapb.CopySegmentIDMapping{
+		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
+		{SourceSegmentId: 3, TargetSegmentId: 103, PartitionId: 10},
+	}
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:   idMappings,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// Pre-existing task from the failed round covers the first two mappings.
+	partialTask := &copySegmentTask{
+		tr:    timerecord.NewTimeRecorder("test task"),
+		times: taskcommon.NewTimes(),
+	}
+	partialTask.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		NodeId:       NullNodeID,
+		TaskSlot:     1,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		IdMappings:   idMappings[:2],
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), partialTask))
+
+	Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("2")
+	defer Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("10")
+
+	s.checker.checkPendingJob(job)
+
+	// Job must reach Executing.
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+
+	// The uncovered mapping (source segment 3) must now have a task.
+	tasks := s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID)
+	s.Len(tasks, 2)
+	coveredSources := make(map[int64]int)
+	for _, task := range tasks {
+		for _, mapping := range task.GetIdMappings() {
+			coveredSources[mapping.GetSourceSegmentId()]++
+		}
+	}
+	s.Equal(map[int64]int{1: 1, 2: 1, 3: 1}, coveredSources,
+		"each source segment must be covered exactly once")
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_AllTasksExistTransitionsToExecuting() {
+	// Simulate a previous round that created all tasks but failed to persist
+	// the Pending→Executing transition: checkPendingJob must not create any
+	// new task (no AllocID expectation) and must retry the transition.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	idMappings := []*datapb.CopySegmentIDMapping{
+		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
+	}
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:   idMappings,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	fullTask := &copySegmentTask{
+		tr:    timerecord.NewTimeRecorder("test task"),
+		times: taskcommon.NewTimes(),
+	}
+	fullTask.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		NodeId:       NullNodeID,
+		TaskSlot:     1,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		IdMappings:   idMappings,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), fullTask))
+
+	s.checker.checkPendingJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+	s.Len(s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID), 1)
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurrectFailedJob() {
+	// Regression test: checkPendingJob receives a job snapshot taken before it
+	// runs, while tasks of a Pending job can already be dispatched and fail
+	// concurrently — markTaskAndJobFailed then moves the job to Failed and
+	// releases its snapshot pin. The checker, still holding the stale Pending
+	// snapshot, must neither create more tasks nor resurrect the job as
+	// Executing.
+	// AddJob + the concurrent Failed transition each persist once; the stale
+	// checkPendingJob call must not persist anything (and must not AllocID —
+	// the allocator mock has no expectation and would fail the test).
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	staleJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), staleJob))
+
+	// Concurrent failure path moves the cached job to Failed. The cached entry
+	// is replaced with a Failed clone; `staleJob` keeps its Pending state and
+	// plays the stale snapshot below.
+	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("task failed concurrently")))
+
+	s.checker.checkPendingJob(staleJob)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal("task failed concurrently", updatedJob.GetReason())
+	s.Empty(s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID))
+}
+
 func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
@@ -422,6 +571,55 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob() {
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
 	s.Equal("timeout", updatedJob.GetReason())
+}
+
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_FiresWithProductionTimeoutTs() {
+	// End-to-end unit check across the write site and the read site: the job
+	// creation path composes TimeoutTs via CopyJobTimeoutTs, and tryTimeoutJob
+	// must actually fire once that deadline has elapsed. Guards against the
+	// regression where the write site stored UnixNano while the reader decoded
+	// a hybrid TSO, so no job ever timed out.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			// Same composition as the creation path in snapshot_manager, with
+			// an already-elapsed deadline.
+			TimeoutTs: CopyJobTimeoutTs(-time.Minute),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal("timeout", updatedJob.GetReason())
+}
+
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_NotElapsedKeepsExecuting() {
+	// A freshly composed production deadline must NOT trigger the timeout.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			TimeoutTs:    CopyJobTimeoutTs(time.Hour),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
 }
 
 func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
@@ -927,4 +1125,42 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.Contains(updatedJob.GetReason(), "failed to flush")
 
 	// Verify: Ref count is released even on failure
+}
+
+// TestTryTimeoutJob_DoesNotOverwriteTerminalJob is the regression test for the
+// review nit on tryTimeoutJob: `job` is the snapshot captured before the checker
+// round began. In Start(), checkCopyingJob(job) runs first and may finish the
+// job (-> Completed) in that same round; tryTimeoutJob(job) then runs with the
+// still-Executing snapshot and, once the deadline has elapsed, would flip the
+// just-Completed job to Failed. The transition must be conditional on the
+// current state, not the snapshot's.
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_DoesNotOverwriteTerminalJob() {
+	// AddJob + the concurrent Completed transition. The timeout transition must
+	// not reach the catalog.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	staleJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			TimeoutTs:    CopyJobTimeoutTs(-time.Minute),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), staleJob))
+
+	// A concurrent path (finishJob in the same checker round) completes the job
+	// after the snapshot was taken.
+	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
+		UpdateCopyJobTotalRows(123)))
+
+	// tryTimeoutJob still holds the stale Executing snapshot with an elapsed deadline.
+	s.checker.tryTimeoutJob(staleJob)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
+	s.NotEqual("timeout", updatedJob.GetReason())
+	s.Equal(int64(123), updatedJob.GetTotalRows())
 }
