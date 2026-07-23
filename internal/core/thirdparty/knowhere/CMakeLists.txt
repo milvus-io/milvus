@@ -40,7 +40,7 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES 
 # on-device (convert_labels_kernel) instead of a D2H->host->H2D round-trip;
 # milvus uses the searchHost path so this is a no-op for production but keeps
 # the vendored tree in sync with faiss.
-set( KNOWHERE_VERSION 2959fe3dead76ca5d11f1c2611d60d1af9f48932 )
+set( KNOWHERE_VERSION 0d01cac0d961c923596262cc05f5539fb9bed338 )
 set( GIT_REPOSITORY  "https://github.com/6si/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")

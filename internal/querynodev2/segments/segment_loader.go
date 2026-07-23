@@ -102,6 +102,10 @@ type ResourceEstimate struct {
 	FinalMemoryCost uint64
 	FinalDiskCost   uint64
 	HasRawData      bool
+	// GpuMemoryCost is the per-segment device (VRAM) footprint retained after
+	// load; 0 for CPU indexes and for GPU indexes that do not report a distinct
+	// device footprint (those fall back to MaxMemoryCost for GPU admission).
+	GpuMemoryCost uint64
 }
 
 func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
@@ -111,6 +115,7 @@ func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
 		FinalMemoryCost: uint64(estimate.final_memory_cost),
 		FinalDiskCost:   uint64(estimate.final_disk_cost),
 		HasRawData:      bool(estimate.has_raw_data),
+		GpuMemoryCost:   uint64(estimate.gpu_memory_cost),
 	}
 }
 
@@ -2183,7 +2188,17 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			}
 
 			if gpuIndexRequiresGpu(fieldIndexInfo.IndexParams) {
-				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
+				// GPU admission (checkSegmentGpuMemSize) reserves the incremental
+				// VRAM a segment adds against actual device free memory. Prefer
+				// the index-reported device footprint; fall back to the host
+				// transient MaxMemoryCost for GPU indexes that don't report one.
+				// This avoids charging the (larger) host reconstruct/upload peak
+				// against VRAM, which over-reserves and falsely rejects loads.
+				gpuMemoryCost := estimateResult.GpuMemoryCost
+				if gpuMemoryCost == 0 {
+					gpuMemoryCost = estimateResult.MaxMemoryCost
+				}
+				fieldGpuMemorySize = append(fieldGpuMemorySize, gpuMemoryCost)
 			}
 
 			// could skip binlog or

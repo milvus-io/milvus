@@ -547,6 +547,10 @@ IndexFactory::VecIndexLoadResource(
     request.has_raw_data = CanUseIndexRawDataForField(field_type, has_raw_data);
     request.final_disk_cost = res.diskCost;
     request.final_memory_cost = res.memoryCost;
+    // Device footprint retained after load (0 for CPU indexes). Kept distinct
+    // from the host transient max_memory_cost so GPU admission reserves the real
+    // VRAM growth rather than the (larger) host reconstruct/upload peak.
+    request.gpu_memory_cost = res.gpuMemoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
         request.max_disk_cost = res.diskCost;
         request.max_memory_cost =
