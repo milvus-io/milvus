@@ -282,7 +282,7 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
                 break;
             }
             default:
-                ThrowInfo(DataTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "Unsupported data type for ORDER BY: {}",
                           static_cast<int>(data_type));
         }

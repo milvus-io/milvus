@@ -111,7 +111,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
         case DataType::STRING:
             return CanUseIndexForArray<std::string_view>();
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported element type when execute array "
                       "equal for index: {}",
                       expr_->column_.element_type_);
@@ -168,7 +168,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
                     }
                 }
                 default:
-                    ThrowInfo(DataTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "unsupported element type when execute array "
                               "equal for index: {}",
                               expr_->column_.element_type_);
@@ -282,7 +282,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     default:
                         ThrowInfo(
-                            DataTypeInvalid, "unknown data type: {}", val_type);
+                            UnexpectedError, "unknown data type: {}", val_type);
                 }
             } else {
                 switch (val_type) {
@@ -312,7 +312,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     default:
                         ThrowInfo(
-                            DataTypeInvalid, "unknown data type: {}", val_type);
+                            UnexpectedError, "unknown data type: {}", val_type);
                 }
             }
             break;
@@ -335,7 +335,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                             result = ExecRangeVisitorImplArray<double>(context);
                             break;
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       "floating point value is not supported "
                                       "for array element type: {}",
                                       expr_->column_.element_type_);
@@ -356,12 +356,12 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     break;
                 default:
                     ThrowInfo(
-                        DataTypeInvalid, "unknown data type: {}", val_type);
+                        UnexpectedError, "unknown data type: {}", val_type);
             }
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -675,7 +675,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             }
             default:
                 ThrowInfo(
-                    OpTypeInvalid,
+                    UnexpectedError,
                     fmt::format("unsupported operator type for unary expr: {}",
                                 op_type));
         }
@@ -1126,7 +1126,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
             }
             default:
                 ThrowInfo(
-                    OpTypeInvalid,
+                    UnexpectedError,
                     fmt::format("unsupported operator type for unary expr: {}",
                                 op_type));
         }
@@ -1658,7 +1658,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
             }
             default:
                 ThrowInfo(
-                    OpTypeInvalid,
+                    UnexpectedError,
                     fmt::format("unsupported operator type for unary expr: {}",
                                 op_type));
         }
@@ -1727,7 +1727,7 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
                     return res_vec;
                 }
                 default: {
-                    ThrowInfo(OpTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "unsupported range node {}",
                               expr_->op_type_);
                 }
@@ -1927,7 +1927,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             }
             default:
                 ThrowInfo(
-                    OpTypeInvalid,
+                    UnexpectedError,
                     fmt::format("unsupported operator type for unary expr: {}",
                                 expr_type));
         }
@@ -2174,7 +2174,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                 } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
                     res = index->FuzzyMatchQuery(query, max_edit_distance);
                 } else {
-                    ThrowInfo(OpTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "unsupported operator type for match query: {}",
                               op_type);
                 }

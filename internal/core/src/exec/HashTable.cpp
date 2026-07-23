@@ -49,7 +49,7 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
             hashers[i]->hash(i > 0, lookup.hashes_);
         } else {
             ThrowInfo(
-                milvus::OpTypeInvalid,
+                milvus::UnexpectedError,
                 "Not support target hashMode, only support kHash for now");
         }
     }

@@ -1938,7 +1938,7 @@ class SegmentExpr : public Expr {
                             return ProcessIndexChunksForValid<std::string>();
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       "unsupported element type: {}",
                                       element_type);
                     }
@@ -2017,7 +2017,7 @@ class SegmentExpr : public Expr {
                                 use_index, input);
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       "unsupported element type: {}",
                                       element_type);
                     }

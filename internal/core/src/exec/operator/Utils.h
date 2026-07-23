@@ -162,6 +162,18 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
         } catch (const std::runtime_error& e) {
+            // Preserve a coded transient SegcoreError (S3Error / FileReadFailed
+            // / MemAllocateFailed, etc. thrown while reading the index) so the
+            // driver can classify retriability. Only a genuine "this index
+            // cannot produce iterators for the operation" -- Unsupported,
+            // whether reported by the non-ready-iterators branch above or thrown
+            // here -- or a non-SegcoreError failure becomes the unified
+            // "doesn't support" error.
+            if (auto* se = dynamic_cast<const milvus::SegcoreError*>(&e);
+                se != nullptr &&
+                se->get_error_code() != milvus::ErrorCode::Unsupported) {
+                throw;
+            }
             std::string operator_type = "";
             if (search_info.has_group_by()) {
                 operator_type = "group_by";

@@ -453,7 +453,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
     } else {
-        ThrowInfo(ExprInvalid, "unsupport expr: ", expr->ToString());
+        ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
     return result;
 }

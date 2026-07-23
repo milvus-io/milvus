@@ -327,7 +327,7 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                             break;
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
@@ -424,7 +424,7 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
                             break;
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
