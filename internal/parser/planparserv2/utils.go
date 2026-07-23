@@ -444,6 +444,13 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 		return nil, merr.WrapErrQueryPlanMsg("only comparison between two fields is supported")
 	}
 
+	// CompareExpr only carries field IDs and storage data types. It cannot
+	// represent an element path for an ARRAY-backed column, and the executor
+	// does not support ARRAY as an operand type.
+	if typeutil.IsArrayType(leftColumnInfo.GetDataType()) || typeutil.IsArrayType(rightColumnInfo.GetDataType()) {
+		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison involving ARRAY fields is not supported")
+	}
+
 	// Check if both left and right are non-JSON types
 	if typeutil.IsJSONType(leftColumnInfo.GetDataType()) || typeutil.IsJSONType(rightColumnInfo.GetDataType()) {
 		return nil, merr.WrapErrQueryPlanMsg("two column comparison with JSON type is not supported")
