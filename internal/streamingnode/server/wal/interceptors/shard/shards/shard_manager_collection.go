@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
 )
 
 type CollectionSchemaInfo struct {
@@ -56,7 +57,11 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	partitionIDs := msg.Header().PartitionIds
 	vchannel := msg.VChannel()
 	timetick := msg.TimeTick()
-	schema := msg.MustBody().GetCollectionSchema()
+	body := msg.MustBody()
+	schema := body.GetCollectionSchema()
+	if schema == nil && len(body.GetSchema()) > 0 {
+		schema = messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
+	}
 	logger := m.Logger().With(log.FieldMessage(msg))
 
 	m.mu.Lock()
@@ -68,6 +73,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	}
 
 	collectionInfo := newCollectionInfo(vchannel, partitionIDs)
+	// Set schema when creating collection.
 	if schema != nil {
 		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
 			Schema:             schema,
