@@ -39,7 +39,71 @@ CopyScoresToBuffers(const std::vector<std::optional<float>>& scores,
     }
 }
 
+std::unique_ptr<exec::ExprSet>
+BuildFilterExprSet(const expr::TypedExprPtr& filter,
+                   exec::ExecContext* exec_context) {
+    std::vector<expr::TypedExprPtr> filters;
+    filters.emplace_back(filter);
+    // Boost scoring reads only the data bits of the filter output — an
+    // UNKNOWN (NULL) row never receives a boost, exactly like FALSE. 3.0's
+    // ExprSet has no null-rejecting flag (master-only optimization hint);
+    // the explicit valid-bitmap folds on both scoring branches provide the
+    // same guarantee.
+    return std::make_unique<exec::ExprSet>(filters, exec_context);
+}
+
+bool
+AllSupportOffsetInput(const exec::ExprSet& expr_set) {
+    for (const auto& expr : expr_set.exprs()) {
+        if (!expr->SupportOffsetInput()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Without offset-input support each Eval only advances the expression by one
+// internal batch (DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE rows), while the scorer
+// offsets may reference any row of the segment. The shared helper
+// accumulates every batch so the bitset covers all active rows and folds
+// UNKNOWN (NULL) into FALSE so null rows never receive a boost, matching
+// PhyIterativeFilterNode's handling.
+TargetBitmap
+EvalFilterOverAllBatches(exec::ExecContext* exec_context,
+                         exec::ExprSet& expr_set) {
+    exec::EvalCtx eval_ctx(exec_context);
+    auto active_count = exec_context->get_query_context()->get_active_count();
+    return exec::EvalExprSetOverAllBatches(
+        expr_set, eval_ctx, active_count, "ComputeScorerScores");
+}
+
 }  // namespace
+
+std::optional<TargetBitmap>
+ComputeNonNativeFilterBitset(exec::ExecContext* exec_context,
+                             const std::shared_ptr<Scorer>& scorer,
+                             std::unique_ptr<exec::ExprSet>* out_expr_set) {
+    auto filter = scorer->filter();
+    if (!filter) {
+        return std::nullopt;
+    }
+    auto expr_set = BuildFilterExprSet(filter, exec_context);
+    if (AllSupportOffsetInput(*expr_set)) {
+        // Native filter: no whole-segment bitset, but hand the compiled
+        // expressions back so per-chunk scoring does not rebuild them.
+        if (out_expr_set != nullptr) {
+            *out_expr_set = std::move(expr_set);
+        }
+        return std::nullopt;
+    }
+    auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set);
+    // The non-native path is fully answered by the bitset; the expressions
+    // have been advanced to the end of the segment and must not be reused.
+    if (out_expr_set != nullptr) {
+        out_expr_set->reset();
+    }
+    return bitset;
+}
 
 void
 ComputeScorerScores(exec::ExecContext* exec_context,
@@ -47,7 +111,9 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     const segcore::SegmentInternalInterface* segment,
                     const std::shared_ptr<Scorer>& scorer,
                     FixedVector<int32_t>& offsets,
-                    std::vector<std::optional<float>>& output_scores) {
+                    std::vector<std::optional<float>>& output_scores,
+                    const TargetBitmap* filter_bitset,
+                    exec::ExprSet* prepared_expr_set) {
     AssertInfo(output_scores.size() == offsets.size(),
                "scorer score output size {} must match offsets size {}",
                output_scores.size(),
@@ -61,20 +127,25 @@ ComputeScorerScores(exec::ExecContext* exec_context,
         return;
     }
 
-    std::vector<expr::TypedExprPtr> filters;
-    filters.emplace_back(filter);
-    auto expr_set = std::make_unique<exec::ExprSet>(filters, exec_context);
-    std::vector<VectorPtr> results;
-    exec::EvalCtx eval_ctx(exec_context);
-
-    const auto& exprs = expr_set->exprs();
-    bool is_native_supported = true;
-    for (const auto& expr : exprs) {
-        is_native_supported =
-            (is_native_supported && (expr->SupportOffsetInput()));
+    if (filter_bitset != nullptr) {
+        scorer->batch_score(op_context,
+                            segment,
+                            function_mode,
+                            offsets,
+                            *filter_bitset,
+                            output_scores);
+        return;
     }
 
-    if (is_native_supported) {
+    std::unique_ptr<exec::ExprSet> owned_expr_set;
+    if (prepared_expr_set == nullptr) {
+        owned_expr_set = BuildFilterExprSet(filter, exec_context);
+        prepared_expr_set = owned_expr_set.get();
+    }
+    auto& expr_set = prepared_expr_set;
+    if (AllSupportOffsetInput(*expr_set)) {
+        std::vector<VectorPtr> results;
+        exec::EvalCtx eval_ctx(exec_context);
         eval_ctx.set_offset_input(&offsets);
         expr_set->Eval(0, 1, true, eval_ctx, results);
 
@@ -90,6 +161,12 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                    filter->ToString());
         auto col_vec_size = col_vec->size();
         TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+        // Fold UNKNOWN (NULL) into FALSE (data &= valid) so a null row
+        // never receives a boost, keeping NULL policy identical on the
+        // native and non-native branches (PhyIterativeFilterNode folds on
+        // both of its branches too).
+        TargetBitmapView validview(col_vec->GetValidRawData(), col_vec_size);
+        bitsetview.inplace_and(validview, col_vec_size);
         scorer->batch_score(op_context,
                             segment,
                             function_mode,
@@ -97,21 +174,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                             bitsetview,
                             output_scores);
     } else {
-        expr_set->Eval(0, 1, true, eval_ctx, results);
-
-        AssertInfo(!results.empty() && results[0] != nullptr,
-                   "ComputeScorerScores: filter expr returned null result, "
-                   "filter: {}",
-                   filter->ToString());
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-        AssertInfo(col_vec != nullptr,
-                   "ComputeScorerScores: failed to cast result to "
-                   "ColumnVector, filter: {}",
-                   filter->ToString());
-        TargetBitmap bitset;
-        auto col_vec_size = col_vec->size();
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        bitset.append(view);
+        auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set);
         scorer->batch_score(
             op_context, segment, function_mode, offsets, bitset, output_scores);
     }
@@ -124,10 +187,18 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     const std::shared_ptr<Scorer>& scorer,
                     FixedVector<int32_t>& offsets,
                     float* output_scores,
-                    bool* output_has_score) {
+                    bool* output_has_score,
+                    const TargetBitmap* filter_bitset,
+                    exec::ExprSet* prepared_expr_set) {
     std::vector<std::optional<float>> scores(offsets.size());
-    ComputeScorerScores(
-        exec_context, op_context, segment, scorer, offsets, scores);
+    ComputeScorerScores(exec_context,
+                        op_context,
+                        segment,
+                        scorer,
+                        offsets,
+                        scores,
+                        filter_bitset,
+                        prepared_expr_set);
     CopyScoresToBuffers(scores, output_scores, output_has_score);
 }
 

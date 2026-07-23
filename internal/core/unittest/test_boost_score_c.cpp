@@ -15,6 +15,7 @@
 #include <stdlib.h>
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -31,6 +32,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/boost_score_c.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
 
 namespace {
@@ -443,6 +445,276 @@ TEST_F(BoostScoreCTest, RejectInvalidOffsetChunks) {
     FreeStatus(&status);
 
     ReleaseArrow(&null_offset_array, &null_offset_schema);
+}
+
+// Text match cannot consume offset input, so the C wrapper evaluates the
+// filter once over the whole segment and reuses the bitset for every offset
+// chunk. Every chunk -- including offsets beyond the first expression batch
+// (8192 rows) -- must be scored against the full-segment filter result.
+TEST_F(BoostScoreCTest, NonNativeFilterScoresAllChunks) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = std::make_shared<milvus::Schema>();
+    std::map<std::string, std::string> match_params;
+    {
+        milvus::FieldMeta f(milvus::FieldName("pk"),
+                            milvus::FieldId(100),
+                            milvus::DataType::INT64,
+                            false,
+                            std::nullopt);
+        schema->AddField(std::move(f));
+        schema->set_primary_field_id(milvus::FieldId(100));
+    }
+    {
+        milvus::FieldMeta f(milvus::FieldName("str"),
+                            milvus::FieldId(101),
+                            milvus::DataType::VARCHAR,
+                            65536,
+                            false,
+                            true,
+                            true,
+                            match_params,
+                            std::nullopt);
+        schema->AddField(std::move(f));
+    }
+    {
+        milvus::FieldMeta f(milvus::FieldName("fvec"),
+                            milvus::FieldId(102),
+                            milvus::DataType::VECTOR_FLOAT,
+                            16,
+                            knowhere::metric::L2,
+                            false,
+                            std::nullopt);
+        schema->AddField(std::move(f));
+    }
+
+    auto raw_data = milvus::segcore::DataGen(schema, N);
+    auto* str_col = raw_data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = (i % 2 == 0) ? "football match" : "swimming pool";
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    segment->CreateTextIndex(milvus::FieldId(101));
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto anns = plan_node.mutable_vector_anns();
+    anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
+    anns->set_field_id(102);
+    anns->set_placeholder_tag("$0");
+    auto query_info = anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_metric_type(knowhere::metric::L2);
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan = milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
+
+    auto scorer = MakeWeightScorer(2.0F);
+    auto column_info = milvus::test::GenColumnInfo(
+        101, milvus::proto::schema::DataType::VarChar, false, false);
+    std::string query = "football";
+    auto unary_range_expr = milvus::test::GenUnaryRangeExpr(
+        milvus::proto::plan::OpType::TextMatch, query);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto slop = milvus::test::GenGenericValue(static_cast<int64_t>(0));
+    unary_range_expr->add_extra_values()->CopyFrom(*slop);
+    delete slop;
+    scorer.mutable_filter()->set_allocated_unary_range_expr(unary_range_expr);
+    std::string scorer_blob;
+    ASSERT_TRUE(scorer.SerializeToString(&scorer_blob));
+
+    // Two offset chunks, both mixing matching and non-matching rows; the
+    // second one reaches past the first expression batch.
+    std::vector<std::vector<int64_t>> chunk_offsets = {
+        {0, 1},
+        {9000, 9001, N - 2},
+    };
+    const int64_t num_chunks = static_cast<int64_t>(chunk_offsets.size());
+    std::vector<ArrowArray> offset_arrays(num_chunks);
+    std::vector<ArrowSchema> offset_schemas(num_chunks);
+    std::vector<std::vector<float>> scores(num_chunks);
+    std::vector<std::unique_ptr<bool[]>> has_scores(num_chunks);
+    std::vector<float*> score_ptrs(num_chunks);
+    std::vector<bool*> has_score_ptrs(num_chunks);
+    for (int64_t i = 0; i < num_chunks; ++i) {
+        ExportOffsets(MakeOffsets(chunk_offsets[i]),
+                      &offset_arrays[i],
+                      &offset_schemas[i]);
+        scores[i].resize(chunk_offsets[i].size(), -1.0F);
+        has_scores[i] = std::make_unique<bool[]>(chunk_offsets[i].size());
+        score_ptrs[i] = scores[i].data();
+        has_score_ptrs[i] = has_scores[i].get();
+    }
+
+    auto status = ComputeScorerScoresOnOffsetChunks(
+        static_cast<CSegmentInterface>(segment.get()),
+        static_cast<CSearchPlan>(plan.get()),
+        scorer_blob.data(),
+        scorer_blob.size(),
+        offset_arrays.data(),
+        offset_schemas.data(),
+        num_chunks,
+        milvus::MAX_TIMESTAMP,
+        0,
+        0,
+        0,
+        score_ptrs.data(),
+        has_score_ptrs.data());
+    ASSERT_EQ(status.error_code, milvus::Success) << status.error_msg;
+    FreeStatus(&status);
+
+    // Chunk 0: row 0 matches, row 1 does not.
+    EXPECT_TRUE(has_scores[0][0]);
+    EXPECT_FLOAT_EQ(scores[0][0], 2.0F);
+    EXPECT_FALSE(has_scores[0][1]);
+
+    // Chunk 1: offsets beyond the first expression batch keep their boost.
+    EXPECT_TRUE(has_scores[1][0]);
+    EXPECT_FLOAT_EQ(scores[1][0], 2.0F);
+    EXPECT_FALSE(has_scores[1][1]);
+    EXPECT_TRUE(has_scores[1][2]);
+    EXPECT_FLOAT_EQ(scores[1][2], 2.0F);
+
+    for (int64_t i = 0; i < num_chunks; ++i) {
+        ReleaseArrow(&offset_arrays[i], &offset_schemas[i]);
+    }
+}
+
+// The Go caller exports every offset chunk, empty ones included, and only
+// short-circuits when the chunk count itself is zero. So a request with
+// nothing to score still reaches the C wrapper as N empty chunks. Hoisting
+// the non-native filter out of the per-chunk loop must not make that request
+// scan the whole segment: for GIS that would be millions of wasted GEOS
+// calls, and a filter that cannot be evaluated at all (here: text match with
+// no text index) would fail a request that needed no scoring.
+TEST_F(BoostScoreCTest, AllEmptyChunksSkipNonNativeFilter) {
+    const int64_t N = 100;
+    auto schema = std::make_shared<milvus::Schema>();
+    std::map<std::string, std::string> match_params;
+    {
+        milvus::FieldMeta f(milvus::FieldName("pk"),
+                            milvus::FieldId(100),
+                            milvus::DataType::INT64,
+                            false,
+                            std::nullopt);
+        schema->AddField(std::move(f));
+        schema->set_primary_field_id(milvus::FieldId(100));
+    }
+    {
+        milvus::FieldMeta f(milvus::FieldName("str"),
+                            milvus::FieldId(101),
+                            milvus::DataType::VARCHAR,
+                            65536,
+                            false,
+                            true,
+                            true,
+                            match_params,
+                            std::nullopt);
+        schema->AddField(std::move(f));
+    }
+    {
+        milvus::FieldMeta f(milvus::FieldName("fvec"),
+                            milvus::FieldId(102),
+                            milvus::DataType::VECTOR_FLOAT,
+                            16,
+                            knowhere::metric::L2,
+                            false,
+                            std::nullopt);
+        schema->AddField(std::move(f));
+    }
+
+    auto raw_data = milvus::segcore::DataGen(schema, N);
+    // Deliberately no CreateTextIndex: evaluating the filter would throw.
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto anns = plan_node.mutable_vector_anns();
+    anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
+    anns->set_field_id(102);
+    anns->set_placeholder_tag("$0");
+    auto query_info = anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_metric_type(knowhere::metric::L2);
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan = milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
+
+    auto scorer = MakeWeightScorer(2.0F);
+    auto column_info = milvus::test::GenColumnInfo(
+        101, milvus::proto::schema::DataType::VarChar, false, false);
+    std::string query = "football";
+    auto unary_range_expr = milvus::test::GenUnaryRangeExpr(
+        milvus::proto::plan::OpType::TextMatch, query);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto slop = milvus::test::GenGenericValue(static_cast<int64_t>(0));
+    unary_range_expr->add_extra_values()->CopyFrom(*slop);
+    delete slop;
+    scorer.mutable_filter()->set_allocated_unary_range_expr(unary_range_expr);
+    std::string scorer_blob;
+    ASSERT_TRUE(scorer.SerializeToString(&scorer_blob));
+
+    // Two chunks, both empty -- exactly what the Go path hands over when no
+    // row of this segment needs a boost score.
+    const int64_t num_chunks = 2;
+    std::vector<ArrowArray> offset_arrays(num_chunks);
+    std::vector<ArrowSchema> offset_schemas(num_chunks);
+    for (int64_t i = 0; i < num_chunks; ++i) {
+        ExportOffsets(MakeOffsets({}), &offset_arrays[i], &offset_schemas[i]);
+    }
+    // Empty chunks get no output buffer from the Go caller either.
+    std::vector<float*> score_ptrs(num_chunks, nullptr);
+    std::vector<bool*> has_score_ptrs(num_chunks, nullptr);
+
+    auto status = ComputeScorerScoresOnOffsetChunks(
+        static_cast<CSegmentInterface>(segment.get()),
+        static_cast<CSearchPlan>(plan.get()),
+        scorer_blob.data(),
+        scorer_blob.size(),
+        offset_arrays.data(),
+        offset_schemas.data(),
+        num_chunks,
+        milvus::MAX_TIMESTAMP,
+        0,
+        0,
+        0,
+        score_ptrs.data(),
+        has_score_ptrs.data());
+    EXPECT_EQ(status.error_code, milvus::Success) << status.error_msg;
+    FreeStatus(&status);
+
+    for (int64_t i = 0; i < num_chunks; ++i) {
+        ReleaseArrow(&offset_arrays[i], &offset_schemas[i]);
+    }
+
+    // Control: the same setup with one non-empty chunk does evaluate the
+    // filter, so the assertion above is about the skip and not about the
+    // filter being harmless here.
+    ArrowArray offset_array{};
+    ArrowSchema offset_schema{};
+    ExportOffsets(MakeOffsets({0}), &offset_array, &offset_schema);
+    std::vector<float> scores(1, -1.0F);
+    auto has_scores = std::make_unique<bool[]>(1);
+    float* score_chunks[] = {scores.data()};
+    bool* has_score_chunks[] = {has_scores.get()};
+
+    status = ComputeScorerScoresOnOffsetChunks(
+        static_cast<CSegmentInterface>(segment.get()),
+        static_cast<CSearchPlan>(plan.get()),
+        scorer_blob.data(),
+        scorer_blob.size(),
+        &offset_array,
+        &offset_schema,
+        1,
+        milvus::MAX_TIMESTAMP,
+        0,
+        0,
+        0,
+        score_chunks,
+        has_score_chunks);
+    EXPECT_NE(status.error_code, milvus::Success);
+    FreeStatus(&status);
+
+    ReleaseArrow(&offset_array, &offset_schema);
 }
 
 }  // namespace
