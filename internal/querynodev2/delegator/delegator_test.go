@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -2395,7 +2396,12 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newAdditionalBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).RunAndReturn(func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+		// Mirror the real manager's contract: a successful UpdateSchema leaves
+		// the delegator-visible collection at the applied schema.
+		sd.collection = segments.NewCollectionWithoutSegcoreForTest(collectionID, schema)
+		return nil
+	}).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2459,7 +2465,12 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).RunAndReturn(func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+		// Mirror the real manager's contract: a successful UpdateSchema leaves
+		// the delegator-visible collection at the applied schema.
+		sd.collection = segments.NewCollectionWithoutSegcoreForTest(collectionID, schema)
+		return nil
+	}).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2467,6 +2478,254 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 	require.NotNil(t, sd.getIDFOracle())
 
 	_, _, err = sd.getIDFOracle().BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}, Dim: 1})
+	require.NoError(t, err)
+}
+
+// newReconcileIDFOracleTestDelegator builds a minimal delegator (no segcore) whose
+// collection carries the given schema, for exercising reconcileFunctionRuntimeLocked directly.
+func newReconcileIDFOracleTestDelegator(t *testing.T, schema *schemapb.CollectionSchema) *shardDelegator {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+	// Mirror NewShardDelegator: the runner key is allocated at build with the
+	// (possibly pre-DDL) schema; reconcile then updates it. Released by Close.
+	require.NoError(t, function.GetManager().Alloc(1000, delegatorFunctionRunnerKey("test-channel"), newFunctionRuntimeTestSchema()))
+	return &shardDelegator{
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1000, schema),
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              cluster.NewMockManager(t),
+		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
+		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+	}
+}
+
+// reconcileFunctionRuntimeUnderLock calls reconcileFunctionRuntimeLocked while
+// holding schemaChangeMutex, matching how UpdateSchema invokes it.
+func reconcileFunctionRuntimeUnderLock(sd *shardDelegator) error {
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+	return sd.reconcileFunctionRuntimeLocked()
+}
+
+// A load can advance the collection schema to include a BM25 function ahead of the
+// DDL and gate out UpdateSchema; reconcileFunctionRuntimeLocked must create the oracle
+// and refresh the function runner from the collection's current schema so the field
+// is searchable (#51062).
+func TestReconcileIDFOracleCreatesWhenBM25Present(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema()))
+	defer sd.Close()
+
+	require.Nil(t, sd.getIDFOracle())
+	require.NoError(t, reconcileFunctionRuntimeUnderLock(sd))
+	require.NotNil(t, sd.getIDFOracle())
+
+	sparse := &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}, Dim: 1}
+	_, _, err := sd.getIDFOracle().BuildIDF(102, sparse)
+	require.NoError(t, err)
+
+	// The runner must serve the BM25 output field after reconcile.
+	ok, err := function.GetManager().RunWithRunner(context.Background(), 1000, delegatorFunctionRunnerKey("test-channel"), 102, func(function.FunctionRunner) error { return nil })
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+// The oracle is never torn down, so a later load that adds a BM25 output field must
+// sync it into the existing oracle, not just create it (#51062).
+func TestReconcileIDFOracleSyncsAddedBM25Field(t *testing.T) {
+	// Collection already advanced (by the load) to fields 102 + 105.
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchemaWithVersion(2, newBM25FunctionSchema(), newAdditionalBM25FunctionSchema()))
+	defer sd.Close()
+
+	// Existing oracle only knows field 102.
+	oldOracle := NewIDFOracle("test-channel", newFunctionRuntimeTestSchema(newBM25FunctionSchema()).GetFunctions())
+	sd.publishIDFOracle(oldOracle)
+
+	sparse := &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}, Dim: 1}
+	_, _, err := sd.getIDFOracle().BuildIDF(105, sparse)
+	require.Error(t, err) // field 105 unknown before reconcile
+
+	require.NoError(t, reconcileFunctionRuntimeUnderLock(sd))
+	require.Same(t, oldOracle, sd.getIDFOracle()) // synced in place, not replaced
+
+	_, _, err = sd.getIDFOracle().BuildIDF(105, sparse)
+	require.NoError(t, err)
+	_, _, err = sd.getIDFOracle().BuildIDF(102, sparse) // existing field preserved
+	require.NoError(t, err)
+}
+
+// reconcileFunctionRuntimeLocked creates no oracle when the collection schema has
+// no BM25 function.
+func TestReconcileIDFOracleNoopWhenNoBM25(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchema())
+	defer sd.Close()
+
+	require.NoError(t, reconcileFunctionRuntimeUnderLock(sd))
+	require.Nil(t, sd.getIDFOracle())
+}
+
+// End-to-end #51062 regression: the collection schema was already advanced (by a
+// load) past the DDL event, so UpdateSchema takes the gated no-op branch — which
+// must still reconcile the function runtime so the runner serves the new BM25
+// output field and the oracle exists.
+func TestUpdateSchemaGatedBranchReconcilesFunctionRuntime(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchemaWithVersion(2, newBM25FunctionSchema()))
+	// The racing load advanced the collection to barrier 150 while the delegator
+	// load barrier lags at 100.
+	sd.collection = segments.NewCollectionWithoutSegcoreForTest(1000, newFunctionRuntimeTestSchemaWithVersion(2, newBM25FunctionSchema()), 150)
+	sd.schemaBarrierTs = 100
+	defer sd.Close()
+
+	require.Nil(t, sd.getIDFOracle())
+	// Stale DDL event: gated by the schema version check.
+	require.NoError(t, sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema()), 100))
+
+	require.NotNil(t, sd.getIDFOracle())
+	ok, err := function.GetManager().RunWithRunner(context.Background(), 1000, delegatorFunctionRunnerKey("test-channel"), 102, func(function.FunctionRunner) error { return nil })
+	require.NoError(t, err)
+	require.True(t, ok)
+	// The gated branch adopts the load barrier from the applied collection
+	// snapshot so older in-flight loads cannot republish pre-DDL segments.
+	require.Equal(t, uint64(150), sd.schemaBarrierTs)
+}
+
+// loadBM25Stats with a nil oracle: legal when the schema has no BM25 function;
+// a stats-bearing load must fail (retryable) when the schema already has BM25,
+// so the stats are not silently lost before the stream installs the oracle (#51062).
+func TestLoadBM25StatsNilOracle(t *testing.T) {
+	ctx := context.Background()
+	statsInfo := &querypb.SegmentLoadInfo{
+		SegmentID: 1,
+		Bm25Logs:  []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "l1"}}}},
+	}
+	plainInfo := &querypb.SegmentLoadInfo{SegmentID: 2}
+
+	// Schema without BM25 (never had one, or dropped): stats leftovers pass.
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchema())
+	defer sd.Close()
+	require.NoError(t, sd.loadBM25Stats(ctx, []*querypb.SegmentLoadInfo{statsInfo}, &querypb.LoadSegmentsRequest{}))
+
+	// Schema with BM25 but oracle not yet installed by the stream.
+	sdBM25 := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema()))
+	defer sdBM25.Close()
+	err := sdBM25.loadBM25Stats(ctx, []*querypb.SegmentLoadInfo{plainInfo, statsInfo}, &querypb.LoadSegmentsRequest{})
+	require.Error(t, err)
+
+	// Stats-less load in the same window passes.
+	require.NoError(t, sdBM25.loadBM25Stats(ctx, []*querypb.SegmentLoadInfo{plainInfo}, &querypb.LoadSegmentsRequest{}))
+}
+
+// addDistributionIfSchemaBarrierOK fences against the applied collection barrier
+// at decision time, not only the stream-adopted field, so a load racing ahead of
+// the stream cannot let an older in-flight load publish pre-DDL segments.
+func TestAddDistributionFencesOnCollectionBarrier(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchema())
+	sd.collection = segments.NewCollectionWithoutSegcoreForTest(1000, newFunctionRuntimeTestSchema(), 150)
+	sd.schemaBarrierTs = 100
+	defer sd.Close()
+
+	// Clears the delegator field (100) but not the collection barrier (150).
+	require.Error(t, sd.addDistributionIfSchemaBarrierOK(120))
+	// At the collection barrier: accepted.
+	require.NoError(t, sd.addDistributionIfSchemaBarrierOK(150))
+	// Barrier-less (legacy) requests keep the field-only check: the delegator
+	// field is 100, so 0 is still rejected by it, and once the field is 0 they pass.
+	sd.schemaBarrierTs = 0
+	require.NoError(t, sd.addDistributionIfSchemaBarrierOK(0))
+}
+
+// A reopen carrying BM25 stats must fail BEFORE the worker commits the new
+// version when the oracle is missing: failing after the commit leaves no
+// checker-visible diff (the segment already matches the target), so QueryCoord
+// would never re-issue the reopen and the stats would be lost permanently.
+func TestLoadSegmentsReopenFailsBeforeWorkerCommitWhenOracleNil(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema()))
+	defer sd.Close()
+
+	err := sd.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		DstNodeID: 1,
+		LoadScope: querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID: 1,
+			Bm25Logs:  []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "l1"}}}},
+		}},
+	})
+	require.Error(t, err)
+	// The workerManager mock carries no expectations, so reaching the worker
+	// forward would fail this test: the error must fire before the commit.
+}
+
+// The FIRST racing reopen carries the post-DDL schema (with BM25) while the local
+// collection still lags without it; the guard must judge by the newer request
+// schema and reject before the worker commit, or the stats are lost permanently
+// once the worker matches the target (#51062).
+func TestLoadSegmentsReopenFailsWhenRequestSchemaAddsBM25(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchema()) // local schema without BM25
+	defer sd.Close()
+
+	err := sd.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		DstNodeID: 1,
+		LoadScope: querypb.LoadScope_Reopen,
+		Schema:    newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema()),
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID: 1,
+			Bm25Logs:  []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "l1"}}}},
+		}},
+	})
+	require.Error(t, err)
+	// The workerManager mock carries no expectations: the error must fire before
+	// the worker commit.
+}
+
+// A stale pre-drop request can carry BM25 the collection no longer has; the
+// version-newer collection view wins, so the reopen passes instead of retrying
+// forever against an oracle that will never be installed.
+func TestLoadSegmentsReopenPassesWhenStaleRequestCarriesDroppedBM25(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchemaWithVersion(2)) // post-drop schema, no BM25
+	worker := cluster.NewMockWorker(t)
+	worker.EXPECT().LoadSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	workerManager := cluster.NewMockManager(t)
+	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+	sd.workerManager = workerManager
+	defer sd.Close()
+
+	err := sd.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:      &commonpb.MsgBase{},
+		DstNodeID: 1,
+		LoadScope: querypb.LoadScope_Reopen,
+		Schema:    newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema()), // stale pre-drop schema
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID: 1,
+			Bm25Logs:  []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "l1"}}}},
+		}},
+	})
+	require.NoError(t, err)
+}
+
+// After the BM25 function is dropped and the delegator rebuilt, the oracle is
+// correctly absent while historical segments still carry BM25 logs. Such reopens
+// must pass end-to-end (guard skips, post-load skips orphaned stats) — rejecting
+// them would retry forever because no oracle will ever be installed.
+func TestLoadSegmentsReopenPassesWhenBM25Dropped(t *testing.T) {
+	sd := newReconcileIDFOracleTestDelegator(t, newFunctionRuntimeTestSchema()) // schema without BM25
+	worker := cluster.NewMockWorker(t)
+	worker.EXPECT().LoadSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	workerManager := cluster.NewMockManager(t)
+	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+	sd.workerManager = workerManager
+	defer sd.Close()
+
+	err := sd.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:      &commonpb.MsgBase{},
+		DstNodeID: 1,
+		LoadScope: querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID: 1,
+			Bm25Logs:  []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "l1"}}}},
+		}},
+	})
 	require.NoError(t, err)
 }
 
@@ -2537,7 +2796,12 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newMinHashFunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).RunAndReturn(func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+		// Mirror the real manager's contract: a successful UpdateSchema leaves
+		// the delegator-visible collection at the applied schema.
+		sd.collection = segments.NewCollectionWithoutSegcoreForTest(collectionID, schema)
+		return nil
+	}).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2591,7 +2855,12 @@ func TestUpdateSchemaPanicsOnInvalidFunctionMetadata(t *testing.T) {
 	invalidFunction.OutputFieldIds = []int64{999}
 	invalidSchema := newFunctionRuntimeTestSchemaWithVersion(1, invalidFunction)
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), invalidSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), invalidSchema, uint64(100)).RunAndReturn(func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+		// Mirror the real manager's contract: a successful UpdateSchema leaves
+		// the delegator-visible collection at the applied schema.
+		sd.collection = segments.NewCollectionWithoutSegcoreForTest(collectionID, schema)
+		return nil
+	}).Once()
 	sd.collectionManager = collectionManager
 
 	_, expectedErr := function.EmbeddingOutputFieldIDs(invalidSchema)
