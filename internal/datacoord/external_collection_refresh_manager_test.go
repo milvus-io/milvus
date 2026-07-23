@@ -134,9 +134,15 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	mgr.Stop()
 }
 
-func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
+func TestCreateTasksForJobCreatesSingleTaskForAllFiles(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
+	filesPerTaskKey := Params.DataCoordCfg.ExternalCollectionFilesPerTask.Key
+	oldFilesPerTask := Params.DataCoordCfg.ExternalCollectionFilesPerTask.GetValue()
+	assert.NoError(t, Params.Save(filesPerTaskKey, "1"))
+	t.Cleanup(func() {
+		_ = Params.Save(filesPerTaskKey, oldFilesPerTask)
+	})
 	schema := &schemapb.CollectionSchema{
 		Name:           "ext",
 		ExternalSource: "s3://bucket/path",
@@ -161,7 +167,10 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Return([]*datapb.ExternalFileInfo{
+			{FilePath: "s3://bucket/path/a.parquet", NumRows: 10},
+			{FilePath: "s3://bucket/path/b.parquet", NumRows: 20},
+		}, "manifest-path", nil).
 		Build()
 	defer mockExplore.UnPatch()
 
@@ -181,6 +190,93 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 	assert.Equal(t, collectionID, tasks[0].GetCollectionId())
 	assert.Equal(t, "s3://bucket/path", tasks[0].GetExternalSource())
 	assert.Equal(t, `{"format":"parquet"}`, tasks[0].GetExternalSpec())
+	assert.Equal(t, job.GetJobId(), tasks[0].GetTaskId())
+	assert.Equal(t, int64(0), tasks[0].GetFileIndexBegin())
+	assert.Equal(t, int64(2), tasks[0].GetFileIndexEnd())
+	assert.Len(t, refreshMeta.GetTasksByJobID(job.GetJobId()), 1)
+	assert.Len(t, refreshMeta.GetJob(job.GetJobId()).GetTaskIds(), 1)
+}
+
+func TestCreateTasksForJobReusesPersistedUnlinkedTask(t *testing.T) {
+	ctx := context.Background()
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:        1001,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	persistedTask := &datapb.ExternalCollectionRefreshTask{
+		TaskId:              job.GetJobId(),
+		JobId:               job.GetJobId(),
+		CollectionId:        job.GetCollectionId(),
+		State:               indexpb.JobState_JobStateInit,
+		ExploreManifestPath: "manifest-path",
+		FileIndexEnd:        2,
+	}
+	refreshMeta := createTestRefreshMetaWithJobs(
+		t,
+		[]*datapb.ExternalCollectionRefreshJob{job},
+		[]*datapb.ExternalCollectionRefreshTask{persistedTask},
+	)
+	mgr := NewExternalCollectionRefreshManager(
+		ctx,
+		nil,
+		newStubScheduler(),
+		&stubAllocator{nextID: 3000},
+		refreshMeta,
+		nil,
+		nil,
+		nil,
+		nil,
+	).(*externalCollectionRefreshManager)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		To(func(*externalCollectionRefreshManager, context.Context, *datapb.ExternalCollectionRefreshJob) ([]*datapb.ExternalFileInfo, string, error) {
+			t.Fatal("persisted task should be reused before exploring files")
+			return nil, "", nil
+		}).Build()
+	defer mockExplore.UnPatch()
+
+	tasks, err := mgr.createTasksForJob(ctx, job)
+	assert.NoError(t, err)
+	assert.Len(t, tasks, 1)
+	assert.Equal(t, persistedTask.GetTaskId(), tasks[0].GetTaskId())
+	assert.Equal(t, []int64{persistedTask.GetTaskId()}, refreshMeta.GetJob(job.GetJobId()).GetTaskIds())
+	assert.Len(t, refreshMeta.GetTasksByJobID(job.GetJobId()), 1)
+}
+
+func TestCreateTasksForJobRejectsLegacyUnlinkedTask(t *testing.T) {
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:        1001,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	legacyTask := &datapb.ExternalCollectionRefreshTask{
+		TaskId:       2001,
+		JobId:        job.GetJobId(),
+		CollectionId: job.GetCollectionId(),
+		State:        indexpb.JobState_JobStateInit,
+	}
+	refreshMeta := createTestRefreshMetaWithJobs(
+		t,
+		[]*datapb.ExternalCollectionRefreshJob{job},
+		[]*datapb.ExternalCollectionRefreshTask{legacyTask},
+	)
+	mgr := NewExternalCollectionRefreshManager(
+		context.Background(),
+		nil,
+		newStubScheduler(),
+		&stubAllocator{nextID: 3000},
+		refreshMeta,
+		nil,
+		nil,
+		nil,
+		nil,
+	).(*externalCollectionRefreshManager)
+
+	_, err := mgr.createTasksForJob(context.Background(), job)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected persisted refresh tasks")
+	assert.Empty(t, refreshMeta.GetJob(job.GetJobId()).GetTaskIds())
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
