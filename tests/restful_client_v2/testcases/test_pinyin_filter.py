@@ -56,30 +56,41 @@ class TestPinyinFilter(TestBase):
         rsp = self._flush_with_rate_limit_retry(collection_name)
         assert rsp["code"] == 0, rsp
 
-    def _query_until_target_ids(self, collection_name, query_text, timeout=30):
+    @staticmethod
+    def _assert_exact_target_ids(rows):
+        ids = [int(row["id"]) for row in rows]
+        assert len(ids) == len(TARGET_IDS), ids
+        assert len(ids) == len(set(ids)), ids
+        assert set(ids) == TARGET_IDS, ids
+
+    def _search_until_target_ids(self, collection_name, query_text, timeout=30):
         deadline = time.monotonic() + timeout
         rows = []
         while time.monotonic() < deadline:
-            rsp = self.vector_client.vector_query(
+            rsp = self.vector_client.vector_search(
                 {
                     "collectionName": collection_name,
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
                     "filter": f'text_match(text, "{query_text}")',
                     "outputFields": ["id", "text"],
                     "limit": TOTAL_COUNT,
+                    "searchParams": {"metricType": "L2", "params": {"nprobe": 64}},
                 },
                 timeout=0,
             )
             assert rsp["code"] == 0, rsp
             rows = rsp["data"]
-            if {int(row["id"]) for row in rows} == TARGET_IDS:
+            ids = [int(row["id"]) for row in rows]
+            if len(ids) == len(TARGET_IDS) and len(ids) == len(set(ids)) and set(ids) == TARGET_IDS:
                 return rows
             time.sleep(1)
         return rows
 
     def test_pinyin_filter_text_match_across_data_paths(self):
         """
-        target: verify Pinyin Text Match through RESTful v2 across three data paths
-        method: build 3000 indexed, 500 unindexed, and 500 growing rows through RESTful v2
+        target: verify filtered Pinyin vector search through RESTful v2 across three data paths
+        method: vector-search 3000 indexed, 500 unindexed, and 500 growing rows through RESTful v2
         expected: joined Pinyin and original Chinese both return the target row from every path
         """
         name = gen_collection_name()
@@ -171,6 +182,6 @@ class TestPinyinFilter(TestBase):
         assert rsp["data"]["insertCount"] == GROWING_COUNT, rsp
 
         for query_text in ["zhongwen", "中文"]:
-            rows = self._query_until_target_ids(name, query_text)
-            assert {int(row["id"]) for row in rows} == TARGET_IDS
+            rows = self._search_until_target_ids(name, query_text)
+            self._assert_exact_target_ids(rows)
             assert all(row["text"] == "中文测试" for row in rows)
