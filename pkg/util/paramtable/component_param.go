@@ -60,7 +60,6 @@ const (
 	DefaultPQCodeBudgetGBRatio      = 0.125
 	DefaultBuildNumThreadsRatio     = 1.0
 	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
 	MaxClusterIDBits                = 3
 )
@@ -251,7 +250,6 @@ type commonConfig struct {
 	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
 	BuildNumThreadsRatio                ParamItem `refreshable:"true"`
 	SearchCacheBudgetGBRatio            ParamItem `refreshable:"true"`
-	LoadNumThreadRatio                  ParamItem `refreshable:"true"`
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
@@ -633,14 +631,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.SearchCacheBudgetGBRatio.Init(base.mgr)
-
-	p.LoadNumThreadRatio = ParamItem{
-		Key:          "common.DiskIndex.LoadNumThreadRatio",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultLoadNumThreadRatio),
-		Export:       true,
-	}
-	p.LoadNumThreadRatio.Init(base.mgr)
 
 	p.BeamWidthRatio = ParamItem{
 		Key:          "common.DiskIndex.BeamWidthRatio",
