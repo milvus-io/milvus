@@ -181,6 +181,10 @@ func (c *columnVectorArrayBase[T]) ValidCount() int {
 }
 
 func (c *columnVectorArrayBase[T]) Slice(start, end int) Column {
+	return c.slice(start, end)
+}
+
+func (c *columnVectorArrayBase[T]) slice(start, end int) *columnVectorArrayBase[T] {
 	l := c.Len()
 	if start < 0 {
 		start = 0
@@ -326,6 +330,12 @@ func NewColumnFloatVectorArray(fieldName string, dim int, data [][][]float32) *C
 	}
 }
 
+func (c *ColumnFloatVectorArray) Slice(start, end int) Column {
+	return &ColumnFloatVectorArray{
+		columnVectorArrayBase: c.columnVectorArrayBase.slice(start, end),
+	}
+}
+
 // AppendValue accepts `[]entity.FloatVector` or `[][]float32` for one row.
 func (c *ColumnFloatVectorArray) AppendValue(value any) error {
 	if value == nil {
@@ -400,6 +410,12 @@ func NewColumnFloat16VectorArray(fieldName string, dim int, data [][][]byte) *Co
 	}
 }
 
+func (c *ColumnFloat16VectorArray) Slice(start, end int) Column {
+	return &ColumnFloat16VectorArray{
+		columnVectorArrayBase: c.columnVectorArrayBase.slice(start, end),
+	}
+}
+
 /* bfloat16 vector array */
 
 type ColumnBFloat16VectorArray struct {
@@ -437,6 +453,12 @@ func NewColumnBFloat16VectorArray(fieldName string, dim int, data [][][]byte) *C
 	}
 }
 
+func (c *ColumnBFloat16VectorArray) Slice(start, end int) Column {
+	return &ColumnBFloat16VectorArray{
+		columnVectorArrayBase: c.columnVectorArrayBase.slice(start, end),
+	}
+}
+
 /* binary vector array */
 
 type ColumnBinaryVectorArray struct {
@@ -471,6 +493,12 @@ func NewColumnBinaryVectorArray(fieldName string, dim int, data [][][]byte) *Col
 			dim:         dim,
 			values:      values,
 		},
+	}
+}
+
+func (c *ColumnBinaryVectorArray) Slice(start, end int) Column {
+	return &ColumnBinaryVectorArray{
+		columnVectorArrayBase: c.columnVectorArrayBase.slice(start, end),
 	}
 }
 
@@ -518,5 +546,11 @@ func NewColumnInt8VectorArray(fieldName string, dim int, data [][][]int8) *Colum
 			dim:         dim,
 			values:      values,
 		},
+	}
+}
+
+func (c *ColumnInt8VectorArray) Slice(start, end int) Column {
+	return &ColumnInt8VectorArray{
+		columnVectorArrayBase: c.columnVectorArrayBase.slice(start, end),
 	}
 }

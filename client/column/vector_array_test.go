@@ -459,6 +459,56 @@ func (s *VectorArraySuite) TestSlice() {
 	s.Equal(0, sliced4.Len())
 }
 
+func (s *VectorArraySuite) TestSlicePreservesConcreteTypeAndPublicAppendShape() {
+	byteVector := []byte{1, 2, 3, 4}
+	cases := []struct {
+		name        string
+		column      Column
+		wantType    Column
+		appendValue any
+	}{
+		{
+			name:        "float",
+			column:      NewColumnFloatVectorArray("emb", 2, [][][]float32{{{1, 2}}}),
+			wantType:    (*ColumnFloatVectorArray)(nil),
+			appendValue: [][]float32{{3, 4}},
+		},
+		{
+			name:        "float16",
+			column:      NewColumnFloat16VectorArray("emb", 2, [][][]byte{{byteVector}}),
+			wantType:    (*ColumnFloat16VectorArray)(nil),
+			appendValue: [][]byte{byteVector},
+		},
+		{
+			name:        "bfloat16",
+			column:      NewColumnBFloat16VectorArray("emb", 2, [][][]byte{{byteVector}}),
+			wantType:    (*ColumnBFloat16VectorArray)(nil),
+			appendValue: [][]byte{byteVector},
+		},
+		{
+			name:        "binary",
+			column:      NewColumnBinaryVectorArray("emb", 8, [][][]byte{{{1}}}),
+			wantType:    (*ColumnBinaryVectorArray)(nil),
+			appendValue: [][]byte{{2}},
+		},
+		{
+			name:        "int8",
+			column:      NewColumnInt8VectorArray("emb", 2, [][][]int8{{{1, 2}}}),
+			wantType:    (*ColumnInt8VectorArray)(nil),
+			appendValue: [][]int8{{3, 4}},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			sliced := tc.column.Slice(0, -1)
+			s.IsType(tc.wantType, sliced)
+			s.Require().NoError(sliced.AppendValue(tc.appendValue))
+			s.Equal(2, sliced.Len())
+		})
+	}
+}
+
 func TestVectorArray(t *testing.T) {
 	suite.Run(t, new(VectorArraySuite))
 }
