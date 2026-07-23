@@ -226,6 +226,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 val_type == proto::plan::GenericValue::ValCase::kInt64Val &&
                 !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val());
             if (requires_precise_numeric_comparison) {
+                SetNotUseIndex();
                 result = ExecRangeVisitorImplJsonPreciseNumeric(context);
             } else if (CanUseIndexForJson(val_type_inner) &&
                        !has_offset_input_) {

@@ -43,6 +43,22 @@
 using namespace milvus;
 
 namespace milvus::test {
+namespace {
+
+struct ExprBatchSizeGuard {
+    explicit ExprBatchSizeGuard(int64_t batch_size)
+        : old_batch_size_(EXEC_EVAL_EXPR_BATCH_SIZE.exchange(batch_size)) {
+    }
+
+    ~ExprBatchSizeGuard() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(old_batch_size_);
+    }
+
+    int64_t old_batch_size_;
+};
+
+}  // namespace
+
 struct ChunkManagerWrapper {
     ChunkManagerWrapper(storage::ChunkManagerPtr cm) : cm_(cm) {
     }
@@ -869,6 +885,7 @@ TEST_F(JsonFlatIndexExprTest, JSONArrayEqualityFallsBackToRawData) {
 
 TEST_F(JsonFlatIndexExprTest,
        JSONContainsMixedAndArrayLiteralsFallBackToRawData) {
+    ExprBatchSizeGuard batch_size_guard(7);
     proto::plan::GenericValue string_value;
     string_value.set_string_val("a");
     proto::plan::GenericValue int_value;

@@ -156,6 +156,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
             } else {
+                SetNotUseIndex();
                 result = EvalJsonContainsForDataSegment(context);
             }
             break;

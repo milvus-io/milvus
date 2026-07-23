@@ -98,6 +98,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       expr_->upper_val_.int64_val())));
 
             if (has_unsafe_int_bound) {
+                SetNotUseIndex();
                 result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
             } else if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 if (is_numeric) {

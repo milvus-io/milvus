@@ -16,6 +16,22 @@
 
 #include "ExprTestBase.h"
 
+namespace {
+
+struct ExprBatchSizeGuard {
+    explicit ExprBatchSizeGuard(int64_t batch_size)
+        : old_batch_size_(EXEC_EVAL_EXPR_BATCH_SIZE.exchange(batch_size)) {
+    }
+
+    ~ExprBatchSizeGuard() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(old_batch_size_);
+    }
+
+    int64_t old_batch_size_;
+};
+
+}  // namespace
+
 template <typename T>
 class JsonIndexTestFixture : public testing::Test {
  public:
@@ -314,6 +330,7 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
 }
 
 TEST(JsonIndexTest, LargeInt64LiteralFallsBackToPreciseRawComparison) {
+    ExprBatchSizeGuard batch_size_guard(3);
     constexpr int64_t kLargeInt = 9007199254740993LL;
     auto json_strs = std::vector<std::string>{
         R"({"a": 9007199254740992})",
