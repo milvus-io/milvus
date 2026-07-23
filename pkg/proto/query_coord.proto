@@ -13,7 +13,7 @@ import "schema.proto";
 import "msg.proto";
 import "data_coord.proto";
 import "index_coord.proto";
-import "messages.proto";
+
 
 service QueryCoord {
     rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
@@ -40,9 +40,7 @@ service QueryCoord {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
-    rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest)
-        returns (GetQueryViewLoadInfoResponse) {
-    }
+    
     rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
         returns (stream WatchQueryViewSegmentLoadInfoResponse) {
     }
@@ -1254,17 +1252,6 @@ message ListLoadedSegmentsResponse {
 }
 
 
-message GetQueryViewLoadInfoRequest {
-    common.MsgBase base = 1;
-    int64 collectionID = 2;
-    uint64 version = 3;
-}
 
-message GetQueryViewLoadInfoResponse {
-    common.Status status = 1;
-    int64 collectionID = 2;
-    uint64 version = 3;
-    repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
-    repeated index.IndexInfo index_info_list = 6;
-}
+
+
