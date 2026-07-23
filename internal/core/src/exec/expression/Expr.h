@@ -291,6 +291,7 @@ class SegmentExpr : public Expr {
           consistency_level_(consistency_level),
           is_json_contains_(is_json_contains),
           plan_options_(plan_options) {
+        CaptureSchemaSnapshot();
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
             batch_size_ > 0,
@@ -302,13 +303,21 @@ class SegmentExpr : public Expr {
     virtual ~SegmentExpr();
 
     void
+    CaptureSchemaSnapshot() {
+        // Hold the published schema for this expr's lifetime. The segment read
+        // lease keeps the published state stable across the whole operation,
+        // so this single capture stays consistent for every access below.
+        schema_snapshot_ = segment_->get_schema_snapshot();
+    }
+
+    void
     InitSegmentExpr() {
-        auto schema = segment_->get_schema_snapshot();
-        auto& field_meta = (*schema)[field_id_];
+        auto& schema = *schema_snapshot_;
+        auto& field_meta = schema[field_id_];
         field_type_ = field_meta.get_data_type();
 
-        if (schema->get_primary_field_id().has_value() &&
-            schema->get_primary_field_id().value() == field_id_ &&
+        if (schema.get_primary_field_id().has_value() &&
+            schema.get_primary_field_id().value() == field_id_ &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -350,8 +359,8 @@ class SegmentExpr : public Expr {
             return;
         }
         pinned_index_initialized_ = true;
-        auto schema = segment_->get_schema_snapshot();
-        auto& field_meta = (*schema)[field_id_];
+        auto& schema = *schema_snapshot_;
+        auto& field_meta = schema[field_id_];
         pinned_index_ = PinIndex(op_ctx_,
                                  segment_,
                                  field_meta,
@@ -2173,8 +2182,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        (*schema_snapshot_)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -2247,8 +2256,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        (*schema_snapshot_)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -2838,6 +2847,7 @@ class SegmentExpr : public Expr {
     }
 
     const segcore::SegmentInternalInterface* segment_;
+    SchemaPtr schema_snapshot_;
     const FieldId field_id_;
     bool is_pk_field_{false};
     DataType pk_type_;

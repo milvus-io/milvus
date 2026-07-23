@@ -1086,6 +1086,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffMixedFormats) {
     EXPECT_TRUE(replace_field_ids.count(105) > 0);
     EXPECT_TRUE(replace_field_ids.count(106) > 0);
 
+    // A diff that replaces existing field data must invalidate the segment's
+    // process-level expr-result cache (which has no data generation in its key).
+    EXPECT_TRUE(diff.ReplacesExistingFieldData());
+
     // No fields should be dropped
     EXPECT_TRUE(diff.field_data_to_drop.empty());
 }
@@ -3952,4 +3956,66 @@ TEST(IndexFactoryRawDataTest,
         DataType::INT64, false));
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::JSON, false));
+}
+
+// Truth table for LoadDiff::ReplacesExistingFieldData(): only changes that
+// mutate the data of pre-existing rows may invalidate a cached filter bitset
+// keyed by {segment_id, predicate, row_count}. Adding new fields / indexes over
+// unchanged values must NOT trigger invalidation (it would needlessly drop a
+// still-correct cache).
+TEST(LoadDiffTest, ReplacesExistingFieldData) {
+    // Empty diff — nothing changed.
+    EXPECT_FALSE(LoadDiff{}.ReplacesExistingFieldData());
+
+    // New-field-only changes: no existing row's value changes.
+    {
+        LoadDiff d;
+        d.fields_to_fill_default.push_back(FieldId(101));
+        EXPECT_FALSE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.binlogs_to_load.push_back({{FieldId(101)}, {}});
+        d.column_groups_to_load.push_back({0, {FieldId(101)}});
+        d.indexes_to_load[FieldId(101)] = {};
+        d.text_indexes_to_create.insert(FieldId(101));
+        EXPECT_FALSE(d.ReplacesExistingFieldData());
+    }
+
+    // Data-replacing changes: each alone must trigger invalidation.
+    {
+        LoadDiff d;
+        d.binlogs_to_replace.push_back({{FieldId(101)}, {}});
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.column_groups_to_replace.push_back({0, {FieldId(101)}});
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.column_groups_to_lazyreplace.push_back({0, {FieldId(101)}});
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.field_data_to_drop.insert(FieldId(101));
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.fields_to_reload.push_back(FieldId(101));
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.manifest_updated = true;
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
+    {
+        LoadDiff d;
+        d.load_external_manifest = true;
+        EXPECT_TRUE(d.ReplacesExistingFieldData());
+    }
 }

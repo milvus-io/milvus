@@ -299,12 +299,13 @@ PhyGISRefineConjunctExpr::EvalPrepared(
     proto::plan::GISFunctionFilterExpr_GISOp op,
     const PreparedGeometry& prepared,
     const Geometry& query_geom,
-    const Geometry& left) const {
+    const Geometry& left,
+    GEOSContextHandle_t operation_ctx) const {
     // Delegate to the shared helper so the prepared-predicate semantics (the
     // contains/within swap in particular) never drift from the per-predicate
     // path. DWithin is filtered out before grouping, so distance is unused here.
     return EvaluateGISPreparedOp(
-        op, prepared, query_geom, left, /*distance=*/0.0);
+        op, prepared, query_geom, left, operation_ctx, /*distance=*/0.0);
 }
 
 void
@@ -313,8 +314,7 @@ PhyGISRefineConjunctExpr::PrefetchRawData() {
     // bulk_subscript over their offsets -- never a sequential full-column scan,
     // so the base prefetch_chunks over EVERY chunk is mostly wasted. Warm the
     // column only when reads will actually span it.
-    auto* geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-        segment_->get_segment_id(), st_->field_id);
+    auto geometry_cache = segment_->GetGeometryCache(st_->field_id);
     if (geometry_cache != nullptr) {
         // Reads come from the cache; the raw column is never touched.
         return;
@@ -395,8 +395,8 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         auto eval_all = [&](const Geometry& left) -> bool {
             bool bit = st_->is_and;
             for (size_t j = 0; j < st_->preds.size(); ++j) {
-                bool r =
-                    EvalPrepared(st_->preds[j].op, preps[j], qgeoms[j], left);
+                bool r = EvalPrepared(
+                    st_->preds[j].op, preps[j], qgeoms[j], left, qctx);
                 bit = st_->is_and ? (bit && r) : (bit || r);
                 if (st_->is_and != bit) {
                     break;  // short-circuit
@@ -421,8 +421,9 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
         }
 
-        auto* geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-            segment_->get_segment_id(), st_->field_id);
+        // Keep the selected cache alive for the complete refinement pass,
+        // even if the segment retires its owning entry concurrently.
+        auto geometry_cache = segment_->GetGeometryCache(st_->field_id);
 
         if (geometry_cache) {
             auto cache_lock = geometry_cache->AcquireReadLock();

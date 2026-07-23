@@ -303,13 +303,31 @@ the flag byte:
 - `0x01` → decode `(file_id, row_offset)`, fetch through
   `TextColumnReader::Take`, which:
   1. Groups requested references by `file_id`.
-  2. For each file, opens (or reuses, via the per-segment LOB reader
-     cache) `{partition}/lobs/{field}/_data/{file_id}.vx`.
+  2. For each file, opens or reuses
+     `{partition}/lobs/{field}/_data/{file_id}.vx` through a partition/field
+     `LobColumnReader`. Loaded segment runtime states hold reference-counted
+     reader handles; segments using the same LOB path share the handle, and the
+     reader is released after the last runtime/query snapshot drops it. There
+     is no reader-capacity limit or LRU eviction. A global weak registry only
+     deduplicates handles; it owns no reader. Whether a segment owns a reader
+     is determined solely by whether that internal V3 TEXT column exists in
+     the storage manifest and is currently loaded.
   3. Calls `VortexFileReader::take(row_indices)` for batched, vectorized
      random access.
   4. Reorders results back to the caller's original index.
 
-The query and expression layers above `GetText` are unchanged.
+External-collection `TEXT` columns remain ordinary Arrow strings and never
+acquire a partition LOB reader.
+
+Query semantics above `GetText` are unchanged. On sealed `Search`/`Retrieve`
+paths that hold a `SegmentReadLease`, online publication waits for the lease to
+drain, so repeated state captures during the operation cannot cross a publish;
+each captured state strongly owns its matching TEXT reader and other derived
+resources. This is not a universal per-operation snapshot pin: complete sealed
+accessor routing is tracked by
+[#51594](https://github.com/milvus-io/milvus/issues/51594), and growing-segment
+schema/resource publication remains tracked by
+[#51781](https://github.com/milvus-io/milvus/issues/51781).
 
 ### Compaction
 
