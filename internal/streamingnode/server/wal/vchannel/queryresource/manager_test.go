@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -172,6 +174,31 @@ func TestManagerResolveLoadInfoAppliesLoadInfoAndIndexInfos(t *testing.T) {
 	require.Equal(t, int64(101), view.IndexInfos[0].GetFieldID())
 }
 
+func TestManagerResolveLoadInfoFailureDelaysBuild(t *testing.T) {
+	scheduler := &capturedNodeScheduler{}
+	manager := NewManager(Config{
+		Scheduler: scheduler,
+		LoadInfoProvider: fakeLoadInfoProvider{
+			err: merr.WrapErrCollectionNotLoaded(1),
+		},
+	})
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	meta.LoadInfoVersion = 7
+	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta}, func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
+		return walview.VChannelWALView{
+			CollectionID:    1,
+			LoadInfoVersion: meta.GetLoadInfoVersion(),
+		}, true
+	})
+
+	require.NotNil(t, scheduler.task)
+	require.NotPanics(t, func() {
+		err := scheduler.task.Execute(context.Background())
+		require.Error(t, err)
+		require.True(t, errors.Is(err, nodescheduler.ErrDelay))
+	})
+}
+
 func loadFields(fieldIDs ...int64) []*messagespb.LoadFieldConfig {
 	fields := make([]*messagespb.LoadFieldConfig, 0, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
@@ -184,6 +211,21 @@ type fakeLoadInfoProvider struct {
 	loadInfo QueryViewLoadInfo
 	err      error
 }
+
+type capturedNodeScheduler struct {
+	task nodescheduler.Task
+}
+
+func (s *capturedNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	s.task = task
+	return noopTaskHandle{}
+}
+
+type noopTaskHandle struct{}
+
+func (noopTaskHandle) Cancel() {}
+
+func (noopTaskHandle) Wait(context.Context) error { return nil }
 
 func (p fakeLoadInfoProvider) QueryViewLoadInfo(context.Context, int64, uint64) (QueryViewLoadInfo, error) {
 	return p.loadInfo, p.err

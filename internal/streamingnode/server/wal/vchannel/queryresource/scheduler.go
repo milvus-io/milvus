@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -27,6 +29,9 @@ func newResourceBuildTask(build func(context.Context) (*QueryRuntime, error)) *r
 
 func (t *resourceBuildTask) Execute(ctx context.Context) error {
 	runtime, err := t.build(ctx)
+	if errors.Is(err, nodescheduler.ErrDelay) {
+		return err
+	}
 	t.finish(runtime, err)
 	if t.doneCallback != nil {
 		t.doneCallback()

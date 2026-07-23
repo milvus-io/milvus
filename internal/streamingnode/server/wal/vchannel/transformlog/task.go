@@ -3,6 +3,7 @@ package transformlog
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -34,27 +35,37 @@ func (t *transformTaskBase) predecessorsDone() bool {
 	return true
 }
 
+func (t *transformTaskBase) execute(ctx context.Context, ready bool, fn func(context.Context) error) error {
+	if !ready {
+		return nodescheduler.ErrDelay
+	}
+	err := fn(ctx)
+	if err == nil {
+		t.done.Store(true)
+		return nil
+	}
+	return errors.Mark(err, nodescheduler.ErrDelay)
+}
+
 type transformFlushTask struct {
 	transformTaskBase
 }
 
 func (t *transformFlushTask) Execute(ctx context.Context) error {
-	if !t.predecessorsDone() {
-		return nodescheduler.ErrDelay
-	}
-	defer t.done.Store(true)
-	result, err := t.log.flush(ctx, flushOption{TargetTimeTick: t.timetick})
-	if err != nil {
-		return err
-	}
-	if result.NextTargetTimeTick > 0 {
-		t.log.submitFlushTask(result.NextTargetTimeTick)
-	}
-	if t.log.shouldMaterialize() && !t.log.HasPendingMaterializeTask() {
-		t.log.submitMaterializeTask(t.log.dataCheckpointTimeTick())
-	}
-	t.log.notifyUpdated()
-	return nil
+	return t.execute(ctx, t.predecessorsDone(), func(ctx context.Context) error {
+		result, err := t.log.flush(ctx, flushOption{TargetTimeTick: t.timetick})
+		if err != nil {
+			return err
+		}
+		if result.NextTargetTimeTick > 0 {
+			t.log.submitFlushTask(result.NextTargetTimeTick)
+		}
+		if t.log.shouldMaterialize() && !t.log.HasPendingMaterializeTask() {
+			t.log.submitMaterializeTask(t.log.dataCheckpointTimeTick())
+		}
+		t.log.notifyUpdated()
+		return nil
+	})
 }
 
 type transformMaterializeTask struct {
@@ -62,16 +73,14 @@ type transformMaterializeTask struct {
 }
 
 func (t *transformMaterializeTask) Execute(ctx context.Context) error {
-	if !t.predecessorsDone() || t.log.LatestTimeTick() < t.timetick {
-		return nodescheduler.ErrDelay
-	}
-	defer t.done.Store(true)
-	_, err := t.log.materialize(ctx, materializeOption{TargetTimeTick: t.timetick})
-	if err != nil {
-		return err
-	}
-	t.log.notifyUpdated()
-	return nil
+	ready := t.predecessorsDone() && t.log.LatestTimeTick() >= t.timetick
+	return t.execute(ctx, ready, func(ctx context.Context) error {
+		if _, err := t.log.materialize(ctx, materializeOption{TargetTimeTick: t.timetick}); err != nil {
+			return err
+		}
+		t.log.notifyUpdated()
+		return nil
+	})
 }
 
 func (t *TransformLog) submitFlushTask(timetick uint64) {

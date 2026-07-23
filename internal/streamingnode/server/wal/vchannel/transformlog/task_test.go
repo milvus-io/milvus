@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -72,17 +72,40 @@ func TestTransformMaterializeTaskDelaysUntilFrontierArrives(t *testing.T) {
 	assert.True(t, task.Done())
 }
 
+func TestTransformTaskRetriesErrorsUntilSuccess(t *testing.T) {
+	businessErr := errors.New("business failure")
+	task := &testTransformTask{err: businessErr}
+
+	err := task.Execute(context.Background())
+	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
+	require.ErrorIs(t, err, businessErr)
+	assert.False(t, task.Done())
+
+	task.err = nil
+	require.NoError(t, task.Execute(context.Background()))
+	assert.True(t, task.Done())
+}
+
+func TestTransformTaskDoesNotInterpretCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	task := &testTransformTask{err: context.Canceled}
+	err := task.Execute(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
+	assert.False(t, task.Done())
+}
+
 type testTransformTask struct {
-	done atomic.Bool
+	transformTaskBase
+	err error
 }
 
-func (t *testTransformTask) Execute(context.Context) error {
-	t.done.Store(true)
-	return nil
-}
-
-func (t *testTransformTask) Done() bool {
-	return t.done.Load()
+func (t *testTransformTask) Execute(ctx context.Context) error {
+	return t.execute(ctx, true, func(context.Context) error {
+		return t.err
+	})
 }
 
 type inspectingTransformTaskScheduler struct {

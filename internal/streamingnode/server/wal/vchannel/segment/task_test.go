@@ -28,8 +28,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-func TestSegmentTaskDelaysUntilPredecessorIsTerminal(t *testing.T) {
-	predecessor := &testSegmentTask{err: errors.New("business failure")}
+func TestSegmentTaskRetriesErrorsUntilSuccess(t *testing.T) {
+	businessErr := errors.New("business failure")
+	predecessor := &testSegmentTask{err: businessErr}
 	successor := &testSegmentTask{
 		segmentTaskBase: segmentTaskBase{predecessors: []segmentTask{predecessor}},
 	}
@@ -38,11 +39,29 @@ func TestSegmentTaskDelaysUntilPredecessorIsTerminal(t *testing.T) {
 	assert.Equal(t, int32(0), successor.calls.Load())
 	assert.False(t, successor.Done())
 
-	require.Error(t, predecessor.Execute(context.Background()))
+	err := predecessor.Execute(context.Background())
+	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
+	require.ErrorIs(t, err, businessErr)
+	assert.False(t, predecessor.Done())
+	require.ErrorIs(t, successor.Execute(context.Background()), nodescheduler.ErrDelay)
+
+	predecessor.err = nil
+	require.NoError(t, predecessor.Execute(context.Background()))
 	assert.True(t, predecessor.Done())
 	require.NoError(t, successor.Execute(context.Background()))
 	assert.Equal(t, int32(1), successor.calls.Load())
 	assert.True(t, successor.Done())
+}
+
+func TestSegmentTaskDoesNotInterpretCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	task := &testSegmentTask{err: context.Canceled}
+	err := task.Execute(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
+	assert.False(t, task.Done())
 }
 
 type testSegmentTask struct {

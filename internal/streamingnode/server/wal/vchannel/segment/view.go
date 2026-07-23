@@ -381,6 +381,12 @@ func (info *SegmentView) IDAndVChannel() (int64, string) {
 	return info.meta.GetSegmentId(), info.meta.GetVchannel()
 }
 
+func (info *SegmentView) CollectionID() int64 {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.meta.GetCollectionId()
+}
+
 func (info *SegmentView) VChannel() string {
 	info.mu.Lock()
 	defer info.mu.Unlock()

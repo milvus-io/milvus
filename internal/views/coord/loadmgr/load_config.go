@@ -147,6 +147,7 @@ func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
 		CollectionID:             c.CollectionID,
 		DbID:                     c.DbID,
 		ReplicaNumber:            int32(len(c.Replicas)),
+		Status:                   querypb.LoadStatus_Loaded,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 	}
 	if len(c.LoadFields) > 0 {
@@ -169,6 +170,7 @@ func (c *LoadConfig) toPartitionLoadInfoProtos() []*querypb.PartitionLoadInfo {
 		out = append(out, &querypb.PartitionLoadInfo{
 			CollectionID: c.CollectionID,
 			PartitionID:  pid,
+			Status:       querypb.LoadStatus_Loaded,
 		})
 	}
 	return out
