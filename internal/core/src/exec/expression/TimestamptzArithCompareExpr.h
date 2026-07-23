@@ -13,7 +13,6 @@
 
 #include <memory>
 #include "common/Vector.h"
-#include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/Element.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
@@ -51,9 +50,7 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
-    DetermineExecPath() override {
-        exec_path_ = ExprExecPath::RawData;
-    }
+    DetermineExecPath() override;
 
     std::string
     ToString() const override;
@@ -77,8 +74,11 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
     VectorPtr
     ExecCompareVisitorImplForAll(OffsetVector* input);
 
+    template <typename T>
+    VectorPtr
+    ExecCompareVisitorImplForIndex(OffsetVector* input);
+
  private:
-    std::shared_ptr<PhyBinaryArithOpEvalRangeExpr> helperPhyExpr_;
     std::shared_ptr<const milvus::expr::TimestamptzArithCompareExpr> expr_;
     bool arg_inited_{false};
     proto::plan::Interval interval_;
