@@ -141,6 +141,11 @@ ComputeScorerScoresOnPreparedChunks(
     float* const* output_score_chunks,
     bool* const* output_has_score_chunks,
     const folly::CancellationToken& cancel_token = folly::CancellationToken()) {
+    // Observe a pre-cancelled request before doing anything at all --
+    // including the all-empty fast path below, which the per-chunk loop's
+    // cancellation check used to cover before the fast path existed.
+    milvus::futures::throwIfCancelled(cancel_token);
+
     // Nothing to score: skip the whole setup. Bailing out here matters for a
     // non-native filter (text match, GIS) -- otherwise it would scan the whole
     // segment to build a bitset no chunk ever consumes.
@@ -153,11 +158,9 @@ ComputeScorerScoresOnPreparedChunks(
     }
 
     // Preflight before the potentially expensive whole-segment filter
-    // evaluation below (ComputeNonNativeFilterBitset): observe a
-    // pre-cancelled request now instead of after a full segment scan, and
-    // catch a null per-chunk output pointer before doing any work rather
-    // than midway through the chunk loop.
-    milvus::futures::throwIfCancelled(cancel_token);
+    // evaluation below (ComputeNonNativeFilterBitset): catch a null
+    // per-chunk output pointer before doing any work rather than midway
+    // through the chunk loop.
     for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
          ++chunk_idx) {
         if (scorer_offset_chunks[chunk_idx].empty()) {
