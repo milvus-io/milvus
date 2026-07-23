@@ -273,6 +273,7 @@ class SegmentExpr : public Expr {
           consistency_level_(consistency_level),
           is_json_contains_(is_json_contains),
           plan_options_(plan_options) {
+        CaptureSchemaSnapshot();
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
             batch_size_ > 0,
@@ -284,8 +285,18 @@ class SegmentExpr : public Expr {
     virtual ~SegmentExpr();
 
     void
+    CaptureSchemaSnapshot() {
+        // Hold the published schema for this expr's lifetime. get_schema()
+        // returns a SchemaPtr by value, so a raw reference to *get_schema()
+        // would dangle. The segment read lease keeps the published state stable
+        // across the whole operation, so this single capture stays consistent
+        // for every access below.
+        schema_snapshot_ = segment_->get_schema();
+    }
+
+    void
     InitSegmentExpr() {
-        auto& schema = segment_->get_schema();
+        auto& schema = *schema_snapshot_;
         auto& field_meta = schema[field_id_];
         field_type_ = field_meta.get_data_type();
 
@@ -328,7 +339,7 @@ class SegmentExpr : public Expr {
             return;
         }
         pinned_index_initialized_ = true;
-        auto& schema = segment_->get_schema();
+        auto& schema = *schema_snapshot_;
         auto& field_meta = schema[field_id_];
         pinned_index_ = PinIndex(op_ctx_,
                                  segment_,
@@ -1918,7 +1929,7 @@ class SegmentExpr : public Expr {
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
                     auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                        (*schema_snapshot_)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -1992,7 +2003,7 @@ class SegmentExpr : public Expr {
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
                     auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                        (*schema_snapshot_)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -2516,6 +2527,7 @@ class SegmentExpr : public Expr {
     }
 
     const segcore::SegmentInternalInterface* segment_;
+    SchemaPtr schema_snapshot_;
     const FieldId field_id_;
     bool is_pk_field_{false};
     DataType pk_type_;

@@ -777,8 +777,11 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     int N = 200;
     int num_iters = 1;
     auto full_ds = DataGen(schema, N * num_iters);
-    auto sealed =
-        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+    auto segcore_config = SegcoreConfig::default_config();
+    segcore_config.set_enable_geometry_cache(true);
+    auto sealed = CreateSealedSegment(
+        schema, empty_index_meta, /*segment_id=*/1, segcore_config);
+    LoadGeneratedDataIntoSegment(full_ds, sealed.get(), false, {geo_id.get()});
 
     // Prepare controlled geometry WKBs mirroring the shapes used in growing
     std::vector<std::string> wkbs;
@@ -818,6 +821,7 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     auto load_info = PrepareSingleFieldInsertBinlog(
         1, 1, 1, geo_id.get(), {geo_field_data}, cm);
     sealed->LoadFieldData(load_info);
+    ASSERT_NE(sealed->GetGeometryCache(geo_id), nullptr);
 
     // build geometry R-Tree index files and load into sealed
     // Write a single parquet for geometry to simulate build input
@@ -890,6 +894,20 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     test_op("POINT(0 0)",
             proto::plan::GISFunctionFilterExpr_GISOp_Equals,
             [](int i) { return (i % 4 == 0); });
+
+    // R-Tree stores only coarse bounding boxes. Dropping the raw field after
+    // index load must keep the derived Geometry cache in the same runtime
+    // generation so exact refinement remains correct.
+    sealed->DropFieldData(geo_id);
+    ASSERT_NE(sealed->GetGeometryCache(geo_id), nullptr);
+    test_op("POINT(0 0)",
+            proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+            [](int i) { return (i % 4 == 0) || (i % 4 == 1) || (i % 4 == 3); });
+
+    // Once neither raw data nor the R-Tree remains, the cache's logical data
+    // lifecycle is over and the new runtime must release its owner.
+    sealed->DropIndex(geo_id);
+    EXPECT_EQ(sealed->GetGeometryCache(geo_id), nullptr);
 
     // Explicit cleanup for this test to avoid conflicts
     sealed.reset();  // Release the sealed segment first

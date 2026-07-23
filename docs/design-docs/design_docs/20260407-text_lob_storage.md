@@ -303,13 +303,25 @@ the flag byte:
 - `0x01` → decode `(file_id, row_offset)`, fetch through
   `TextColumnReader::Take`, which:
   1. Groups requested references by `file_id`.
-  2. For each file, opens (or reuses, via the per-segment LOB reader
-     cache) `{partition}/lobs/{field}/_data/{file_id}.vx`.
+  2. For each file, opens or reuses
+     `{partition}/lobs/{field}/_data/{file_id}.vx` through a partition/field
+     `LobColumnReader`. Loaded segment runtime states hold reference-counted
+     reader handles; segments using the same LOB path share the handle, and the
+     reader is released after the last runtime/query snapshot drops it. There
+     is no reader-capacity limit or LRU eviction. A global weak registry only
+     deduplicates handles; it owns no reader. Whether a segment owns a reader
+     is determined solely by whether that internal V3 TEXT column exists in
+     the storage manifest and is currently loaded.
   3. Calls `VortexFileReader::take(row_indices)` for batched, vectorized
      random access.
   4. Reorders results back to the caller's original index.
 
-The query and expression layers above `GetText` are unchanged.
+External-collection `TEXT` columns remain ordinary Arrow strings and never
+acquire a partition LOB reader.
+
+Query semantics above `GetText` are unchanged. Query execution captures one
+published segment-state snapshot, so the TEXT reader, raw column, indexes, and
+other derived resources used by a request all come from the same generation.
 
 ### Compaction
 

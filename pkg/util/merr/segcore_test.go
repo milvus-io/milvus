@@ -91,7 +91,7 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		// Transient system codes (object storage / local IO / OOM / mmap /
 		// folly / field-not-loaded / insufficient-resource) -> retriable
 		// system errors, never InputError.
-		for _, code := range []int32{2012, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043} {
+		for _, code := range []int32{2012, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043, 2045} {
 			err := SegcoreError(code, "transient failure")
 			assert.Equal(t, SystemError, GetErrorType(err), "code %d", code)
 			assert.True(t, Status(err).GetRetriable(), "code %d should be retriable", code)
@@ -101,7 +101,7 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	t.Run("permanent_system_classification", func(t *testing.T) {
 		// Registered permanent system codes stay non-retriable system errors:
 		// IndexBuildError, BucketInvalid, ObjectNotExist.
-		for _, code := range []int32{2004, 2016, 2017} {
+		for _, code := range []int32{2004, 2016, 2017, 2044} {
 			err := SegcoreError(code, "permanent failure")
 			assert.Equal(t, SystemError, GetErrorType(err), "code %d", code)
 			assert.False(t, Status(err).GetRetriable(), "code %d should not be retriable", code)

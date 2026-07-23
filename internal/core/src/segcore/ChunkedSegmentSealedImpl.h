@@ -82,7 +82,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
 #include "storage/MmapChunkManager.h"
-#include "segcore/TextColumnCache.h"
+#include "segcore/TextLobReader.h"
 
 namespace milvus::segcore {
 
@@ -355,7 +355,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             FieldId,
             std::unordered_map<std::string, index::CacheIndexBasePtr>>
             ngram_indexings;
-        std::unordered_map<FieldId, std::string> text_lob_paths;
+        std::unordered_map<FieldId, std::shared_ptr<SharedTextLobReader>>
+            text_lob_readers;
+        std::unordered_map<
+            FieldId,
+            std::shared_ptr<const milvus::exec::SimpleGeometryCache>>
+            geometry_caches;
         std::unordered_map<FieldId, TextIndexVariant> text_indexes;
         std::vector<JsonIndex> json_indices;
         std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
@@ -436,6 +441,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<const SkipIndex>
     GetSkipIndexSnapshot() const;
 
+    std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const override;
+
     int64_t
     get_deleted_count() const override;
 
@@ -447,7 +455,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    : 0;
     }
 
-    const Schema&
+    SchemaPtr
     get_schema() const override;
 
     void
@@ -704,7 +712,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::vector<int64_t>& result_mapping,
         int64_t size,
         const std::vector<std::string>* dynamic_field_names = nullptr,
-        const std::string* text_lob_path = nullptr);
+        std::shared_ptr<SharedTextLobReader> text_lob_reader = nullptr);
 
     // Calls reader_->take() with timing. Returns the table on success,
     // or nullptr on failure (logs a warning). Checks op_ctx for cancellation
@@ -731,10 +739,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   "sealed segment does not support get_timestamps()");
     }
 
-    // Load Geometry cache for a field
-    void
-    LoadGeometryCache(FieldId field_id,
-                      const std::shared_ptr<ChunkedColumnInterface>& column);
+    // Build an immutable Geometry cache for one published field column.
+    std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+    BuildGeometryCache(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column) const;
 
  private:
     void
@@ -1258,7 +1267,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     bulk_subscript_text_impl(
         milvus::OpContext* op_ctx,
-        FieldId field_id,
+        const std::shared_ptr<SharedTextLobReader>& text_lob_reader,
         const ChunkedColumnInterface* column,
         const int64_t* seg_offsets,
         int64_t count,
@@ -1558,7 +1567,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         Publish(const std::shared_ptr<const PublishedSegmentState>& current,
                 const StateDelta& delta,
                 milvus::OpContext* op_ctx = nullptr,
-                PublishMode publish_mode = PublishMode::Drain) {
+                PublishMode publish_mode = PublishMode::Drain,
+                const std::function<void()>& while_locked = {}) {
             std::vector<SealedIndexingEntryPtr> retired_indexings;
             std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
             std::shared_ptr<PublishedSegmentState> next;
@@ -1568,7 +1578,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 retired_indexings.swap(retired_vector_indexings_);
                 retired_cache_indexings.swap(retired_cache_indexings_);
             }
-            segment_.PublishStateOnline(std::move(next), op_ctx, publish_mode);
+            segment_.PublishStateOnline(
+                std::move(next), op_ctx, publish_mode, while_locked);
             for (auto& entry : retired_indexings) {
                 if (entry != nullptr && entry->indexing_ != nullptr) {
                     entry->indexing_->CancelWarmup();
@@ -1613,16 +1624,24 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     PublishState(PublishLease& publish_lease,
                  std::shared_ptr<PublishedSegmentState> state);
 
+    // while_locked, if set, runs after the new state is stored but before the
+    // publish lease is released — i.e. while in-flight readers are drained and
+    // no new reader can start yet. Use it for post-swap actions that must be
+    // atomic with the publication w.r.t. reader admission (e.g. dropping a
+    // segment-keyed cache so no reader observes the new state with a stale
+    // entry still present).
     void
     PublishStateOnline(
         const std::shared_ptr<const PublishedSegmentState>& state,
         milvus::OpContext* op_ctx = nullptr,
-        PublishMode publish_mode = PublishMode::Drain);
+        PublishMode publish_mode = PublishMode::Drain,
+        const std::function<void()>& while_locked = {});
 
     void
     PublishStateOnline(std::shared_ptr<PublishedSegmentState> state,
                        milvus::OpContext* op_ctx = nullptr,
-                       PublishMode publish_mode = PublishMode::Drain);
+                       PublishMode publish_mode = PublishMode::Drain,
+                       const std::function<void()>& while_locked = {});
 
     std::shared_ptr<index::JsonKeyStats>
     BuildJsonKeyStatsIndex(
@@ -1966,14 +1985,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                        bool is_replace = false);
 
     void
-    InitTextLobPaths(const std::string& manifest_path,
-                     const SchemaPtr& schema_snapshot,
-                     RuntimeResourceState* runtime);
-
-    void
-    InitTextLobPaths(const std::string& manifest_path,
-                     const SchemaPtr& schema_snapshot,
-                     StagedStateCommitter& committer);
+    InitTextLobReaders(const SegmentLoadInfo& segment_load_info,
+                       const SchemaPtr& schema_snapshot,
+                       StagedStateCommitter& committer);
 
     void
     SynthesizeExternalSystemFields(const SegmentLoadInfo& segment_load_info,
@@ -2124,6 +2138,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ApplyLoadDiff(milvus::OpContext* op_ctx,
                   SegmentLoadInfo& segment_load_info,
                   LoadDiff& load_diff);
+
+    // Drop this segment's process-level filter-bitset cache after a reopen that
+    // replaced existing row data. The cache key carries no data generation, so
+    // a same-id/same-row-count replacement would otherwise serve an older
+    // generation's bitmap. MUST run as the committer.Publish while_locked hook,
+    // i.e. after the new state is stored but before the publish lease releases:
+    // in-flight readers are already drained (their stale writes landed) and no
+    // new reader can start until the erase completes, so no query can observe
+    // the new state with a stale entry still present. Calling it after the
+    // lease releases would leave a window where a new reader hits the old
+    // bitmap. No-op unless load_diff.ReplacesExistingFieldData().
+    void
+    InvalidateExprCacheAfterReopen(const LoadDiff& load_diff) const;
 
     void
     Reopen(milvus::OpContext* op_ctx, SchemaPtr sch);
@@ -2312,6 +2339,34 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return CapturePublishedState();
     }
 
+    void
+    TestInvalidateExprCacheAfterReopen(const LoadDiff& diff) const {
+        InvalidateExprCacheAfterReopen(diff);
+    }
+
+    // Publish a no-op state carrying the expr-cache invalidation exactly as the
+    // reopen paths do (as the committer.Publish while_locked hook), and report
+    // whether a new read lease was refused *while the hook ran*. A true result
+    // proves the erase is ordered before reader admission — no query can see
+    // the freshly published state with a stale cached bitset still present.
+    bool
+    TestInvalidateExprCacheDuringPublish(const LoadDiff& diff) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto next = ClonePublishedState(current);
+        bool reader_refused_during_hook = false;
+        PublishStateOnline(std::move(next), nullptr, PublishMode::Drain, [&] {
+            try {
+                auto lease = AcquireReadLease(folly::CancellationToken());
+                (void)lease;
+            } catch (...) {
+                reader_refused_during_hook = true;
+            }
+            InvalidateExprCacheAfterReopen(diff);
+        });
+        return reader_refused_during_hook;
+    }
+
     std::string
     TestResolveFieldDataWarmupPolicy(
         FieldId field_id,
@@ -2409,6 +2464,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   bool is_replace,
                   RuntimeResourceState* runtime) {
         LoadIndex(info, is_replace, runtime);
+    }
+
+    void
+    TestLoadFieldData(const LoadFieldDataInfo& info, bool is_replace) {
+        LoadFieldData(info, nullptr, is_replace);
+    }
+
+    void
+    TestInitTextLobReaders(const SegmentLoadInfo& segment_load_info,
+                           const SchemaPtr& schema_snapshot,
+                           RuntimeResourceState* runtime,
+                           PublishedSegmentState* staged_state) {
+        StagedStateCommitter committer(*this, runtime, staged_state);
+        InitTextLobReaders(segment_load_info, schema_snapshot, committer);
     }
 
     void
@@ -2590,7 +2659,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
         auto runtime = CloneRuntimeResourceState(current->runtime);
-        runtime->text_lob_paths[field_id] = std::move(lob_base_path);
+        runtime->text_lob_readers[field_id] =
+            GetGlobalTextLobReaderRegistry().AcquireHandle(lob_base_path);
         next->runtime = ToConstRuntimeState(std::move(runtime));
         PublishStateOnline(std::move(next));
     }
