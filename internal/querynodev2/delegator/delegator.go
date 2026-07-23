@@ -228,6 +228,41 @@ func (sd *shardDelegator) publishIDFOracle(idfOracle IDFOracle) {
 	sd.idfOracle.Store(&idfOracleHolder{oracle: idfOracle})
 }
 
+// reconcileFunctionRuntimeLocked reconciles the delegator's function runtime —
+// the per-vchannel function runner and the BM25 IDF oracle — to the collection's
+// current schema. The caller MUST hold schemaChangeMutex.
+//
+// Both artifacts are driven only by UpdateSchema (the stream/DDL path); the load
+// path never touches them. A segment load can advance the collection schema ahead
+// of the DDL and gate that UpdateSchema out as a no-op (#51062), so the no-op
+// branch calls this to still refresh the runner and create/sync the oracle. It
+// reconciles against sd.collection.Schema() (monotonic:
+// prepareCollectionSchemaUpdate rejects older versions), so a stale schema can never
+// roll either back; the oracle is never torn down and is published once, so a
+// later schema that adds a BM25 field must SyncFunctions, not just create.
+func (sd *shardDelegator) reconcileFunctionRuntimeLocked() error {
+	schema := sd.collection.Schema()
+	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
+		// Runner construction failures are retried asynchronously by the manager.
+		// A synchronous error here means the internal function metadata is invalid.
+		panic(err)
+	}
+	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+		return idfOracle.SyncFunctions(schema.GetFunctions())
+	}
+	if len(newBM25FunctionSet(schema)) == 0 {
+		return nil
+	}
+	idfOracle := NewIDFOracle(sd.vchannelName, schema.GetFunctions())
+	idfOracle.Start()
+	sd.distribution.SetIDFOracle(idfOracle)
+	if current := sd.distribution.current.Load(); current != nil {
+		idfOracle.SetNext(current)
+	}
+	sd.publishIDFOracle(idfOracle)
+	return nil
+}
+
 func (sd *shardDelegator) notifyLeaderViewUpdated() {
 	if sd.leaderViewUpdatedCallback != nil {
 		sd.leaderViewUpdatedCallback(sd.vchannelName)
@@ -1277,11 +1312,23 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	defer sd.schemaChangeMutex.Unlock()
 
 	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
-		mlog.Info(ctx, "delegator skip stale or no-op schema event",
+		// Collection schema is already current (e.g. a segment load advanced it ahead
+		// of this DDL), so the schema/worker apply below is a no-op. But the delegator
+		// function runtime (runner + IDF oracle) is driven only by the stream, so
+		// still reconcile it here to the collection's current schema (#51062).
+		mlog.Info(ctx, "delegator collection schema current, reconcile function runtime only",
 			mlog.Uint64("schemaVersion", schemaVersion),
 			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
 		)
-		return nil
+		// Adopt the load barrier from the applied collection snapshot, not from the
+		// possibly stale event: the racing load advanced the collection past this
+		// event, and older in-flight loads must not republish pre-DDL segments
+		// through addDistributionIfSchemaBarrierOK.
+		_, _, currentBarrierTs := sd.collection.SchemaSnapshot()
+		if sd.schemaBarrierTs < currentBarrierTs {
+			sd.schemaBarrierTs = currentBarrierTs
+		}
+		return sd.reconcileFunctionRuntimeLocked()
 	}
 	oldSet := newBM25FunctionSet(sd.collection.Schema())
 	newSet := newBM25FunctionSet(schema)
@@ -1344,27 +1391,12 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	// Publish the manager schema after the delegator schema update. Queries use
-	// the previous function schema until this point.
-	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		// Runner construction failures are retried asynchronously by the manager.
-		// A synchronous error here means the internal function metadata is invalid.
-		panic(err)
-	}
-	if idfOracle == nil && len(newSet) > 0 {
-		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
-		// Old growings cannot receive stats for newly added BM25 fields; ProcessInsert registers only new growings.
-		idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
-		idfOracle.Start()
-		sd.distribution.SetIDFOracle(idfOracle)
-		if current := sd.distribution.current.Load(); current != nil {
-			idfOracle.SetNext(current)
-		}
-		sd.publishIDFOracle(idfOracle)
-	} else if idfOracle != nil && !newSet.Equal(oldSet) {
-		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
-			return err
-		}
+	// Reconcile the delegator function runtime (runner + IDF oracle) to the
+	// now-current schema, after the delegator schema update and sharing the same
+	// path as the gated no-op branch above (one place, no duplication). Queries
+	// use the previous function schema until this point.
+	if err := sd.reconcileFunctionRuntimeLocked(); err != nil {
+		return err
 	}
 	mlog.Info(ctx, "delegator finished update schema event",
 		mlog.Uint64("schemaVersion", schemaVersion),

@@ -502,6 +502,24 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
+		// A nil oracle is legal when the current schema has no BM25 function
+		// (never had one, or it was dropped and old segments still carry stats).
+		if len(newBM25FunctionSet(sd.collection.Schema())) == 0 {
+			return nil
+		}
+		// The schema has BM25 but the stream has not installed the oracle yet
+		// (#51062 race). Skipping would lose these segments' stats forever, so
+		// fail stats-bearing loads; QueryCoord retries until the stream installs
+		// the oracle via UpdateSchema.
+		for _, info := range infos {
+			paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+			if err != nil {
+				return err
+			}
+			if len(paths) > 0 {
+				return merr.WrapErrServiceInternal("BM25 stats load before delegator BM25 oracle is initialized, retry after the stream installs it")
+			}
+		}
 		return nil
 	}
 
@@ -531,24 +549,32 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	return nil
 }
 
+// bm25StatsBearingInfos returns the load infos that carry BM25 stats logs.
+func bm25StatsBearingInfos(ctx context.Context, log *mlog.Logger, infos []*querypb.SegmentLoadInfo) ([]*querypb.SegmentLoadInfo, error) {
+	withStats := make([]*querypb.SegmentLoadInfo, 0, len(infos))
+	for _, info := range infos {
+		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+		if err != nil {
+			log.Warn(ctx, "resolve bm25 stats paths failed", mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))
+			return nil, err
+		}
+		if len(bm25Paths) > 0 {
+			withStats = append(withStats, info)
+		}
+	}
+	return withStats, nil
+}
+
 func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	log := sd.getLogger(ctx).With(
 		mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 		mlog.String("loadScope", req.GetLoadScope().String()),
 	)
 
-	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
-	for _, info := range req.GetInfos() {
-		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
-		if err != nil {
-			log.Warn(ctx, "resolve reopened bm25 stats failed", mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))
-			return err
-		}
-		if len(bm25Paths) > 0 {
-			infosWithBM25Stats = append(infosWithBM25Stats, info)
-		}
+	infosWithBM25Stats, err := bm25StatsBearingInfos(ctx, log, req.GetInfos())
+	if err != nil {
+		return err
 	}
-
 	if len(infosWithBM25Stats) == 0 {
 		return nil
 	}
@@ -558,6 +584,11 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
+		// Dropped-function leftovers: the schema has no BM25, the stats are
+		// orphaned, and no oracle will ever be installed — skip, don't error.
+		if len(newBM25FunctionSet(sd.collection.Schema())) == 0 {
+			return nil
+		}
 		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
 	}
 
@@ -632,6 +663,37 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
 		return merr.WrapErrServiceInternal("load L0 segment is not supported, l0 segment should only be loaded by watchChannel")
+	}
+
+	// A reopen carrying BM25 stats needs the oracle BEFORE the worker commits the
+	// new version: failing after the commit leaves no checker-visible diff (the
+	// segment already matches the target), so QueryCoord would never re-issue the
+	// reopen and the stats would be lost permanently. Fail here so the version
+	// diff persists and the task retries until the stream installs the oracle.
+	if req.GetLoadScope() == querypb.LoadScope_Reopen && sd.getIDFOracle() == nil {
+		// Judge whether the stats matter against the NEWER of the request and
+		// collection schemas (same monotonic version domain): the first racing
+		// reopen carries the post-DDL schema while the collection still lags, and
+		// a stale pre-drop request can carry BM25 the collection no longer has.
+		// When the newer view has no BM25 (function dropped, delegator rebuilt),
+		// no oracle will ever be installed and rejecting would retry forever, so
+		// such loads pass and their orphaned stats are skipped.
+		// Single snapshot: schema and version must come from one atomic load, or a
+		// concurrent PutOrRef between two loads can yield an old schema with a new
+		// version and bypass the guard.
+		schema, collectionVersion, _ := sd.collection.SchemaSnapshot()
+		if reqSchema := req.GetSchema(); reqSchema != nil && uint64(reqSchema.GetVersion()) > collectionVersion {
+			schema = reqSchema
+		}
+		if len(newBM25FunctionSet(schema)) > 0 {
+			statsBearing, err := bm25StatsBearingInfos(ctx, log, req.GetInfos())
+			if err != nil {
+				return err
+			}
+			if len(statsBearing) > 0 {
+				return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+			}
+		}
 	}
 
 	// pin all segments to prevent delete buffer has been cleaned up during worker load segments
@@ -778,7 +840,20 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if schemaBarrierTs < sd.schemaBarrierTs {
+	// Fence barrier-carrying loads against the applied collection barrier too, not
+	// only the stream-adopted field: a load can advance the collection without
+	// schemaChangeMutex, so the delegator field may lag right after adoption.
+	// Reading the monotonic snapshot at decision time closes that window; rejected
+	// loads retry with a fresh barrier. Barrier-less requests (legacy paths) keep
+	// the field-only check — the collection barrier is nonzero from creation and
+	// would reject them permanently.
+	fence := sd.schemaBarrierTs
+	if schemaBarrierTs > 0 {
+		if _, _, collectionBarrierTs := sd.collection.SchemaSnapshot(); collectionBarrierTs > fence {
+			fence = collectionBarrierTs
+		}
+	}
+	if schemaBarrierTs < fence {
 		return merr.WrapErrServiceInternal("schema barrier changed")
 	}
 
