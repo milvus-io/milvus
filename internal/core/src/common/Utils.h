@@ -393,7 +393,9 @@ checkPlus(const T& a, const T& b, const char* typeName = "integer") {
     T result;
     bool overflow = __builtin_add_overflow(a, b, &result);
     if (UNLIKELY(overflow)) {
-        ThrowInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+        // Valid input values can overflow an aggregate accumulator. This is an
+        // execution failure, not an invalid caller-provided data type.
+        ThrowInfo(UnexpectedError, "{} overflow: {} + {}", typeName, a, b);
     }
     return result;
 #else
@@ -416,7 +418,9 @@ checkPlus(const T& a, const T& b, const char* typeName = "integer") {
     // If b == 0, no overflow possible
 
     if (UNLIKELY(overflow)) {
-        ThrowInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+        // Valid input values can overflow an aggregate accumulator. This is an
+        // execution failure, not an invalid caller-provided data type.
+        ThrowInfo(UnexpectedError, "{} overflow: {} + {}", typeName, a, b);
     }
     return a + b;
 #endif

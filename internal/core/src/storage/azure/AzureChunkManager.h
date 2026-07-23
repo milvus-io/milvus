@@ -28,7 +28,11 @@
 #include <vector>
 
 #include "AzureBlobChunkManager.h"
+#include "azure/core/context.hpp"
 #include "azure/core/diagnostics/logger.hpp"
+#include "azure/core/exception.hpp"
+#include "azure/core/http/http.hpp"
+#include "azure/core/http/http_status_code.hpp"
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
 #include "log/Log.h"
@@ -37,6 +41,40 @@
 
 namespace milvus {
 namespace storage {
+
+inline ErrorCode
+AzureHttpStatusToErrorCode(Azure::Core::Http::HttpStatusCode status_code) {
+    if (status_code == Azure::Core::Http::HttpStatusCode::NotFound) {
+        return ErrorCode::ObjectNotExist;
+    }
+    if (status_code == Azure::Core::Http::HttpStatusCode::RequestTimeout ||
+        status_code == Azure::Core::Http::HttpStatusCode::TooManyRequests ||
+        status_code == Azure::Core::Http::HttpStatusCode::InternalServerError ||
+        status_code == Azure::Core::Http::HttpStatusCode::BadGateway ||
+        status_code == Azure::Core::Http::HttpStatusCode::ServiceUnavailable ||
+        status_code == Azure::Core::Http::HttpStatusCode::GatewayTimeout) {
+        return ErrorCode::S3Error;
+    }
+    return ErrorCode::UnexpectedError;
+}
+
+inline ErrorCode
+AzureExceptionToErrorCode(const std::exception& error) {
+    if (const auto* segcore_error = dynamic_cast<const SegcoreError*>(&error)) {
+        return segcore_error->get_error_code();
+    }
+    if (dynamic_cast<const Azure::Core::OperationCancelledException*>(&error) !=
+            nullptr ||
+        dynamic_cast<const Azure::Core::Http::TransportException*>(&error) !=
+            nullptr) {
+        return ErrorCode::S3Error;
+    }
+    if (const auto* request_error =
+            dynamic_cast<const Azure::Core::RequestFailedException*>(&error)) {
+        return AzureHttpStatusToErrorCode(request_error->StatusCode);
+    }
+    return ErrorCode::UnexpectedError;
+}
 
 template <typename... Args>
 static std::string
@@ -61,7 +99,7 @@ ThrowAzureError(const std::string& func,
     std::string error_message =
         AzureErrorMessage(func, err, fmt_string, args...);
     LOG_WARN("{}", error_message);
-    throw SegcoreError(S3Error, error_message);
+    throw SegcoreError(AzureExceptionToErrorCode(err), error_message);
 }
 
 void

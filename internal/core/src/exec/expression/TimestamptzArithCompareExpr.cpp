@@ -130,7 +130,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
             if (::gmtime_r(&epoch_sec, &tm_buf) == nullptr) {
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "gmtime_r failed for timestamp {} us",
                           current_ts_us);
             }
@@ -205,7 +205,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                     match = (final_us <= compare_us);
                     break;
                 default:  // Should not happen
-                    ThrowInfo(OpTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "Unsupported compare op for "
                               "timestamptz_arith_compare_expr");
             }

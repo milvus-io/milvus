@@ -450,7 +450,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			State:          commonpb.SegmentState_Growing,
 			StorageVersion: storage.StorageV3,
 			SchemaVersion:  100,
-		}, pkoracle.NewBloomFilterSet(), nil)
+		}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
 		// segment; recordGrowingSourceProgress and triggerSync see the segment
@@ -600,7 +600,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			State:          commonpb.SegmentState_Growing,
 			StorageVersion: storage.StorageV3,
 			SchemaVersion:  100,
-		}, pkoracle.NewBloomFilterSet(), nil)
+		}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
 		// segment; recordGrowingSourceProgress and triggerSync see the segment

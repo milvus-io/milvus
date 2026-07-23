@@ -17,12 +17,16 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <shared_mutex>
+#include <mutex>
 #include <utility>
 #include <vector>
+
+#include <oneapi/tbb/concurrent_vector.h>
 
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
@@ -33,6 +37,13 @@
 namespace milvus {
 
 class ChunkedColumnInterface;
+
+struct ElementRowInfo {
+    int32_t row_id;
+    int32_t element_index;
+    int32_t row_element_start;
+    int32_t row_element_end;
+};
 
 class IArrayOffsets {
  public:
@@ -50,10 +61,41 @@ class IArrayOffsets {
     virtual std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const = 0;
 
+    // Convert an element ID to its row and return the row's element range in
+    // the same lookup. The growing implementation reads one published
+    // lock-free snapshot; the binary search that finds the row also identifies
+    // row_element_end.
+    virtual ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const = 0;
+
     // Convert row ID to element ID range
     // elements with id in [ret.first, ret.last) belong to row_id
     virtual std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const = 0;
+
+    // Batched row-range lookup. Sealed row IDs must be in [0, row_count).
+    // Growing rejects negative row IDs, but rows not yet committed yield an
+    // empty range so concurrent readers never observe a half-written range.
+    // The growing implementation acquire-loads one publication watermark for
+    // the whole batch, and the caller pays one virtual call instead of one per
+    // row.
+    virtual void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const = 0;
+
+    // Contiguous form for the common sequential-batch case: copy
+    // starts[row_start .. row_start + row_count] into out (row_count + 1
+    // entries), so [out[i], out[i+1]) is row (row_start + i)'s element
+    // range. Sealed is a straight memcpy; growing reads one lock-free snapshot,
+    // copies committed entries per chunk-run, and clamps rows beyond the
+    // committed count to the last committed total (equivalent to the per-row
+    // method's {total, total} for row == committed_row_count_, extended to any
+    // not-yet-committed row).
+    virtual void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const = 0;
 
     // Convert row-level bitsets to element-level bitsets
     // row_start: starting row index (0-based)
@@ -87,6 +129,21 @@ class IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const = 0;
+
+    // Word-wise ANY-semantics reduction of an element-level bitmap to row
+    // level. Bit j of elem_bitset corresponds to global element id
+    // (elem_offset + j). For each i in [0, row_result.size()), sets
+    // row_result[i] = true iff any element bit of row (row_start + i) is set.
+    // Bits in row_result are only ever set, never cleared. elem_bitset must
+    // cover the element ranges of all addressed rows.
+    // This is the hot path used to fold element-level match bits back to
+    // rows (MATCH_ANY over an all-valid element bitmap); it skips zero words
+    // instead of testing element bits one by one.
+    virtual void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -135,8 +192,21 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const override;
 
+    ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const override;
+
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
+
+    void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const override;
+
+    void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
@@ -155,6 +225,12 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const override;
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
@@ -169,30 +245,71 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     int64_t resource_size_{0};
 };
 
+// Growing-segment row -> element-start table with lock-free readers.
+//
+// The starts table lives in fixed-size chunks whose addresses never change.
+// Committing row i writes starts[i + 1] exactly once, then a release-store to
+// committed_row_count_ publishes the completed prefix. Readers acquire-load
+// that watermark and only touch immutable entries at or below it, so they do
+// not contend with ingest.
+//
+// Insert calls may arrive concurrently and out of order. A writer-only mutex
+// serializes the pending-row machinery; readers never acquire it. The
+// watermark is published once per Insert call, preserving the old behavior
+// where readers observe an inserted batch atomically.
+//
+// Growing offsets are not charged to the caching layer. Chunked storage
+// eagerly allocates the first starts chunk (32 KiB) and then grows in 32 KiB
+// steps.
 class ArrayOffsetsGrowing : public IArrayOffsets {
  public:
-    ArrayOffsetsGrowing() = default;
+    // Public so tests can target chunk boundaries.
+    static constexpr int64_t kChunkBits = 13;
+    static constexpr int64_t kEntriesPerChunk = int64_t{1} << kChunkBits;
+    static constexpr int64_t kChunkMask = kEntriesPerChunk - 1;
+
+    ArrayOffsetsGrowing() {
+        // starts[0] is the sentinel for an empty table. The constructor
+        // happens-before concurrent use, so this initialization needs no
+        // synchronization.
+        auto chunk = std::make_unique<int32_t[]>(kEntriesPerChunk);
+        chunk[0] = 0;
+        starts_chunks_.push_back(std::move(chunk));
+    }
 
     void
     Insert(int64_t row_id_start, const int32_t* array_lengths, int64_t count);
 
     int64_t
     GetRowCount() const override {
-        std::shared_lock lock(mutex_);
-        return committed_row_count_;
+        return committed_row_count_.load(std::memory_order_acquire);
     }
 
     int64_t
     GetTotalElementCount() const override {
-        std::shared_lock lock(mutex_);
-        return row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
+        const int64_t committed =
+            committed_row_count_.load(std::memory_order_acquire);
+        return LoadStart(committed);
     }
 
     std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const override;
 
+    ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const override;
+
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
+
+    void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const override;
+
+    void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
@@ -212,27 +329,76 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
                            int64_t row_start,
                            int64_t row_count) const override;
 
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
+
  private:
     struct PendingRow {
         int64_t row_id;
         int32_t array_len;
     };
 
+    template <typename T>
+    using ChunkDirectory = oneapi::tbb::concurrent_vector<std::unique_ptr<T[]>>;
+
+    // Keep this value stable across compiler and -mtune changes. Homebrew
+    // Clang/libc++ does not expose the C++17 interference-size constants;
+    // GCC 12 uses 256 bytes on AArch64 and 64 bytes on x86-64.
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    static constexpr std::size_t kDestructiveInterferenceSize = 128;
+#elif defined(__aarch64__) || defined(__arm64__)
+    static constexpr std::size_t kDestructiveInterferenceSize = 256;
+#else
+    static constexpr std::size_t kDestructiveInterferenceSize = 64;
+#endif
+
+    // Reader-side helper. Callers must only pass indices covered by an
+    // acquire-loaded committed_row_count_; those entries are immutable.
+    int32_t
+    LoadStart(int64_t idx) const {
+        return starts_chunks_[idx >> kChunkBits][idx & kChunkMask];
+    }
+
+    void
+    CopyStartsSlice(int64_t first_idx, int64_t entry_count, int32_t* out) const;
+
+    // Writer-side helpers; write_mutex_ must be held.
+    void
+    WriteStart(int64_t idx, int32_t value);
+
+    void
+    CommitRow(int32_t array_len);
+
     void
     DrainPendingRows();
 
- private:
-    std::vector<int32_t> row_to_element_start_;
+    void
+    PublishCommitted();
 
-    // Number of rows committed (contiguous from 0)
-    int32_t committed_row_count_ = 0;
+ private:
+    // Logical index i is stored at
+    // starts_chunks_[i >> kChunkBits][i & kChunkMask]. TBB's directory can
+    // grow concurrently without relocating existing entries.
+    ChunkDirectory<int32_t> starts_chunks_;
+
+    // Reader-visible publication watermark. Rows below it, plus the sentinel
+    // at the watermark, are committed and immutable.
+    std::atomic<int32_t> committed_row_count_{0};
+
+    // Writer's working count, published at the end of each Insert call. Keep
+    // it off the reader-hot watermark's cache line: CommitRow updates this for
+    // every row, while readers repeatedly acquire-load the watermark.
+    alignas(kDestructiveInterferenceSize) int32_t committed_rows_writer_{0};
 
     // Pending rows waiting for earlier rows to complete
     // Key: row_id, automatically sorted
     std::map<int64_t, PendingRow> pending_rows_;
 
-    // Protects all member variables
-    mutable std::shared_mutex mutex_;
+    // Serializes writers only; readers never take this lock.
+    std::mutex write_mutex_;
 };
 
 }  // namespace milvus

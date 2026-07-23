@@ -79,7 +79,7 @@ struct CompareElementFunc {
                     res[i] = left[offset] <= right[offset];
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
                             op));
@@ -107,7 +107,7 @@ struct CompareElementFunc {
                     res[i] = left[i] <= right[i];
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
                             op));
@@ -135,7 +135,7 @@ struct CompareElementFunc {
             res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
                 left, right, size);
         } else {
-            ThrowInfo(OpTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       fmt::format(
                           "unsupported op_type:{} for CompareElementFunc", op));
         }

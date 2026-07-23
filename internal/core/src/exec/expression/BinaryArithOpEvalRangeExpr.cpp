@@ -98,7 +98,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -118,7 +118,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -138,7 +138,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -146,7 +146,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -332,7 +332,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -388,7 +388,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -444,7 +444,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -500,7 +500,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -556,7 +556,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -612,7 +612,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -620,7 +620,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -809,7 +809,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -865,7 +865,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -921,7 +921,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -977,7 +977,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1033,7 +1033,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1089,7 +1089,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1097,7 +1097,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -1137,7 +1137,7 @@ VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
     OffsetVector* input) {
     if (expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength) {
-        ThrowInfo(OpTypeInvalid,
+        ThrowInfo(UnexpectedError,
                   "unsupported arith type for vector array field: {}",
                   expr_->arith_op_type_);
     }
@@ -1177,7 +1177,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
             case proto::plan::OpType::LessEqual:
                 return length <= value;
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for vector array "
                           "length eval expr: {}",
                           op_type);
@@ -1380,7 +1380,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1495,7 +1495,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1610,7 +1610,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1725,7 +1725,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1840,7 +1840,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1955,7 +1955,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -1963,7 +1963,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
@@ -2118,7 +2118,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2201,7 +2201,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2284,7 +2284,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2367,7 +2367,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2450,7 +2450,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2533,7 +2533,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                     }
                     default:
                         ThrowInfo(
-                            OpTypeInvalid,
+                            UnexpectedError,
                             fmt::format("unsupported arith type for binary "
                                         "arithmetic eval expr: {}",
                                         arith_type));
@@ -2541,7 +2541,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);

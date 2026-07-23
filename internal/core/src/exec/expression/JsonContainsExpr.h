@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -325,7 +327,7 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                             break;
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
@@ -422,7 +424,7 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
                             break;
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       fmt::format("unsupported data type {}",
                                                   element.val_case()));
                     }
@@ -493,6 +495,17 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     DetermineExecPath() override {
         if (CanUseJsonStatsAtInit()) {
             exec_path_ = ExprExecPath::JsonStats;
+            return;
+        }
+        if (expr_->column_.data_type_ == DataType::JSON &&
+            (!expr_->same_type_ ||
+             std::any_of(expr_->vals_.begin(),
+                         expr_->vals_.end(),
+                         [](const auto& value) {
+                             return value.val_case() ==
+                                    proto::plan::GenericValue::kArrayVal;
+                         }))) {
+            exec_path_ = ExprExecPath::RawData;
             return;
         }
         if (expr_->column_.data_type_ == DataType::ARRAY &&

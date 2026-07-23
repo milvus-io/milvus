@@ -238,11 +238,11 @@ PhyFilterBitsNode::GetOutput() {
                 valid_bitset.append(valid_view);
                 num_processed_rows_ += col_vec_size;
             } else {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "PhyFilterBitsNode result should be bitmap");
             }
         } else {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }

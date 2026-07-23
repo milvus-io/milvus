@@ -47,6 +47,13 @@ type BinlogRecordWriter interface {
 		expirQuantiles []int64,
 	)
 	GetRowNum() int64
+	// GetStatsBlobSize returns the cumulative memory size of bloom-filter +
+	// BM25 stat blobs produced by this writer. The value comes from a
+	// counter populated by both the V2 (writeStats) and V3 (appendV3Stats)
+	// paths; for V3 the statsLog / bm25StatsLog FieldBinlogs are nil
+	// because stats live in the manifest, so this counter is the only
+	// source of the blob footprint.
+	GetStatsBlobSize() int64
 	FlushChunk() error
 	GetBufferUncompressed() uint64
 	Schema() *schemapb.CollectionSchema
@@ -81,10 +88,11 @@ type packedBinlogRecordWriterBase struct {
 	writtenUncompressed uint64
 
 	// results
-	fieldBinlogs map[FieldID]*datapb.FieldBinlog
-	statsLog     *datapb.FieldBinlog
-	bm25StatsLog map[FieldID]*datapb.FieldBinlog
-	manifest     string
+	fieldBinlogs  map[FieldID]*datapb.FieldBinlog
+	statsLog      *datapb.FieldBinlog
+	bm25StatsLog  map[FieldID]*datapb.FieldBinlog
+	manifest      string
+	statsBlobSize int64
 
 	ttlFieldID     int64
 	ttlFieldValues []int64
@@ -130,6 +138,9 @@ func (pw *packedBinlogRecordWriterBase) writeStats() error {
 	// Extract single PK stats from map
 	for _, statsLog := range pkStatsMap {
 		pw.statsLog = statsLog
+		for _, l := range statsLog.GetBinlogs() {
+			pw.statsBlobSize += l.GetMemorySize()
+		}
 		break
 	}
 
@@ -147,6 +158,11 @@ func (pw *packedBinlogRecordWriterBase) writeStats() error {
 		return err
 	}
 	pw.bm25StatsLog = bm25StatsLog
+	for _, fb := range bm25StatsLog {
+		for _, l := range fb.GetBinlogs() {
+			pw.statsBlobSize += l.GetMemorySize()
+		}
+	}
 
 	return nil
 }
@@ -172,6 +188,10 @@ func (pw *packedBinlogRecordWriterBase) fillV3ColumnGroupFormats() (string, []st
 	}
 	pw.columnGroups = storagecommon.FillColumnGroupFormats(pw.columnGroups, writerFormat)
 	return writerFormat, storagecommon.ColumnGroupFormats(pw.columnGroups, writerFormat)
+}
+
+func (pw *packedBinlogRecordWriterBase) GetStatsBlobSize() int64 {
+	return pw.statsBlobSize
 }
 
 func (pw *packedBinlogRecordWriterBase) FlushChunk() error {
@@ -516,7 +536,9 @@ func (pw *PackedManifestRecordWriter) Close() error {
 // appendV3Stats serializes bloom filter / BM25 stat blobs, writes them to
 // storage, and appends StatEntry records onto updates so the surrounding
 // commit registers inserts + stats atomically. Leaves pw.statsLog and
-// pw.bm25StatsLog nil so callers know stats are embedded in the manifest.
+// pw.bm25StatsLog nil — stats are embedded in the manifest, not in
+// statslog FieldBinlogs. The cumulative blob memory is tracked on
+// pw.statsBlobSize so callers can ship a correct SegmentInfo.Stats.
 func (pw *packedBinlogRecordWriterBase) appendV3Stats(updates *packed.ManifestUpdates) error {
 	statsBlob, pkFieldID, err := pw.pkCollector.SerializeBlob(pw.rowNum)
 	if err != nil {
@@ -531,10 +553,12 @@ func (pw *packedBinlogRecordWriterBase) appendV3Stats(updates *packed.ManifestUp
 		if err := packed.WriteFile(pw.storageConfig, fullPath, statsBlob.Value); err != nil {
 			return merr.Wrap(err, "appendV3Stats: failed to write bloom filter stats")
 		}
+		blobSize := int64(len(statsBlob.Value))
+		pw.statsBlobSize += blobSize
 		updates.Stats = append(updates.Stats, packed.StatEntry{
 			Key:      fmt.Sprintf("bloom_filter.%d", pkFieldID),
 			Files:    []string{fullPath},
-			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", int64(len(statsBlob.Value)))},
+			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", blobSize)},
 		})
 	}
 
@@ -551,6 +575,7 @@ func (pw *packedBinlogRecordWriterBase) appendV3Stats(updates *packed.ManifestUp
 		if err := packed.WriteFile(pw.storageConfig, fullPath, blob.Value); err != nil {
 			return merr.Wrap(err, "appendV3Stats: failed to write bm25 stats")
 		}
+		pw.statsBlobSize += blob.MemorySize
 		updates.Stats = append(updates.Stats, packed.StatEntry{
 			Key:      fmt.Sprintf("bm25.%d", fieldID),
 			Files:    []string{fullPath},

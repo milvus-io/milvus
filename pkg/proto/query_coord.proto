@@ -669,6 +669,7 @@ message GetDataDistributionRequest {
     common.MsgBase base = 1;
     map<string, msg.MsgPosition> checkpoints = 2;
     int64 lastUpdateTs = 3;
+    bool support_delta = 4;
 }
 
 message GetDataDistributionResponse {
@@ -680,6 +681,11 @@ message GetDataDistributionResponse {
     int64 lastModifyTs = 6;
     double memCapacityInMB = 7;
     int64 cpu_num = 8;
+    bool is_delta = 9;
+    repeated int64 removed_segment_ids = 10;
+    repeated string removed_channel_names = 11;
+    int64 total_segment_count = 12;
+    int64 total_channel_count = 13;
 }
 
 message LeaderView {

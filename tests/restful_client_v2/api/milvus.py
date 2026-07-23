@@ -544,6 +544,21 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
+    def drop_field(self, collection_name, field_name=None, field_id=None, db_name="default"):
+        """Drop field by field name or field ID"""
+        url = f"{self.endpoint}/v2/vectordb/collections/fields/drop"
+        payload = {"collectionName": collection_name}
+        if field_name is not None:
+            payload["fieldName"] = field_name
+        if field_id is not None:
+            payload["fieldId"] = field_id
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
     def add_struct_field(self, collection_name, field_params, db_name="default"):
         """Add struct field"""
         url = f"{self.endpoint}/v2/vectordb/collections/struct_fields/add"

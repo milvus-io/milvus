@@ -141,6 +141,9 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
 		ManifestPath: segment.ManifestPath(),
+		// Report the writer-built cumulative Statistics so DataCoord persists
+		// it directly.
+		Stats: segment.Statistics().Publish(),
 	}, nil
 }
 
