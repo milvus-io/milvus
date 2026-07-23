@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -29,6 +31,29 @@
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::rescores {
+
+namespace {
+
+// The out-of-bounds skip below fires once per batch_score call, i.e. once
+// per offset chunk, and its usual cause (text index lagging the vector
+// index) is expected and transient -- so during sustained lag an unthrottled
+// warning would repeat once per chunk x segment x query. Allow at most one
+// warning per interval process-wide; the per-call counts stay aggregated in
+// the message.
+bool
+ShouldLogOutOfBoundsOffsets() {
+    constexpr int64_t kLogIntervalUs = 10'000'000;  // 10s
+    static std::atomic<int64_t> last_log_us{0};
+    auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count();
+    auto last = last_log_us.load(std::memory_order_relaxed);
+    return now_us - last >= kLogIntervalUs &&
+           last_log_us.compare_exchange_strong(
+               last, now_us, std::memory_order_relaxed);
+}
+
+}  // namespace
 
 void
 WeightScorer::batch_score(milvus::OpContext* op_ctx,
@@ -70,13 +95,14 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
             ++out_of_bounds;
         }
     }
-    if (out_of_bounds > 0) {
+    if (out_of_bounds > 0 && ShouldLogOutOfBoundsOffsets()) {
         LOG_WARN(
             "WeightScorer::batch_score skipped {} of {} offsets outside the "
-            "filter bitmap (bitmap size {})",
+            "filter bitmap (bitmap size {}, segment {})",
             out_of_bounds,
             offsets.size(),
-            bitmap_size);
+            bitmap_size,
+            segment != nullptr ? segment->get_segment_id() : -1);
     }
 };
 
@@ -161,13 +187,14 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
             ++out_of_bounds;
         }
     }
-    if (out_of_bounds > 0) {
+    if (out_of_bounds > 0 && ShouldLogOutOfBoundsOffsets()) {
         LOG_WARN(
             "RandomScorer::batch_score skipped {} of {} offsets outside the "
-            "filter bitmap (bitmap size {})",
+            "filter bitmap (bitmap size {}, segment {})",
             out_of_bounds,
             offsets.size(),
-            bitmap_size);
+            bitmap_size,
+            segment != nullptr ? segment->get_segment_id() : -1);
     }
 
     // skip if empty
