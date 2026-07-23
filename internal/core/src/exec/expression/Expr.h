@@ -1947,8 +1947,19 @@ class SegmentExpr : public Expr {
                 *cached_index_chunk_valid_res_, elem_start, elem_count);
 
             current_index_chunk_pos_ = data_pos + batch_rows;
-        } else if (execute_all_at_once_) {
-            // Fast path: move cached bitmap directly, no copy
+        } else if (execute_all_at_once_ &&
+                   int64_t(cached_index_chunk_res_->size()) == active_count_ &&
+                   int64_t(cached_index_chunk_valid_res_->size()) ==
+                       active_count_) {
+            // Fast path: the cached bitmap lines up exactly with the rows
+            // this query emits, so move it out with no copy. The size guard
+            // keeps this branch under the same invariant as the slicing
+            // branch below: on a growing segment the interim index bitmap
+            // may run ahead of active_count_ under concurrent inserts (see
+            // issue #51237), and moving an oversized bitmap wholesale would
+            // hand downstream more rows than the batch. That case falls
+            // through to the slicing branch, which bounds by active_count_
+            // and asserts coverage.
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
             return std::make_shared<ColumnVector>(
                 std::move(*cached_index_chunk_res_),
