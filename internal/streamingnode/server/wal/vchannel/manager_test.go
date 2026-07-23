@@ -69,6 +69,21 @@ func TestPChannelRecoveryManagerModuleIndexSupportsConcurrentRange(t *testing.T)
 	assert.ElementsMatch(t, []string{"v1", "v2"}, mapKeys(observed))
 }
 
+func TestPChannelRecoveryManagerSwitchAggregatesVChannelMetaSnapshot(t *testing.T) {
+	manager := newTestManager(t, "p1", "v1", "v2")
+
+	snapshots := moduleapi.FlattenModuleSnapshot(manager.SwitchIntoMetaAndData())
+
+	vchannelSnapshots := make([]*moduleapi.VChannelModuleSnapshot, 0)
+	for _, snapshot := range snapshots {
+		if typed, ok := snapshot.(*moduleapi.VChannelModuleSnapshot); ok {
+			vchannelSnapshots = append(vchannelSnapshots, typed)
+		}
+	}
+	require.Len(t, vchannelSnapshots, 1)
+	assert.ElementsMatch(t, []string{"v1", "v2"}, mapKeys(vchannelSnapshots[0].VChannels))
+}
+
 func TestPChannelRecoveryManagerConsumesDirtySnapshotsByScanningModules(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestManager(t, "p1", "v1")

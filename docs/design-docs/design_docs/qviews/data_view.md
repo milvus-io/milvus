@@ -95,7 +95,7 @@ Version rules:
 | Segment joins DataView from write/import/copy-segment-complete path | `(S, C) -> (S+1, 0)` | New loadable data joins the view. |
 | Segment leaves DataView, or membership is replaced/trimmed | `(S, C) -> (S, C+1)` | Existing loadable membership changes without a new streaming epoch. |
 | Segment content changes without membership change | unchanged | DataView does not track content mutation. |
-| Delete frontier changes without membership change | unchanged | `delete_apply_start_after_timetick` is derived metadata, not a version source. |
+| Delete frontier changes without membership change | unchanged | `transform_start_after_timetick` is derived metadata, not a version source. |
 | DropCollection | delete DataView | The whole collection view is removed. |
 
 `compact_version` resets to `0` whenever `streaming_version` advances.
@@ -146,7 +146,7 @@ message DataViewOfCollection {
 message DataViewOfShard {
     string vchannel = 1;
     repeated DataViewOfPartition partitions = 2;
-    uint64 delete_apply_start_after_timetick = 3;
+    uint64 transform_start_after_timetick = 3;
 }
 
 message DataViewOfPartition {
@@ -162,7 +162,7 @@ storage version, segment-level data version, and segment-level
 QueryCoord may fetch that metadata separately for balancer scoring, but it must
 not recompute DataView membership from it.
 
-`DataViewOfShard.delete_apply_start_after_timetick` is a snapshot/transport
+`DataViewOfShard.transform_start_after_timetick` is a snapshot/transport
 field derived from the current loadable membership. It does not need to be
 stored durably with DataView; DataCoord may recompute it from segment metadata
 when publishing snapshots or syncing StreamingNode. If the serialized proto
@@ -184,7 +184,7 @@ Responsibilities:
 3. Persist every loadable-membership mutation.
 4. Advance DataVersion according to the rules above.
 5. Expose DataView snapshots to QueryCoord.
-6. Derive and sync `delete_apply_start_after_timetick` to StreamingNode when it changes.
+6. Derive and sync `transform_start_after_timetick` to StreamingNode when it changes.
 
 ### 4.2 QueryCoord
 
@@ -236,12 +236,12 @@ It does not shard the persisted DataView payload.
 Suggested keys:
 
 ```
-datacoord/dataview/{collectionID}/versions/{streamingVersion}/{compactVersion}
+datacoord-meta/dataview/{collectionID}/versions/{streamingVersion}/{compactVersion}
 ```
 
 `versions/{S}/{C}` stores a serialized `DataViewOfCollection` membership
 snapshot. The durable record may omit
-`delete_apply_start_after_timetick`; that value can be recomputed when
+`transform_start_after_timetick`; that value can be recomputed when
 DataCoord publishes a snapshot or syncs StreamingNode.
 
 Persistence and visibility semantics:
@@ -270,9 +270,9 @@ Normal flow:
 1. Apply and persist segment metadata mutation.
 2. Build the next full DataView snapshot from the previous resident DataView
    plus the DataCoord event.
-3. Persist versions/{D'}.
+3. Persist `versions/{D'}`.
 4. If the new DataView is available for QueryView construction, notify
-   QueryCoord after versions/{D'} is persisted.
+   QueryCoord after `versions/{D'}` is persisted.
 ```
 
 This is not a strict atomic transaction between segment metadata and DataView.
@@ -342,6 +342,8 @@ persisted loadable membership.
 Suggested interface shape:
 
 ```go
+func RecoverManager(ctx context.Context, catalog RecoveryCatalog, segments SegmentStore) (Manager, error)
+
 type DataViewManager interface {
     OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error)
     OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error)
@@ -353,10 +355,17 @@ type DataViewManager interface {
     OnTruncate(ctx context.Context, event TruncateDataViewEvent) (*viewpb.DataVersion, error)
     OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error)
 
+    RepairCollection(ctx context.Context, collectionID int64) error
+    RepairCollections(ctx context.Context, collectionIDs []int64) error
     LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error)
     Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error)
 }
 ```
+
+`RecoverManager` restores all DataViews directly from metastore using a
+collection-hint-free full scan. `RepairCollection(s)` is the separate recovery
+repair step that reconciles DataView with SegmentMeta after SegmentMeta and
+collection/partition metadata have recovered.
 
 Every `On*` method returns the DataVersion generated or affected by the event.
 If the event only refreshes derived metadata, for example L0 compaction changing
@@ -656,7 +665,7 @@ delivery.
 
 ## 8. Delete Data Eviction
 
-`DataViewOfShard.delete_apply_start_after_timetick` is DataView-derived
+`DataViewOfShard.transform_start_after_timetick` is DataView-derived
 metadata because it depends on the data that must remain queryable, not on query
 placement.
 
@@ -664,7 +673,7 @@ It is derived from the segment IDs contained in the current DataView.
 Conceptually, for one shard:
 
 ```
-delete_apply_start_after_timetick =
+transform_start_after_timetick =
     min(segment.delete_apply_start_after_timetick for every segment in the current DataView shard)
 ```
 
@@ -757,7 +766,7 @@ DataCoord syncs the lightweight timetick through `SyncDataView`:
 ```proto
 message DataViewShardTimeTick {
     string vchannel = 1;
-    uint64 delete_apply_start_after_timetick = 2;
+    uint64 transform_start_after_timetick = 2;
 }
 ```
 

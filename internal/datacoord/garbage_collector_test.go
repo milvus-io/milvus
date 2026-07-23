@@ -136,7 +136,11 @@ func (m *fakeGCDataViewManager) OnDropCollection(ctx context.Context, collection
 	return nil, nil
 }
 
-func (m *fakeGCDataViewManager) RecoverCollection(ctx context.Context, collectionID int64) error {
+func (m *fakeGCDataViewManager) RepairCollection(ctx context.Context, collectionID int64) error {
+	return nil
+}
+
+func (m *fakeGCDataViewManager) RepairCollections(ctx context.Context, collectionIDs []int64) error {
 	return nil
 }
 

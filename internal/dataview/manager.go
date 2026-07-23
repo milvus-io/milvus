@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/metastore"
 	balancerapi "github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -36,6 +35,18 @@ import (
 type SegmentStore interface {
 	GetSegment(ctx context.Context, segID int64) *Segment
 	SelectSegments(ctx context.Context, collectionID int64) []*Segment
+}
+
+type Catalog interface {
+	SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
+	ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error)
+	DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error
+	DropDataViews(ctx context.Context, collectionID int64) error
+}
+
+type RecoveryCatalog interface {
+	Catalog
+	ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error)
 }
 
 type Manager interface {
@@ -50,7 +61,8 @@ type Manager interface {
 	OnTruncate(ctx context.Context, event TruncateDataViewEvent) (*viewpb.DataVersion, error)
 	OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error)
 
-	RecoverCollection(ctx context.Context, collectionID int64) error
+	RepairCollection(ctx context.Context, collectionID int64) error
+	RepairCollections(ctx context.Context, collectionIDs []int64) error
 	DataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error)
 	LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error)
 	Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error)
@@ -119,10 +131,12 @@ type collectionDataViewState struct {
 }
 
 type dataViewManager struct {
-	mu       sync.RWMutex
-	catalog  metastore.DataCoordCatalog
-	segments SegmentStore
-	states   map[int64]*collectionDataViewState
+	mu             sync.RWMutex
+	catalog        Catalog
+	segments       SegmentStore
+	states         map[int64]*collectionDataViewState
+	recoveredAll   bool
+	recoveredViews map[int64][]*viewpb.DataViewOfCollection
 }
 
 type Segment struct {
@@ -265,12 +279,22 @@ type dataViewMembershipMutation struct {
 	classifyAdvance func(removed bool, added bool) dataViewAdvance
 }
 
-func NewManager(catalog metastore.DataCoordCatalog, segments SegmentStore) Manager {
+func NewManager(catalog Catalog, segments SegmentStore) Manager {
 	return &dataViewManager{
 		catalog:  catalog,
 		segments: segments,
 		states:   make(map[int64]*collectionDataViewState),
 	}
+}
+
+func RecoverManager(ctx context.Context, catalog RecoveryCatalog, segments SegmentStore) (Manager, error) {
+	manager := NewManager(catalog, segments).(*dataViewManager)
+	dataViews, err := catalog.ListAllDataViews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	manager.recoverFromDataViews(dataViews)
+	return manager, nil
 }
 
 func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
@@ -433,16 +457,99 @@ func (m *dataViewManager) OnDropCollection(ctx context.Context, collectionID int
 	return nil, nil
 }
 
-func (m *dataViewManager) RecoverCollection(ctx context.Context, collectionID int64) error {
+func (m *dataViewManager) RepairCollection(ctx context.Context, collectionID int64) error {
+	persistedViews, ok := m.recoveredDataViews(collectionID)
+	if ok {
+		return m.repairCollectionWithDataViews(ctx, collectionID, persistedViews)
+	}
+	persistedViews, err := m.catalog.ListDataViews(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	return m.repairCollectionWithDataViews(ctx, collectionID, persistedViews)
+}
+
+func (m *dataViewManager) RepairCollections(ctx context.Context, collectionIDs []int64) error {
+	for _, collectionID := range collectionIDs {
+		if err := m.RepairCollection(ctx, collectionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *dataViewManager) recoverFromDataViews(dataViews []*viewpb.DataViewOfCollection) {
+	viewsByCollection := make(map[int64][]*viewpb.DataViewOfCollection)
+	recoveredViews := make(map[int64][]*viewpb.DataViewOfCollection)
+	for _, view := range dataViews {
+		if view == nil {
+			continue
+		}
+		collectionID := view.GetCollectionId()
+		viewsByCollection[collectionID] = append(viewsByCollection[collectionID], view)
+		recoveredViews[collectionID] = append(recoveredViews[collectionID], canonicalDataViewClone(view))
+	}
+	m.mu.Lock()
+	m.recoveredAll = true
+	m.recoveredViews = recoveredViews
+	m.mu.Unlock()
+
+	collectionIDs := make([]int64, 0, len(viewsByCollection))
+	for collectionID := range viewsByCollection {
+		collectionIDs = append(collectionIDs, collectionID)
+	}
+	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
+	for _, collectionID := range collectionIDs {
+		m.recoverCollectionFromDataViews(collectionID, viewsByCollection[collectionID])
+	}
+}
+
+func (m *dataViewManager) recoveredDataViews(collectionID int64) ([]*viewpb.DataViewOfCollection, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.recoveredAll {
+		return nil, false
+	}
+	return cloneDataViews(m.recoveredViews[collectionID]), true
+}
+
+func (m *dataViewManager) rememberRecoveredDataView(view *viewpb.DataViewOfCollection) {
+	if view == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.recoveredAll {
+		return
+	}
+	collectionID := view.GetCollectionId()
+	version := view.GetDataVersion()
+	views := m.recoveredViews[collectionID]
+	for idx, recovered := range views {
+		if compareDataVersion(recovered.GetDataVersion(), version) == 0 {
+			views[idx] = canonicalDataViewClone(view)
+			m.recoveredViews[collectionID] = views
+			return
+		}
+	}
+	m.recoveredViews[collectionID] = append(views, canonicalDataViewClone(view))
+}
+
+func (m *dataViewManager) recoverCollectionFromDataViews(collectionID int64, persistedViews []*viewpb.DataViewOfCollection) {
+	state := m.getOrCreateState(collectionID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	state.dropped = false
+	state.latestResident = canonicalDataViewClone(latestDataView(persistedViews))
+	state.latestVisible = canonicalDataViewClone(state.latestResident)
+}
+
+func (m *dataViewManager) repairCollectionWithDataViews(ctx context.Context, collectionID int64, persistedViews []*viewpb.DataViewOfCollection) error {
 	state := m.getOrCreateState(collectionID)
 	state.mu.Lock()
 	state.dropped = false
 
-	persistedViews, err := m.catalog.ListDataViews(ctx, collectionID)
-	if err != nil {
-		state.mu.Unlock()
-		return err
-	}
 	latestPersisted := latestDataView(persistedViews)
 	segments := m.segments.SelectSegments(ctx, collectionID)
 	pendingRetainedInputs := pendingRetainedCompactionInputs(segments)
@@ -473,6 +580,7 @@ func (m *dataViewManager) RecoverCollection(ctx context.Context, collectionID in
 		state.mu.Unlock()
 		return err
 	}
+	m.rememberRecoveredDataView(toPersist)
 
 	state.latestResident = canonicalDataViewClone(toPersist)
 	if m.isDataViewVisibleFromBase(ctx, latestPersisted, state.latestResident, pendingRetainedInputs) {
@@ -1091,6 +1199,20 @@ func canonicalDataViewClone(view *viewpb.DataViewOfCollection) *viewpb.DataViewO
 	clone := proto.Clone(view).(*viewpb.DataViewOfCollection)
 	canonicalizeDataView(clone)
 	return clone
+}
+
+func cloneDataViews(views []*viewpb.DataViewOfCollection) []*viewpb.DataViewOfCollection {
+	if len(views) == 0 {
+		return nil
+	}
+	clones := make([]*viewpb.DataViewOfCollection, 0, len(views))
+	for _, view := range views {
+		if view == nil {
+			continue
+		}
+		clones = append(clones, canonicalDataViewClone(view))
+	}
+	return clones
 }
 
 func cloneDataVersion(version *viewpb.DataVersion) *viewpb.DataVersion {
