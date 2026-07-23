@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <random>
@@ -23,8 +25,43 @@
 #include "Utils.h"
 #include "log/Log.h"
 #include "rescores/Murmur3.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus::rescores {
+
+namespace {
+
+// The out-of-bounds skip below fires once per batch_score call, and its
+// usual cause (text index lagging the vector index) is expected and
+// transient -- so during sustained lag an unthrottled warning would repeat
+// once per segment x query. Allow at most one warning per interval
+// process-wide, but never lose counts: calls whose warning is suppressed
+// fold their count into the next emitted one, so a sustained systemic
+// desync shows up as a large accumulated total rather than one stray line.
+//
+// Returns the total count to report (this call's plus everything suppressed
+// since the last emitted warning), or 0 if this call's warning is
+// suppressed.
+int64_t
+AccumulateOutOfBoundsForLog(int64_t out_of_bounds) {
+    constexpr int64_t kLogIntervalUs = 10'000'000;  // 10s
+    static std::atomic<int64_t> last_log_us{0};
+    static std::atomic<int64_t> suppressed_count{0};
+    auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count();
+    auto last = last_log_us.load(std::memory_order_relaxed);
+    if (now_us - last >= kLogIntervalUs &&
+        last_log_us.compare_exchange_strong(
+            last, now_us, std::memory_order_relaxed)) {
+        return out_of_bounds +
+               suppressed_count.exchange(0, std::memory_order_relaxed);
+    }
+    suppressed_count.fetch_add(out_of_bounds, std::memory_order_relaxed);
+    return 0;
+}
+
+}  // namespace
 
 void
 WeightScorer::batch_score(milvus::OpContext* op_ctx,
@@ -48,9 +85,36 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const FixedVector<int32_t>& offsets,
                           const TargetBitmap& bitmap,
                           std::vector<std::optional<float>>& boost_scores) {
+    auto bitmap_size = bitmap.size();
+    size_t out_of_bounds = 0;
     for (auto i = 0; i < offsets.size(); i++) {
-        if (bitmap[offsets[i]] > 0) {
-            set_score(boost_scores[i], mode);
+        auto offset = offsets[i];
+        // Bounds check: offset must be within bitmap size.
+        // Race condition: text index may lag behind vector index,
+        // causing offsets to reference rows not yet in text index.
+        if (offset >= 0 && static_cast<size_t>(offset) < bitmap_size) {
+            if (bitmap[offset] > 0) {
+                set_score(boost_scores[i], mode);
+            }
+        } else {
+            // Out of bounds: treat as "no match" (don't apply boost), but
+            // count it -- a silent skip here once masked a short filter
+            // bitset, so make any bitmap/offset desync observable.
+            ++out_of_bounds;
+        }
+    }
+    if (out_of_bounds > 0) {
+        auto total = AccumulateOutOfBoundsForLog(out_of_bounds);
+        if (total > 0) {
+            LOG_WARN(
+                "WeightScorer::batch_score skipped {} offsets outside the "
+                "filter bitmap since the last report ({} of {} in this call, "
+                "bitmap size {}, segment {})",
+                total,
+                out_of_bounds,
+                offsets.size(),
+                bitmap_size,
+                segment != nullptr ? segment->get_segment_id() : -1);
         }
     }
 };
@@ -117,10 +181,37 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
     target_offsets.reserve(offsets.size());
     idx.reserve(offsets.size());
 
+    auto bitmap_size = bitmap.size();
+    size_t out_of_bounds = 0;
     for (auto i = 0; i < offsets.size(); i++) {
-        if (bitmap[offsets[i]] > 0) {
-            target_offsets.push_back(static_cast<int64_t>(offsets[i]));
-            idx.push_back(i);
+        auto offset = offsets[i];
+        // Bounds check: offset must be within bitmap size.
+        // Race condition: text index may lag behind vector index,
+        // causing offsets to reference rows not yet in text index.
+        if (offset >= 0 && static_cast<size_t>(offset) < bitmap_size) {
+            if (bitmap[offset] > 0) {
+                target_offsets.push_back(static_cast<int64_t>(offset));
+                idx.push_back(i);
+            }
+        } else {
+            // Out of bounds: treat as "no match" (don't apply boost), but
+            // count it -- a silent skip here once masked a short filter
+            // bitset, so make any bitmap/offset desync observable.
+            ++out_of_bounds;
+        }
+    }
+    if (out_of_bounds > 0) {
+        auto total = AccumulateOutOfBoundsForLog(out_of_bounds);
+        if (total > 0) {
+            LOG_WARN(
+                "RandomScorer::batch_score skipped {} offsets outside the "
+                "filter bitmap since the last report ({} of {} in this call, "
+                "bitmap size {}, segment {})",
+                total,
+                out_of_bounds,
+                offsets.size(),
+                bitmap_size,
+                segment != nullptr ? segment->get_segment_id() : -1);
         }
     }
 
