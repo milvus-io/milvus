@@ -2486,11 +2486,30 @@ func (s *ConverterSuite) TestFromSearchResultData_EmptyIDsZeroRows() {
 			s.True(df.HasColumn(types.IDFieldName), name)
 			idType, ok := df.FieldType(types.IDFieldName)
 			s.True(ok, name)
+			// Int64 is the converter's schema-less empty-ID fallback, not necessarily the collection PK type.
 			s.Equal(schemapb.DataType_Int64, idType, name)
 			s.True(df.HasColumn(types.ScoreFieldName), name)
 			df.Release()
 		}
 	}
+}
+
+func (s *ConverterSuite) TestFromSearchResultData_EmptyIDsNoTopks() {
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 0,
+		TopK:       10,
+		Topks:      []int64{},
+		Scores:     []float32{},
+		Ids:        &schemapb.IDs{},
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	df, err := FromSearchResultData(resultData, s.pool, nil)
+	s.Require().NoError(err)
+	defer df.Release()
+	s.Equal(int64(0), df.NumRows())
+	s.False(df.HasColumn(types.IDFieldName))
+	s.False(df.HasColumn(types.ScoreFieldName))
 }
 
 // Ids == nil with rows present is tolerated: the DataFrame is built without

@@ -293,7 +293,7 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 		}
 	} else if ids != nil {
 		// IdField unset but rows present: malformed input.
-		return nil, merr.WrapErrServiceInternal("unsupported ID type")
+		return nil, importIDs(builder, ids, offsets, alloc)
 	}
 
 	// Import Score column ($score)
