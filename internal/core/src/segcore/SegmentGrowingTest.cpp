@@ -34,6 +34,8 @@
 #include "cachinglayer/Utils.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Geometry.h"
+#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -273,6 +275,49 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
     milvus::tracer::TraceContext trace_ctx;
     ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
     EXPECT_EQ(segment->get_row_count(), 0);
+
+    std::filesystem::remove_all(base_path);
+}
+
+TEST(Growing, SchemaOnlyTextFieldDoesNotOwnPartitionLobReader) {
+    auto stored_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(stored_schema);
+    auto stored_pk = stored_schema->AddDebugField("pk", DataType::INT64);
+    stored_schema->set_primary_field_id(stored_pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "growing_schema_only_text_reader")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        stored_schema, 1, 2, 1, TestLocalPath, base_path);
+
+    auto query_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(query_schema);
+    auto query_pk = query_schema->AddDebugField("pk", DataType::INT64);
+    auto text =
+        query_schema->AddDebugField("text", DataType::TEXT, /*nullable=*/true);
+    query_schema->set_primary_field_id(query_pk);
+    ASSERT_FALSE(ManifestHasField(test_data, text));
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(5);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows());
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment = CreateGrowingSegment(
+        query_schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    EXPECT_EQ(growing->CaptureTextFieldResource(text).lob_reader, nullptr);
 
     std::filesystem::remove_all(base_path);
 }
@@ -1994,4 +2039,169 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                            N * sizeof(float) + N * sizeof(double) +
                            N * sizeof(Timestamp);
     EXPECT_GE(resource.memory_bytes, min_expected);
+}
+
+TEST(Growing, GeometryCacheUsesReservedOffsetsAndOutlivesSegmentOwner) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto geometry = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_geometry_cache(true);
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, 72001, config);
+
+    auto set_geometry = [&](GeneratedData& dataset, const char* wkt) {
+        proto::schema::FieldData* geometry_data = nullptr;
+        for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+            if (field_data.field_id() == geometry.get()) {
+                geometry_data = &field_data;
+                break;
+            }
+        }
+        ASSERT_NE(geometry_data, nullptr);
+        auto* values = geometry_data->mutable_scalars()
+                           ->mutable_geometry_data()
+                           ->mutable_data();
+        values->Clear();
+        auto ctx = GEOS_init_r();
+        for (int i = 0; i < 2; ++i) {
+            values->Add(Geometry(ctx, wkt).to_wkb_string());
+        }
+        GEOS_finish_r(ctx);
+    };
+
+    auto first = DataGen(schema, 2, 1);
+    auto second = DataGen(schema, 2, 2);
+    set_geometry(first, "POINT (0 0)");
+    set_geometry(second, "POINT (10 10)");
+
+    auto first_offset = segment->PreInsert(2);
+    auto second_offset = segment->PreInsert(2);
+    ASSERT_EQ(first_offset, 0);
+    ASSERT_EQ(second_offset, 2);
+
+    // Complete the later reservation first. Cache positions must still match
+    // segment offsets rather than insert completion order.
+    segment->Insert(second_offset,
+                    2,
+                    second.row_ids_.data(),
+                    second.timestamps_.data(),
+                    second.raw_);
+    segment->Insert(first_offset,
+                    2,
+                    first.row_ids_.data(),
+                    first.timestamps_.data(),
+                    first.raw_);
+
+    auto cache = segment->GetGeometryCache(geometry);
+    ASSERT_NE(cache, nullptr);
+    ASSERT_EQ(cache->Size(), 4);
+    {
+        auto lock = cache->AcquireReadLock();
+        ASSERT_NE(cache->GetByOffsetUnsafe(0), nullptr);
+        ASSERT_NE(cache->GetByOffsetUnsafe(2), nullptr);
+        EXPECT_EQ(cache->GetByOffsetUnsafe(0)->to_wkt_string().find("10"),
+                  std::string::npos);
+        EXPECT_NE(cache->GetByOffsetUnsafe(2)->to_wkt_string().find("10"),
+                  std::string::npos);
+    }
+
+    segment.reset();
+    EXPECT_EQ(cache->Size(), 4);
+    auto lock = cache->AcquireReadLock();
+    EXPECT_NE(cache->GetByOffsetUnsafe(2)->to_wkt_string().find("10"),
+              std::string::npos);
+}
+
+TEST(Growing, DroppedFieldsReleaseDerivedResources) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    auto text = old_schema->AddDebugField("text", DataType::TEXT);
+    auto geometry = old_schema->AddDebugField("geometry", DataType::GEOMETRY);
+    old_schema->set_primary_field_id(pk);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_geometry_cache(true);
+    auto segment =
+        CreateGrowingSegment(old_schema, empty_index_meta, 72002, config);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->SetTextLobPathForTesting(text,
+                                      "/tmp/growing-drop-derived-text-reader");
+
+    // DataGen does not synthesize DataType::TEXT. Use the wire-compatible
+    // VARCHAR representation so Insert still exercises the TEXT spillover
+    // path with identical field IDs.
+    auto input_schema = std::make_shared<Schema>();
+    auto input_pk = input_schema->AddDebugField("pk", DataType::INT64);
+    auto input_text = input_schema->AddDebugField("text", DataType::VARCHAR);
+    auto input_geometry =
+        input_schema->AddDebugField("geometry", DataType::GEOMETRY);
+    input_schema->set_primary_field_id(input_pk);
+    ASSERT_EQ(input_pk, pk);
+    ASSERT_EQ(input_text, text);
+    ASSERT_EQ(input_geometry, geometry);
+    auto dataset = DataGen(input_schema, 1, 7);
+    auto offset = segment->PreInsert(1);
+    segment->Insert(offset,
+                    1,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    auto text_reader = growing->CaptureTextFieldResource(text).lob_reader;
+    auto geometry_cache = growing->GetGeometryCache(geometry);
+    ASSERT_NE(text_reader, nullptr);
+    ASSERT_NE(growing->GetTextLobSpillover(text), nullptr);
+    ASSERT_NE(geometry_cache, nullptr);
+    std::weak_ptr<SharedTextLobReader> weak_text_reader = text_reader;
+    std::weak_ptr<const milvus::exec::SimpleGeometryCache> weak_geometry_cache =
+        geometry_cache;
+    text_reader.reset();
+    geometry_cache.reset();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    auto new_pk = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk);
+    growing->Reopen(new_schema);
+
+    EXPECT_EQ(growing->CaptureTextFieldResource(text).lob_reader, nullptr);
+    EXPECT_EQ(growing->GetTextLobSpillover(text), nullptr);
+    EXPECT_EQ(growing->GetGeometryCache(geometry), nullptr);
+    EXPECT_TRUE(weak_text_reader.expired());
+    EXPECT_TRUE(weak_geometry_cache.expired());
+}
+
+TEST(Growing, CapturedTextResourceOutlivesFieldDrop) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    auto text = old_schema->AddDebugField("text", DataType::TEXT);
+    old_schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(old_schema, empty_index_meta, 72003);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->SetTextLobPathForTesting(text,
+                                      "/tmp/growing-captured-text-reader");
+
+    auto captured = growing->CaptureTextFieldResource(text);
+    ASSERT_NE(captured.lob_reader, nullptr);
+    std::weak_ptr<SharedTextLobReader> weak_reader = captured.lob_reader;
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    auto new_pk = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk);
+    growing->Reopen(new_schema);
+
+    EXPECT_EQ(growing->CaptureTextFieldResource(text).lob_reader, nullptr);
+    EXPECT_FALSE(weak_reader.expired());
+
+    captured = {};
+    EXPECT_TRUE(weak_reader.expired());
 }

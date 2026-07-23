@@ -10,11 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <map>
 #include <memory>
 #include <numeric>
+#include <string>
 #include <vector>
 
+#include "common/Geometry.h"
 #include "common/Schema.h"
+#include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -283,4 +287,171 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexesForMultipleNewFields) {
     EXPECT_EQ(default_pw.get()->MatchQuery("default", 1).count(),
               static_cast<size_t>(N));
     EXPECT_EQ(default_pw.get()->IsNotNull().count(), static_cast<size_t>(N));
+}
+
+TEST_F(SchemaReopenTest, ReopenTextFieldsOwnSpilloversAndBackfilledRows) {
+    auto segment = CreateGrowingSegment(schema_v1_, milvus::empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+
+    constexpr int64_t row_count = 4;
+    auto initial = DataGen(schema_v1_, row_count, /*seed=*/17);
+    auto reserved = segment->PreInsert(row_count);
+    segment->Insert(reserved,
+                    row_count,
+                    initial.row_ids_.data(),
+                    initial.timestamps_.data(),
+                    initial.raw_);
+
+    auto schema_v2 = std::make_shared<Schema>();
+    schema_v2->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto pk_fid = schema_v2->AddDebugField("pk", DataType::INT64);
+    auto nullable_text =
+        schema_v2->AddDebugField("nullable_text", DataType::TEXT, true);
+    DefaultValueType default_value;
+    default_value.set_string_data("schema default text");
+    auto default_text = schema_v2->AddDebugFieldWithDefaultValue(
+        "default_text", DataType::TEXT, default_value);
+    schema_v2->set_primary_field_id(pk_fid);
+    schema_v2->set_schema_version(2);
+
+    growing->Reopen(schema_v2);
+    ASSERT_NE(growing->GetTextLobSpillover(nullable_text), nullptr);
+    ASSERT_NE(growing->GetTextLobSpillover(default_text), nullptr);
+
+    // Replay an insert produced with the old schema. Reopen and Insert must
+    // encode the synthesized TEXT values into each field's local spillover.
+    auto replay = DataGen(schema_v1_, row_count, /*seed=*/19);
+    reserved = segment->PreInsert(row_count);
+    segment->Insert(reserved,
+                    row_count,
+                    replay.row_ids_.data(),
+                    replay.timestamps_.data(),
+                    replay.raw_);
+
+    std::vector<int64_t> offsets(2 * row_count);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    milvus::OpContext op_ctx;
+
+    auto nullable = growing->bulk_subscript(
+        &op_ctx, nullable_text, offsets.data(), offsets.size());
+    ASSERT_EQ(nullable->valid_data_size(), 2 * row_count);
+    ASSERT_EQ(nullable->scalars().string_data().data_size(), 2 * row_count);
+    for (int64_t i = 0; i < 2 * row_count; ++i) {
+        EXPECT_FALSE(nullable->valid_data(i));
+        EXPECT_TRUE(nullable->scalars().string_data().data(i).empty());
+    }
+
+    auto with_default = growing->bulk_subscript(
+        &op_ctx, default_text, offsets.data(), offsets.size());
+    ASSERT_EQ(with_default->valid_data_size(), 2 * row_count);
+    ASSERT_EQ(with_default->scalars().string_data().data_size(), 2 * row_count);
+    for (int64_t i = 0; i < 2 * row_count; ++i) {
+        EXPECT_TRUE(with_default->valid_data(i));
+        EXPECT_EQ(with_default->scalars().string_data().data(i),
+                  "schema default text");
+    }
+}
+
+TEST_F(SchemaReopenTest, TextRepresentationBoundaryIsPerField) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto loaded_text = schema->AddDebugField("loaded_text", DataType::TEXT);
+    auto local_text = schema->AddDebugField("local_text", DataType::TEXT);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, milvus::empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->SetTextLobPathForTesting(loaded_text, "/tmp/unused_text_lob");
+
+    constexpr int64_t row_count = 2;
+    segment->PreInsert(row_count);
+    std::vector<std::string> loaded_values = {"loaded zero", "loaded one"};
+    std::vector<std::string> encoded_values;
+    encoded_values.reserve(row_count);
+    for (const auto& value : loaded_values) {
+        auto encoded = milvus_storage::lob_column::EncodeInlineText(value);
+        encoded_values.emplace_back(
+            reinterpret_cast<const char*>(encoded.data()), encoded.size());
+    }
+    auto loaded_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
+    loaded_data->FillFieldData(encoded_values.data(), row_count);
+    growing->load_field_data_common(
+        loaded_text, 0, {loaded_data}, FieldId(-1), row_count);
+
+    std::vector<std::string> local_values = {"local zero", "local one"};
+    auto local_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
+    local_data->FillFieldData(local_values.data(), row_count);
+    growing->load_field_data_common(
+        local_text, 0, {local_data}, FieldId(-1), row_count);
+
+    std::vector<int64_t> offsets = {0, 1};
+    milvus::OpContext op_ctx;
+    auto loaded = growing->bulk_subscript(
+        &op_ctx, loaded_text, offsets.data(), offsets.size());
+    auto local = growing->bulk_subscript(
+        &op_ctx, local_text, offsets.data(), offsets.size());
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(loaded->scalars().string_data().data(i), loaded_values[i]);
+        EXPECT_EQ(local->scalars().string_data().data(i), local_values[i]);
+    }
+}
+
+TEST_F(SchemaReopenTest, ReopenGeometryDefaultBackfillsCache) {
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_geometry_cache(true);
+    auto segment = CreateGrowingSegment(
+        schema_v1_, milvus::empty_index_meta, 73001, config);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+
+    constexpr int64_t row_count = 3;
+    auto initial = DataGen(schema_v1_, row_count, /*seed=*/23);
+    auto reserved = segment->PreInsert(row_count);
+    segment->Insert(reserved,
+                    row_count,
+                    initial.row_ids_.data(),
+                    initial.timestamps_.data(),
+                    initial.raw_);
+
+    auto ctx = GEOS_init_r();
+    DefaultValueType default_value;
+    default_value.set_bytes_data(Geometry(ctx, "POINT (3 4)").to_wkb_string());
+    GEOS_finish_r(ctx);
+
+    auto schema_v2 = std::make_shared<Schema>();
+    schema_v2->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto pk_fid = schema_v2->AddDebugField("pk", DataType::INT64);
+    auto geometry = schema_v2->AddDebugFieldWithDefaultValue(
+        "geometry", DataType::GEOMETRY, default_value);
+    schema_v2->set_primary_field_id(pk_fid);
+    schema_v2->set_schema_version(2);
+
+    growing->Reopen(schema_v2);
+    auto cache = growing->GetGeometryCache(geometry);
+    ASSERT_NE(cache, nullptr);
+    ASSERT_EQ(cache->Size(), row_count);
+
+    auto replay = DataGen(schema_v1_, row_count, /*seed=*/29);
+    reserved = segment->PreInsert(row_count);
+    segment->Insert(reserved,
+                    row_count,
+                    replay.row_ids_.data(),
+                    replay.timestamps_.data(),
+                    replay.raw_);
+
+    ASSERT_EQ(cache->Size(), 2 * row_count);
+    auto lock = cache->AcquireReadLock();
+    for (int64_t i = 0; i < 2 * row_count; ++i) {
+        ASSERT_NE(cache->GetByOffsetUnsafe(i), nullptr);
+        EXPECT_NE(cache->GetByOffsetUnsafe(i)->to_wkt_string().find("3"),
+                  std::string::npos);
+        EXPECT_NE(cache->GetByOffsetUnsafe(i)->to_wkt_string().find("4"),
+                  std::string::npos);
+    }
 }

@@ -68,6 +68,10 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 
+namespace milvus::exec {
+class SimpleGeometryCache;
+}
+
 namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
@@ -167,7 +171,7 @@ class SegmentInterface {
     virtual int64_t
     get_row_count() const = 0;
 
-    virtual const Schema&
+    virtual SchemaPtr
     get_schema() const = 0;
 
     virtual int64_t
@@ -348,6 +352,13 @@ class SegmentInterface {
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    // Returns a lifetime-safe cache derived from the currently published field
+    // data. A null result means callers should decode raw GEOMETRY values.
+    virtual std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const {
+        return nullptr;
+    }
+
     virtual void
     prefetch_chunks(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -850,7 +861,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 
