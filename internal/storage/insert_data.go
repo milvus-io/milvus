@@ -647,11 +647,11 @@ func (data *FloatFieldData) RowNum() int       { return len(data.Data) }
 func (data *DoubleFieldData) RowNum() int      { return len(data.Data) }
 func (data *TimestamptzFieldData) RowNum() int { return len(data.Data) }
 
-func (data *DecimalFieldData) RowNum() int { return len(data.Data) }
-func (data *StringFieldData) RowNum() int      { return len(data.Data) }
-func (data *ArrayFieldData) RowNum() int       { return len(data.Data) }
-func (data *JSONFieldData) RowNum() int        { return len(data.Data) }
-func (data *GeometryFieldData) RowNum() int    { return len(data.Data) }
+func (data *DecimalFieldData) RowNum() int  { return len(data.Data) }
+func (data *StringFieldData) RowNum() int   { return len(data.Data) }
+func (data *ArrayFieldData) RowNum() int    { return len(data.Data) }
+func (data *JSONFieldData) RowNum() int     { return len(data.Data) }
+func (data *GeometryFieldData) RowNum() int { return len(data.Data) }
 func (data *BinaryVectorFieldData) RowNum() int {
 	if data.Nullable {
 		return len(data.ValidData)
@@ -2158,7 +2158,7 @@ func (data *Int64FieldData) GetRowSize(i int) int       { return 8 }
 func (data *FloatFieldData) GetRowSize(i int) int       { return 4 }
 func (data *DoubleFieldData) GetRowSize(i int) int      { return 8 }
 func (data *TimestamptzFieldData) GetRowSize(i int) int { return 8 }
-func (data *DecimalFieldData) GetRowSize(i int) int      { return 8 }
+func (data *DecimalFieldData) GetRowSize(i int) int     { return 8 }
 func (data *BinaryVectorFieldData) GetRowSize(i int) int {
 	if data.GetNullable() && !data.ValidData[i] {
 		return 0
