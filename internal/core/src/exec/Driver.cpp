@@ -17,6 +17,7 @@
 #include "Driver.h"
 
 #include <folly/ExceptionWrapper.h>
+#include <folly/ScopeGuard.h>
 #include <folly/Try.h>
 #include <algorithm>
 #include <atomic>
@@ -235,19 +236,46 @@ Driver::Init(std::unique_ptr<DriverContext> ctx,
 }
 
 void
+Driver::CloseByTask() noexcept {
+    try {
+        Close();
+    } catch (const std::exception& e) {
+        LOG_WARN("Ignore driver cleanup error while terminating task: {}",
+                 e.what());
+    } catch (...) {
+        LOG_WARN("Ignore unknown driver cleanup error while terminating task");
+    }
+}
+
+void
 Driver::Close() {
-    if (closed_) {
+    if (closed_.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
 
+    auto remove_driver_guard = folly::makeGuard(
+        [task = ctx_->task_, this]() { Task::RemoveDriver(task, this); });
+    std::exception_ptr close_error;
     for (auto& op : operators_) {
-        op->WaitPrefetch();
-        op->Close();
+        try {
+            op->WaitPrefetch();
+        } catch (...) {
+            if (close_error == nullptr) {
+                close_error = std::current_exception();
+            }
+        }
+        try {
+            op->Close();
+        } catch (...) {
+            if (close_error == nullptr) {
+                close_error = std::current_exception();
+            }
+        }
     }
 
-    closed_ = true;
-
-    Task::RemoveDriver(ctx_->task_, this);
+    if (close_error != nullptr) {
+        std::rethrow_exception(close_error);
+    }
 }
 
 RowVectorPtr

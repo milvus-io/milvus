@@ -290,7 +290,15 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         result = ExecRangeVisitorImplJson<bool>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kInt64Val:
-                        result = ExecRangeVisitorImplJson<int64_t>(context);
+                        if ((has_offset_input_ ||
+                             exec_path_ != ExprExecPath::JsonStats) &&
+                            !IsInt64SafeForJsonDoubleIndex(
+                                expr_->val_.int64_val())) {
+                            result =
+                                ExecRangeVisitorImplJsonPreciseNumeric(context);
+                        } else {
+                            result = ExecRangeVisitorImplJson<int64_t>(context);
+                        }
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
                         result = ExecRangeVisitorImplJson<double>(context);
@@ -2002,6 +2010,16 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     // JsonStats: use JSON statistics to skip segments when possible.
     if (CanUseJsonStatsAtInit()) {
         exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+
+    // JSON array literals are only executable from raw data. Decide this
+    // before the base selector pins a JSON index so a cold or failed index
+    // fetch cannot affect an otherwise executable array comparison.
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        expr_->val_.val_case() ==
+            proto::plan::GenericValue::ValCase::kArrayVal) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 
