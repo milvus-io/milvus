@@ -1903,7 +1903,7 @@ func TestAssembleCopySegmentRequest_RedispatchAllocatesFreshBuildIDs(t *testing.
 	// earlier attempt (under the old buildIDs) are then never referenced by
 	// meta — they stay orphaned and are removed by GC — while the new attempt
 	// cannot collide with them.
-	snapshotData := &SnapshotData{
+	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:           1,
 			CollectionId: 100,
@@ -1957,7 +1957,8 @@ func TestAssembleCopySegmentRequest_RedispatchAllocatesFreshBuildIDs(t *testing.
 			CollectionId: 100,
 			SnapshotName: "test_snapshot",
 		},
-		tr: timerecord.NewTimeRecorder("test_job"),
+		tr:            timerecord.NewTimeRecorder("test_job"),
+		snapshotCache: &copySegmentSnapshotCache{},
 	}
 
 	// First dispatch attempt
