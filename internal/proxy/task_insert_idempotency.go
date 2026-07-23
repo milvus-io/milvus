@@ -95,6 +95,11 @@ func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 	if !it.idempotencyEnabled || !excludeAutoIDPrimary {
 		return nil
 	}
+	// Namespace partition-key mode routes the WAL shard by namespace, not by the
+	// generated primary key, so PK-hash-stable auto IDs buy nothing here.
+	if namespacePartitionKeyModeEnabled(it.schema) && it.insertMsg.Namespace != nil {
+		return nil
+	}
 
 	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
 	channelNames, err := it.chMgr.getVChannels(it.collectionID)

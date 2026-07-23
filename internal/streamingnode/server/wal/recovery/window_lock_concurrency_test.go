@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -34,6 +35,7 @@ import (
 // rs.mu before windowManager.mu (and windowManager never takes rs.mu), the lock
 // order cannot invert, so the test also serves as a deadlock check.
 func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	resource.InitForTest(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
@@ -100,4 +102,52 @@ func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
 
 	wg.Wait()
 	require.Len(t, rs.windowManager.idempotencyWindows(), collections)
+}
+
+func TestWindowManagerConcurrentIdleAdvanceAndTruncateClamp(t *testing.T) {
+	enableRecoveryIdempotency(t)
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  1,
+	})
+	rs.SetLogger(resource.Resource().Logger())
+	rs.windowManager.SetLogger(resource.Resource().Logger())
+	rs.windowManager.markActiveViewsInitialized()
+	rs.windowManager.setPChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  1,
+	})
+	catalogState.storeMeta = &streamingpb.PChannelWindowMeta{
+		Pchannel:                  "p1",
+		SourceCheckpointMessageId: rmq.NewRmqID(1).IntoProto(),
+		SourceCheckpointTimetick:  1,
+		Term:                      rs.windowManager.term,
+	}
+
+	const rounds = 1000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 2; i < rounds; i++ {
+			rs.windowManager.mu.Lock()
+			rs.windowManager.advancePChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+				MessageID: rmq.NewRmqID(int64(i)),
+				TimeTick:  uint64(i),
+			})
+			rs.windowManager.mu.Unlock()
+			rs.windowManager.advanceIdleSourceCheckpoint(ctx)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 2; i < rounds; i++ {
+			_ = rs.windowManager.truncateClampCheckpoint()
+		}
+	}()
+	wg.Wait()
 }

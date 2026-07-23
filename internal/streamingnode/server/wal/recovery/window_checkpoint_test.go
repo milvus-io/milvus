@@ -17,7 +17,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func enableRecoveryIdempotency(t *testing.T) {
+	t.Helper()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+	t.Cleanup(func() { _ = params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+}
+
 func TestEffectivePersistCheckpointUsesPChannelWindowAndFlushOnly(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
 		"v1": {
@@ -77,6 +85,7 @@ func TestEffectivePersistCheckpointNotFlusherClampedWhenIdempotencyDisabled(t *t
 }
 
 func TestEffectivePersistCheckpointPreservesReplicateAndAlterState(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
 		"v1": {
@@ -121,6 +130,7 @@ func TestEffectivePersistCheckpointPreservesReplicateAndAlterState(t *testing.T)
 }
 
 func TestEffectivePersistCheckpointUsesPersistedPChannelWindowWhenWindowDirty(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
 	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
@@ -150,6 +160,7 @@ func TestEffectivePersistCheckpointIgnoresPChannelWindowWhenWindowClean(t *testi
 }
 
 func TestRecoveryCheckpointBecomesDirtyAfterWindowSnapshotPersisted(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	window := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))
 	require.NoError(t, window.applyCommittedWriteRecord(*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
@@ -211,6 +222,7 @@ func TestFlusherCheckpointIgnoresWindowSnapshotCheckpoint(t *testing.T) {
 // WAL truncation must never pass the durable window source checkpoint: that is
 // the position a restart rewinds the consume stream to.
 func TestSimpleTruncateCheckpointClampedByWindowSnapshotCheckpoint(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
 		"v1": {
@@ -234,6 +246,7 @@ func TestSimpleTruncateCheckpointClampedByWindowSnapshotCheckpoint(t *testing.T)
 // advancing the consume and flusher checkpoints. Truncation must stay clamped to
 // the frozen position, otherwise the restart rewind lands outside the WAL.
 func TestSimpleTruncateCheckpointClampedWhilePChannelIsIdle(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
 		"v1": {

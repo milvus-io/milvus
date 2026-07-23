@@ -58,8 +58,8 @@ type columnBasedDataOption struct {
 
 	// idempotencyKey is only honored by Insert. A non-empty option key overrides
 	// the call's existing outgoing metadata key; with no option key, Client.Insert
-	// preserves callers that set the gRPC header directly on ctx. Upsert rejects
-	// it and Delete has no way to set it.
+	// preserves callers that set the gRPC header directly on ctx. Upsert rejects a
+	// configured option key and Delete has no way to set it.
 	idempotencyKey string
 
 	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
@@ -425,7 +425,7 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 // collections: the server would answer the second insert with the first one's
 // IDs. Only Insert honors the key, and only when idempotent write is enabled
 // both globally (streaming.idempotency.enabled) and on the target collection;
-// Upsert rejects it.
+// Upsert rejects a configured option key.
 func (opt *columnBasedDataOption) WithIdempotencyKey(idempotencyKey string) *columnBasedDataOption {
 	opt.idempotencyKey = idempotencyKey
 	return opt

@@ -8044,7 +8044,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Key:          "streaming.idempotency.enabled",
 		Version:      "3.0.0",
 		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
-		DefaultValue: "true",
+		DefaultValue: "false",
 		FallbackKeys: []string{"idempotency.enabled"},
 		Export:       false,
 	}

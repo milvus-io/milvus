@@ -20,6 +20,7 @@ func TestNewConfig(t *testing.T) {
 	assert.Equal(t, 10*time.Second, cfg.idempotencySnapshotInterval)
 	assert.Equal(t, 100, cfg.maxDirtyMessages)
 	assert.Equal(t, 3*time.Second, cfg.gracefulTimeout)
+	assert.False(t, cfg.idempotencyEnabled)
 }
 
 func TestNewConfigKeepsRecoveryAndIdempotencyIntervalsIndependent(t *testing.T) {
@@ -109,10 +110,12 @@ func TestSanitizeIdempotencyFallsBack(t *testing.T) {
 	// its default with a warning. (windowTTL: 0s alone is now a legitimate
 	// count-capped configuration, since maxEntriesPerWindow defaults to 10000.)
 	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	params.Save(params.StreamingCfg.IdempotencyWindowTTL.Key, "0s")
 	params.Save(params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key, "0")
 	params.Save(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key, "0")
 	defer func() {
+		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
 		params.Reset(params.StreamingCfg.IdempotencyWindowTTL.Key)
 		params.Reset(params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key)
 		params.Reset(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key)

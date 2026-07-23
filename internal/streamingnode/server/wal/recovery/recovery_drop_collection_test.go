@@ -97,6 +97,7 @@ func buildDropCollectionMsg(vchannel string, collectionID int64, timetick uint64
 
 func TestConsumeDirtySnapshotRemovesDroppedVChannelWindow(t *testing.T) {
 	rs := newTestRecoveryStorage(t)
+	rs.windowManager.cfg.idempotencyEnabled = true
 
 	// Active vchannel with an idempotency window (as created on create-collection).
 	addActiveVChannel(rs, "v1", 100, []int64{200})
