@@ -29,6 +29,7 @@
 #include "boost/variant/detail/apply_visitor_unary.hpp"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
 #include "fmt/core.h"
 #include "geos_c.h"
 #include "glog/logging.h"
@@ -90,15 +91,11 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
         rtree_.insert(val);
     };
 
-    // Parse WKB data using GEOS for consistency
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    if (ctx == nullptr) {
-        // Transient resource failure on a valid geometry -- fail the insert so
-        // it can be retried, rather than permanently mis-indexing a good row.
-        ThrowInfo(ErrorCode::MemAllocateFailed,
-                  "Failed to initialize GEOS context for row {}",
-                  row_offset);
-    }
+    // Parse WKB data using GEOS for consistency. InitGEOSContext throws a
+    // retriable MemAllocateFailed on a transient allocation failure, so a
+    // valid geometry fails the insert (and can be retried) rather than being
+    // permanently mis-indexed.
+    GEOSContextHandle_t ctx = InitGEOSContext("add_geometry");
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {
@@ -158,12 +155,9 @@ RTreeIndexWrapper::bulk_load_from_field_data(
 
     // Initialize GEOS context for bulk operations. A transient allocation
     // failure here would otherwise silently drop EVERY row from the index --
-    // throw so the build fails and can be retried instead.
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    if (ctx == nullptr) {
-        ThrowInfo(ErrorCode::MemAllocateFailed,
-                  "Failed to initialize GEOS context for bulk load");
-    }
+    // InitGEOSContext throws a retriable error so the build fails and can be
+    // retried instead.
+    GEOSContextHandle_t ctx = InitGEOSContext("bulk load");
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {

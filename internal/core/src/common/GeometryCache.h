@@ -43,9 +43,10 @@ MakeCacheKey(int64_t segment_id, FieldId field_id) {
 // RemoveSegmentCaches() runs concurrently.
 class SimpleGeometryCache {
  public:
-    SimpleGeometryCache() : ctx_(GEOS_init_r()) {
-        AssertInfo(ctx_ != nullptr,
-                   "Failed to initialize GEOS context for geometry cache");
+    // InitGEOSContext translates an allocation failure into a retriable
+    // MemAllocateFailed (GEOS_init_r throws bad_alloc on OOM, it never
+    // returns nullptr -- see the helper's comment).
+    SimpleGeometryCache() : ctx_(InitGEOSContext("geometry cache")) {
     }
 
     ~SimpleGeometryCache() {

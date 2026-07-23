@@ -13,10 +13,35 @@
 #include <geos_c.h>
 #include <memory>
 #include <cmath>
+#include <new>
 #include <string>
 #include "common/EasyAssert.h"
 
 namespace milvus {
+
+/**
+ * Create a GEOS context, translating allocation failure into a retriable
+ * system error.
+ *
+ * GEOS_init_r() allocates its context with a bare `new` (it is NOT wrapped in
+ * the capi execute() guard), so on OOM it throws std::bad_alloc and never
+ * returns nullptr. Without this translation the bad_alloc is not a
+ * SegcoreError, so it would bypass the `catch (const SegcoreError&)` rethrow
+ * guards on the index write paths and collapse into a non-retryable
+ * UnexpectedError at the cgo boundary -- inverting the transient-vs-permanent
+ * classification for what is a textbook transient failure. See PR #50951
+ * review.
+ */
+inline GEOSContextHandle_t
+InitGEOSContext(const char* purpose) {
+    try {
+        return GEOS_init_r();
+    } catch (const std::bad_alloc&) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory initializing GEOS context for {}",
+                  purpose);
+    }
+}
 
 /**
  * Get a thread-local GEOS context handle for thread-safe operations.
@@ -32,7 +57,7 @@ inline GEOSContextHandle_t
 GetThreadLocalGEOSContext() {
     thread_local struct ThreadLocalContext {
         GEOSContextHandle_t ctx;
-        ThreadLocalContext() : ctx(GEOS_init_r()) {
+        ThreadLocalContext() : ctx(InitGEOSContext("thread-local geometry")) {
         }
         ~ThreadLocalContext() {
             if (ctx) {

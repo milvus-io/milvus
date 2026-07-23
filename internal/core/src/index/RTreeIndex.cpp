@@ -562,8 +562,10 @@ RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
     }
     AssertInfo(wrapper != nullptr, "R-Tree index wrapper is null");
 
-    // Create GEOS context and ensure it's properly released
-    GEOSContextHandle_t ctx = GEOS_init_r();
+    // Create GEOS context and ensure it's properly released. InitGEOSContext
+    // throws a retriable MemAllocateFailed on OOM instead of handing a null
+    // context to query_candidates.
+    GEOSContextHandle_t ctx = InitGEOSContext("query_candidates");
 
     wrapper->query_candidates(
         op, query_geometry.GetGeometry(), ctx, candidate_offsets);

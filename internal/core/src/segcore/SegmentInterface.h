@@ -39,6 +39,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -872,7 +873,10 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
 
-    GEOSContextHandle_t ctx_ = GEOS_init_r();
+    // InitGEOSContext translates a construction-time OOM into a retriable
+    // MemAllocateFailed instead of a bare std::bad_alloc that would collapse
+    // into a non-retryable error at the cgo boundary.
+    GEOSContextHandle_t ctx_ = InitGEOSContext("segment");
 };
 
 }  // namespace milvus::segcore

@@ -2740,8 +2740,9 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
 
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    AssertInfo(ctx != nullptr, "Failed to initialize GEOS context");
+    // InitGEOSContext throws a retriable MemAllocateFailed on OOM
+    // (GEOS_init_r never returns nullptr -- see the helper's comment).
+    GEOSContextHandle_t ctx = InitGEOSContext("WKT to WKB conversion");
 
     for (const auto& arr : arrays) {
         const auto tid = arr->type_id();
