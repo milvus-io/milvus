@@ -609,7 +609,6 @@ extract_literals_from_regex(const std::string& pattern) {
             if (i < pattern.size() && pattern[i] == '?') {
                 // (?:...) non-capturing, (?P<...) named, (?i...) flags
                 // Skip to the actual content or end of flag-only group
-                size_t flag_start = i;
                 ++i;  // skip '?'
                 // Skip flag chars and special prefixes
                 while (i < pattern.size()) {
@@ -647,7 +646,6 @@ extract_literals_from_regex(const std::string& pattern) {
                 continue;
 
             // Find the matching ')' to check the quantifier after it
-            size_t content_start = i;
             int depth = 1;
             size_t close_pos = i;
             while (close_pos < pattern.size() && depth > 0) {
@@ -687,7 +685,7 @@ extract_literals_from_regex(const std::string& pattern) {
                     // Required group with {n} or {n,m}
                     // Penetrate: parse group content, then expand
                     group_start_stack.push_back(current.size());
-                    // i is at content_start, will parse group content
+                    // i is already at group content.
                     // Store quantifier info for ')' handler
                     // We handle it when we reach ')' below
                     continue;

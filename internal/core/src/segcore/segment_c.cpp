@@ -2073,7 +2073,6 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         const auto& schema = *flush_schema;
         auto& insert_record = growing_segment->get_insert_record();
 
-        int64_t total_rows = end_offset - start_offset;
         std::unordered_set<int64_t> bm25_field_ids;
         std::unordered_map<int64_t, int64_t> bm25_stats_log_ids;
         for (size_t i = 0; i < config->num_bm25_fields; i++) {

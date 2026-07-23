@@ -860,7 +860,6 @@ IndexFactory::CreateJsonIndex(
     const auto& index_type = create_index_info.index_type;
     const auto& cast_dtype = create_index_info.json_cast_type;
     const auto& nested_path = create_index_info.json_path;
-    const auto& json_cast_function = create_index_info.json_cast_function;
 
     // Sort index
     if (index_type == ASCENDING_SORT) {

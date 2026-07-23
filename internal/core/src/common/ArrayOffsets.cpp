@@ -349,9 +349,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
 std::pair<int32_t, int32_t>
 ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
     std::shared_lock lock(mutex_);
-    int64_t total_elements =
-        row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
-    assert(elem_id >= 0 && elem_id < total_elements);
+    assert(elem_id >= 0 && elem_id < (row_to_element_start_.empty()
+                                          ? 0
+                                          : row_to_element_start_.back()));
 
     // Binary search: find the row where elem_id belongs
     auto it = std::upper_bound(

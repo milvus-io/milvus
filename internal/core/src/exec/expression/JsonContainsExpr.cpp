@@ -470,7 +470,6 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
 
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer("json_contains_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
@@ -717,7 +716,6 @@ VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_array_by_stats",
@@ -1083,7 +1081,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
 
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_all_by_stats",
@@ -1410,7 +1407,6 @@ VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_all_difftype_by_stats",
@@ -1766,7 +1762,6 @@ VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_all_array_by_stats",
@@ -2012,7 +2007,6 @@ VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_difftype_by_stats",
