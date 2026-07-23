@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
@@ -91,4 +92,44 @@ func TestFlushedSegmentSnapshotReturnsFilteredSealedSegment(t *testing.T) {
 	assert.Equal(t, int64(10), flushed.PartitionID)
 	assert.Equal(t, uint64(50), flushed.FlushTimeTick)
 	assert.Equal(t, qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1}, flushed.SealedAtDataVersion)
+}
+
+func TestPrunePendingFlushChunksClearsDiscardedBackingSlots(t *testing.T) {
+	view := &SegmentView{
+		meta: &streamingpb.SegmentAssignmentMeta{DataCheckpointTimeTick: 20},
+		pendingFlushChunks: []writeOnlyInsertBuffer{
+			{entries: make([]message.ImmutableMessage, 1), toTimeTick: 10},
+			{entries: make([]message.ImmutableMessage, 1), toTimeTick: 15},
+			{entries: make([]message.ImmutableMessage, 1), toTimeTick: 30},
+		},
+	}
+
+	view.prunePendingFlushChunksLocked()
+
+	require.Len(t, view.pendingFlushChunks, 1)
+	assert.Equal(t, uint64(30), view.pendingFlushChunks[0].toTimeTick)
+	backing := view.pendingFlushChunks[:cap(view.pendingFlushChunks)]
+	for _, chunk := range backing[len(view.pendingFlushChunks):] {
+		assert.Nil(t, chunk.entries)
+	}
+}
+
+func TestPendingFlushChunkSearchBoundaries(t *testing.T) {
+	chunks := []writeOnlyInsertBuffer{
+		{toTimeTick: 10},
+		{toTimeTick: 15},
+		{toTimeTick: 15},
+		{toTimeTick: 30},
+	}
+
+	assert.Equal(t, 0, firstPendingFlushChunkAtOrAfter(chunks, 10))
+	assert.Equal(t, 1, firstPendingFlushChunkAtOrAfter(chunks, 11))
+	assert.Equal(t, 1, firstPendingFlushChunkAtOrAfter(chunks, 15))
+	assert.Equal(t, 3, firstPendingFlushChunkAtOrAfter(chunks, 16))
+	assert.Equal(t, len(chunks), firstPendingFlushChunkAtOrAfter(chunks, 31))
+
+	assert.Equal(t, 0, firstPendingFlushChunkAfter(chunks, 9))
+	assert.Equal(t, 1, firstPendingFlushChunkAfter(chunks, 10))
+	assert.Equal(t, 3, firstPendingFlushChunkAfter(chunks, 15))
+	assert.Equal(t, len(chunks), firstPendingFlushChunkAfter(chunks, 30))
 }

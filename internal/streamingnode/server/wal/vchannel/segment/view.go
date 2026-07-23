@@ -3,6 +3,7 @@ package segment
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -128,8 +129,9 @@ type SegmentView struct {
 	runtime      moduleapi.Runtime     // schedules segment-owned data tasks.
 	pendingTasks []segmentTask         // unfinished segment tasks used as predecessors.
 	pending      writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
-	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks.
-	// Chunks stay here until segment data checkpoint advances over them.
+	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks,
+	// ordered by toTimeTick. Chunks stay here until segment data checkpoint advances
+	// over them.
 	pendingFlushChunks []writeOnlyInsertBuffer
 	flushPolicy        flushPolicy // decides when pending insert data should be flushed.
 	onDataUpdated      func()      // notifies checkpoint manager when data barrier may advance.
@@ -801,24 +803,34 @@ func (s *SegmentView) enqueuePendingFlushChunkLocked() uint64 {
 }
 
 func (s *SegmentView) flushPackForTimeTickLocked(timetick uint64) *flushPack {
-	for _, chunk := range s.pendingFlushChunks {
-		if chunk.toTimeTick == timetick {
-			return chunk.flushPack(s.meta, s.schema)
-		}
+	index := firstPendingFlushChunkAtOrAfter(s.pendingFlushChunks, timetick)
+	if index == len(s.pendingFlushChunks) || s.pendingFlushChunks[index].toTimeTick != timetick {
+		return nil
 	}
-	return nil
+	return s.pendingFlushChunks[index].flushPack(s.meta, s.schema)
 }
 
 func (s *SegmentView) prunePendingFlushChunksLocked() {
 	dataCheckpoint := s.meta.GetDataCheckpointTimeTick()
-	remaining := s.pendingFlushChunks[:0]
-	for _, chunk := range s.pendingFlushChunks {
-		if chunk.toTimeTick <= dataCheckpoint {
-			continue
-		}
-		remaining = append(remaining, chunk)
+	firstRemaining := firstPendingFlushChunkAfter(s.pendingFlushChunks, dataCheckpoint)
+	if firstRemaining == 0 {
+		return
 	}
-	s.pendingFlushChunks = remaining
+	remaining := copy(s.pendingFlushChunks, s.pendingFlushChunks[firstRemaining:])
+	clear(s.pendingFlushChunks[remaining:cap(s.pendingFlushChunks)])
+	s.pendingFlushChunks = s.pendingFlushChunks[:remaining]
+}
+
+func firstPendingFlushChunkAtOrAfter(chunks []writeOnlyInsertBuffer, timetick uint64) int {
+	return sort.Search(len(chunks), func(index int) bool {
+		return chunks[index].toTimeTick >= timetick
+	})
+}
+
+func firstPendingFlushChunkAfter(chunks []writeOnlyInsertBuffer, timetick uint64) int {
+	return sort.Search(len(chunks), func(index int) bool {
+		return chunks[index].toTimeTick > timetick
+	})
 }
 
 func (s *SegmentView) appendPersistedStorage(storage *streamingpb.L1SegmentPersistedStorage) {
