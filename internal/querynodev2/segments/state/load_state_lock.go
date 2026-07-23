@@ -189,23 +189,18 @@ func (ls *LoadStateLock) canReleaseAll(state loadStateEnum) bool {
 }
 
 func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then func()) {
-	ch := make(chan struct{})
 	maxWaitTime := paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.GetAsDuration(time.Second)
-	go func() {
-		ls.cv.L.Lock()
-		defer ls.cv.L.Unlock()
-		defer close(ch)
-		for !ready(ls.state) {
-			ls.cv.Wait()
-		}
-		then()
-	}()
-
-	select {
-	case <-time.After(maxWaitTime):
+	timer := time.AfterFunc(maxWaitTime, func() {
 		mlog.Error(context.TODO(), "load state lock wait timeout", mlog.Duration("maxWaitTime", maxWaitTime))
-	case <-ch:
+	})
+	defer timer.Stop()
+
+	ls.cv.L.Lock()
+	defer ls.cv.L.Unlock()
+	for !ready(ls.state) {
+		ls.cv.Wait()
 	}
+	then()
 }
 
 type StatePredicate func(state loadStateEnum) bool
