@@ -172,7 +172,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 	task := newResourceBuildTask(func(ctx context.Context) (*QueryRuntime, error) {
 		resolved, err := m.resolveLoadInfo(ctx, view)
 		if err != nil {
-			return runtime, err
+			return runtime, errors.Mark(err, nodescheduler.ErrDelay)
 		}
 		if err := runtime.Initialize(ctx, resolved); err != nil {
 			return runtime, err

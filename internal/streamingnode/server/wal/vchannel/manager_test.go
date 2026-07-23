@@ -85,17 +85,56 @@ func TestPChannelRecoveryManagerSwitchAggregatesVChannelMetaSnapshot(t *testing.
 	assert.ElementsMatch(t, []string{"v1", "v2"}, mapKeys(vchannelSnapshots[0].VChannels))
 }
 
-func TestPChannelRecoveryManagerConsumesDirtySnapshotsByScanningModules(t *testing.T) {
+func TestGroupSegmentsByVChannel(t *testing.T) {
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: {SegmentId: 1, Vchannel: "v1"},
+		2: {SegmentId: 2, Vchannel: "v2"},
+		3: {SegmentId: 3, Vchannel: "v1"},
+		4: {SegmentId: 4},
+	}
+
+	grouped := groupSegmentsByVChannel(segments)
+	require.Len(t, grouped, 2)
+	assert.ElementsMatch(t, []int64{1, 3}, mapKeys(grouped["v1"]))
+	assert.ElementsMatch(t, []int64{2}, mapKeys(grouped["v2"]))
+}
+
+func TestPChannelRecoveryManagerConsumesDirtySnapshotsFromUpdatedModule(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestManager(t, "p1", "v1")
 	manager.SwitchIntoMetaAndData()
 
-	result := manager.Module("v1").ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v1", 20))
+	result := manager.ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v1", 20))
 	require.NotNil(t, result.Meta)
 
 	snapshots := manager.ConsumeDirtySnapshots()
 	require.NotEmpty(t, snapshots)
 	assert.Contains(t, dirtySnapshotModuleNames(snapshots), moduleapi.ModuleNameVChannel)
+}
+
+func TestPChannelRecoveryManagerDoesNotScanCleanModulesForDirtySnapshots(t *testing.T) {
+	ctx := context.Background()
+	manager := newTestManager(t, "p1", "v1", "v2")
+	manager.SwitchIntoMetaAndData()
+
+	result := manager.Module("v2").ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v2", 20))
+	require.NotNil(t, result.Meta)
+	result = manager.ObserveMessage(ctx, newTestCreatePartitionMessage(t, "v1", 20))
+	require.NotNil(t, result.Meta)
+
+	snapshots := manager.ConsumeDirtySnapshots()
+	assert.Contains(t, dirtySnapshotVChannels(snapshots), "v1")
+	assert.NotContains(t, dirtySnapshotVChannels(snapshots), "v2")
+}
+
+func TestPChannelRecoveryManagerTracksAsyncModuleUpdates(t *testing.T) {
+	manager := newTestManager(t, "p1", "v1")
+	module := manager.Module("v1")
+	require.NotNil(t, module.runtime.Notifier)
+
+	module.runtime.Notifier.NotifyBarrierUpdated()
+	dirty := manager.takeDirtyModules()
+	assert.Same(t, module, dirty["v1"])
 }
 
 func TestPChannelRecoveryManagerKeepsInFlightDirtyVChannelSnapshots(t *testing.T) {

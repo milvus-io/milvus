@@ -18,8 +18,10 @@ package queryresource
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -38,6 +40,26 @@ func TestResourceBuildTaskStoresResultBeforeHandleCompletion(t *testing.T) {
 	got, err := scheduled.Result()
 	require.NoError(t, err)
 	require.Same(t, want, got)
+}
+
+func TestResourceBuildTaskRetriesErrDelayBeforeCompleting(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+
+	want := NewQueryRuntime(&recordingModule{})
+	var attempts atomic.Int32
+	task := newResourceBuildTask(func(context.Context) (*QueryRuntime, error) {
+		if attempts.Add(1) == 1 {
+			return want, errors.Mark(errors.New("load info is not ready"), nodescheduler.ErrDelay)
+		}
+		return want, nil
+	})
+	scheduled := scheduleResourceBuild(scheduler, task)
+
+	got, err := scheduled.Result()
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, int32(2), attempts.Load())
 }
 
 func TestResourceBuildTaskCanceledBeforeExecutionCompletesResult(t *testing.T) {

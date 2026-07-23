@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -71,6 +72,23 @@ func TestScopedTaskSchedulerTracksDelayedTaskUntilSuccess(t *testing.T) {
 	defer cancel()
 	require.ErrorIs(t, scheduler.WaitIdle(waitCtx), context.DeadlineExceeded)
 	ready.Store(true)
+	require.NoError(t, scheduler.WaitIdle(context.Background()))
+}
+
+func TestScopedTaskSchedulerCloseCancelsDelayedTask(t *testing.T) {
+	inner := nodescheduler.New(1)
+	defer inner.Close()
+	scheduler := newScopedTaskScheduler(inner)
+
+	started := make(chan struct{})
+	scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return errors.Mark(ctx.Err(), nodescheduler.ErrDelay)
+	}))
+	<-started
+
+	scheduler.Close()
 	require.NoError(t, scheduler.WaitIdle(context.Background()))
 }
 

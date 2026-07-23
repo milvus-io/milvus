@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,6 +85,51 @@ func TestVChannelRecoveryModuleRuntimeCreatedSegmentInheritsMetaAndData(t *testi
 
 	require.NotNil(t, result.Data)
 	assert.Len(t, scheduler.tasks, 2)
+}
+
+func TestVChannelRecoveryModuleRefreshesFrontierAfterTransformSnapshotPersisted(t *testing.T) {
+	var frontierUpdates atomic.Int32
+	module, err := NewModule(ModuleConfig{
+		PChannel: "p1",
+		VChannel: "v1",
+		VChannelMeta: &streamingpb.VChannelMeta{
+			Vchannel: "v1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 100,
+			},
+		},
+		TransformLogMeta: &streamingpb.VChannelTransformLogMeta{},
+		OnFrontierUpdated: func() {
+			frontierUpdates.Add(1)
+		},
+	})
+	require.NoError(t, err)
+	before := frontierUpdates.Load()
+	module.markTransformSnapshotPersisted(module.transformLog.SnapshotMeta())
+	assert.Greater(t, frontierUpdates.Load(), before)
+}
+
+func TestVChannelRecoveryModuleConsumesOnlyDirtySegments(t *testing.T) {
+	module := newTestModule(t, "p1", "v1")
+	module.runtime.Scheduler = &recordingScheduler{}
+	module.SwitchIntoMetaAndData()
+	module.ObserveMessage(context.Background(), newTestCreateSegmentMessage(t, "v1", 10, 20))
+	module.ObserveMessage(context.Background(), newTestCreateSegmentMessage(t, "v1", 20, 21))
+
+	for _, snapshot := range module.ConsumeDirtySnapshots() {
+		snapshot.MarkPersisted()
+	}
+	assert.Empty(t, module.ConsumeDirtySnapshots())
+
+	module.ObserveMessage(context.Background(), newTestCreateSegmentMessage(t, "v1", 30, 22))
+	segmentIDs := make([]int64, 0)
+	for _, snapshot := range module.ConsumeDirtySnapshots() {
+		if snapshot.ModuleName() == moduleapi.ModuleNameSegment {
+			segmentIDs = append(segmentIDs, snapshot.Key().SegmentID)
+		}
+	}
+	assert.Equal(t, []int64{30}, segmentIDs)
 }
 
 func newTestModule(t *testing.T, pchannel string, vchannel string) *VChannelRecoveryModule {
