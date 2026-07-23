@@ -30,7 +30,6 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -176,12 +175,26 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	estimatedVectorArrayVectors := int64(0)
 	isVectorArrayIndex := false
 	isEmbeddingListIndex := false
+	skipVectorArrayThreshold := false
 	if fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
 		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
 			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
 				if f.FieldID == fieldID {
 					if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
-						effectiveRows = segmentutil.CalcValidRowCountFromFieldBinLog(segment.SegmentInfo, fieldID)
+						// Derive valid rows from the persisted Statistics NullCounts
+						// instead of iterating field binlogs.
+						nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
+						if !ok {
+							// NullCounts carries an entry for every field present
+							// in the segment's data (zero included). A missing key
+							// means the field was added to the schema after this
+							// segment was flushed: every row reads as null, so
+							// there is nothing to index.
+							log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
+								mlog.Int64("fieldID", fieldID))
+							nullCount = segIndex.NumRows
+						}
+						effectiveRows = segIndex.NumRows - nullCount
 					}
 					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
@@ -210,6 +223,17 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 								mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
 								mlog.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
 						}
+						if estimate.manifestBacked {
+							// Recovered StorageV3 segment: the element count can't be derived
+							// from the empty in-memory binlog arrays. Skip the element-count
+							// threshold so DataCoord doesn't fake-finish/block a build that the
+							// manifest-aware worker can complete.
+							skipVectorArrayThreshold = true
+							log.Info(ctx, "vector array element count unknown for manifest-backed segment, skipping element-count threshold",
+								mlog.Int64("fieldID", f.GetFieldID()),
+								mlog.String("fieldName", f.GetName()),
+								mlog.String("manifestPath", segment.GetManifestPath()))
+						}
 					}
 					break
 				}
@@ -224,7 +248,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		// Element-level ArrayOfVector indexes are built from flattened inner vectors,
 		// so row count alone should not block index building. MaxSim metrics build
 		// EmbList indexes and additionally require enough logical rows.
-		vectorArrayVectorCountBelowThreshold = estimatedVectorArrayVectors < minRowsToBuildIndex
+		vectorArrayVectorCountBelowThreshold = !skipVectorArrayThreshold && estimatedVectorArrayVectors < minRowsToBuildIndex
 		indexDataBelowThreshold = vectorArrayVectorCountBelowThreshold ||
 			(isEmbeddingListIndex && rowCountBelowThreshold)
 	}
@@ -303,6 +327,11 @@ func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
 type vectorArrayElementCountEstimate struct {
 	vectorCount        int64
 	emptyOnStaleSchema bool
+	// manifestBacked is set for a recovered StorageV3 segment whose in-memory
+	// binlog arrays are empty: the element count can't be derived here, but the
+	// manifest-aware worker build can, so the pre-check must not fail or
+	// fake-finish — it lets the build proceed.
+	manifestBacked bool
 }
 
 func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) (vectorArrayElementCountEstimate, error) {
@@ -315,6 +344,13 @@ func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, s
 		// stale segment. For index build purposes it contributes zero vectors and
 		// should be fake-finished by the threshold check below.
 		return vectorArrayElementCountEstimate{emptyOnStaleSchema: true}, nil
+	}
+	if errors.Is(err, errVectorArrayFieldBinlogNotFound) && segment.GetManifestPath() != "" {
+		// A recovered StorageV3 segment reloads with empty in-memory binlog arrays
+		// (per-field KVs are not persisted), so the element count is unknowable
+		// here — but the manifest is authoritative and the worker build reads it.
+		// Don't fail the pre-check; let the manifest-aware build proceed.
+		return vectorArrayElementCountEstimate{manifestBacked: true}, nil
 	}
 	return vectorArrayElementCountEstimate{}, err
 }

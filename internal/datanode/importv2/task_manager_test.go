@@ -153,3 +153,34 @@ func TestImportManager_L0(t *testing.T) {
 		assert.Equal(t, int64(100), res.(*L0ImportTask).GetSegmentsInfo()[0].GetImportedRows())
 	})
 }
+
+func TestUpdateSegmentInfoRefreshesStatsOnMerge(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	task := &ImportTask{
+		ImportTaskV2: &datapb.ImportTaskV2{TaskID: 1},
+		segmentsInfo: map[int64]*datapb.ImportSegmentInfo{},
+		ctx:          ctx,
+		cancel:       cancel,
+	}
+
+	// A segment fed by multiple import files: each NewImportSegmentInfo ships the
+	// segment's cumulative Statistics (Publish() is cumulative per segment), so a
+	// later file's snapshot supersedes the earlier one. The merge must refresh
+	// Stats to the latest info, like ImportedRows — not freeze the first.
+	UpdateSegmentInfo(&datapb.ImportSegmentInfo{
+		SegmentID:    10,
+		ImportedRows: 50,
+		Stats:        &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1},
+	})(task)
+	UpdateSegmentInfo(&datapb.ImportSegmentInfo{
+		SegmentID:    10,
+		ImportedRows: 120,
+		Stats:        &datapb.Statistics{InsertBinlogSize: 250, InsertBinlogCount: 3},
+	})(task)
+
+	got := task.segmentsInfo[10]
+	assert.EqualValues(t, 120, got.GetImportedRows())
+	assert.EqualValues(t, 250, got.GetStats().GetInsertBinlogSize(), "stats must reflect the latest cumulative snapshot")
+	assert.EqualValues(t, 3, got.GetStats().GetInsertBinlogCount())
+}

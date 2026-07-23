@@ -255,6 +255,10 @@ func (t *mixCompactionTask) mergeSplit(
 		if err != nil {
 			return nil, err
 		}
+		// Stats stays nil for the empty placeholder. The receiver's
+		// NewSegmentInfo path tolerates nil Stats and populates it
+		// from the (empty) arrays on first read; an empty CompactionSegment
+		// has no aggregate footprint to report.
 		res = append(res, &datapb.CompactionSegment{
 			SegmentID: id,
 			NumOfRows: 0,
