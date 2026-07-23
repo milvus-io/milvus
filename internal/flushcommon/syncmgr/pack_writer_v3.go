@@ -455,7 +455,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 	pkFieldID := serializer.pkField.GetFieldID()
 
 	var files []string
-	var memorySize int64
+	var existingMemorySize int64
 
 	// Preserve existing bloom filter files from previous batches.
 	// loon_transaction_update_stat uses replace semantics, so we must
@@ -467,7 +467,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 			files = append(files, existing.Paths...)
 			if memStr, ok := existing.Metadata["memory_size"]; ok {
 				existingMem, _ := strconv.ParseInt(memStr, 10, 64)
-				memorySize += existingMem
+				existingMemorySize += existingMem
 			}
 		}
 	}
@@ -483,7 +483,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 		return nil, nil, err
 	}
 	bw.sizeWritten += int64(len(batchStatsBlob.Value))
-	memorySize += int64(len(batchStatsBlob.Value))
+	memorySize := existingMemorySize + int64(len(batchStatsBlob.Value))
 	files = append(files, fullPath)
 
 	// Write merged stats on flush
@@ -500,7 +500,9 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 			return nil, nil, err
 		}
 		bw.sizeWritten += int64(len(mergedStatsBlob.Value))
-		memorySize += int64(len(mergedStatsBlob.Value))
+		// The resolver loads only the compound bloom-filter file when it is
+		// present, so memory_size must match that selected file.
+		memorySize = int64(len(mergedStatsBlob.Value))
 		files = append(files, mergedFullPath)
 	}
 

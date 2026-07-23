@@ -31,6 +31,7 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/Utils.h"
 #include "segcore/reduce/Reduce.h"
@@ -68,6 +69,16 @@ using ChunkSizesPtr = std::unique_ptr<int64_t, decltype(&ReleaseChunkSizes)>;
 static ChunkSizesPtr
 AdoptChunkSizes(int64_t* chunk_sizes) {
     return ChunkSizesPtr(chunk_sizes, ReleaseChunkSizes);
+}
+
+static void
+AttachSealedRequestLease(SearchResult& result,
+                         milvus::segcore::SegmentInterface* segment) {
+    auto* sealed =
+        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
+    ASSERT_NE(sealed, nullptr);
+    result.segment_ = segment;
+    result.read_lease_ = sealed->AcquireReadLease(folly::CancellationToken());
 }
 
 // ---------------------------------------------------------------------------
@@ -843,7 +854,7 @@ TEST(SearchResultExport,
     sr.total_nq_ = 1;
     sr.unity_topK_ = 3;
     sr.pk_type_ = DataType::INT64;
-    sr.segment_ = segment.get();
+    AttachSealedRequestLease(sr, segment.get());
     sr.seg_offsets_ = {0, 1, 2};
     sr.distances_ = {0.9f, 0.8f, 0.7f};
     sr.primary_keys_ = {
@@ -1038,7 +1049,7 @@ TEST(SearchResultExport,
     non_empty_sr.total_nq_ = 1;
     non_empty_sr.unity_topK_ = 2;
     non_empty_sr.pk_type_ = DataType::INT64;
-    non_empty_sr.segment_ = segment.get();
+    AttachSealedRequestLease(non_empty_sr, segment.get());
     non_empty_sr.seg_offsets_ = {0, 1};
     non_empty_sr.distances_ = {0.9f, 0.8f};
     non_empty_sr.primary_keys_ = {PkType(int64_t(100)), PkType(int64_t(101))};
@@ -1098,7 +1109,7 @@ TEST(SearchResultExport, ExportSearchResultAsArrowRecordBatch_ExtraFieldIds) {
     sr.total_nq_ = 1;
     sr.unity_topK_ = 3;
     sr.pk_type_ = DataType::INT64;
-    sr.segment_ = segment.get();
+    AttachSealedRequestLease(sr, segment.get());
     sr.seg_offsets_ = {0, 1, 2};
     sr.distances_ = {0.9f, 0.8f, 0.7f};
     sr.primary_keys_ = {
@@ -1150,10 +1161,12 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
     auto plan = milvus::query::CreateSearchPlanByExpr(
         schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(pk_fid);
     plan->target_entries_.push_back(output_fid);
+    EXPECT_TRUE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
 
     SearchResult sr;
-    sr.segment_ = segment.get();
+    AttachSealedRequestLease(sr, segment.get());
 
     std::vector<CSearchResult> c_results = {
         reinterpret_cast<CSearchResult>(&sr)};
@@ -1175,11 +1188,31 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     milvus::proto::schema::SearchResultData result_data;
     ASSERT_TRUE(
         result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
-    ASSERT_EQ(result_data.fields_data_size(), 1);
-    EXPECT_EQ(result_data.fields_data(0).field_id(), output_fid.get());
+    ASSERT_EQ(result_data.fields_data_size(), 2);
+    EXPECT_EQ(result_data.fields_data(0).field_id(), pk_fid.get());
     EXPECT_EQ(result_data.fields_data(0).scalars().long_data().data_size(), 2);
+    EXPECT_EQ(result_data.fields_data(1).field_id(), output_fid.get());
+    EXPECT_EQ(result_data.fields_data(1).scalars().long_data().data_size(), 2);
 
     free(const_cast<void*>(c_proto.proto_blob));
+}
+
+TEST(SearchResultExport, HasTargetEntries) {
+    using namespace milvus;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    EXPECT_FALSE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
+
+    plan->target_entries_.push_back(pk_fid);
+    EXPECT_TRUE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
 }
 
 TEST(SearchResultExport,
@@ -1200,6 +1233,7 @@ TEST(SearchResultExport,
     auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
     auto plan = milvus::query::CreateSearchPlanByExpr(
         schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(pk_fid);
     plan->target_entries_.push_back(scalar_fid);
     plan->target_entries_.push_back(vec_fid);
     plan->target_entries_.push_back(array_fid);
@@ -1221,22 +1255,28 @@ TEST(SearchResultExport,
     milvus::proto::schema::SearchResultData result_data;
     ASSERT_TRUE(
         result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
-    ASSERT_EQ(result_data.fields_data_size(), 4);
+    ASSERT_EQ(result_data.fields_data_size(), 5);
 
-    const auto& scalar_field = result_data.fields_data(0);
+    const auto& pk_field = result_data.fields_data(0);
+    EXPECT_EQ(pk_field.field_id(), pk_fid.get());
+    EXPECT_EQ(pk_field.type(), milvus::proto::schema::DataType::Int64);
+    EXPECT_TRUE(pk_field.has_scalars());
+    EXPECT_TRUE(pk_field.scalars().has_long_data());
+
+    const auto& scalar_field = result_data.fields_data(1);
     EXPECT_EQ(scalar_field.field_id(), scalar_fid.get());
     EXPECT_EQ(scalar_field.type(), milvus::proto::schema::DataType::Int64);
     EXPECT_TRUE(scalar_field.has_scalars());
     EXPECT_TRUE(scalar_field.scalars().has_long_data());
 
-    const auto& vector_field = result_data.fields_data(1);
+    const auto& vector_field = result_data.fields_data(2);
     EXPECT_EQ(vector_field.field_id(), vec_fid.get());
     EXPECT_EQ(vector_field.type(),
               milvus::proto::schema::DataType::FloatVector);
     EXPECT_TRUE(vector_field.has_vectors());
     EXPECT_TRUE(vector_field.vectors().has_float_vector());
 
-    const auto& array_field = result_data.fields_data(2);
+    const auto& array_field = result_data.fields_data(3);
     EXPECT_EQ(array_field.field_id(), array_fid.get());
     EXPECT_EQ(array_field.type(), milvus::proto::schema::DataType::Array);
     EXPECT_TRUE(array_field.has_scalars());
@@ -1244,7 +1284,7 @@ TEST(SearchResultExport,
     EXPECT_EQ(array_field.scalars().array_data().element_type(),
               milvus::proto::schema::DataType::Int64);
 
-    const auto& vector_array_field = result_data.fields_data(3);
+    const auto& vector_array_field = result_data.fields_data(4);
     EXPECT_EQ(vector_array_field.field_id(), vector_array_fid.get());
     EXPECT_EQ(vector_array_field.type(),
               milvus::proto::schema::DataType::ArrayOfVector);
@@ -1340,7 +1380,7 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_FillsPrimaryKeys) {
     sr_a.total_nq_ = 1;
     sr_a.unity_topK_ = 3;
     sr_a.total_data_cnt_ = N;
-    sr_a.segment_ = seg_a.get();
+    AttachSealedRequestLease(sr_a, seg_a.get());
     sr_a.seg_offsets_ = {0, INVALID_SEG_OFFSET, 5};
     sr_a.distances_ = {1.0f, 2.0f, 3.0f};
 
@@ -1348,7 +1388,7 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_FillsPrimaryKeys) {
     sr_b.total_nq_ = 1;
     sr_b.unity_topK_ = 3;
     sr_b.total_data_cnt_ = N;
-    sr_b.segment_ = seg_b.get();
+    AttachSealedRequestLease(sr_b, seg_b.get());
     sr_b.seg_offsets_ = {1, 7, 10};
     sr_b.distances_ = {1.5f, 2.5f, 3.5f};
 
@@ -1356,7 +1396,7 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_FillsPrimaryKeys) {
     sr_no_hit.total_nq_ = 1;
     sr_no_hit.unity_topK_ = 3;
     sr_no_hit.total_data_cnt_ = N;
-    sr_no_hit.segment_ = seg_b.get();
+    AttachSealedRequestLease(sr_no_hit, seg_b.get());
     sr_no_hit.seg_offsets_ = {
         INVALID_SEG_OFFSET, INVALID_SEG_OFFSET, INVALID_SEG_OFFSET};
     sr_no_hit.distances_ = {4.0f, 5.0f, 6.0f};

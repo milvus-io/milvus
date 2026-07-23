@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -96,6 +97,27 @@ type ServiceSuite struct {
 
 	// Mock
 	factory *dependency.MockFactory
+}
+
+func TestDropIndexPropagatesSegmentError(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	dropErr := merr.SegcoreError(2038, "publication drain canceled")
+
+	segmentManager.EXPECT().GetAndPinBy(mock.Anything).
+		Return([]segments.Segment{segment}, nil).Once()
+	segmentManager.EXPECT().Unpin(mock.Anything).Once()
+	segment.EXPECT().DropIndex(mock.Anything, int64(10)).Return(dropErr).Once()
+
+	node := &QueryNode{
+		manager: &segments.Manager{Segment: segmentManager},
+	}
+	status, err := node.DropIndex(context.Background(), &querypb.DropIndexRequest{
+		SegmentID: 1,
+		IndexIDs:  []int64{10},
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(status), merr.ErrSegcoreFollyCancel)
 }
 
 func (suite *ServiceSuite) SetupSuite() {
@@ -592,6 +614,11 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "read only local wal",
+			err:  handler.ErrReadOnlyWAL,
+			want: true,
+		},
+		{
 			name: "no streaming node deployed",
 			err:  registry.ErrNoStreamingNodeDeployed,
 			want: true,
@@ -604,6 +631,16 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 		{
 			name: "streaming on shutdown",
 			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
+			want: true,
+		},
+		{
+			name: "local wal channel not exist",
+			err:  streamingstatus.NewChannelNotExist("pchannel"),
+			want: true,
+		},
+		{
+			name: "local wal channel term unmatched",
+			err:  streamingstatus.NewUnmatchedChannelTerm("pchannel", 1, 2),
 			want: true,
 		},
 		{
@@ -2596,6 +2633,7 @@ func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
+	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
 	scanner := mock_streaming.NewMockScanner(t)
@@ -2603,7 +2641,6 @@ func TestQueryNodeService(t *testing.T) {
 	scanner.EXPECT().Error().Return(nil).Maybe()
 	scanner.EXPECT().Close().Return().Maybe()
 	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner).Maybe()
-	wal.EXPECT().PrepareReleaseManualFlush(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	paramtable.SetRole(typeutil.StandaloneRole)
 	paramtable.Get().MQCfg.Type.SwapTempValue(message.WALNameRocksmq.String())
 	util.InitAndSelectWALName()

@@ -175,7 +175,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 bool
 PhyTermFilterExpr::CanSkipSegment() {
-    const auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
     T min, max;
     for (auto i = 0; i < expr_->vals_.size(); i++) {
         auto val = GetValueFromProto<T>(expr_->vals_[i]);
@@ -185,7 +185,7 @@ PhyTermFilterExpr::CanSkipSegment() {
     auto can_skip = [&]() -> bool {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
-            if (!skip_index.CanSkipBinaryRange<T>(
+            if (!skip_index->CanSkipBinaryRange<T>(
                     op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
@@ -1308,7 +1308,7 @@ PhyTermFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyTermFilterExpr::PrefetchRawData() {
-    auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
 
     std::vector<T> elements;
     elements.reserve(expr_->vals_.size());
@@ -1319,7 +1319,7 @@ PhyTermFilterExpr::PrefetchRawData() {
 
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index.CanSkipInQuery(field_id_, i, elements);
+        auto skip = skip_index->CanSkipInQuery(field_id_, i, elements);
         if (!skip) {
             chunks_may_hit.push_back(i);
         }

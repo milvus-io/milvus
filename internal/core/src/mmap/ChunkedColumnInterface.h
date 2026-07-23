@@ -164,7 +164,7 @@ class ChunkedColumnInterface {
                    offset,
                    size,
                    chunk->RowNums());
-        auto& valid_data = chunk->Valid();
+        const auto& valid_data = chunk->Valid();
         AssertInfo(
             offset + size <= static_cast<int64_t>(valid_data.size()),
             "Valid-data range out of valid-data bounds, offset: {}, size: {}, "
@@ -173,7 +173,7 @@ class ChunkedColumnInterface {
             size,
             valid_data.size());
         for (int64_t i = 0; i < size; ++i) {
-            if (!chunk->isValid(offset + i)) {
+            if (!valid_data[offset + i]) {
                 valid_result[i] = false;
             }
         }

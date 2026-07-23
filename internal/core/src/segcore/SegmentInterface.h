@@ -568,14 +568,14 @@ class SegmentInternalInterface : public SegmentInterface {
         return false;
     }
 
-    const SkipIndex&
+    std::shared_ptr<const SkipIndex>
     GetSkipIndex() const;
 
     void
     LoadSkipIndex(FieldId field_id,
                   DataType data_type,
                   std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
+        skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
     void
@@ -583,7 +583,7 @@ class SegmentInternalInterface : public SegmentInterface {
         FieldId field_id,
         DataType data_type,
         std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_.LoadSkipFromStatistics(
+        skip_index_->LoadSkipFromStatistics(
             get_segment_id(), field_id, data_type, statistics);
     }
 
@@ -858,7 +858,7 @@ class SegmentInternalInterface : public SegmentInterface {
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
-    SkipIndex skip_index_;
+    std::shared_ptr<SkipIndex> skip_index_ = std::make_shared<SkipIndex>();
 
     // text-indexes used to do match.
     std::unordered_map<

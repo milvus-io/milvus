@@ -272,7 +272,7 @@ func (s *DeleteRunnerSuite) SetupSuite() {
 			},
 		},
 	}
-	s.schema = newSchemaInfo(schema)
+	s.schema = mustNewSchemaInfo(schema)
 	s.mockCache = NewMockCache(s.T())
 }
 
@@ -356,7 +356,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 1, Name: "non_pk", DataType: schemapb.DataType_Int64},
 		)
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
@@ -409,7 +409,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Once()
 		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 
@@ -450,7 +450,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Once()
 		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
 		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1000), nil)
@@ -496,7 +496,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 				},
 			},
 		}
-		schemaInfo := newSchemaInfo(schema)
+		schemaInfo := mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Once()
 		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, namespace).Return(int64(1000), nil)
 		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
@@ -538,7 +538,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil)
@@ -668,7 +668,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.schema, nil)
 
@@ -702,7 +702,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				},
 			},
 		}
-		s.schema = newSchemaInfo(schema)
+		s.schema = mustNewSchemaInfo(schema)
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
@@ -772,7 +772,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()

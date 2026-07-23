@@ -17,7 +17,10 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES 
 # Pinned to an immutable commit SHA on 6si/knowhere@gpu-hnsw rather than the
 # branch name: a branch is mutable and the build could change with no milvus PR.
 # Repoint to a tagged 6si/knowhere release before merging to production. This SHA
-# re-vendors the vanilla-faiss-structured GpuIndexHNSW (built on faiss::IndexHNSW,
+# is 6si/knowhere@gpu-hnsw merged up to knowhere main, so it INCLUDES the
+# expected<T> iterator error-code interface (knowhere #1699) that the segcore
+# adaptation on milvus master now depends on. It re-vendors the
+# vanilla-faiss-structured GpuIndexHNSW (built on faiss::IndexHNSW,
 # cppcontrib-free) and rewires GpuHnswIndexNode to be a pure consumer of it: the
 # deserialized cppcontrib index is converted to a vanilla faiss::IndexHNSW and
 # uploaded via copyFrom(), cosine folded into normalize+IP. It carries GPU-side
@@ -37,7 +40,7 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES 
 # on-device (convert_labels_kernel) instead of a D2H->host->H2D round-trip;
 # milvus uses the searchHost path so this is a no-op for production but keeps
 # the vendored tree in sync with faiss.
-set( KNOWHERE_VERSION 99d92eb1eeaa8d5c72e7d2ea537c7d09d08ffd0d )
+set( KNOWHERE_VERSION 2959fe3dead76ca5d11f1c2611d60d1af9f48932 )
 set( GIT_REPOSITORY  "https://github.com/6si/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")

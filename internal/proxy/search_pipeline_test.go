@@ -1279,7 +1279,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 			tasks: highlightTasks,
 		},
 		lb:             mockLb,
-		schema:         newSchemaInfo(schema),
+		schema:         mustNewSchemaInfo(schema),
 		request:        req,
 		collectionName: collName,
 		SearchRequest: &internalpb.SearchRequest{
@@ -1398,7 +1398,7 @@ func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHigh
 					tasks: highlightTasks,
 				},
 				lb:             mockLb,
-				schema:         newSchemaInfo(schema),
+				schema:         mustNewSchemaInfo(schema),
 				request:        &milvuspb.SearchRequest{CollectionName: collName, DbName: "default"},
 				collectionName: collName,
 				SearchRequest:  &internalpb.SearchRequest{CollectionID: 0},
@@ -2483,6 +2483,110 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 	}
 }
 
+func (s *SearchPipelineSuite) TestEndOperatorRoundsScores() {
+	task := &searchTask{
+		queryInfos: []*planpb.QueryInfo{{RoundDecimal: 0}},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.49, 0.36},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{0, 0}, resultData.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestRoundAggHitScores() {
+	// Aggregation searches bypass endOperator, so hit scores are rounded at the
+	// aggregate operator's terminal step. Covers nested sub-aggregation buckets.
+	buckets := []*search_agg.AggBucketResult{
+		{
+			Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}},
+			SubAggBuckets: []*search_agg.AggBucketResult{
+				{Hits: []*search_agg.HitResult{{Score: 0.51}, nil}},
+			},
+		},
+		nil,
+	}
+
+	roundAggHitScores(buckets, 0)
+
+	s.Equal(float32(0), buckets[0].Hits[0].Score)
+	s.Equal(float32(0), buckets[0].Hits[1].Score)
+	s.Equal(float32(1), buckets[0].SubAggBuckets[0].Hits[0].Score)
+}
+
+func (s *SearchPipelineSuite) TestRoundAggHitScoresDisabled() {
+	buckets := []*search_agg.AggBucketResult{
+		{Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}}},
+	}
+
+	roundAggHitScores(buckets, -1)
+
+	s.Equal(float32(0.49), buckets[0].Hits[0].Score)
+	s.Equal(float32(0.36), buckets[0].Hits[1].Score)
+}
+
+func (s *SearchPipelineSuite) TestEndOperatorKeepsScoresWhenRoundDecimalDisabled() {
+	task := &searchTask{
+		queryInfos: []*planpb.QueryInfo{{RoundDecimal: -1}},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.49, 0.36},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{float32(0.49), float32(0.36)}, resultData.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestEndOperatorKeepsAdvancedRerankScores() {
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{IsAdvanced: true},
+		rankParams:    &rankParams{roundDecimal: 0},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.99, 0.88},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{float32(0.99), float32(0.88)}, resultData.GetScores())
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},
@@ -3300,7 +3404,7 @@ func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam
 			CollectionID: 100,
 			PartitionIDs: []int64{10},
 		},
-		schema: newSchemaInfo(&schemapb.CollectionSchema{
+		schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			},

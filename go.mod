@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
@@ -70,7 +70,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260625075625-7262f8042a55
-	github.com/milvus-io/milvus/client/v2 v2.6.2
+	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
 	github.com/spaolacci/murmur3 v1.1.0
@@ -98,7 +98,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ./client
+replace github.com/milvus-io/milvus/client/v3 => ./client
 
 require (
 	cel.dev/expr v0.25.1 // indirect

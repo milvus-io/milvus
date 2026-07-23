@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -71,7 +72,7 @@ func (s *WriteBufferSuite) SetupTest() {
 func (s *WriteBufferSuite) TestHasSegment() {
 	segmentID := int64(1001)
 
-	s.wb.useGrowingSourceFlush = false
+	s.wb.allowGrowingSourceFlush = false
 	s.False(s.wb.HasSegment(segmentID))
 
 	s.wb.getOrCreateBuffer(segmentID, 0)
@@ -96,7 +97,7 @@ func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 		}).Return().Once()
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
 
-		s.wb.useGrowingSourceFlush = true
+		s.wb.allowGrowingSourceFlush = true
 		s.wb.getOrCreateBuffer(segmentID, 0)
 		s.Equal(segmentID, notifiedSegmentID)
 		s.Equal(metacache.FlushSourceWriteBuffer, notifiedMode)
@@ -104,21 +105,22 @@ func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 
 	s.Run("growing_mode", func() {
 		segmentID := int64(1002)
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil)
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID, StorageVersion: storage.StorageV3}, nil, nil)
 		notifiedSegmentID = 0
 		notifiedMode = metacache.FlushSourceUnknown
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
-		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Once()
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
 			action(segment)
 		}).Return().Once()
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
 
-		s.wb.recordGrowingSourceProgress(&InsertData{
+		err := s.wb.recordGrowingSourceProgress(&InsertData{
 			segmentID:   segmentID,
 			partitionID: 10,
 			rowNum:      3,
 		}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 1, 3)
+		s.NoError(err)
 		s.Equal(segmentID, notifiedSegmentID)
 		s.Equal(metacache.FlushSourceGrowing, notifiedMode)
 	})
@@ -132,8 +134,8 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 	defer param.Reset(param.CommonCfg.EnableGrowingSourceFlush.Key)
 
 	s.Run("non_text_uses_v2_when_ffi_disabled", func() {
-		s.wb.useGrowingSourceFlush = false
-		s.False(s.wb.UseGrowingSourceFlush())
+		s.wb.allowGrowingSourceFlush = false
+		s.False(s.wb.AllowGrowingSourceFlush())
 		s.metacache.EXPECT().GetSegmentByID(int64(2001)).Return(nil, false).Once()
 		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
 			return info.GetStorageVersion() == storage.StorageV2 &&
@@ -141,11 +143,17 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 				info.GetSchemaVersion() == 11
 		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
 
-		s.wb.CreateNewGrowingSegment(10, 2001, nil, 11)
+		err := s.wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:    10,
+			SegmentID:      2001,
+			SchemaVersion:  11,
+			StorageVersion: storage.StorageV2,
+		})
+		s.NoError(err)
 	})
 
 	s.Run("growing_source_does_not_force_v3_manifest_when_ffi_disabled", func() {
-		s.wb.useGrowingSourceFlush = true
+		s.wb.allowGrowingSourceFlush = true
 		s.metacache.EXPECT().GetSegmentByID(int64(2002)).Return(nil, false).Once()
 		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
 			return info.GetStorageVersion() == storage.StorageV2 &&
@@ -153,10 +161,16 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 				info.GetSchemaVersion() == 12
 		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
 
-		s.wb.CreateNewGrowingSegment(10, 2002, nil, 12)
+		err := s.wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:    10,
+			SegmentID:      2002,
+			SchemaVersion:  12,
+			StorageVersion: storage.StorageV2,
+		})
+		s.NoError(err)
 	})
 
-	s.Run("text_schema_does_not_enable_growing_source_when_ffi_disabled", func() {
+	s.Run("text_schema_uses_v3_manifest_without_enabling_growing_source_when_ffi_disabled", func() {
 		textSchema := &schemapb.CollectionSchema{
 			Name: "wb_text_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -173,19 +187,24 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 
 		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
 		s.Require().NoError(err)
-		s.False(wb.UseGrowingSourceFlush())
+		s.False(wb.AllowGrowingSourceFlush())
 
 		mc.EXPECT().GetSegmentByID(int64(2003)).Return(nil, false).Once()
 		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
-			return info.GetStorageVersion() == storage.StorageV2 &&
-				info.GetManifestPath() == "" &&
+			return info.GetStorageVersion() == storage.StorageV3 &&
+				info.GetManifestPath() != "" &&
 				info.GetSchemaVersion() == 13
 		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
 
-		wb.CreateNewGrowingSegment(10, 2003, nil, 13)
+		err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:   10,
+			SegmentID:     2003,
+			SchemaVersion: 13,
+		})
+		s.NoError(err)
 	})
 
-	s.Run("text_schema_uses_v3_manifest_when_ffi_enabled", func() {
+	s.Run("text_schema_uses_v3_manifest_with_writer_buffer_when_ffi_enabled", func() {
 		param.Save(param.CommonCfg.UseLoonFFI.Key, "true")
 		defer param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
 
@@ -205,7 +224,7 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 
 		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
 		s.Require().NoError(err)
-		s.True(wb.UseGrowingSourceFlush())
+		s.False(wb.AllowGrowingSourceFlush())
 
 		mc.EXPECT().GetSegmentByID(int64(2004)).Return(nil, false).Once()
 		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
@@ -214,7 +233,26 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 				info.GetSchemaVersion() == 14
 		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
 
-		wb.CreateNewGrowingSegment(10, 2004, nil, 14)
+		err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:    10,
+			SegmentID:      2004,
+			SchemaVersion:  14,
+			StorageVersion: storage.StorageV3,
+		})
+		s.NoError(err)
+	})
+
+	s.Run("streaming_requires_create_segment_storage_version", func() {
+		s.T().Setenv(streamingutil.MilvusStreamingServiceEnabled, "1")
+
+		s.metacache.EXPECT().GetSegmentByID(int64(2005)).Return(nil, false).Once()
+
+		err := s.wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:   10,
+			SegmentID:     2005,
+			SchemaVersion: 15,
+		})
+		s.ErrorIs(err, merr.ErrServiceInternal)
 	})
 }
 
@@ -234,7 +272,7 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	segmentID := int64(1001)
 
 	s.Run("non_text_returns_error", func() {
-		s.wb.useGrowingSourceFlush = false
+		s.wb.allowGrowingSourceFlush = false
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 
 		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
@@ -242,9 +280,9 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	})
 
 	s.Run("text_skips_missing_segment", func() {
-		s.wb.useGrowingSourceFlush = true
+		s.wb.allowGrowingSourceFlush = true
 		defer func() {
-			s.wb.useGrowingSourceFlush = false
+			s.wb.allowGrowingSourceFlush = false
 		}()
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 

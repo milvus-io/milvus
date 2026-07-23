@@ -1423,31 +1423,16 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	return merr.Success(), nil
 }
 
+// AddCollectionFunction is the deprecated legacy attach RPC; it only allowed the
+// unsafe attach-over-existing-field path. A function is coupled to its output field
+// (BM25/MinHash via add_function_field; TextEmbedding at collection creation), so
+// this path is rejected.
 func (c *Core) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("AddCollectionFunction")
-
-	mlog.Info(context.TODO(), "received request to Add collection function")
-
-	if err := c.broadcastAlterCollectionForAddFunction(ctx, in); err != nil {
-		if errors.Is(err, errIgnoredAlterCollection) {
-			mlog.Info(context.TODO(), "add collection function make no changes, ignore it")
-			metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
-		mlog.Warn(context.TODO(), "failed to alter collection function", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionFunction", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AddCollectionFunction").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	mlog.Info(context.TODO(), "done to add collection function")
-	return merr.Success(), nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"AddCollectionFunction RPC is no longer supported; add BM25/MinHash via add_function_field, and define a TextEmbedding function at collection creation")), nil
 }
 
 func (c *Core) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
@@ -1477,31 +1462,15 @@ func (c *Core) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCo
 	return merr.Success(), nil
 }
 
+// DropCollectionFunction is the deprecated legacy detach RPC; pymilvus routes
+// drop through AlterCollectionSchema (drop_function_field / detach), so this path
+// is unused. Reject to avoid a second, divergent DDL path.
 func (c *Core) DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("DropCollectionFunction")
-
-	mlog.Info(context.TODO(), "received request to drop collection function")
-
-	if err := c.broadcastAlterCollectionForDropFunction(ctx, in); err != nil {
-		if errors.Is(err, errIgnoredAlterCollection) {
-			mlog.Info(context.TODO(), "Drop collection function make no changes, ignore it")
-			metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
-		}
-		mlog.Warn(context.TODO(), "failed to drop collection function", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollectionFunction", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollectionFunction").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	mlog.Info(context.TODO(), "done to drop collection function")
-	return merr.Success(), nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field")), nil
 }
 
 func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {

@@ -179,8 +179,7 @@ class CachedSearchIterator {
     void
     WriteSingleQuerySearchResult(SearchResult& search_result,
                                  const size_t idx,
-                                 std::vector<DisIdPair>& rst,
-                                 const int64_t round_decimal);
+                                 std::vector<DisIdPair>& rst);
 
     void
     Init(const SearchInfo& search_info);

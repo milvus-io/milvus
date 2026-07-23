@@ -11,7 +11,7 @@ import (
 
 	"github.com/x448/float16"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 

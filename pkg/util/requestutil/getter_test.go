@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestGetCollectionNameFromRequest(t *testing.T) {
@@ -516,55 +517,106 @@ func TestGetStatusFromResponse(t *testing.T) {
 }
 
 func TestParseMetricLabel(t *testing.T) {
-	// transport / interceptor error -> rejected_system (highest priority)
-	assert.Equal(t, metrics.RejectedSystemLabel,
-		ParseMetricLabel(&commonpb.Status{}, errors.New("transport failed")))
+	assertLabels := func(wantStatus, wantCause string, resp any, err error) {
+		t.Helper()
+		status, cause := ParseMetricLabel(resp, err)
+		assert.Equal(t, wantStatus, status)
+		assert.Equal(t, wantCause, cause)
+	}
+
+	// transport / interceptor error -> rejected by the system
+	assertLabels(metrics.RejectedLabel, metrics.CauseSystem,
+		&commonpb.Status{}, errors.New("transport failed"))
 
 	// success
-	assert.Equal(t, metrics.SuccessLabel,
-		ParseMetricLabel(&commonpb.Status{}, nil))
+	assertLabels(metrics.SuccessLabel, metrics.CauseNA, &commonpb.Status{}, nil)
 
 	// retryable hard failure -> retry (retryability beats classification)
-	assert.Equal(t, metrics.RetryLabel,
-		ParseMetricLabel(merr.Status(merr.ErrServiceRateLimit), nil))
+	assertLabels(metrics.RetryLabel, metrics.CauseNA,
+		merr.Status(merr.ErrServiceRateLimit), nil)
 
-	// hard failure, system error -> fail_system
-	assert.Equal(t, metrics.FailSystemLabel,
-		ParseMetricLabel(merr.Status(merr.ErrSegcore), nil))
+	// hard failure caused by Milvus itself
+	assertLabels(metrics.FailLabel, metrics.CauseSystem,
+		merr.Status(merr.ErrSegcore), nil)
 
-	// hard failure, input error -> fail_input
+	// hard failure caused by the request
 	inputErr := merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))
-	assert.Equal(t, metrics.FailInputLabel,
-		ParseMetricLabel(merr.Status(inputErr), nil))
+	assertLabels(metrics.FailLabel, metrics.CauseUser, merr.Status(inputErr), nil)
 
 	// response that itself implements GetStatus
-	assert.Equal(t, metrics.FailInputLabel,
-		ParseMetricLabel(&milvuspb.BoolResponse{Status: merr.Status(inputErr)}, nil))
+	assertLabels(metrics.FailLabel, metrics.CauseUser,
+		&milvuspb.BoolResponse{Status: merr.Status(inputErr)}, nil)
 
 	// merr input error through the err path (REST v2 handlers abort with merr
-	// directly; no GRPCStatus, so the gRPC switch alone would misbucket it as
-	// rejected_system) -> rejected_user
-	assert.Equal(t, metrics.RejectedUserLabel,
-		ParseMetricLabel(&commonpb.Status{}, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))))
+	// directly; no GRPCStatus, so the gRPC switch alone would misbucket it as a
+	// system rejection)
+	assertLabels(metrics.RejectedLabel, metrics.CauseUser, &commonpb.Status{},
+		merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param")))
 
-	// merr system error through the err path -> rejected_system
-	assert.Equal(t, metrics.RejectedSystemLabel,
-		ParseMetricLabel(&commonpb.Status{}, merr.WrapErrServiceInternalMsg("boom")))
+	// merr system error through the err path
+	assertLabels(metrics.RejectedLabel, metrics.CauseSystem,
+		&commonpb.Status{}, merr.WrapErrServiceInternalMsg("boom"))
 
-	// client cancellation through the err path -> cancel, not a system rejection
-	assert.Equal(t, metrics.CancelLabel,
-		ParseMetricLabel(&commonpb.Status{}, context.Canceled))
-	assert.Equal(t, metrics.CancelLabel,
-		ParseMetricLabel(&commonpb.Status{}, errors.Wrap(context.Canceled, "rpc aborted")))
+	// client cancellation is neither party's fault, but it stays a rejection so
+	// that a pre-existing status="rejected" query keeps counting it
+	assertLabels(metrics.RejectedLabel, metrics.CauseCancel, &commonpb.Status{}, context.Canceled)
+	assertLabels(metrics.RejectedLabel, metrics.CauseCancel,
+		&commonpb.Status{}, errors.Wrap(context.Canceled, "rpc aborted"))
 
 	// REST v2 wrapper shape: the response carries the failed status AND the
 	// wrapper reconstructs err from it. Processed failures must classify by
-	// the status (fail_*), not be misrouted into the rejected_* buckets.
+	// the status ("fail"), not be misrouted into the "rejected" bucket.
 	restSys := merr.Status(merr.ErrSegcore)
-	assert.Equal(t, metrics.FailSystemLabel, ParseMetricLabel(restSys, merr.Error(restSys)))
+	assertLabels(metrics.FailLabel, metrics.CauseSystem, restSys, merr.Error(restSys))
 	restInput := merr.Status(merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param")))
-	assert.Equal(t, metrics.FailInputLabel, ParseMetricLabel(restInput, merr.Error(restInput)))
-	// Cancellation surfaced through the response status stays out of fail_system.
+	assertLabels(metrics.FailLabel, metrics.CauseUser, restInput, merr.Error(restInput))
+	// Cancellation surfaced through the response status is still a "fail", as it
+	// was before the cause dimension existed; cause is what excludes it.
 	restCancel := merr.Status(context.Canceled)
-	assert.Equal(t, metrics.CancelLabel, ParseMetricLabel(restCancel, merr.Error(restCancel)))
+	assertLabels(metrics.FailLabel, metrics.CauseCancel, restCancel, merr.Error(restCancel))
+}
+
+// The status label is a public monitoring contract: dashboards and alert rules
+// written against status="fail" / status="rejected" predate the cause dimension
+// and must keep working. Splitting the responsible party into new status values
+// (fail_input, rejected_system, ...) silently zeroes those queries, so pin the
+// domain here: anything finer belongs on the orthogonal cause label.
+func TestParseMetricLabelStatusDomainIsStable(t *testing.T) {
+	legacyStatus := typeutil.NewSet(
+		metrics.SuccessLabel,
+		metrics.FailLabel,
+		metrics.RejectedLabel,
+		metrics.RetryLabel,
+	)
+	knownCause := typeutil.NewSet(
+		metrics.CauseUser,
+		metrics.CauseSystem,
+		metrics.CauseCancel,
+		metrics.CauseNA,
+	)
+
+	inputErr := merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))
+	cases := []struct {
+		name string
+		resp any
+		err  error
+	}{
+		{"success", &commonpb.Status{}, nil},
+		{"transport error", &commonpb.Status{}, errors.New("transport failed")},
+		{"rate limited", merr.Status(merr.ErrServiceRateLimit), nil},
+		{"system failure", merr.Status(merr.ErrSegcore), nil},
+		{"input failure", merr.Status(inputErr), nil},
+		{"input rejection", &commonpb.Status{}, inputErr},
+		{"canceled at interceptor", &commonpb.Status{}, context.Canceled},
+		{"canceled in response", merr.Status(context.Canceled), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, cause := ParseMetricLabel(tc.resp, tc.err)
+			assert.Truef(t, legacyStatus.Contain(status),
+				"status %q is outside the pre-2.6.19 domain %v; put the distinction on the cause label instead",
+				status, legacyStatus.Collect())
+			assert.Truef(t, knownCause.Contain(cause), "unknown cause %q", cause)
+		})
+	}
 }

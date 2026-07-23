@@ -96,6 +96,48 @@ func TestSecondaryReplicateManager(t *testing.T) {
 	testMessageOnSecondary(t, rm)
 }
 
+func TestReplicateManager_UnreplicableMessage(t *testing.T) {
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID:       walimplstest.NewTestMessageID(1),
+				TimeTick:        1,
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  1,
+				},
+			},
+			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+
+	msg := newCreateSnapshotMutableMessage()
+	g, err := rm.BeginReplicateMessage(context.Background(), msg)
+	assert.ErrorIs(t, err, ErrNotHandledByReplicateManager)
+	assert.Nil(t, g)
+
+	msg = newCreateSnapshotMutableMessage().WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID:              "test2",
+		MessageID:              walimplstest.NewTestMessageID(2),
+		LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:               2,
+		VChannel:               "test2-rootcoord-dml_0",
+	})
+	g, err = rm.BeginReplicateMessage(context.Background(), msg)
+	assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
+	assert.Nil(t, g)
+}
+
 func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 	// Setup: cluster starts as secondary with a checkpoint
 	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
@@ -600,6 +642,15 @@ func testMessageOnSecondary(t *testing.T, rm ReplicatesManager) {
 	g, err = rm.BeginReplicateMessage(context.Background(), newReplicateTxnMessage("test1", "test2", 2)[0])
 	assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
 	assert.Nil(t, g)
+}
+
+func newCreateSnapshotMutableMessage() message.MutableMessage {
+	return message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithVChannel("test1-rootcoord-dml_0").
+		WithUnreplicable().
+		MustBuildMutable()
 }
 
 // newReplicateConfiguration creates a valid replicate configuration for testing

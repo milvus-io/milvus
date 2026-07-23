@@ -304,7 +304,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 			createdTimestamp: 1,
 		}, nil).Times(4)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Times(4)
-		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schema), nil).Times(4)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schema), nil).Times(4)
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, namespace).Return(&partitionInfo{
 			name:                namespace,
 			partitionID:         20,

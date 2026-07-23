@@ -124,6 +124,32 @@ func (req *CollectionAddFunction) GetFunction() *FunctionSchema {
 	return &req.Function
 }
 
+type CollectionAddFunctionField struct {
+	DbName         string         `json:"dbName"`
+	CollectionName string         `json:"collectionName" binding:"required"`
+	Function       FunctionSchema `json:"function" binding:"required"`
+	OutputField    FieldSchema    `json:"outputField" binding:"required"`
+	IndexParam     IndexParam     `json:"indexParams" binding:"required"`
+}
+
+func (req *CollectionAddFunctionField) GetDbName() string { return req.DbName }
+
+func (req *CollectionAddFunctionField) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type CollectionDropFunctionField struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	FunctionName   string `json:"functionName" binding:"required"`
+}
+
+func (req *CollectionDropFunctionField) GetDbName() string { return req.DbName }
+
+func (req *CollectionDropFunctionField) GetCollectionName() string {
+	return req.CollectionName
+}
+
 type CollectionAlterFunction struct {
 	DbName         string         `json:"dbName"`
 	CollectionName string         `json:"collectionName" binding:"required"`

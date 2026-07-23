@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -722,6 +723,28 @@ func (s *PackWriterV3Suite) TestWrite_SingleVersionBumpAcrossSections() {
 	s.Require().NoError(err)
 	s.Equalf(baseVer+1, newVer,
 		"Write must produce exactly one version bump; baseVer=%d newVer=%d", baseVer, newVer)
+
+	bfKey := fmt.Sprintf("bloom_filter.%d", int64(100))
+	stats, err := packed.GetManifestStats(writtenManifestPath, s.storageConfig)
+	s.Require().NoError(err)
+	bfStat := stats[bfKey]
+	var compoundPath string
+	for _, statPath := range bfStat.Paths {
+		if path.Base(statPath) == strconv.FormatInt(int64(storage.CompoundStatsType), 10) {
+			compoundPath = statPath
+			break
+		}
+	}
+	s.Require().NotEmpty(compoundPath, "flush should publish a compound bloom filter")
+	compoundBlob, err := packed.ReadFile(s.storageConfig, compoundPath)
+	s.Require().NoError(err)
+	metadataMemorySize, err := strconv.ParseInt(bfStat.Metadata["memory_size"], 10, 64)
+	s.Require().NoError(err)
+	s.Equal(int64(len(compoundBlob)), metadataMemorySize)
+
+	resolvedMemorySize, err := packed.NewStatsResolver(writtenManifestPath, s.storageConfig).BloomFilterMemorySize(100)
+	s.Require().NoError(err)
+	s.Equal(int64(len(compoundBlob)), resolvedMemorySize)
 }
 
 // TestWrite_RetryDoesNotLeakVersionBumps verifies that when a transient

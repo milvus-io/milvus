@@ -301,7 +301,8 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "BM25 function must be dropped with its output field in drop_function_field interface: "
+                    "detaching a function without dropping its output field is not supported; "
+                    "drop_function always removes the function together with its output field: "
                     "bm25: invalid parameter"
                 ),
             },
@@ -1084,6 +1085,138 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_then_readd_same_struct_array_name_isolates_old_offsets(self):
+        """
+        target: verify a same-name Struct Array added after drop gets new field IDs and independent physical data
+        method: drop an indexed vector Struct, re-add the same parent/child name with a scalar-only schema through
+            an alias, then query old/new rows before and after nested index build and reload
+        expected: old Struct binlogs and indexes never surface through the new field; old rows are null and new offsets
+            belong only to newly inserted rows
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        alias = cf.gen_unique_str("struct_readd_alias")
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+        old_struct_schema = client.create_struct_field_schema()
+        old_struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=4)
+        old_struct_schema.add_field("name", DataType.VARCHAR, max_length=64)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=old_struct_schema,
+            max_capacity=4,
+        )
+        index_params = client.prepare_index_params()
+        index_params.add_index("vec", index_type="HNSW", metric_type="L2", params={"M": 8, "efConstruction": 64})
+        index_params.add_index("events[embedding]", index_type="HNSW", metric_type="MAX_SIM_L2")
+        index_params.add_index("events[name]", index_type="INVERTED")
+        client.create_collection(
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        client.create_alias(collection_name, alias)
+
+        old_rows = [
+            {
+                "id": row_id,
+                "vec": [float(row_id), 0.0, 0.0, 0.0],
+                "events": [
+                    {
+                        "embedding": [float(row_id), 1.0, 0.0, 0.0],
+                        "name": f"old_{row_id}",
+                    }
+                ],
+            }
+            for row_id in range(3)
+        ]
+        client.insert(collection_name, old_rows)
+        client.flush(collection_name)
+        client.load_collection(collection_name)
+        before_drop = client.describe_collection(collection_name)
+        old_parent = next(field for field in before_drop["fields"] if field["name"] == "events")
+        old_parent_id = old_parent.get("field_id")
+
+        client.drop_collection_field(collection_name, "events")
+        for _ in range(30):
+            if not any(index_name.startswith("events[") for index_name in client.list_indexes(collection_name)):
+                break
+            time.sleep(1)
+        assert not any(index_name.startswith("events[") for index_name in client.list_indexes(collection_name))
+
+        new_struct_schema = client.create_struct_field_schema()
+        new_struct_schema.add_field("name", DataType.VARCHAR, max_length=128)
+        new_struct_schema.add_field("rank", DataType.INT64)
+        client.add_collection_struct_field(
+            alias,
+            "events",
+            new_struct_schema,
+            max_capacity=3,
+        )
+        after_add = client.describe_collection(alias)
+        new_parent = next(field for field in after_add["fields"] if field["name"] == "events")
+        new_parent_id = new_parent.get("field_id")
+        if old_parent_id is not None and new_parent_id is not None:
+            assert new_parent_id > old_parent_id
+
+        old_after_add = client.query(
+            alias,
+            filter="id in [0, 1, 2]",
+            output_fields=["id", "events"],
+        )
+        assert {row["id"] for row in old_after_add} == {0, 1, 2}
+        assert all(row["events"] is None for row in old_after_add)
+        assert client.query(alias, filter='array_contains(events[name], "old_1")', output_fields=["id"]) == []
+
+        new_rows = [
+            {"id": 100, "vec": [100.0, 0.0, 0.0, 0.0], "events": []},
+            {
+                "id": 101,
+                "vec": [101.0, 0.0, 0.0, 0.0],
+                "events": [{"name": "new_a", "rank": 10}, {"name": "new_b", "rank": 20}],
+            },
+        ]
+        client.insert(alias, new_rows)
+        client.flush(alias)
+        nested_indexes = client.prepare_index_params()
+        nested_indexes.add_index("events[name]", index_type="BITMAP")
+        nested_indexes.add_index("events[rank]", index_type="STL_SORT")
+        client.create_index(alias, nested_indexes)
+
+        def assert_new_schema_data():
+            old_rows_result = client.query(
+                alias,
+                filter="id in [0, 1, 2]",
+                output_fields=["id", "events"],
+            )
+            assert all(row["events"] is None for row in old_rows_result)
+            contains = client.query(
+                alias,
+                filter='array_contains(events[name], "new_b")',
+                output_fields=["id", "events"],
+            )
+            assert [row["id"] for row in contains] == [101]
+            assert contains[0]["events"] == new_rows[1]["events"]
+            element_rows = client.query(
+                alias,
+                filter="element_filter(events, $[rank] >= 10)",
+                output_fields=["id"],
+                limit=10,
+            )
+            assert sorted((row["id"], row["offset"]) for row in element_rows) == [(101, 0), (101, 1)]
+
+        assert_new_schema_data()
+        client.release_collection(alias)
+        client.load_collection(alias)
+        assert_new_schema_data()
+        client.drop_alias(alias)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_drop_field_negative_constraint_matrix(self):
         """
         TC-L1-06: Drop Field negative constraint matrix.
@@ -1250,7 +1383,8 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "BM25 function must be dropped with its output field in drop_function_field interface: "
+                    "detaching a function without dropping its output field is not supported; "
+                    "drop_function always removes the function together with its output field: "
                     "bm25: invalid parameter"
                 ),
             },
@@ -1327,9 +1461,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         """
         TC-L1-07a: Drop Function detach vs cascade semantics for MinHash.
 
-        target: verify MinHash supports both detach-only and cascade-output-field drop paths
-        method: drop_collection_function keeps output field/index; drop_function_field removes output field/index
-        expected: detach removes only the function; cascade removes function, output field, and output index
+        target: verify MinHash detach-only drop is rejected and cascade-output-field drop works
+        method: drop_collection_function (detach) is rejected; drop_function_field removes function + output field/index
+        expected: detach rejected (function/field unchanged); cascade removes function, output field, and output index
         """
         client = self._client()
         detach_collection_name = f"{cf.gen_collection_name_by_testcase_name()}_detach"
@@ -1393,29 +1527,30 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             assert len(search_res[0]) > 0
             assert "doc" in search_res[0][0]["entity"]
 
-        # Step 1: Detach-only MinHash drop removes the function but keeps output field/index.
+        # Step 1: Detach-only MinHash drop is rejected; the function keeps its output field.
         create_minhash_collection(detach_collection_name)
-        client.drop_collection_function(detach_collection_name, "text_to_minhash")
+        self.drop_collection_function(
+            client,
+            detach_collection_name,
+            "text_to_minhash",
+            check_task=ct.CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: (
+                    "detaching a function without dropping its output field is not supported; "
+                    "drop_function always removes the function together with its output field: "
+                    "text_to_minhash: invalid parameter"
+                ),
+            },
+        )
 
         desc = client.describe_collection(detach_collection_name)
         field_names = [field["name"] for field in desc["fields"]]
         function_names = [func["name"] for func in desc.get("functions", [])]
-        assert "text_to_minhash" not in function_names
+        assert "text_to_minhash" in function_names
         assert "mh" in field_names
         assert "vec" in field_names
         assert "mh" in client.list_indexes(detach_collection_name)
-
-        # Once detached, mh is a normal field and new writes must provide it or fail clearly.
-        self.insert(
-            client,
-            collection_name=detach_collection_name,
-            data=[{"id": 100, "doc": "after detach", "vec": [1.0, 0.0, 0.0, 0.0]}],
-            check_task=ct.CheckTasks.err_res,
-            check_items={
-                ct.err_code: 1,
-                ct.err_msg: "Insert missed an field `mh` to collection without set nullable==true or set default_value",
-            },
-        )
 
         # Step 2: Cascade MinHash drop removes the function, output field, and output index.
         create_minhash_collection(cascade_collection_name)

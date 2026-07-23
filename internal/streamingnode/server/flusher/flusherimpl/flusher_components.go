@@ -38,13 +38,15 @@ type flusherComponents struct {
 }
 
 // WhenCreateCollection handles the create collection message.
-func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createCollectionMsg message.ImmutableCreateCollectionMessageV1) {
+func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createCollectionMsg message.ImmutableCreateCollectionMessageV1) error {
 	// because we need to get the schema from the recovery storage, we need to observe the message at recovery storage first.
-	impl.rs.ObserveMessage(ctx, createCollectionMsg)
+	if err := impl.rs.ObserveMessage(ctx, createCollectionMsg); err != nil {
+		return err
+	}
 	if _, ok := impl.dataServices[createCollectionMsg.VChannel()]; ok {
 		impl.logger.Info(ctx, "the data sync service of current vchannel is built, skip it", mlog.FieldVChannel(createCollectionMsg.VChannel()))
 		// May repeated consumed, so we ignore the message.
-		return
+		return nil
 	}
 	if createCollectionMsg.TimeTick() <= impl.recoveryCheckPointTimeTick {
 		// It should already be recovered from the recovery storage.
@@ -54,7 +56,7 @@ func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createC
 			mlog.FieldVChannel(createCollectionMsg.VChannel()),
 			mlog.Uint64("timeTick", createCollectionMsg.TimeTick()),
 			mlog.Uint64("recoveryCheckPointTimeTick", impl.recoveryCheckPointTimeTick))
-		return
+		return nil
 	}
 
 	msgChan := make(chan *msgstream.MsgPack, 10)
@@ -101,6 +103,7 @@ func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createC
 		nil,
 	)
 	impl.addNewDataSyncService(ctx, createCollectionMsg, msgChan, ds)
+	return nil
 }
 
 // WhenDropCollection handles the drop collection message.

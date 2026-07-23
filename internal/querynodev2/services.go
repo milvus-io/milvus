@@ -736,7 +736,7 @@ func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collection
 	if wal == nil {
 		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
 	}
-	return wal.PrepareReleaseManualFlush(ctx, collectionID, channel, segmentIDs)
+	return wal.Local().PrepareReleaseManualFlushIfLocal(ctx, collectionID, channel, segmentIDs)
 }
 
 func isReleaseManualFlushPrepareUnavailable(err error) bool {
@@ -746,11 +746,13 @@ func isReleaseManualFlushPrepareUnavailable(err error) bool {
 	if errors.Is(err, merr.ErrServiceUnavailable) ||
 		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, handler.ErrClientClosed) ||
+		errors.Is(err, handler.ErrReadOnlyWAL) ||
 		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
 		return true
 	}
-	return streamingstatus.AsStreamingError(err).IsOnShutdown()
+	streamingErr := streamingstatus.AsStreamingError(err)
+	return streamingErr.IsOnShutdown() || streamingErr.IsWrongStreamingNode()
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
@@ -1809,7 +1811,9 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 	segment := segments[0]
 	indexIDs := req.GetIndexIDs()
 	for _, indexID := range indexIDs {
-		segment.DropIndex(ctx, indexID)
+		if err := segment.DropIndex(ctx, indexID); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	return merr.Success(), nil

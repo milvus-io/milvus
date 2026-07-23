@@ -187,6 +187,12 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return merr.Wrap(err, "failed to parse external spec")
 	}
+	if t.req.GetTargetRowsPerSegment() == 0 {
+		t.req.TargetRowsPerSegment = paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	}
+	if t.req.GetTargetRowsPerSegment() <= 0 {
+		return merr.WrapErrParameterInvalidMsg("target rows per segment must be positive")
+	}
 	t.parsedSpec = spec
 	schema := proto.Clone(t.req.GetSchema()).(*schemapb.CollectionSchema)
 	if schema.GetExternalSource() == "" {
@@ -256,8 +262,6 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
-	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
-
 	return packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
 		t.parsedSpec.Format,
@@ -270,7 +274,7 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		packed.ExternalFetchOptions{
 			CollectionID: t.req.GetCollectionID(),
 			ExternalSpec: t.req.GetExternalSpec(),
-			RowLimit:     targetRowsPerSegment,
+			RowLimit:     t.req.GetTargetRowsPerSegment(),
 		},
 	)
 }
@@ -720,8 +724,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			}
 		}
 	} else {
-		// Get target rows per segment from configuration
-		targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+		targetRowsPerSegment := t.req.GetTargetRowsPerSegment()
 		if totalRows < targetRowsPerSegment {
 			targetRowsPerSegment = totalRows
 		}

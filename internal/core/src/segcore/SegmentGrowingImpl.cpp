@@ -210,9 +210,14 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // For regular array types (INT32, FLOAT, etc.)
-            auto* raw_data = static_cast<const ArrayView*>(data->Data());
+            // Regular nullable ARRAY FieldData is dense: invalid rows retain
+            // their physical Array slot but contribute no logical elements.
+            auto* raw_data = static_cast<const Array*>(data->Data());
             for (int64_t i = 0; i < num_rows; ++i) {
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = 0;
+                    continue;
+                }
                 array_lengths[offset + i] = raw_data[i].length();
             }
         }
@@ -344,6 +349,8 @@ SchemaHasTextField(const Schema& schema) {
 
 void
 SegmentGrowingImpl::InitializeArrayOffsets() {
+    std::unique_lock lock(array_offsets_map_mutex_);
+
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
@@ -393,17 +400,6 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
-    if (segcore_config_.get_storage_v3_enabled() &&
-        (SchemaHasTextField(*schema_) ||
-         segcore_config_.get_enable_growing_source_flush())) {
-        // StorageV3 TEXT and growing-source flush persist growing segments
-        // through milvus-storage. Interim indexes may also contain raw vector
-        // data, but FlushGrowingSegmentData reads directly from insert_record_
-        // chunks. Keep raw chunks until the flush path can reliably export from
-        // indexes too.
-        return;
-    }
-
     //remove the chunk data to reduce memory consumption
     auto& field_meta = schema_->operator[](fieldId);
     auto data_type = field_meta.get_data_type();
@@ -762,8 +758,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
 
-        // update ArrayOffsetsGrowing for struct fields
-        if (struct_representative_fields_.count(field_id) > 0) {
+        std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+        {
+            std::shared_lock lock(array_offsets_map_mutex_);
+            if (struct_representative_fields_.count(field_id) > 0) {
+                auto offsets_it = array_offsets_map_.find(field_id);
+                if (offsets_it != array_offsets_map_.end()) {
+                    array_offsets = offsets_it->second;
+                }
+            }
+        }
+        if (array_offsets != nullptr) {
             const auto& field_data =
                 insert_record_proto->fields_data(data_offset);
 
@@ -771,11 +776,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             ExtractArrayLengths(
                 field_data, field_meta, num_rows, array_lengths.data());
 
-            auto offsets_it = array_offsets_map_.find(field_id);
-            if (offsets_it != array_offsets_map_.end()) {
-                offsets_it->second->Insert(
-                    reserved_offset, array_lengths.data(), num_rows);
-            }
+            array_offsets->Insert(
+                reserved_offset, array_lengths.data(), num_rows);
         }
 
         // index text.
@@ -1019,17 +1021,22 @@ SegmentGrowingImpl::load_field_data_common(
         }
     }
 
-    // update ArrayOffsetsGrowing for struct fields
-    if (struct_representative_fields_.count(field_id) > 0) {
+    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    {
+        std::shared_lock lock(array_offsets_map_mutex_);
+        if (struct_representative_fields_.count(field_id) > 0) {
+            auto offsets_it = array_offsets_map_.find(field_id);
+            if (offsets_it != array_offsets_map_.end()) {
+                array_offsets = offsets_it->second;
+            }
+        }
+    }
+    if (array_offsets != nullptr) {
         std::vector<int32_t> array_lengths(num_rows);
         ExtractArrayLengthsFromFieldData(
             field_data, field_meta, array_lengths.data());
 
-        auto offsets_it = array_offsets_map_.find(field_id);
-        if (offsets_it != array_offsets_map_.end()) {
-            offsets_it->second->Insert(
-                reserved_offset, array_lengths.data(), num_rows);
-        }
+        array_offsets->Insert(reserved_offset, array_lengths.data(), num_rows);
 
         LOG_INFO("Updated ArrayOffsetsGrowing for field {} with {} rows",
                  field_id.get(),
@@ -1900,20 +1907,20 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     milvus::proto::schema::SparseFloatArray* output) const {
     AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
 
-    // if index has finished building, grab from index without any
-    // synchronization operations.
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
+    // If the index has finished building and keeps raw data, grab from index
+    // without any synchronization operations.
+    if (indexing_record_.HasRawData(field_id)) {
         indexing_record_.GetDataFromIndex(
             field_id, seg_offsets, count, 0, output);
         return;
     }
     {
         std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
-        // check again after lock to make sure: if index has finished building
-        // after the above check but before we grabbed the lock, we should grab
-        // from index as the data in chunk may have been removed in
-        // try_remove_chunks.
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+        // Check again after lock to make sure: if index has finished building
+        // and can provide raw data after the above check but before we grabbed
+        // the lock, we should grab from index as the data in chunk may have
+        // been removed in try_remove_chunks.
+        if (!indexing_record_.HasRawData(field_id)) {
             // copy from raw data
             SparseRowsToProto(
                 [&](size_t i) {
@@ -2718,6 +2725,8 @@ SegmentGrowingImpl::FillAbsentFields() {
                 insert_record_.is_valid_data_exist(field_id) &&
                 insert_record_.get_valid_data(field_id)->get_data().empty()) {
                 fill_empty_field(field_meta);
+                EnsureArrayOffsetsForStructField(field_meta,
+                                                 insert_record_.row_count());
             }
             continue;
         }
@@ -2725,6 +2734,8 @@ SegmentGrowingImpl::FillAbsentFields() {
         // so we must check data empty here
         if (insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
+            EnsureArrayOffsetsForStructField(field_meta,
+                                             insert_record_.row_count());
         }
     }
 }
@@ -3014,6 +3025,8 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
         return;
     }
 
+    std::unique_lock lock(array_offsets_map_mutex_);
+
     std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
     for (const auto& [field_id, offsets] : array_offsets_map_) {
         auto field_it = schema_->get_fields().find(field_id);
@@ -3031,11 +3044,21 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 
     if (!array_offsets) {
         array_offsets = std::make_shared<ArrayOffsetsGrowing>();
-        if (row_count > 0) {
-            std::vector<int32_t> empty_lengths(row_count, 0);
-            array_offsets->Insert(0, empty_lengths.data(), row_count);
-        }
         struct_representative_fields_.insert(field_meta.get_id());
+    }
+
+    auto current_row_count = array_offsets->GetRowCount();
+    AssertInfo(current_row_count <= row_count,
+               "struct array offsets row count {} exceeds segment row count "
+               "{} for field {}",
+               current_row_count,
+               row_count,
+               field_meta.get_id().get());
+    if (current_row_count < row_count) {
+        auto missing_row_count = row_count - current_row_count;
+        std::vector<int32_t> empty_lengths(missing_row_count, 0);
+        array_offsets->Insert(
+            current_row_count, empty_lengths.data(), missing_row_count);
     }
 
     array_offsets_map_[field_meta.get_id()] = array_offsets;

@@ -106,8 +106,17 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
+        if (data == nullptr) {
+            return;
+        }
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                // NULL never matches, under either polarity (three-valued
+                // logic); do not evaluate the storage placeholder value.
+                res[i] = valid_res[i] = false;
+                continue;
+            }
             const int64_t current_ts_us = data[i];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;

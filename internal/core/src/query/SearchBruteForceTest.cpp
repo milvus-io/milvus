@@ -188,3 +188,98 @@ TEST_F(TestFloatSearchBruteForce, IP) {
 TEST_F(TestFloatSearchBruteForce, NotSupported) {
     Run(100, 10, 5, 128, "aaaaaaaaaaaa");
 }
+
+TEST(PrepareBFSearchParams, BM25ParamsFromIndexInfo) {
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::BM25;
+    search_info.search_params_[knowhere::meta::BM25_AVGDL] = 5.0;
+    std::map<std::string, std::string> index_info{
+        {knowhere::meta::BM25_K1, "2.0"},
+        {knowhere::meta::BM25_B, "0.5"},
+    };
+    auto cfg = PrepareBFSearchParams(search_info, index_info);
+    ASSERT_FLOAT_EQ(cfg[knowhere::meta::BM25_K1].get<float>(), 2.0f);
+    ASSERT_FLOAT_EQ(cfg[knowhere::meta::BM25_B].get<float>(), 0.5f);
+    ASSERT_DOUBLE_EQ(cfg[knowhere::meta::BM25_AVGDL].get<double>(), 5.0);
+}
+
+// A field added by add_function_field leaves the per-segment index_info empty;
+// k1/b then come from brute_force_index_params_ (sourced from the collection
+// metadata at plan creation), not the stale segment meta, and must not throw.
+TEST(PrepareBFSearchParams, BM25ParamsFromCollectionMetaWhenIndexInfoEmpty) {
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::BM25;
+    search_info.search_params_[knowhere::meta::BM25_AVGDL] = 5.0;
+    search_info.brute_force_index_params_.bm25_k1_ = 1.2f;
+    search_info.brute_force_index_params_.bm25_b_ = 0.75f;
+    std::map<std::string, std::string> empty_index_info;
+    knowhere::Json cfg;
+    ASSERT_NO_THROW(cfg = PrepareBFSearchParams(search_info, empty_index_info));
+    ASSERT_FLOAT_EQ(cfg[knowhere::meta::BM25_K1].get<float>(), 1.2f);
+    ASSERT_FLOAT_EQ(cfg[knowhere::meta::BM25_B].get<float>(), 0.75f);
+}
+
+TEST(PrepareBFSearchParams, MinHashParams) {
+    // present per-segment params are parsed from index_info
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::MHJACCARD;
+    std::map<std::string, std::string> index_info{
+        {knowhere::indexparam::MH_LSH_BAND, "8"},
+        {knowhere::indexparam::MH_ELEMENT_BIT_WIDTH, "16"},
+    };
+    auto cfg = PrepareBFSearchParams(search_info, index_info);
+    ASSERT_EQ(cfg[knowhere::indexparam::MH_LSH_BAND].get<int>(), 8);
+    ASSERT_EQ(cfg[knowhere::indexparam::MH_ELEMENT_BIT_WIDTH].get<int>(), 16);
+
+    // a stale segment leaves index_info empty; band/width then come from
+    // brute_force_index_params_ (collection metadata), not knowhere defaults.
+    SearchInfo stale_info;
+    stale_info.metric_type_ = knowhere::metric::MHJACCARD;
+    stale_info.brute_force_index_params_.minhash_lsh_band_ = 4;
+    stale_info.brute_force_index_params_.minhash_element_bit_width_ = 32;
+    std::map<std::string, std::string> empty_index_info;
+    knowhere::Json cfg2;
+    ASSERT_NO_THROW(cfg2 = PrepareBFSearchParams(stale_info, empty_index_info));
+    ASSERT_EQ(cfg2[knowhere::indexparam::MH_LSH_BAND].get<int>(), 4);
+    ASSERT_EQ(cfg2[knowhere::indexparam::MH_ELEMENT_BIT_WIDTH].get<int>(), 32);
+}
+
+// plan-creation side: params are sourced from the collection-level field index
+// meta into brute_force_index_params_.
+TEST(PopulateBruteForceIndexParams, BM25) {
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::BM25;
+    FieldIndexMeta meta(
+        FieldId(100),
+        {{knowhere::meta::BM25_K1, "2.0"}, {knowhere::meta::BM25_B, "0.5"}},
+        {});
+    PopulateBruteForceIndexParams(search_info, meta);
+    const auto& p = search_info.brute_force_index_params_;
+    ASSERT_TRUE(p.bm25_k1_.has_value());
+    ASSERT_FLOAT_EQ(p.bm25_k1_.value(), 2.0f);
+    ASSERT_TRUE(p.bm25_b_.has_value());
+    ASSERT_FLOAT_EQ(p.bm25_b_.value(), 0.5f);
+}
+
+TEST(PopulateBruteForceIndexParams, MinHashDefaultsWhenAbsent) {
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::MHJACCARD;
+    FieldIndexMeta meta(FieldId(100), {}, {});
+    PopulateBruteForceIndexParams(search_info, meta);
+    const auto& p = search_info.brute_force_index_params_;
+    ASSERT_EQ(p.minhash_lsh_band_.value(), 1);
+    ASSERT_EQ(p.minhash_element_bit_width_.value(), 8);
+}
+
+TEST(PopulateBruteForceIndexParams, MinHashOverridesFromMeta) {
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::MHJACCARD;
+    FieldIndexMeta meta(FieldId(100),
+                        {{knowhere::indexparam::MH_LSH_BAND, "4"},
+                         {knowhere::indexparam::MH_ELEMENT_BIT_WIDTH, "32"}},
+                        {});
+    PopulateBruteForceIndexParams(search_info, meta);
+    const auto& p = search_info.brute_force_index_params_;
+    ASSERT_EQ(p.minhash_lsh_band_.value(), 4);
+    ASSERT_EQ(p.minhash_element_bit_width_.value(), 32);
+}

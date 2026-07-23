@@ -13,6 +13,7 @@ L3 tests require Milvus configuration changes:
         enableAutoCompaction: false
 """
 
+import asyncio
 import time
 
 import numpy as np
@@ -23,6 +24,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa: F403
 from pymilvus import DataType
+from pymilvus.milvus_client.async_optimize_task import AsyncOptimizeTask
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
@@ -164,6 +166,25 @@ class TestMilvusClientOptimizeInvalid(TestMilvusClientV2Base):
             check_items=error,
         )
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_optimize_oversized_target_size(self):
+        """
+        target: test the first target_size above the signed-int64-MB maximum
+        method: call optimize with 9223372036854775808MB
+        expected: Client-side parsing rejects the value before submission
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+        error = {ct.err_code: 1, ct.err_msg: "target size too large"}
+        self.optimize(
+            client,
+            collection_name,
+            target_size="9223372036854775808MB",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
 
 class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
     """Test cases for optimize() with valid parameters"""
@@ -190,6 +211,54 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
         # Empty collection may return compaction_id=-1 (no segments to compact)
         assert isinstance(result.compaction_id, int)
         log.info(f"Optimize on empty collection completed: {result}")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "target_size",
+        [
+            "1073741824B",
+            "1048576 KB",
+            "1024MB",
+            "1GB",
+            "1.5 gB",
+            " 1 gb ",
+            "1TB",
+            "1PB",
+        ],
+        ids=["B", "KB", "MB", "GB", "decimal-mixed-case", "whitespace", "TB", "PB"],
+    )
+    def test_optimize_valid_target_size_formats(self, target_size):
+        """
+        target: test all supported units plus decimal, case, and whitespace handling
+        method: optimize an empty collection with each valid representation
+        expected: Each representation is accepted and preserved in OptimizeResult
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+
+        result = self.optimize(client, collection_name, target_size=target_size)[0]
+
+        assert result.status == "success"
+        assert result.collection_name == collection_name
+        assert result.target_size == target_size
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_optimize_max_target_size(self):
+        """
+        target: test the maximum accepted signed-int64-MB target_size
+        method: optimize an empty collection with 9223372036854775807MB
+        expected: The boundary value is accepted without overflow
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        target_size = "9223372036854775807MB"
+        self.create_collection(client, collection_name, default_dim)
+
+        result = self.optimize(client, collection_name, target_size=target_size)[0]
+
+        assert result.status == "success"
+        assert result.target_size == target_size
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_optimize_default_target_size(self):
@@ -429,11 +498,11 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
         log.info("Optimize task cancelled successfully")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_optimize_verify_segment_count(self):
+    def test_optimize_refreshes_loaded_segments(self):
         """
-        target: test optimize reduces segment count
-        method: create collection, insert in batches, check segments before/after optimize
-        expected: Fewer segments after optimize
+        target: test optimize refreshes an already-loaded collection after compaction
+        method: record loaded IDs, optimize, then poll loaded IDs without release/load
+        expected: Old IDs disappear, segment count decreases, and all rows remain queryable
         note: L3 - requires config change (segment.maxSize=64MB)
         """
         client = self._client()
@@ -454,30 +523,42 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
 
-        # Get stable segment count before optimize
+        # Establish the loaded precondition and a stable pre-optimize view.
         assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=300)
-        self.release_collection(client, collection_name)
-        self.load_collection(client, collection_name)
+        self.refresh_load(client, collection_name, timeout=300)
         segments_before = client.list_loaded_segments(collection_name)
-        segment_count_before = len(segments_before)
-        log.info(f"Segment count before optimize: {segment_count_before}")
+        segment_ids_before = {segment.segment_id for segment in segments_before}
+        assert len(segment_ids_before) > 1, f"Expected multiple loaded inputs, got {segments_before}"
+        log.info(f"Loaded segments before optimize: {segments_before}")
 
-        # Optimize (handles compaction + index rebuild + refresh load)
-        result = self.optimize(client, collection_name, target_size="2GB", timeout=600)[0]
+        # optimize() must rebuild indexes and refresh the loaded view itself.
+        result = self.optimize(client, collection_name, target_size="64MB", timeout=600)[0]
         assert result.status == "success"
+        progress = {getattr(stage, "value", stage) for stage in result.progress}
+        assert "refreshing load" in progress, f"Loaded optimize skipped refresh_load: {result.progress}"
 
-        # Release and reload to get updated segment info
-        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=300)
-        self.release_collection(client, collection_name)
-        self.load_collection(client, collection_name)
-        segments_after = client.list_loaded_segments(collection_name)
-        segment_count_after = len(segments_after)
-        log.info(f"Segment count after optimize: {segment_count_after}")
+        deadline = time.time() + 300
+        segments_after = []
+        while time.time() < deadline:
+            segments_after = client.list_loaded_segments(collection_name)
+            segment_ids_after = {segment.segment_id for segment in segments_after}
+            if len(segment_ids_after) < len(segment_ids_before) and segment_ids_after.isdisjoint(segment_ids_before):
+                break
+            time.sleep(2)
+        else:
+            pytest.fail(
+                f"Loaded segments did not converge after optimize without release/load: "
+                f"before={segments_before}, after={segments_after}"
+            )
 
-        assert segment_count_after <= segment_count_before, (
-            f"Expected fewer segments after optimize, got {segment_count_after} >= {segment_count_before}"
-        )
-        log.info(f"Optimize reduced segments from {segment_count_before} to {segment_count_after}")
+        count_result = self.query(
+            client,
+            collection_name,
+            filter="",
+            output_fields=["count(*)"],
+        )[0]
+        assert count_result[0]["count(*)"] == num_batches * batch_size
+        log.info(f"Loaded segments converged after optimize: before={segments_before}, after={segments_after}")
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_optimize_numeric_target_size(self):
@@ -555,3 +636,103 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
         result = self.optimize(client, collection_name, target_size="2GB", timeout=300)[0]
         assert result.status == "success"
         log.info(f"Optimize with clustering key completed: {result}")
+
+
+class TestAsyncMilvusClientOptimizeValid(TestMilvusClientV2Base):
+    """Live AsyncMilvusClient optimize coverage."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.tags(CaseLabel.L3)
+    async def test_async_optimize_loaded_collection(self):
+        """
+        target: test AsyncMilvusClient.optimize wait=False against a loaded collection
+        method: observe the task lifecycle and loaded segment IDs without release/load
+        expected: The task succeeds, old loaded IDs disappear, and all rows remain queryable
+        """
+        sync_client = self._client()
+        self.init_async_milvus_client()
+        async_client = self.async_milvus_client_wrap
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        num_batches = 5
+        batch_size = default_nb
+        collection_created = False
+
+        try:
+            await async_client.create_collection(collection_name, dimension=dim)
+            collection_created = True
+            rng = np.random.default_rng(seed=19530)
+            for batch in range(num_batches):
+                vectors = rng.random((batch_size, dim), dtype=np.float32)
+                rows = [
+                    {
+                        default_primary_key_field_name: batch * batch_size + index,
+                        default_vector_field_name: vectors[index].tolist(),
+                    }
+                    for index in range(batch_size)
+                ]
+                await async_client.insert(collection_name, rows)
+                await async_client.flush(collection_name)
+
+            await async_client.load_collection(collection_name)
+            segments_before = sync_client.list_loaded_segments(collection_name)
+            segment_ids_before = {segment.segment_id for segment in segments_before}
+            assert len(segment_ids_before) > 1, f"Expected multiple loaded optimize inputs: {segments_before}"
+
+            task, check_result = await async_client.optimize(
+                collection_name,
+                target_size="64MB",
+                wait=False,
+                timeout=600,
+            )
+            assert check_result
+            assert isinstance(task, AsyncOptimizeTask)
+
+            observed_progress = set()
+            deadline = time.time() + 600
+            while not task.done():
+                stage = task.progress()
+                observed_progress.add(getattr(stage, "value", stage))
+                if time.time() >= deadline:
+                    pytest.fail(f"Async optimize task did not complete; progress={observed_progress}")
+                await asyncio.sleep(0.5)
+
+            result = await task.result(timeout=10)
+
+            assert result.status == "success"
+            assert result.collection_name == collection_name
+            assert result.target_size == "64MB"
+            progress = {getattr(stage, "value", stage) for stage in result.progress}
+            assert "compacting" in progress
+            assert "waiting for index rebuild" in progress
+            assert "refreshing load" in progress
+            assert observed_progress - {"initializing"}, (
+                f"Async task exposed no live progress beyond initialization: {observed_progress}"
+            )
+
+            refresh_deadline = time.time() + 300
+            segments_after = []
+            while time.time() < refresh_deadline:
+                segments_after = sync_client.list_loaded_segments(collection_name)
+                segment_ids_after = {segment.segment_id for segment in segments_after}
+                if len(segment_ids_after) < len(segment_ids_before) and segment_ids_after.isdisjoint(
+                    segment_ids_before
+                ):
+                    break
+                await asyncio.sleep(2)
+            else:
+                pytest.fail(
+                    f"Loaded segments did not converge after async optimize without release/load: "
+                    f"before={segments_before}, after={segments_after}"
+                )
+
+            count_result, _ = await async_client.query(
+                collection_name,
+                filter="",
+                output_fields=["count(*)"],
+            )
+            assert count_result[0]["count(*)"] == num_batches * batch_size
+        finally:
+            if collection_created:
+                await async_client.drop_collection(collection_name)
+            await async_client.close()

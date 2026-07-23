@@ -345,6 +345,51 @@ func (_c *MockMutableMessage_IsPersisted_Call) RunAndReturn(run func() bool) *Mo
 	return _c
 }
 
+// IsUnreplicable provides a mock function with no fields
+func (_m *MockMutableMessage) IsUnreplicable() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsUnreplicable")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_IsUnreplicable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsUnreplicable'
+type MockMutableMessage_IsUnreplicable_Call struct {
+	*mock.Call
+}
+
+// IsUnreplicable is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) IsUnreplicable() *MockMutableMessage_IsUnreplicable_Call {
+	return &MockMutableMessage_IsUnreplicable_Call{Call: _e.mock.On("IsUnreplicable")}
+}
+
+func (_c *MockMutableMessage_IsUnreplicable_Call) Run(run func()) *MockMutableMessage_IsUnreplicable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_IsUnreplicable_Call) Return(_a0 bool) *MockMutableMessage_IsUnreplicable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_IsUnreplicable_Call) RunAndReturn(run func() bool) *MockMutableMessage_IsUnreplicable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MarshalLogObject provides a mock function with given fields: _a0
 func (_m *MockMutableMessage) MarshalLogObject(_a0 mlog.ObjectEncoder) error {
 	ret := _m.Called(_a0)

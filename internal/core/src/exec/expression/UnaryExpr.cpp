@@ -473,6 +473,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val,
             int index) {
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFuncForArray<ValueType,
@@ -889,6 +893,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             ExprValueType val) {
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         switch (op_type) {
             case proto::plan::GreaterThan: {
@@ -2043,10 +2051,8 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             switch (val_type) {
                 case DataType::STRING:
                 case DataType::VARCHAR:
-                    can_use =
-                        expr_->op_type_ != proto::plan::OpType::Match &&
-                        expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
-                        expr_->op_type_ != proto::plan::OpType::InnerMatch;
+                    can_use = SegmentExpr::CanUseIndexForOp<std::string>(
+                        expr_->op_type_);
                     break;
                 default:
                     can_use = true;
@@ -2361,12 +2367,12 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
     using U =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     auto op_type = expr_->op_type_;
-    auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
     U val = GetValueFromProto<U>(expr_->val_);
 
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = 0; i < num_data_chunk_; i++) {
-        if (skip_index.CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
+        if (skip_index->CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
             continue;
         }
         chunks_may_hit.push_back(i);

@@ -24,7 +24,6 @@
 #include "index/JsonFlatIndex.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
-#include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
 #include "index/NgramInvertedIndex.h"
@@ -38,9 +37,11 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void
-    DropIndex(const FieldId field_id) = 0;
+    DropIndex(const FieldId field_id, milvus::OpContext* op_ctx = nullptr) = 0;
     virtual void
-    DropJSONIndex(const FieldId field_id, const std::string& nested_path) = 0;
+    DropJSONIndex(const FieldId field_id,
+                  const std::string& nested_path,
+                  milvus::OpContext* op_ctx = nullptr) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
 
@@ -55,9 +56,6 @@ class SegmentSealed : public SegmentInternalInterface {
                FieldId field_id,
                const int64_t* ids,
                int64_t count) const = 0;
-
-    virtual InsertRecord<true>&
-    get_insert_record() = 0;
 
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(milvus::OpContext* op_ctx,

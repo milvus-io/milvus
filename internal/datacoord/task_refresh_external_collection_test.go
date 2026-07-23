@@ -865,6 +865,10 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
+		const targetRowsPerSegmentKey = "dataNode.externalCollection.targetRowsPerSegment"
+		paramtable.Get().Save(targetRowsPerSegmentKey, "12345")
+		defer paramtable.Get().Reset(targetRowsPerSegmentKey)
+
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
@@ -912,6 +916,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
 		assert.NotNil(t, cluster.refreshReq)
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
+		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
 	})
 }
 

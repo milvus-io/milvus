@@ -570,22 +570,16 @@ class BitsetBase {
 
     // Read multiple bits starting from a given bit index.
     inline data_type
-    read(const size_t starting_bit_idx, const size_t nbits) {
-        range_checker::le(nbits, sizeof(data_type));
+    read(const size_t starting_bit_idx, const size_t nbits) const {
+        range_checker::le(nbits, 8 * sizeof(data_type));
+        // Check the end bound without computing starting_bit_idx + nbits, which
+        // can wrap around size_t and slip past the check; both operands are
+        // unsigned so size() - starting_bit_idx is safe once the first holds.
+        range_checker::le(starting_bit_idx, this->size());
+        range_checker::le(nbits, this->size() - starting_bit_idx);
 
         return policy_type::op_read(
             this->data(), this->offset() + starting_bit_idx, nbits);
-    }
-
-    // Write multiple bits starting from a given bit index.
-    inline void
-    write(const size_t starting_bit_idx,
-          const data_type value,
-          const size_t nbits) {
-        range_checker::le(nbits, sizeof(data_type));
-
-        policy_type::op_write(
-            this->data(), this->offset() + starting_bit_idx, nbits, value);
     }
 
     // Compare two arrays element-wise

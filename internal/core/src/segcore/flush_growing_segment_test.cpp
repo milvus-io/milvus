@@ -14,16 +14,21 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
+#include "common/IndexMeta.h"
 #include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "knowhere/index/index_factory.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/transaction/transaction.h"
@@ -239,6 +244,34 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         return ParseBM25StatsBlob(buffer->data(), buffer->size());
     }
 
+    std::vector<uint8_t>
+    ReadRawFile(const std::string& path) {
+        auto fs = GetDefaultArrowFileSystem();
+        EXPECT_NE(fs, nullptr);
+        if (!fs) {
+            return {};
+        }
+        auto input_result = fs->OpenInputFile(path);
+        EXPECT_TRUE(input_result.ok()) << input_result.status().ToString();
+        if (!input_result.ok()) {
+            return {};
+        }
+        auto input = input_result.ValueOrDie();
+        auto size_result = input->GetSize();
+        EXPECT_TRUE(size_result.ok()) << size_result.status().ToString();
+        if (!size_result.ok()) {
+            return {};
+        }
+        auto buffer_result = input->Read(size_result.ValueOrDie());
+        EXPECT_TRUE(buffer_result.ok()) << buffer_result.status().ToString();
+        if (!buffer_result.ok()) {
+            return {};
+        }
+        auto buffer = buffer_result.ValueOrDie();
+        return std::vector<uint8_t>(buffer->data(),
+                                    buffer->data() + buffer->size());
+    }
+
     std::string
     SerializeSchemaBlob(const SchemaPtr& schema) {
         auto schema_proto = schema->ToProto();
@@ -269,6 +302,25 @@ class FlushGrowingSegmentTest : public ::testing::Test {
     SetFlushSchema(CFlushConfig& config, const std::string& schema_blob) {
         config.schema_blob = schema_blob.data();
         config.schema_length = static_cast<int64_t>(schema_blob.size());
+    }
+
+    IndexMetaPtr
+    MakeVectorIndexMeta(FieldId vec_fid,
+                        int64_t dim,
+                        const std::string& index_type,
+                        const std::string& metric_type) {
+        std::map<std::string, std::string> index_params = {
+            {"index_type", index_type}, {"metric_type", metric_type}};
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+            index_params["nlist"] = "1";
+        }
+        std::map<std::string, std::string> type_params = {
+            {"dim", std::to_string(dim)}};
+        FieldIndexMeta field_index_meta(
+            vec_fid, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_map = {
+            {vec_fid, field_index_meta}};
+        return std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
     }
 };
 
@@ -1597,6 +1649,439 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     EXPECT_FLOAT_EQ(row2[1], 4.0F);
 
     FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, 2, "L2");
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    auto dataset = DataGen(schema, N);
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_offset_out_of_range";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N + 1, &config, &result);
+
+    EXPECT_NE(status.error_code, Success);
+    ASSERT_NE(status.error_msg, nullptr);
+    EXPECT_NE(std::string(status.error_msg).find("exceeds growing segment"),
+              std::string::npos);
+    free(const_cast<char*>(status.error_msg));
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 100;
+    constexpr int64_t start = 13;
+    constexpr int64_t end = 87;
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 16;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    interim_config.sub_dim = dim;
+    interim_config.refine_ratio = 1.0F;
+    interim_config.refine_quant_type = "NONE";
+    interim_config.refine_with_quant_flag = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+    config.set_storage_v3_enabled(true);
+    config.set_enable_growing_source_flush(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto index_meta =
+        MakeVectorIndexMeta(vec_fid,
+                            dim,
+                            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                            knowhere::metric::L2);
+    auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto dataset = DataGen(schema, row_count);
+    auto offset = segment->PreInsert(row_count);
+    segment->Insert(offset,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+    auto vec_base = segment_impl->get_insert_record().get_data_base(vec_fid);
+    ASSERT_NE(vec_base, nullptr);
+    ASSERT_EQ(vec_base->num_chunk(), 0);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_fid));
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(flush_config, schema);
+    std::string segment_path = test_dir_ + "/segment_index_fallback_float";
+    flush_config.segment_path = segment_path.c_str();
+    flush_config.read_version = -1;
+    flush_config.retry_limit = 3;
+
+    CFlushResult result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), start, end, &flush_config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, end - start);
+
+    auto field_datas = ReadFlushedFieldData(
+        segment_path, result, vec_fid, DataType::VECTOR_FLOAT, false, dim);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto field_data = field_datas[0];
+    ASSERT_EQ(field_data->get_num_rows(), end - start);
+    auto source_vectors = dataset.get_col<float>(vec_fid);
+    for (int64_t i = 0; i < end - start; i++) {
+        auto row = static_cast<const float*>(field_data->RawValue(i));
+        ASSERT_NE(row, nullptr);
+        for (int64_t d = 0; d < dim; d++) {
+            EXPECT_FLOAT_EQ(row[d], source_vectors[(start + i) * dim + d]);
+        }
+    }
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest,
+       FlushNullableFloatVectorFromIndexKeepsCompactMapping) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 100;
+    constexpr int64_t start = 13;
+    constexpr int64_t end = 87;
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 16;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    interim_config.sub_dim = dim;
+    interim_config.refine_ratio = 1.0F;
+    interim_config.refine_quant_type = "NONE";
+    interim_config.refine_with_quant_flag = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+    config.set_storage_v3_enabled(true);
+    config.set_enable_growing_source_flush(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto index_meta =
+        MakeVectorIndexMeta(vec_fid,
+                            dim,
+                            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                            knowhere::metric::L2);
+    auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    std::vector<int64_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count);
+    std::vector<int64_t> pks(row_count);
+    std::unique_ptr<bool[]> valid(new bool[row_count]);
+    std::vector<float> compact_vectors;
+    compact_vectors.reserve(row_count * dim);
+    for (int64_t i = 0; i < row_count; i++) {
+        row_ids[i] = i;
+        timestamps[i] = 1000 + i;
+        pks[i] = 10000 + i;
+        valid[i] = i % 7 != 0;
+        if (valid[i]) {
+            for (int64_t d = 0; d < dim; d++) {
+                compact_vectors.push_back(static_cast<float>(i * 10 + d));
+            }
+        }
+    }
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(row_count);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto vec_array = CreateVectorDataArrayFrom(compact_vectors.data(),
+                                               valid.get(),
+                                               row_count,
+                                               compact_vectors.size() / dim,
+                                               (*schema)[vec_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+    segment->PreInsert(row_count);
+    segment->Insert(
+        0, row_count, row_ids.data(), timestamps.data(), insert_data.get());
+    auto vec_base = segment_impl->get_insert_record().get_data_base(vec_fid);
+    ASSERT_NE(vec_base, nullptr);
+    ASSERT_EQ(vec_base->num_chunk(), 0);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_fid));
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(flush_config, schema);
+    std::string segment_path = test_dir_ + "/segment_index_fallback_nullable";
+    flush_config.segment_path = segment_path.c_str();
+    flush_config.read_version = -1;
+    flush_config.retry_limit = 3;
+
+    CFlushResult result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), start, end, &flush_config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, end - start);
+
+    auto field_datas = ReadFlushedFieldData(
+        segment_path, result, vec_fid, DataType::VECTOR_FLOAT, true, dim);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto field_data = field_datas[0];
+    ASSERT_EQ(field_data->get_num_rows(), end - start);
+    for (int64_t i = 0; i < end - start; i++) {
+        auto logical = start + i;
+        EXPECT_EQ(field_data->is_valid(i), valid[logical]);
+        if (!valid[logical]) {
+            continue;
+        }
+        auto row = static_cast<const float*>(field_data->RawValue(i));
+        ASSERT_NE(row, nullptr);
+        for (int64_t d = 0; d < dim; d++) {
+            EXPECT_FLOAT_EQ(row[d], static_cast<float>(logical * 10 + d));
+        }
+    }
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest,
+       FlushSparseVectorAndBM25FromIndexAfterChunksCleared) {
+    constexpr int64_t row_count = 64;
+    constexpr int64_t start = 5;
+    constexpr int64_t end = 25;
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 16;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+    config.set_storage_v3_enabled(true);
+    config.set_enable_growing_source_flush(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto sparse_fid = schema->AddDebugField(
+        "bm25", DataType::VECTOR_SPARSE_U32_F32, 0, knowhere::metric::IP);
+    schema->set_primary_field_id(pk_fid);
+
+    auto index_meta =
+        MakeVectorIndexMeta(sparse_fid,
+                            0,
+                            knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                            knowhere::metric::IP);
+    auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    std::vector<int64_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count);
+    std::vector<int64_t> pks(row_count);
+    auto sparse_vectors =
+        std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(
+            row_count);
+    std::unordered_map<uint32_t, int32_t> expected_rows_with_token;
+    int64_t expected_num_token = 0;
+    for (int64_t i = 0; i < row_count; i++) {
+        row_ids[i] = i;
+        timestamps[i] = 1000 + i;
+        pks[i] = 10000 + i;
+        sparse_vectors[i] = knowhere::sparse::SparseRow<SparseValueType>(2);
+        auto common_token = static_cast<uint32_t>(10 + i % 3);
+        auto unique_token = static_cast<uint32_t>(100 + i);
+        sparse_vectors[i].set_at(0, common_token, 1.0F);
+        sparse_vectors[i].set_at(1, unique_token, 2.0F);
+        if (i >= start && i < end) {
+            expected_rows_with_token[common_token]++;
+            expected_rows_with_token[unique_token]++;
+            expected_num_token += 3;
+        }
+    }
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(row_count);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto sparse_array = CreateVectorDataArrayFrom(sparse_vectors.get(),
+                                                  nullptr,
+                                                  row_count,
+                                                  row_count,
+                                                  (*schema)[sparse_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(sparse_array.release());
+
+    segment->PreInsert(row_count);
+    segment->Insert(
+        0, row_count, row_ids.data(), timestamps.data(), insert_data.get());
+    auto vec_base = segment_impl->get_insert_record().get_data_base(sparse_fid);
+    ASSERT_NE(vec_base, nullptr);
+    ASSERT_EQ(vec_base->num_chunk(), 0);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(sparse_fid));
+
+    int64_t bm25_field_ids[] = {sparse_fid.get()};
+    int64_t bm25_stats_log_ids[] = {2001};
+    C_FLUSH_CONFIG_WITH_SCHEMA(flush_config, schema);
+    std::string segment_path = test_dir_ + "/segment_index_fallback_sparse";
+    flush_config.segment_path = segment_path.c_str();
+    flush_config.read_version = -1;
+    flush_config.retry_limit = 3;
+    flush_config.bm25_field_ids = bm25_field_ids;
+    flush_config.bm25_stats_log_ids = bm25_stats_log_ids;
+    flush_config.num_bm25_fields = 1;
+
+    CFlushResult result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), start, end, &flush_config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, end - start);
+
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            sparse_fid,
+                                            DataType::VECTOR_SPARSE_U32_F32,
+                                            false,
+                                            0);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto field_data = field_datas[0];
+    ASSERT_EQ(field_data->get_num_rows(), end - start);
+    for (int64_t i = 0; i < end - start; i++) {
+        auto row =
+            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+                field_data->RawValue(i));
+        ASSERT_NE(row, nullptr);
+        EXPECT_EQ(row->data_byte_size(),
+                  sparse_vectors[start + i].data_byte_size());
+    }
+
+    auto stats = ParseBM25StatsFromResult(result, sparse_fid);
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_EQ(stats->num_row, end - start);
+    EXPECT_EQ(stats->num_token, expected_num_token);
+    EXPECT_EQ(stats->rows_with_token, expected_rows_with_token);
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushPrimaryKeyStatsManifestAndCompound) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, 2, "L2");
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 4;
+    auto dataset = DataGen(schema, N);
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    std::string segment_path = test_dir_ + "/segment_pk_stats";
+    std::vector<uint8_t> first_pk_blob = {'s', 'i', 'n', 'g', 'l', 'e', 'A'};
+    std::vector<uint8_t> second_pk_blob = {'s', 'i', 'n', 'g', 'l', 'e', 'B'};
+    std::vector<uint8_t> merged_pk_blob = {'m', 'e', 'r', 'g', 'e', 'd'};
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(first_config, schema);
+    first_config.segment_path = segment_path.c_str();
+    first_config.read_version = -1;
+    first_config.retry_limit = 3;
+    first_config.pk_stats_field_id = pk_fid.get();
+    first_config.pk_stats_log_id = 101;
+    first_config.pk_stats_blob = first_pk_blob.data();
+    first_config.pk_stats_blob_size = first_pk_blob.size();
+
+    CFlushResult first_result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, 2, &first_config, &first_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(first_result.num_rows, 2);
+
+    auto stat_key = "bloom_filter." + std::to_string(pk_fid.get());
+    auto first_paths = ManifestStatPaths(
+        segment_path, first_result.committed_version, stat_key);
+    ASSERT_EQ(first_paths.size(), 1);
+    auto first_full_path = segment_path + "/_stats/bloom_filter." +
+                           std::to_string(pk_fid.get()) + "/101";
+    EXPECT_EQ(first_paths[0], first_full_path);
+    EXPECT_EQ(ReadRawFile(first_full_path), first_pk_blob);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(second_config, schema);
+    second_config.segment_path = segment_path.c_str();
+    second_config.read_version = first_result.committed_version;
+    second_config.retry_limit = 3;
+    second_config.pk_stats_field_id = pk_fid.get();
+    second_config.pk_stats_log_id = 102;
+    second_config.pk_stats_blob = second_pk_blob.data();
+    second_config.pk_stats_blob_size = second_pk_blob.size();
+    second_config.merged_pk_stats_blob = merged_pk_blob.data();
+    second_config.merged_pk_stats_blob_size = merged_pk_blob.size();
+
+    CFlushResult second_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 2, 4, &second_config, &second_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(second_result.num_rows, 2);
+
+    auto second_paths = ManifestStatPaths(
+        segment_path, second_result.committed_version, stat_key);
+    ASSERT_EQ(second_paths.size(), 3);
+
+    auto stats_prefix = segment_path + "/_stats/bloom_filter." +
+                        std::to_string(pk_fid.get()) + "/";
+    auto second_full_path = stats_prefix + "102";
+    auto merged_full_path = stats_prefix + "1";
+    EXPECT_NE(
+        std::find(second_paths.begin(), second_paths.end(), first_full_path),
+        second_paths.end());
+    EXPECT_NE(
+        std::find(second_paths.begin(), second_paths.end(), second_full_path),
+        second_paths.end());
+    EXPECT_NE(
+        std::find(second_paths.begin(), second_paths.end(), merged_full_path),
+        second_paths.end());
+    EXPECT_EQ(ReadRawFile(second_full_path), second_pk_blob);
+    EXPECT_EQ(ReadRawFile(merged_full_path), merged_pk_blob);
+
+    FreeFlushResult(&first_result);
+    FreeFlushResult(&second_result);
 }
 
 TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {

@@ -83,10 +83,6 @@ func (w *walAccesserImpl) Local() Local {
 	return localServiceImpl{w}
 }
 
-func (w *walAccesserImpl) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
-	return w.handlerClient.PrepareReleaseManualFlush(ctx, collectionID, vchannel, releaseSegmentIDs)
-}
-
 // ControlChannel returns the control channel name of the wal.
 func (w *walAccesserImpl) ControlChannel() string {
 	last, err := w.streamingCoordClient.Assignment().GetLatestAssignments(context.Background())

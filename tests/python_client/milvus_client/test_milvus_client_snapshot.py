@@ -9,6 +9,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from ml_dtypes import bfloat16
 from pymilvus import DataType
+from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
 
 prefix = "snapshot"
@@ -2242,6 +2243,152 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_snapshot_restores_struct_array_semantics_and_indexes(self):
+        """
+        target: verify snapshot restores Struct Array schema, nullability, nested indexes, and both search modes
+        method: snapshot nullable Struct rows with empty and variable-length values plus separate embedding-list and
+            element-vector sub-fields, restore to a new collection, and compare exact semantic observations
+        expected: restored projection, predicates, complete valid ANN candidate sets, and index metadata equal source
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_struct_source")
+        restored_collection_name = cf.gen_unique_str(f"{prefix}_struct_restored")
+        snapshot_name = cf.gen_unique_str(f"{prefix}_struct")
+        dim = 8
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("element_embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=32)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+            nullable=True,
+        )
+        index_params = client.prepare_index_params()
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
+        index_params.add_index(
+            "events[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index(
+            "events[element_embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index("events[tag]", index_type="BITMAP")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        def vector(axis):
+            value = [0.0] * dim
+            value[axis % dim] = 1.0
+            return value
+
+        def event(axis, tag):
+            value = vector(axis)
+            return {"embedding": value, "element_embedding": value, "tag": tag}
+
+        rows = [
+            {"id": 0, "vector": vector(0), "events": None},
+            {"id": 1, "vector": vector(1), "events": []},
+            {"id": 2, "vector": vector(2), "events": [event(0, "target"), event(2, "other")]},
+            {"id": 3, "vector": vector(3), "events": [event(1, "control")]},
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        def collect_observations(target_collection):
+            projected = self.query(
+                client,
+                target_collection,
+                filter="id >= 0",
+                output_fields=["id", "events"],
+                limit=len(rows),
+            )[0]
+            contains = self.query(
+                client,
+                target_collection,
+                filter='array_contains(events[tag], "target")',
+                output_fields=["id"],
+                limit=len(rows),
+            )[0]
+            matched = self.query(
+                client,
+                target_collection,
+                filter='MATCH_ANY(events, $[tag] == "target")',
+                output_fields=["id"],
+                limit=len(rows),
+            )[0]
+            element_hits = self.search(
+                client,
+                target_collection,
+                data=[vector(0)],
+                anns_field="events[element_embedding]",
+                search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+                output_fields=["id"],
+                limit=3,
+            )[0][0]
+            tensor = EmbeddingList()
+            tensor.add(vector(0))
+            embedding_hits = self.search(
+                client,
+                target_collection,
+                data=[tensor],
+                anns_field="events[embedding]",
+                search_params={"metric_type": "MAX_SIM_COSINE", "params": {"ef": 32}},
+                output_fields=["id"],
+                limit=2,
+            )[0][0]
+            return {
+                "projection": sorted((row["id"], row["events"]) for row in projected),
+                "contains_ids": sorted(row["id"] for row in contains),
+                "match_ids": sorted(row["id"] for row in matched),
+                "element_keys": sorted((hit["id"], hit["offset"]) for hit in element_hits),
+                "embedding_ids": sorted(hit["id"] for hit in embedding_hits),
+                "indexes": sorted(client.list_indexes(target_collection)),
+            }
+
+        source_observations = collect_observations(collection_name)
+        assert source_observations["contains_ids"] == [2]
+        assert source_observations["match_ids"] == [2]
+        assert source_observations["element_keys"] == [(2, 0), (2, 1), (3, 0)]
+        assert source_observations["embedding_ids"] == [2, 3]
+
+        self.create_snapshot(client, snapshot_name, collection_name)
+        job_id = self.restore_snapshot(
+            client,
+            snapshot_name,
+            collection_name,
+            restored_collection_name,
+        )[0]
+        wait_for_restore_complete(self, client, job_id)
+        self.load_collection(client, restored_collection_name)
+        try:
+            restored_observations = collect_observations(restored_collection_name)
+            for key in ("projection", "contains_ids", "match_ids", "element_keys", "indexes"):
+                assert restored_observations[key] == source_observations[key]
+            assert restored_observations["embedding_ids"] == [2, 3]
+        finally:
+            self.drop_snapshot(client, snapshot_name, collection_name)
+            self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_with_bfloat16_vector(self):
