@@ -32,9 +32,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -42,6 +44,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 )
+
+func TestMixCoordStopOwnsSharedSession(t *testing.T) {
+	mockey.PatchConvey("shared session stops after child coordinators", t, func() {
+		ctx := context.Background()
+		coord, err := NewMixCoordServer(ctx, dependency.NewDefaultFactory(true))
+		assert.NoError(t, err)
+		coord.session = sessionutil.NewSession(ctx)
+
+		stopOrder := make([]string, 0, 4)
+		mockey.Mock((*querycoordv2.Server).Stop).To(func(*querycoordv2.Server) error {
+			stopOrder = append(stopOrder, "querycoord")
+			return nil
+		}).Build()
+		mockey.Mock((*datacoord.Server).Stop).To(func(*datacoord.Server) error {
+			stopOrder = append(stopOrder, "datacoord")
+			return nil
+		}).Build()
+		mockey.Mock((*rootcoord.Core).Stop).To(func(*rootcoord.Core) error {
+			stopOrder = append(stopOrder, "rootcoord")
+			return nil
+		}).Build()
+		mockey.Mock((*sessionutil.Session).Stop).To(func(*sessionutil.Session) {
+			stopOrder = append(stopOrder, "session")
+		}).Build()
+
+		err = coord.Stop()
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"querycoord", "datacoord", "rootcoord", "session"}, stopOrder)
+	})
+}
 
 func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()

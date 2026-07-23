@@ -133,7 +133,9 @@ type Server struct {
 	factory         dependency.Factory
 
 	session          sessionutil.SessionInterface
+	sessionOwned     bool
 	icSession        sessionutil.SessionInterface
+	icSessionOwned   bool
 	dnSessionWatcher sessionutil.SessionWatcher
 	qnSessionWatcher sessionutil.SessionWatcher
 
@@ -397,7 +399,9 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
+	s.sessionOwned = false
 	s.icSession = session
+	s.icSessionOwned = false
 	if s.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
@@ -520,11 +524,13 @@ func (s *Server) initSegmentManager() error {
 func (s *Server) initSession() error {
 	if s.icSession == nil {
 		s.icSession = sessionutil.NewSession(s.ctx)
+		s.icSessionOwned = true
 		s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
 		s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
+		s.sessionOwned = true
 
 		s.session.Init(typeutil.DataCoordRole, s.address, true, true)
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
@@ -986,18 +992,22 @@ func (s *Server) Stop() error {
 		s.qnSessionWatcher.Stop()
 	}
 
-	if s.session != nil {
-		s.session.Stop()
-	}
-
-	if s.icSession != nil {
-		s.icSession.Stop()
-	}
+	s.stopSessions()
 
 	s.stopServerLoop()
 	log.Info("datacoord serverloop stopped")
 	log.Warn("datacoord stop successful")
 	return nil
+}
+
+func (s *Server) stopSessions() {
+	if s.sessionOwned && s.session != nil {
+		s.session.Stop()
+	}
+
+	if s.icSessionOwned && s.icSession != nil {
+		s.icSession.Stop()
+	}
 }
 
 // CleanMeta only for test
