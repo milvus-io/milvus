@@ -83,7 +83,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2ToV2Format() {
 	var segmentID int64 = 1001
 
-	fBinlogs, deltalogs, _, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
+	fBinlogs, deltalogs, _, _, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
 	s.NoError(err)
 
 	dblobs, err := getInt64DeltaBlobs(
@@ -188,12 +188,13 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(int64(rows))(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()

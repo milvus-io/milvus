@@ -527,9 +527,10 @@ type CompositeBinlogRecordWriter struct {
 	rowNum        int64
 
 	// results
-	fieldBinlogs map[FieldID]*datapb.FieldBinlog
-	statsLog     *datapb.FieldBinlog
-	bm25StatsLog map[FieldID]*datapb.FieldBinlog
+	fieldBinlogs  map[FieldID]*datapb.FieldBinlog
+	statsLog      *datapb.FieldBinlog
+	bm25StatsLog  map[FieldID]*datapb.FieldBinlog
+	statsBlobSize int64
 
 	flushedUncompressed uint64
 	options             []StreamWriterOption
@@ -722,6 +723,9 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 	// Extract single PK stats from map
 	for _, statsLog := range pkStatsMap {
 		c.statsLog = statsLog
+		for _, l := range statsLog.GetBinlogs() {
+			c.statsBlobSize += l.GetMemorySize()
+		}
 		break
 	}
 
@@ -739,8 +743,17 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 		return err
 	}
 	c.bm25StatsLog = bm25StatsLog
+	for _, fb := range bm25StatsLog {
+		for _, l := range fb.GetBinlogs() {
+			c.statsBlobSize += l.GetMemorySize()
+		}
+	}
 
 	return nil
+}
+
+func (c *CompositeBinlogRecordWriter) GetStatsBlobSize() int64 {
+	return c.statsBlobSize
 }
 
 func (c *CompositeBinlogRecordWriter) GetExpirQuantiles() []int64 {

@@ -151,6 +151,11 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				segmentsInfo[segment].Bm25Logs = mergeFn(segmentsInfo[segment].Bm25Logs, info.GetBm25Logs())
 				segmentsInfo[segment].ManifestPath = info.GetManifestPath()
+				// Stats (segment.Statistics().Publish()) is cumulative per segment,
+				// so the latest contributing file's snapshot supersedes earlier
+				// ones — refresh like ImportedRows rather than freezing the first,
+				// which would undercount every file after the first. Do NOT sum.
+				segmentsInfo[segment].Stats = info.GetStats()
 				return
 			}
 			segmentsInfo[segment] = info
