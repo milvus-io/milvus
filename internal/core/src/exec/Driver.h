@@ -213,9 +213,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
          std::vector<std::shared_ptr<Operator>> operators);
 
     void
-    CloseByTask() {
-        Close();
-    }
+    CloseByTask() noexcept;
 
  private:
     Driver() = default;

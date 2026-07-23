@@ -121,18 +121,17 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       proto::plan::GenericValue::ValCase::kFloatVal) &&
                  (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
                   upper_type == proto::plan::GenericValue::ValCase::kFloatVal));
+            const auto has_unsafe_int_bound =
+                is_numeric &&
+                ((lower_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                  !IsInt64SafeForJsonDoubleIndex(
+                      expr_->lower_val_.int64_val())) ||
+                 (upper_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                  !IsInt64SafeForJsonDoubleIndex(
+                      expr_->upper_val_.int64_val())));
 
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 if (is_numeric) {
-                    const auto has_unsafe_int_bound =
-                        (lower_type ==
-                             proto::plan::GenericValue::ValCase::kInt64Val &&
-                         !IsInt64SafeForJsonDoubleIndex(
-                             expr_->lower_val_.int64_val())) ||
-                        (upper_type ==
-                             proto::plan::GenericValue::ValCase::kInt64Val &&
-                         !IsInt64SafeForJsonDoubleIndex(
-                             expr_->upper_val_.int64_val()));
                     if (has_unsafe_int_bound) {
                         result =
                             ExecRangeVisitorImplForJsonPreciseNumeric(context);
@@ -174,7 +173,11 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                     lower_type));
                 }
             } else {
-                if (is_numeric && use_double) {
+                if (has_unsafe_int_bound &&
+                    (has_offset_input_ ||
+                     exec_path_ != ExprExecPath::JsonStats)) {
+                    result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
+                } else if (is_numeric && use_double) {
                     // Use double when either bound is float
                     result = ExecRangeVisitorImplForJson<double>(context);
                 } else if (lower_type ==

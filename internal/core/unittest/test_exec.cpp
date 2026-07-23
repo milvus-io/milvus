@@ -385,6 +385,35 @@ TEST_P(TaskTest, UnaryExpr) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
+TEST_P(TaskTest, DetermineExecPathFailureReleasesTaskDriverCycle) {
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("1");
+    auto logical_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(field_map_["json"], DataType::JSON, {"v"}),
+        std::vector<proto::plan::GenericValue>{int_value, string_value},
+        false);
+    auto filter_node = std::make_shared<plan::FilterBitsNode>(
+        "mixed-json-term", logical_expr, std::vector<plan::PlanNodePtr>{});
+    auto query_context =
+        std::make_shared<QueryContext>("mixed-json-term",
+                                       segment_.get(),
+                                       num_rows_,
+                                       MAX_TIMESTAMP,
+                                       0,
+                                       0,
+                                       query::PlanOptions{false},
+                                       std::make_shared<QueryConfig>());
+
+    auto task = Task::Create(
+        "mixed-json-term", plan::PlanFragment(filter_node), 0, query_context);
+    std::weak_ptr<Task> weak_task = task;
+    EXPECT_ANY_THROW(task->Next());
+    task.reset();
+    EXPECT_TRUE(weak_task.expired());
+}
+
 TEST_P(TaskTest, LogicalExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);
