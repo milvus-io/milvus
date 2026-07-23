@@ -137,9 +137,9 @@ func (c *Client) RestoreExternalSnapshot(ctx context.Context, opt RestoreExterna
 	return jobID, err
 }
 
-func (c *Client) ExportSnapshot(ctx context.Context, opt ExportSnapshotOption, callOptions ...grpc.CallOption) (string, error) {
+func (c *Client) ExportSnapshot(ctx context.Context, opt ExportSnapshotOption, callOptions ...grpc.CallOption) (int64, error) {
 	if opt == nil {
-		return "", merr.WrapErrParameterInvalid("ExportSnapshotOption", "nil", "option cannot be nil")
+		return 0, merr.WrapErrParameterInvalid("ExportSnapshotOption", "nil", "option cannot be nil")
 	}
 	req := opt.Request()
 	if req.DbName == "" {
@@ -151,16 +151,35 @@ func (c *Client) ExportSnapshot(ctx context.Context, opt ExportSnapshotOption, c
 		defer cancel()
 	}
 
-	var snapshotMetadataURI string
+	var jobID int64
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.ExportSnapshot(ctx, req, callOptions...)
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
-		snapshotMetadataURI = resp.GetSnapshotMetadataUri()
+		jobID = resp.GetJobId()
 		return nil
 	})
-	return snapshotMetadataURI, err
+	return jobID, err
+}
+
+// GetExportSnapshotState gets the durable state of a snapshot export job.
+func (c *Client) GetExportSnapshotState(ctx context.Context, opt GetExportSnapshotStateOption, callOptions ...grpc.CallOption) (*milvuspb.ExportSnapshotInfo, error) {
+	if opt == nil {
+		return nil, merr.WrapErrParameterInvalid("GetExportSnapshotStateOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+
+	var info *milvuspb.ExportSnapshotInfo
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.GetExportSnapshotState(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		info = resp.GetInfo()
+		return nil
+	})
+	return info, err
 }
 
 // GetRestoreSnapshotState gets the state of a restore snapshot job

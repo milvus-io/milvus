@@ -322,9 +322,98 @@ func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnaps
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.ExportSnapshotResponse{
-		Status:              resp.GetStatus(),
-		SnapshotMetadataUri: resp.GetSnapshotMetadataUri(),
+		Status: resp.GetStatus(),
+		JobId:  resp.GetJobId(),
 	}, nil
+}
+
+func (node *Proxy) GetExportSnapshotState(
+	ctx context.Context,
+	req *milvuspb.GetExportSnapshotStateRequest,
+) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetExportSnapshotState")
+	defer sp.End()
+
+	method := "GetExportSnapshotState"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.TotalLabel,
+		metrics.CauseNA,
+		"",
+		"",
+	).Inc()
+	if req == nil || req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("valid snapshot export job_id is required")
+		failStatus, failCause := failMetricLabel(err)
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			failStatus,
+			failCause,
+			"",
+			"",
+		).Inc()
+		return &milvuspb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+
+	resp, err := node.mixCoord.GetExportSnapshotState(ctx, &datapb.GetExportSnapshotStateRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetExportSnapshotState),
+		),
+		JobId: req.GetJobId(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		failStatus, failCause := failMetricLabel(err)
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			failStatus,
+			failCause,
+			"",
+			"",
+		).Inc()
+		return &milvuspb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.SuccessLabel,
+		metrics.CauseNA,
+		"",
+		"",
+	).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+	).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.GetExportSnapshotStateResponse{
+		Status: resp.GetStatus(),
+		Info:   exportSnapshotJobInfoToPublic(resp.GetInfo()),
+	}, nil
+}
+
+func exportSnapshotJobInfoToPublic(info *datapb.ExportSnapshotJobInfo) *milvuspb.ExportSnapshotInfo {
+	if info == nil {
+		return nil
+	}
+	return &milvuspb.ExportSnapshotInfo{
+		JobId:               info.GetJobId(),
+		SnapshotName:        info.GetSnapshotName(),
+		DbName:              info.GetDbName(),
+		CollectionName:      info.GetCollectionName(),
+		State:               milvuspb.ExportSnapshotState(info.GetState()),
+		Progress:            info.GetProgress(),
+		Reason:              info.GetReason(),
+		StartTime:           info.GetStartTime(),
+		TimeCost:            info.GetTimeCost(),
+		TotalFiles:          info.GetTotalFiles(),
+		CopiedFiles:         info.GetCopiedFiles(),
+		SnapshotMetadataUri: info.GetSnapshotMetadataUri(),
+		TotalBytes:          info.GetTotalBytes(),
+	}
 }
 
 func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {

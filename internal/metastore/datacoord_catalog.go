@@ -157,4 +157,7 @@ type DataCoordCatalog interface {
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
 	ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error)
+	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
+	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
+	DropExportSnapshotJob(ctx context.Context, jobID int64) error
 }

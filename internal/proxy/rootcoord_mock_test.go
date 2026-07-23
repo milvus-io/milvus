@@ -1735,8 +1735,14 @@ func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.Rest
 
 func (coord *MixCoordMock) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
 	return &datapb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: req.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+	return &datapb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
 	}, nil
 }
 
