@@ -21,8 +21,24 @@ func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel 
 	if schema != nil {
 		schemaVersion = schema.GetVersion()
 	}
-	if err := function.AllocFunctionRunners(collectionID, key, schema); err != nil {
+	if err := function.GetManager().Alloc(collectionID, key, schema); err != nil {
 		impl.shardManager.Logger().Warn("failed to allocate function runners",
+			zap.Int64("collectionID", collectionID),
+			zap.String("vchannel", vchannel),
+			zap.String("key", key),
+			zap.Int32("schemaVersion", schemaVersion),
+			zap.Error(err))
+	}
+}
+
+func (impl *shardInterceptor) updateFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
+	key := walFunctionRunnerKey(vchannel)
+	schemaVersion := function.LatestFunctionRunnerVersion
+	if schema != nil {
+		schemaVersion = schema.GetVersion()
+	}
+	if err := function.GetManager().Update(collectionID, key, schema); err != nil {
+		impl.shardManager.Logger().Warn("failed to update function runners",
 			zap.Int64("collectionID", collectionID),
 			zap.String("vchannel", vchannel),
 			zap.String("key", key),
@@ -35,20 +51,14 @@ type collectionSchemaProvider interface {
 	GetAllCollectionSchemaInfos() map[int64]shards.CollectionSchemaInfo
 }
 
-func (impl *shardInterceptor) materializeFunctionFields(ctx context.Context, insertMsg message.MutableInsertMessageV1, collectionID int64, schemaVersion int32) error {
+func (impl *shardInterceptor) materializeFunctionFields(
+	ctx context.Context,
+	insertMsg message.MutableInsertMessageV1,
+	collectionID int64,
+	schemaVersion int32,
+) error {
 	body := insertMsg.MustBody()
-	changed, ok, err := function.TryMaterialize(collectionID, schemaVersion, body)
-	if err != nil {
-		return err
-	}
-	if ok {
-		if changed {
-			insertMsg.OverwriteBody(body)
-		}
-		return nil
-	}
-
-	changed, err = function.FillFunctionData(ctx, collectionID, nil, body)
+	changed, err := function.GetManager().Materialize(ctx, collectionID, walFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, body)
 	if err != nil {
 		return err
 	}

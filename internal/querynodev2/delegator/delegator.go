@@ -174,8 +174,6 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	functionState *functionRuntimeState
-
 	// current forward policy
 	l0ForwardPolicy string
 
@@ -250,21 +248,28 @@ func (sd *shardDelegator) Stopped() bool {
 func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
 	var avgdl float64
 	isBM25 := false
-	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
+	ok, err := function.GetManager().RunWithRunner(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), req.GetFieldId(), func(runner function.FunctionRunner) error {
+		functionType := runner.GetSchema().GetType()
 		switch functionType {
 		case schemapb.FunctionType_BM25:
 			isBM25 = true
 			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 			}
-			var buildErr error
-			avgdl, buildErr = sd.buildBM25IDF(ctx, req)
-			return buildErr
+			var runErr error
+			avgdl, runErr = sd.buildBM25IDF(req, runner)
+			return runErr
 		default:
-			return nil
+			return merr.WrapErrServiceInternalMsg("unsupported managed function type %s", functionType.String())
 		}
 	})
-	return avgdl, isBM25 && avgdl <= 0, err
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		return 0, false, nil
+	}
+	return avgdl, isBM25 && avgdl <= 0, nil
 }
 
 // Start sets delegator to working state.
@@ -1221,11 +1226,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	log.Info("delegator received update schema event")
 
-	newFunctionState, err := buildFunctionRuntimeState(schema)
-	if err != nil {
-		return err
-	}
-
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
@@ -1233,7 +1233,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	newSet := newBM25FunctionSet(schema)
 	idfOracle := sd.getIDFOracle()
 	if idfOracle != nil && !newSet.IsSupersetOf(oldSet) {
-		newFunctionState.Close()
 		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
 	}
 
@@ -1267,7 +1266,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 			return nodeReq
 		})
 	if err != nil {
-		newFunctionState.Close()
 		return err
 	}
 
@@ -1277,13 +1275,19 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
 	if err != nil {
-		newFunctionState.Close()
 		return err
 	}
 
 	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schVersion); err != nil {
-		newFunctionState.Close()
 		return err
+	}
+
+	// Publish the manager schema after the delegator schema update. Queries use
+	// the previous function schema until this point.
+	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
+		// Runner construction failures are retried asynchronously by the manager.
+		// A synchronous error here means the internal function metadata is invalid.
+		panic(err)
 	}
 	if idfOracle == nil && len(newSet) > 0 {
 		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
@@ -1297,12 +1301,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		sd.publishIDFOracle(idfOracle)
 	} else if idfOracle != nil && !newSet.Equal(oldSet) {
 		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
-			newFunctionState.Close()
 			return err
 		}
 	}
-	sd.functionState.swap(newFunctionState).Close()
-
 	log.Info("delegator finished update schema event",
 		zap.Uint64("schemaVersion", schVersion),
 		zap.Int("sealedNum", len(sealed)),
@@ -1342,10 +1343,7 @@ func (sd *shardDelegator) Close() {
 		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, sd.postLoadConfigHandler)
 	}
 
-	if sd.functionState != nil {
-		sd.functionState.Close()
-	}
-	sd.releaseFunctionRunners()
+	function.GetManager().Release(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 
 	// clean up l0 segment in delete buffer
 	start := time.Now()
@@ -1354,29 +1352,6 @@ func (sd *shardDelegator) Close() {
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
-}
-
-func (sd *shardDelegator) allocFunctionRunners(schema *schemapb.CollectionSchema) {
-	if err := function.AllocFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		sd.warnFunctionRunnerInit(err, "allocate", schema)
-	}
-}
-
-func (sd *shardDelegator) warnFunctionRunnerInit(err error, operation string, schema *schemapb.CollectionSchema) {
-	schemaVersion := function.LatestFunctionRunnerVersion
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
-	log.Warn("failed to initialize delegator function runners",
-		zap.Int64("collectionID", sd.collectionID),
-		zap.String("vchannel", sd.vchannelName),
-		zap.String("operation", operation),
-		zap.Int32("schemaVersion", schemaVersion),
-		zap.Error(err))
-}
-
-func (sd *shardDelegator) releaseFunctionRunners() {
-	function.ReleaseFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 }
 
 func delegatorFunctionRunnerKey(vchannel string) string {
@@ -1447,6 +1422,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
+	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), collection.Schema()); err != nil {
+		return nil, err
+	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
 	log.Info("Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
@@ -1493,13 +1471,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		opt(sd)
 	}
 
-	functionState, err := buildFunctionRuntimeState(collection.Schema())
-	if err != nil {
-		return nil, err
-	}
-	sd.functionState = functionState
-	sd.allocFunctionRunners(collection.Schema())
-
 	hasBM25Field := lo.ContainsBy(collection.Schema().GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
 		return tf.GetType() == schemapb.FunctionType_BM25
 	})
@@ -1523,46 +1494,7 @@ func (sd *shardDelegator) useGrowingSourceFlush() bool {
 }
 
 func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
-	schema := sd.collection.Schema()
-	ok, err := function.RunWithAnalyzer(ctx, sd.collectionID, function.LatestFunctionRunnerVersion, fieldID, run)
-	if ok || err != nil {
-		return ok, err
-	}
-	if fieldHasBM25Analyzer(schema, fieldID) {
-		return false, nil
-	}
-
-	field := typeutil.GetField(schema, fieldID)
-	if field == nil || !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
-		return false, nil
-	}
-
-	analyzer, err := function.NewAnalyzerRunner(field)
-	if err != nil {
-		return false, err
-	}
-	if runner, ok := analyzer.(function.FunctionRunner); ok {
-		defer runner.Close()
-	}
-	return true, run(analyzer)
-}
-
-func fieldHasBM25Analyzer(schema *schemapb.CollectionSchema, fieldID int64) bool {
-	for _, fn := range schema.GetFunctions() {
-		if fn.GetType() != schemapb.FunctionType_BM25 {
-			continue
-		}
-		if slices.Contains(fn.GetInputFieldIds(), fieldID) {
-			return true
-		}
-		for _, inputName := range fn.GetInputFieldNames() {
-			field := typeutil.GetFieldByName(schema, inputName)
-			if field != nil && field.GetFieldID() == fieldID {
-				return true
-			}
-		}
-	}
-	return false
+	return function.GetManager().RunWithAnalyzer(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), fieldID, run)
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {

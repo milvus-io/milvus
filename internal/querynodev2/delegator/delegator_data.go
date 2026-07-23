@@ -1170,7 +1170,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	}
 }
 
-func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest) (float64, error) {
+func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
 		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
@@ -1191,50 +1191,33 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	var tfArray *schemapb.SparseFloatArray
-	ok, err := function.RunWithRunner(ctx, sd.collectionID, function.LatestFunctionRunnerVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
-		if functionType != schemapb.FunctionType_BM25 {
-			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+	datas := []any{texts}
+	if len(functionRunner.GetInputFields()) == 2 {
+		analyzerName := "default"
+		if name := req.GetAnalyzerName(); name != "" {
+			// use user provided analyzer name
+			analyzerName = name
 		}
 
-		datas := []any{texts}
-		if len(functionRunner.GetInputFields()) == 2 {
-			analyzerName := "default"
-			if name := req.GetAnalyzerName(); name != "" {
-				// use user provided analyzer name
-				analyzerName = name
-			}
+		analyzers := make([]string, len(texts))
+		for i := range texts {
+			analyzers[i] = analyzerName
+		}
+		datas = append(datas, analyzers)
+	}
 
-			analyzers := make([]string, len(texts))
-			for i := range texts {
-				analyzers[i] = analyzerName
-			}
-			datas = append(datas, analyzers)
-		}
-
-		// get search text term frequency
-		output, err := functionRunner.BatchRun(datas...)
-		if err != nil {
-			return err
-		}
-		if len(output) == 0 {
-			return merr.WrapErrServiceInternalMsg("BM25 embedding failed: runner returned empty output")
-		}
-
-		var ok bool
-		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
-		if !ok {
-			return merr.WrapErrServiceInternalMsg("functionRunner return unknown data")
-		}
-		return nil
-	})
+	// get search text term frequency
+	output, err := functionRunner.BatchRun(datas...)
 	if err != nil {
 		return 0, err
 	}
+	if len(output) == 0 {
+		return 0, merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
+	}
+
+	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		// internal invariant: runners are populated with the schema, never by
-		// the request — classified system, keeps cross-replica failover
-		return 0, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		return 0, merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 	}
 
 	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)

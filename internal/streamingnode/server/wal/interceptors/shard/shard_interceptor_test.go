@@ -7,18 +7,224 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
+
+func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
+	t.Helper()
+	key := walFunctionRunnerKey(vchannel)
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{Version: schemaVersion}))
+	t.Cleanup(func() {
+		function.GetManager().Release(collectionID, key)
+	})
+}
+
+func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing.T) {
+	collectionID := int64(99000)
+	vchannel := "v1-no-functions"
+	allocWALSchemaForTest(t, collectionID, vchannel, 0)
+
+	impl := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&messagespb.InsertMessageHeader{CollectionId: collectionID}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable()
+
+	insertMsg := message.MustAsMutableInsertMessageV1(msg)
+	err := impl.materializeFunctionFields(context.Background(), insertMsg, collectionID, function.LatestFunctionRunnerVersion)
+	require.NoError(t, err)
+}
+
+func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(t *testing.T) {
+	collectionID := int64(99001)
+	vchannel := "by-dev-rootcoord-dml_0_99001v0"
+	key := walFunctionRunnerKey(vchannel)
+	schema := &schemapb.CollectionSchema{
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "analyzer_params", Value: "{}"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, schema))
+	defer function.GetManager().Release(collectionID, key)
+
+	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, key, 101, func(function.Analyzer) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	impl := &shardInterceptor{shardManager: shardManager}
+	noFunctionSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	noFunctionSchema.Version = 2
+	noFunctionSchema.Functions = nil
+	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
+
+	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, key, 101, func(function.Analyzer) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	invalidSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	invalidSchema.Version = 3
+	invalidSchema.Functions[0].OutputFieldIds = []int64{999}
+	require.NotPanics(t, func() {
+		impl.updateFunctionRunners(collectionID, vchannel, invalidSchema)
+	})
+	require.NotPanics(t, func() {
+		impl.allocFunctionRunners(collectionID+1, vchannel+"-alloc", invalidSchema)
+	})
+}
+
+func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchema(t *testing.T) {
+	collectionID := int64(99003)
+	vchannel := "by-dev-rootcoord-dml_0_99003v0"
+	key := walFunctionRunnerKey(vchannel)
+	schema := &schemapb.CollectionSchema{
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "analyzer_params", Value: "{}"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	legacySchema, err := proto.Marshal(schema)
+	require.NoError(t, err)
+
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfCollectionCanBeCreated(collectionID).Return(nil).Once()
+	shardManager.EXPECT().CreateCollection(mock.Anything).Return().Once()
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	impl := &shardInterceptor{shardManager: shardManager}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: collectionID}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: legacySchema}).
+		MustBuildMutable().
+		WithTimeTick(1)
+
+	msgID, err := impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	require.NoError(t, err)
+	require.NotNil(t, msgID)
+	defer function.GetManager().Release(collectionID, key)
+
+	ok, err := function.GetManager().RunWithRunner(context.Background(), collectionID, key, 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+func TestShardInterceptorRejectsCreateCollectionWithoutSchema(t *testing.T) {
+	impl := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("by-dev-rootcoord-dml_0_99004v0").
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 99004}).
+		WithBody(&msgpb.CreateCollectionRequest{}).
+		MustBuildMutable()
+
+	appended := false
+	msgID, err := impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return rmq.NewRmqID(1), nil
+	})
+	require.ErrorContains(t, err, "does not contain collection schema")
+	require.Nil(t, msgID)
+	require.False(t, appended)
+}
+
+func TestShardInterceptorRejectsInvalidLegacySchemaBeforeAppend(t *testing.T) {
+	impl := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("by-dev-rootcoord-dml_0_99005v0").
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 99005}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: []byte{0xff}}).
+		MustBuildMutable()
+
+	appended := false
+	require.Panics(t, func() {
+		_, _ = impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	})
+	require.False(t, appended)
+}
+
+func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{ShardManager: shardManager})
+	defer i.Close()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("missing-snapshot-v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 99101,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{PartitionId: 1, Rows: 1, BinarySize: 100},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	require.Nil(t, msgID)
+}
 
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 	b := NewInterceptorBuilder()
@@ -72,7 +278,7 @@ func TestShardInterceptor(t *testing.T) {
 			CollectionId: 1,
 			PartitionIds: []int64{1},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Version: 0}}).
 		MustBuildMutable()
 	shardManager.EXPECT().CheckIfCollectionCanBeCreated(mock.Anything).Return(nil)
 	shardManager.EXPECT().CreateCollection(mock.Anything).Return()
@@ -231,6 +437,7 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
+	allocWALSchemaForTest(t, 1, vchannel, 0)
 
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 	msgID, err = i.DoAppend(ctx, msg, appender)
