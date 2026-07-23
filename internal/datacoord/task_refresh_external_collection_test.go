@@ -873,13 +873,17 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
+		filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
+		basePreAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
 		protoTask := &datapb.ExternalCollectionRefreshTask{
 			TaskId:         1001,
-			JobId:          1,
+			JobId:          1001,
 			CollectionId:   100,
 			State:          indexpb.JobState_JobStateInit,
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
+			FileIndexBegin: 0,
+			FileIndexEnd:   filesPerTask*2 + 1,
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
@@ -917,6 +921,9 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NotNil(t, cluster.refreshReq)
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
+		assert.Equal(t, basePreAllocCount*3, cluster.refreshReq.GetNumSegmentsExpected())
+		assert.Equal(t, basePreAllocCount*3,
+			cluster.refreshReq.GetPreAllocatedSegmentIds().GetEnd()-cluster.refreshReq.GetPreAllocatedSegmentIds().GetBegin())
 	})
 }
 
@@ -1406,7 +1413,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 
 	// Add active job with matching source
 	job := &datapb.ExternalCollectionRefreshJob{
-		JobId:          1,
+		JobId:          1001,
 		CollectionId:   100,
 		State:          indexpb.JobState_JobStateInProgress,
 		ExternalSource: "s3://bucket/path",
@@ -1417,7 +1424,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 
 	protoTask := &datapb.ExternalCollectionRefreshTask{
 		TaskId:         1001,
-		JobId:          1,
+		JobId:          1001,
 		CollectionId:   100,
 		NodeId:         1,
 		State:          indexpb.JobState_JobStateInProgress,
@@ -1426,9 +1433,11 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	}
 	err = refreshMeta.AddTask(protoTask)
 	assert.NoError(t, err)
+	assert.NoError(t, refreshMeta.AddTaskIDToJob(job.GetJobId(), protoTask.GetTaskId()))
 
 	segments := NewSegmentsInfo()
 	mt := &meta{
+		catalog:     catalog,
 		segments:    segments,
 		collections: newTestCollections(100),
 	}
@@ -1448,15 +1457,15 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	}, nil).Build()
 	defer mockQuery.UnPatch()
 
-	// Mock UpdateSegmentsInfo to succeed
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).Return(nil).Build()
-	defer mockUpdate.UnPatch()
-
 	task.QueryTaskOnWorker(cluster)
 
-	// Task should be marked as Finished
 	metaTask := refreshMeta.GetTask(1001)
 	assert.Equal(t, indexpb.JobState_JobStateFinished, metaTask.GetState())
+	assert.False(t, metaTask.GetResultReady())
+	assert.Empty(t, metaTask.GetKeptSegments())
+	assert.Empty(t, metaTask.GetUpdatedSegments())
+	assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(job.GetJobId()).GetState())
+	assert.NotNil(t, mt.segments.GetSegment(1))
 }
 
 func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUntilJobFinished(t *testing.T) {
@@ -1525,6 +1534,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 
 	metaTask := refreshMeta.GetTask(1001)
 	assert.Equal(t, indexpb.JobState_JobStateFinished, metaTask.GetState())
+	assert.True(t, metaTask.GetResultReady())
+	assert.Len(t, metaTask.GetUpdatedSegments(), 1)
 	assert.Equal(t, 0, updateCalls)
 }
 

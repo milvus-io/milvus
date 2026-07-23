@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -166,7 +165,7 @@ type externalCollectionRefreshManager struct {
 	// initJobsInFlight tracks jobs whose async task-creation (Phase B) is
 	// currently running. SubmitRefreshJobWithID persists the job record in
 	// Init state on the WAL ack callback path and returns immediately; the
-	// S3 explore + task split + scheduler enqueue run in a background
+	// S3 explore + task creation + scheduler enqueue run in a background
 	// goroutine so the broadcaster is never blocked on object-store I/O.
 	// Both the eager Submit path and the periodic checker tick drive the
 	// same entry point (ensureTasksForInitJob) and this map dedups them so
@@ -483,7 +482,7 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 //     task creation. The caller (WAL ack callback) is unblocked the moment
 //     the meta write returns.
 //  2. Phase B (asynchronous, ensureTasksForInitJob): explore the external
-//     source, split files into task chunks, persist tasks, and enqueue them.
+//     source, persist the collection-wide task, and enqueue it.
 //     Kicked off from this method via a background goroutine AND retried by
 //     the checker tick if the first attempt fails. The `tryTimeoutJob` path
 //     acts as the final safety net — a job that never advances past Init
@@ -592,7 +591,7 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 // from multiple paths concurrently — the SubmitRefreshJobWithID eager path
 // after AddJob, and the checker tick that re-triggers Init-stuck jobs.
 // initJobsInFlight dedups concurrent invocations so at most one explore +
-// task split runs per jobID at any moment.
+// task creation runs per jobID at any moment.
 //
 // All work runs in a background goroutine tracked by the manager's wait
 // group so Stop() waits for in-flight explores to finish (or the derived
@@ -686,20 +685,29 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 	}()
 }
 
-// createTasksForJob creates task(s) for a job and persists them to meta.
-// Returns the created tasks for subsequent scheduling.
-//
-// Task count is ceil(totalFiles / ExternalCollectionFilesPerTask), driven by
-// the config — it is independent of the current DataNode count. Each task
-// carries the shared manifest path plus a [FileIndexBegin, FileIndexEnd)
-// slice; DataNodes then read the manifest from object storage once and
-// process only their assigned range, so the FFI explore runs exactly once
-// on DataCoord.
+// createTasksForJob creates one collection-wide task for a new job and
+// persists it to meta. Persisted legacy jobs may still contain multiple tasks.
 func (m *externalCollectionRefreshManager) createTasksForJob(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
 ) ([]*refreshExternalCollectionTask, error) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()), mlog.FieldCollectionID(job.GetCollectionId()))
+
+	// AddTask and AddTaskIDToJob are persisted separately. Reuse an unlinked
+	// task when Phase B retries so one job cannot create a second full-range task.
+	if existingTasks := m.refreshMeta.GetTasksByJobID(job.GetJobId()); len(existingTasks) > 0 {
+		if len(existingTasks) != 1 || existingTasks[0].GetTaskId() != job.GetJobId() {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"job %d has unexpected persisted refresh tasks",
+				job.GetJobId(),
+			)
+		}
+		existingTask := existingTasks[0]
+		if err := m.refreshMeta.AddTaskIDToJob(job.GetJobId(), existingTask.GetTaskId()); err != nil {
+			return nil, err
+		}
+		return []*refreshExternalCollectionTask{m.wrapTask(existingTask)}, nil
+	}
 
 	// ExploreFiles once on DataCoord to get the full file list and manifest path.
 	// Manifest is written to S3 so DataNodes can read file info by range.
@@ -727,82 +735,37 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// parquet metadata, so FileInfo.NumRows carries -1, not a real row count.
 	// The real guard lives at datanode's balanceFragmentsToSegments, where
 	// fragment RowCount is populated from manifest (endRow - startRow).
-	log.Info(ctx, "explored external files for task splitting",
+	log.Info(ctx, "explored external files for refresh task",
 		mlog.Int("totalFiles", len(allFiles)),
 		mlog.String("manifestPath", manifestPath))
 
-	// Determine task count: ceil(totalFiles/filesPerTask).
-	// - filesPerTask: configurable via dataCoord.externalCollectionFilesPerTask
-	// In standalone mode, multiple tasks run concurrently on the single DN's worker pool.
-	minFilesPerTask := int(paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64())
-
-	type taskChunk struct {
-		fileIndexBegin int64
-		fileIndexEnd   int64
+	// The current task-level concurrency is not correct: every file-range task
+	// independently computes a collection-wide mapping, so sibling ranges can
+	// remap each other's segments. Use one task for correctness until a future
+	// coordinated parallel design restores concurrency safely.
+	// Reuse the globally allocated job ID as the only task ID. Job and task
+	// metadata use separate namespaces, and legacy range tasks always allocated
+	// a different ID, so equality also identifies the new direct-apply path.
+	taskID := job.GetJobId()
+	task := &datapb.ExternalCollectionRefreshTask{
+		TaskId:              taskID,
+		JobId:               job.GetJobId(),
+		CollectionId:        job.GetCollectionId(),
+		State:               indexpb.JobState_JobStateInit,
+		ExternalSource:      job.GetExternalSource(),
+		ExternalSpec:        job.GetExternalSpec(),
+		ExploreManifestPath: manifestPath,
+		FileIndexBegin:      0,
+		FileIndexEnd:        int64(len(allFiles)),
 	}
-	var chunks []taskChunk
-	numTasks := (len(allFiles) + minFilesPerTask - 1) / minFilesPerTask
-	if numTasks < 1 {
-		numTasks = 1
+	if err = m.refreshMeta.AddTask(task); err != nil {
+		return nil, err
 	}
-	filesPerTask := (len(allFiles) + numTasks - 1) / numTasks // ceil division
-	for i := 0; i < len(allFiles); i += filesPerTask {
-		end := i + filesPerTask
-		if end > len(allFiles) {
-			end = len(allFiles)
-		}
-		chunks = append(chunks, taskChunk{
-			fileIndexBegin: int64(i),
-			fileIndexEnd:   int64(end),
-		})
-	}
-
-	log.Info(ctx, "splitting refresh job into tasks",
-		mlog.Int("totalFiles", len(allFiles)),
-		mlog.Int("numTasks", len(chunks)))
-
-	var tasks []*refreshExternalCollectionTask
-	for _, chunk := range chunks {
-		taskID, err := m.allocator.AllocID(ctx)
-		if err != nil {
-			log.Warn(ctx, "failed to allocate task ID", mlog.Err(err))
-			return nil, err
-		}
-
-		task := &datapb.ExternalCollectionRefreshTask{
-			TaskId:              taskID,
-			JobId:               job.GetJobId(),
-			CollectionId:        job.GetCollectionId(),
-			Version:             0,
-			NodeId:              0,
-			State:               indexpb.JobState_JobStateInit,
-			ExternalSource:      job.GetExternalSource(),
-			ExternalSpec:        job.GetExternalSpec(),
-			Progress:            0,
-			ExploreManifestPath: manifestPath,
-			FileIndexBegin:      chunk.fileIndexBegin,
-			FileIndexEnd:        chunk.fileIndexEnd,
-		}
-
-		if err = m.refreshMeta.AddTask(task); err != nil {
-			log.Warn(ctx, "failed to add task to meta", mlog.Err(err))
-			return nil, err
-		}
-
-		if err = m.refreshMeta.AddTaskIDToJob(job.GetJobId(), taskID); err != nil {
-			log.Warn(ctx, "failed to add taskID to job", mlog.Err(err))
-			return nil, err
-		}
-
-		taskWrapper := m.wrapTask(task)
-		tasks = append(tasks, taskWrapper)
+	if err = m.refreshMeta.AddTaskIDToJob(job.GetJobId(), taskID); err != nil {
+		return nil, err
 	}
 
-	log.Info(ctx, "tasks created for job",
-		mlog.Int("numTasks", len(tasks)),
-		mlog.FieldJobID(job.GetJobId()))
-
-	return tasks, nil
+	return []*refreshExternalCollectionTask{m.wrapTask(task)}, nil
 }
 
 func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state indexpb.JobState, progress int64) {
