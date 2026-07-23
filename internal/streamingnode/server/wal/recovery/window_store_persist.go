@@ -86,7 +86,7 @@ func (m *windowManager) persistPChannelWindowChunk(
 		minAvailableGeneration = meta.MinAvailableGeneration
 	}
 
-	chunkPayload, footer, _, err := marshalPChannelWindowChunk(m.pchannel, nextGeneration, sourceCheckpoint, recordsByVChannel)
+	chunkPayload, footer, _, err := marshalPChannelWindowChunk(m.pchannel, nextGeneration, m.term, sourceCheckpoint, recordsByVChannel)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (m *windowManager) persistPChannelWindowChunk(
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelWindowChunk"), mlog.Uint64("generation", nextGeneration)),
 		func(ctx context.Context) error {
-			return writePChannelWindowChunkIfAbsent(ctx, chunkKey, chunkPayload)
+			return writePChannelWindowChunkIfAbsent(ctx, chunkKey, chunkPayload, m.term)
 		}); err != nil {
 		return nil, err
 	}
@@ -115,6 +115,7 @@ func pchannelWindowStoreMetaFromCatalog(meta *streamingpb.PChannelWindowMeta) *p
 		LatestGeneration:       meta.GetLatestGeneration(),
 		MinAvailableGeneration: meta.GetMinAvailableGeneration(),
 		MinInUseGeneration:     meta.GetMinInUseGeneration(),
+		Term:                   meta.GetTerm(),
 		SourceCheckpoint: pchannelWindowSourceCheckpointToWALCheckpoint(&pchannelWindowSourceCheckpoint{
 			MessageID: cloneMessageIDProto(meta.GetSourceCheckpointMessageId()),
 			TimeTick:  meta.GetSourceCheckpointTimetick(),
@@ -130,6 +131,7 @@ func (meta *pchannelWindowStoreMeta) intoCatalogMeta() *streamingpb.PChannelWind
 		MinAvailableGeneration:   meta.MinAvailableGeneration,
 		MinInUseGeneration:       meta.MinInUseGeneration,
 		CodecVersion:             uint32(pchannelWindowCodecVersion),
+		Term:                     meta.Term,
 	}
 	if meta.SourceCheckpoint != nil {
 		catalogMeta.SourceCheckpointTimetick = meta.SourceCheckpoint.TimeTick
@@ -155,9 +157,21 @@ func (m *windowManager) persistPChannelWindowMeta(
 		persistedChunk.minAvailableGeneration,
 		minInUseGeneration,
 	)
+	storeMeta.Term = m.term
 	return retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelWindowMeta")),
 		func(ctx context.Context) error {
+			// Best-effort split-brain fence (the save itself is not a CAS): a
+			// durable meta stamped with a newer term means another owner took
+			// over — overwriting it would rewind the current owner's window
+			// boundaries. Fenced errors are terminal in the retry loop.
+			currentPB, err := resource.Resource().StreamingNodeCatalog().GetPChannelWindowMeta(ctx, m.pchannel)
+			if err != nil {
+				return err
+			}
+			if current := pchannelWindowStoreMetaFromCatalog(currentPB); current != nil && current.Term > m.term {
+				return pchannelWindowStoreFencedf("pchannel window meta of %s already owned by term %d, own term %d", m.pchannel, current.Term, m.term)
+			}
 			return resource.Resource().StreamingNodeCatalog().SavePChannelWindowMeta(ctx, m.pchannel, storeMeta.intoCatalogMeta())
 		})
 }
@@ -173,7 +187,7 @@ func (m *windowManager) persistIdempotencyWindowMetas(ctx context.Context, logge
 		})
 }
 
-func writePChannelWindowChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte) error {
+func writePChannelWindowChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte, term int64) error {
 	chunkManager := resource.Resource().ChunkManager()
 	exists, err := chunkManager.Exist(ctx, chunkKey)
 	if err != nil {
@@ -186,10 +200,26 @@ func writePChannelWindowChunkIfAbsent(ctx context.Context, chunkKey string, payl
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(existingPayload, payload) {
-		return pchannelWindowStoreCorruptedf("pchannel window chunk already exists with different payload: %s", chunkKey)
+	if bytes.Equal(existingPayload, payload) {
+		return nil
 	}
-	return nil
+	// Same generation, different bytes: another writer produced this chunk.
+	// The Exist->Write above is not atomic, so under split-brain both owners
+	// can pass the absence check and the last write would silently win —
+	// replacing the other owner's window records with no error anywhere.
+	// Arbitrate by the assignment term embedded in the footer instead: the
+	// newer term is the current owner and keeps/overwrites the chunk, the
+	// older term is fenced and must stop persisting. Only an undecidable
+	// conflict (same term, or an undecodable existing payload) is corruption.
+	if _, existingFooter, _, decodeErr := unmarshalPChannelWindowChunk(existingPayload); decodeErr == nil {
+		if existingFooter.Term > term {
+			return pchannelWindowStoreFencedf("pchannel window chunk %s already written by term %d, own term %d", chunkKey, existingFooter.Term, term)
+		}
+		if existingFooter.Term < term {
+			return chunkManager.Write(ctx, chunkKey, payload)
+		}
+	}
+	return pchannelWindowStoreCorruptedf("pchannel window chunk already exists with different payload: %s", chunkKey)
 }
 
 func buildPChannelWindowChunkKey(pchannel string, generation uint64) string {

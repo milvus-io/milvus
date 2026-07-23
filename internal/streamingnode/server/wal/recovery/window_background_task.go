@@ -78,10 +78,17 @@ func (m *windowManager) advanceIdleSourceCheckpoint(ctx context.Context) {
 		}
 		return
 	}
+	if metaPB.GetTerm() > m.term {
+		// A newer owner took over the store: a stale owner advancing the
+		// source checkpoint would prematurely unclamp WAL truncation for the
+		// current owner. Stop silently; this WAL is about to close anyway.
+		return
+	}
 	metaPB.SourceCheckpointTimetick = current.TimeTick
 	if current.MessageID != nil {
 		metaPB.SourceCheckpointMessageId = current.MessageID.IntoProto()
 	}
+	metaPB.Term = m.term
 	if err := catalog.SavePChannelWindowMeta(ctx, m.pchannel, metaPB); err != nil {
 		m.Logger().Warn(ctx, "failed to advance idle pchannel window source checkpoint", mlog.Err(err))
 		return

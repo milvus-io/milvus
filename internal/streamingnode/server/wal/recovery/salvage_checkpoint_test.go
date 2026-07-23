@@ -112,7 +112,7 @@ func attachTestWindowManager(rs *recoveryStorageImpl) {
 	if rs.cfg == nil {
 		rs.cfg = &config{}
 	}
-	rs.windowManager = newWindowManager(rs.channel.Name, rs.cfg, rs.metrics, rs.checkpoint, windowEvictionConfig{})
+	rs.windowManager = newWindowManager(rs.channel.Name, rs.channel.Term, rs.cfg, rs.metrics, rs.checkpoint, windowEvictionConfig{})
 }
 
 func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {

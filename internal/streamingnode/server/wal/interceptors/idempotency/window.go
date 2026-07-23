@@ -128,6 +128,16 @@ func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.WindowSnap
 	}
 	window.snapshotCheckpointTT = snapshot.GetSnapshotCheckpointTimetick()
 	window.evictedWatermarkTT = snapshot.GetEvictedWatermarkTimetick()
+	// The recovery-side store deliberately retains past-TTL entries (minEntries
+	// floor), so a restored window may hold entries that must no longer answer
+	// duplicates. Seed the TTL visibility bound from the snapshot checkpoint
+	// timetick — the latest clock the snapshot vouches for — so those entries
+	// are unservable immediately at WAL open instead of only after the first
+	// TimeTick sweep. The bound is conservative (checkpoint TT <= now) and
+	// evictLocked only ever advances it.
+	if config.WindowTTL > 0 {
+		window.ttlEvictBoundTT = evictBeforeCommitTT(window.snapshotCheckpointTT, config.WindowTTL)
+	}
 	for _, snapshotEntry := range snapshot.GetEntries() {
 		if snapshotEntry == nil {
 			continue

@@ -19,6 +19,9 @@ type pchannelWindowStoreMeta struct {
 	MinAvailableGeneration uint64
 	MinInUseGeneration     uint64
 	SourceCheckpoint       *WALCheckpoint
+	// Term is the WAL assignment term of the owner that last persisted the
+	// meta; writers with an older term are fenced (best-effort, no CAS).
+	Term int64
 }
 
 type persistedPChannelWindowChunk struct {
@@ -83,6 +86,12 @@ func (m *windowManager) recoverWindows(ctx context.Context, pchannel string, che
 // accept in-TTL client retries as fresh writes — duplicate data with no error
 // anywhere. Failing open is explicit and actionable instead.
 func wrapWindowRecoveryError(err error) error {
+	if errors.Is(err, ErrPChannelWindowStoreFenced) {
+		return errors.Wrap(err,
+			"idempotency window store is already owned by a newer WAL assignment term; "+
+				"refusing the stale open instead of overwriting the current owner's window state. "+
+				"No remediation needed: the newer assignment is authoritative and this node should observe it shortly")
+	}
 	if errors.Is(err, ErrPChannelWindowStoreCorrupted) {
 		return errors.Wrap(err,
 			"idempotency window store is corrupted and the WAL may already be truncated past its coverage; "+
@@ -172,7 +181,7 @@ func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchann
 	if sourceCheckpoint == nil {
 		return nil, merr.WrapErrServiceInternalMsg("cannot bootstrap pchannel window store without source checkpoint for pchannel %s", pchannel)
 	}
-	chunkPayload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, sourceCheckpoint, nil)
+	chunkPayload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, m.term, sourceCheckpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +204,7 @@ func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchann
 		return nil, err
 	}
 	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
-		return writePChannelWindowChunkIfAbsent(ctx, chunkKey, chunkPayload)
+		return writePChannelWindowChunkIfAbsent(ctx, chunkKey, chunkPayload, m.term)
 	}); err != nil {
 		return nil, err
 	}
@@ -217,6 +226,12 @@ func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchann
 func (m *windowManager) recoverIdempotencyWindowsFromPChannelWindowStore(ctx context.Context, pchannel string, meta *pchannelWindowStoreMeta) (*pchannelWindowStoreMeta, error) {
 	if meta == nil {
 		return nil, nil
+	}
+	if meta.Term > m.term {
+		// The durable store was already taken over by a newer assignment term:
+		// this open is stale (split-brain) and must not recover from — much
+		// less later persist over — the current owner's state.
+		return nil, pchannelWindowStoreFencedf("pchannel window store of %s already owned by term %d, recovering term %d stops", pchannel, meta.Term, m.term)
 	}
 	if meta.MinAvailableGeneration > meta.LatestGeneration {
 		return nil, pchannelWindowStoreCorruptedf("pchannel window generation range mismatch, min available %d, latest %d", meta.MinAvailableGeneration, meta.LatestGeneration)
@@ -302,6 +317,9 @@ func (m *windowManager) recoverPChannelWindowChunk(
 	}
 	if footer.Generation != generation {
 		return nil, pchannelWindowStoreCorruptedf("pchannel window chunk generation mismatch, expected %d, actual %d", generation, footer.Generation)
+	}
+	if footer.Term > m.term {
+		return nil, pchannelWindowStoreFencedf("pchannel window chunk %s written by newer term %d, recovering term %d stops", chunkKey, footer.Term, m.term)
 	}
 	for vchannel, records := range recordsByVChannel {
 		if !hasIdempotencyCommittedWriteRecords(records) {

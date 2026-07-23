@@ -727,6 +727,10 @@ message PChannelWindowMeta {
     uint64 min_in_use_generation = 6;
     // Physical chunk codec version.
     uint32 codec_version = 7;
+    // The WAL assignment term of the owner that last persisted this meta.
+    // Best-effort split-brain fencing: writers refuse to update a meta carrying
+    // a newer term than their own assignment (the save itself is not a CAS).
+    int64 term = 8;
 }
 
 message WindowEntry {

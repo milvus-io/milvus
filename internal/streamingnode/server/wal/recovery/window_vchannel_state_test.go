@@ -137,7 +137,7 @@ func writeTestBootstrapPChannelWindowMeta(
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	payload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, checkpoint, nil)
+	payload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, 0, checkpoint, nil)
 	require.NoError(t, err)
 	key := buildPChannelWindowChunkKey(pchannel, footer.Generation)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
@@ -156,7 +156,7 @@ func writeTestPChannelWindowChunk(
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	payload, footer, checksum, err := marshalPChannelWindowChunk(pchannel, generation, checkpoint, records)
+	payload, footer, checksum, err := marshalPChannelWindowChunk(pchannel, generation, 0, checkpoint, records)
 	require.NoError(t, err)
 	key := buildPChannelWindowChunkKey(pchannel, generation)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
@@ -813,7 +813,7 @@ func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
 		},
 	}
 
-	payload, footer, checksum, err := marshalPChannelWindowChunk("p1", 7, &utility.WALCheckpoint{
+	payload, footer, checksum, err := marshalPChannelWindowChunk("p1", 7, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
@@ -851,7 +851,7 @@ func TestPChannelWindowChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testi
 		},
 	}
 
-	payload, footer, _, err := marshalPChannelWindowChunk("p1", 9, &utility.WALCheckpoint{
+	payload, footer, _, err := marshalPChannelWindowChunk("p1", 9, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
@@ -869,7 +869,7 @@ func TestPChannelWindowChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testi
 }
 
 func TestPChannelWindowChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
-	payload, footer, checksum, err := marshalPChannelWindowChunk("p1", 8, &utility.WALCheckpoint{
+	payload, footer, checksum, err := marshalPChannelWindowChunk("p1", 8, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(200),
 		TimeTick:  200,
 	}, nil)
@@ -898,7 +898,7 @@ func TestPChannelWindowChunkCodecChecksumMismatch(t *testing.T) {
 			}),
 		},
 	}
-	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, &utility.WALCheckpoint{
+	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(100),
 		TimeTick:  100,
 	}, records)
@@ -911,7 +911,7 @@ func TestPChannelWindowChunkCodecChecksumMismatch(t *testing.T) {
 }
 
 func TestPChannelWindowChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
-	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, &utility.WALCheckpoint{
+	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, map[string][]committedWriteRecord{
@@ -936,7 +936,7 @@ func TestPChannelWindowChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
 }
 
 func TestPChannelWindowChunkCodecDetectsVChannelBlockChecksumMismatch(t *testing.T) {
-	payload, footer, _, err := marshalPChannelWindowChunk("p1", 1, &utility.WALCheckpoint{
+	payload, footer, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, map[string][]committedWriteRecord{
@@ -1290,7 +1290,7 @@ func TestPChannelWindowRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T) 
 
 	// A persist wrote chunk generation 1 but crashed before advancing the meta
 	// (still LatestGeneration=0), and the chunk on disk is corrupt/truncated.
-	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}, nil)
+	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}, nil)
 	require.NoError(t, err)
 	corruptPayload := rewritePChannelWindowFooterPayload(t, payload, func(footer *pchannelWindowChunkFooter) {
 		footer.SourceCheckpointTimetick = 999999
