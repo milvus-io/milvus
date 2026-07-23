@@ -135,4 +135,51 @@ TEST_F(GeometryValueSemanticsTest, VectorGrowthDoesNotDoubleFree) {
     EXPECT_NE(v.front().GetRawGeometry(), v.back().GetRawGeometry());
 }
 
+// --- TryParseFromWkb classification boundary (see PR #50951 review) ---
+//
+// The contract splits failures into two buckets: bad data returns false
+// (caller skips the row), a transient resource failure observable BEFORE
+// parsing throws a retriable SegcoreError (the row must not be silently
+// filtered). These tests fault-inject each bucket we can reach from a unit
+// test. The one case that cannot be injected here -- an OOM INSIDE
+// GEOSWKBReader_read_r, which GEOS's execute() wrapper swallows into the
+// same nullptr as corrupt WKB -- is documented as a KNOWN LIMIT on
+// TryParseFromWkb and is intentionally classified as bad data.
+
+TEST_F(GeometryValueSemanticsTest, TryParseFromWkbBadDataReturnsFalse) {
+    const unsigned char corrupt[] = {0xde, 0xad, 0xbe, 0xef, 0x00};
+    Geometry g;
+    EXPECT_FALSE(g.TryParseFromWkb(ctx_, corrupt, sizeof(corrupt)));
+    EXPECT_FALSE(g.IsValid());
+
+    // Truncated-but-plausible WKB (header of a point, payload cut off) is
+    // the placeholder shape the write paths keep; still bad data -> false.
+    Geometry valid(ctx_, "POINT (1 2)");
+    const std::string wkb = valid.to_wkb_string();
+    ASSERT_GT(wkb.size(), 5u);
+    EXPECT_FALSE(g.TryParseFromWkb(ctx_, wkb.data(), 5));
+    EXPECT_FALSE(g.IsValid());
+
+    // The same instance stays reusable: a good payload parses after a bad one.
+    EXPECT_TRUE(g.TryParseFromWkb(ctx_, wkb.data(), wkb.size()));
+    EXPECT_TRUE(g.IsValid());
+}
+
+TEST_F(GeometryValueSemanticsTest,
+       TryParseFromWkbNullContextThrowsRetriableSystemError) {
+    Geometry valid(ctx_, "POINT (1 2)");
+    const std::string wkb = valid.to_wkb_string();
+
+    // Inject the transient bucket: a null context is a resource failure, NOT
+    // bad data -- it must throw MemAllocateFailed (retriable), never return
+    // false (which would silently filter a perfectly valid row).
+    Geometry g;
+    try {
+        g.TryParseFromWkb(nullptr, wkb.data(), wkb.size());
+        FAIL() << "expected SegcoreError";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::MemAllocateFailed);
+    }
+}
+
 }  // namespace

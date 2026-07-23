@@ -78,7 +78,10 @@ class SimpleGeometryCache {
     // The entry must still be appended: the cache is addressed by absolute
     // segment offset, so dropping it would shift every later row. A transient
     // resource failure (reader allocation) still throws a retriable system
-    // error via TryParseFromWkb -- that is not bad data. See PR #50951 review.
+    // error via TryParseFromWkb -- that is not bad data. One exception we
+    // cannot tell apart: an OOM INSIDE GEOS parsing surfaces as the same
+    // nullptr as corrupt WKB and is deliberately classified as bad data here
+    // (see the KNOWN LIMIT note on TryParseFromWkb). See PR #50951 review.
     void
     AppendData(const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);

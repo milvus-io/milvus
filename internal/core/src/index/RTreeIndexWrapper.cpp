@@ -111,6 +111,11 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     if (geom == nullptr) {
         GEOS_finish_r(ctx);
+        // nullptr here is *usually* unparseable WKB, but GEOS's execute()
+        // wrapper also swallows a transient OOM during parsing into the same
+        // nullptr -- the two are indistinguishable at this boundary, and both
+        // are deliberately classified as bad data (see the KNOWN LIMIT note
+        // on Geometry::TryParseFromWkb).
         LOG_ERROR(
             "Failed to parse WKB data for row {}; indexing a placeholder MBR "
             "to keep the index row count consistent",
@@ -202,6 +207,9 @@ RTreeIndexWrapper::bulk_load_from_field_data(
                 reinterpret_cast<const unsigned char*>(wkb_str->data()),
                 wkb_str->size());
             if (geom == nullptr) {
+                // Same classification as add_geometry(): unparseable WKB and
+                // a GEOS-swallowed parse-time OOM both surface as nullptr and
+                // both get a placeholder MBR (see Geometry::TryParseFromWkb).
                 index_placeholder(absolute_offset);
                 continue;
             }

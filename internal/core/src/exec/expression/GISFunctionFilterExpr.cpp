@@ -81,8 +81,10 @@ namespace exec {
         } else {                                                                 \
             /* Thread-local context: a throwing row can no longer leak a       \
              * per-batch GEOS_init_r context. TryParseFromWkb throws only on    \
-             * transient allocation failure; a corrupt/placeholder WKB row      \
-             * evaluates to false, matching the cache branch above. */ \
+             * pre-parse allocation failure; a corrupt/placeholder WKB row --   \
+             * or a GEOS-swallowed parse-time OOM, indistinguishable from it    \
+             * (see the KNOWN LIMIT note on TryParseFromWkb) -- evaluates to    \
+             * false, matching the cache branch above. */ \
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data != nullptr && !valid_data[i]) {                   \

@@ -120,6 +120,17 @@ class Geometry {
     // bad data: collapsing it into `false` would silently filter out a
     // perfectly valid row (a silent false negative). Those cases throw a
     // retriable system error instead, matching RTreeIndexWrapper::add_geometry.
+    //
+    // KNOWN LIMIT: the transient/bad-data split above only covers failures we
+    // can observe BEFORE parsing. GEOS's capi execute() wrapper catches every
+    // exception thrown inside GEOSWKBReader_read_r -- including std::bad_alloc
+    // -- and returns nullptr, so a transient OOM DURING parsing is
+    // indistinguishable from unparseable WKB at this boundary (telling them
+    // apart would require installing a GEOS error handler and parsing message
+    // strings). Such a row is therefore classified as bad data with no retry:
+    // the cache stores an invalid entry, the filter paths evaluate it to
+    // false, and the index stamps a placeholder MBR. Accepted tradeoff:
+    // parse-time OOM is rare and the blast radius is a single row.
     bool
     TryParseFromWkb(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
         if (ctx == nullptr) {
