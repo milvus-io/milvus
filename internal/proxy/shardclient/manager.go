@@ -41,7 +41,6 @@ import (
 type ShardClientMgr interface {
 	GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error)
 	GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
-	DeprecateShardCache(database, collectionName string)
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]NodeInfo
 	RemoveDatabase(database string)
@@ -63,8 +62,13 @@ type shardClientMgrImpl struct {
 
 	mixCoord types.MixCoordClient
 
-	leaderMut  sync.RWMutex
-	collLeader map[string]map[string]*shardLeaders // database -> collectionName -> collection_leaders
+	leaderMut sync.RWMutex
+	// collLeader keys shard leaders by the cluster-unique collection id, so name/alias/database
+	// resolution (done upstream against the meta cache) can never serve one collection's shard
+	// leaders under another's name after an alias repoint or a cross-db rename. Eviction is by
+	// collection id only -- the cache deliberately does not depend on the mutable
+	// collection->database mapping. See issue #51533.
+	collLeader map[int64]*shardLeaders // collectionID -> collection_leaders
 }
 
 const (
@@ -92,7 +96,7 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[string]map[string]*shardLeaders),
+		collLeader: make(map[int64]*shardLeaders),
 		mixCoord:   mixCoord,
 	}
 	for _, opt := range options {
@@ -109,7 +113,7 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error) {
 	method := "GetShard"
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
 		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
@@ -125,7 +129,7 @@ func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, datab
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
 	method := "GetShardLeaderList"
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
 		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
@@ -138,15 +142,9 @@ func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, c
 	return cacheShardLeaders.GetShardLeaderList(), nil
 }
 
-func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, caller string) *shardLeaders {
+func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller string) *shardLeaders {
 	m.leaderMut.RLock()
-	var cacheShardLeaders *shardLeaders
-	db, ok := m.collLeader[database]
-	if !ok {
-		cacheShardLeaders = nil
-	} else {
-		cacheShardLeaders = db[collectionName]
-	}
+	cacheShardLeaders := m.collLeader[collectionID]
 	m.leaderMut.RUnlock()
 
 	if cacheShardLeaders != nil {
@@ -207,10 +205,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	}
 
 	m.leaderMut.Lock()
-	if _, ok := m.collLeader[database]; !ok {
-		m.collLeader[database] = make(map[string]*shardLeaders)
-	}
-	m.collLeader[database][collectionName] = newShardLeaders
+	m.collLeader[collectionID] = newShardLeaders
 	m.leaderMut.Unlock()
 
 	return newShardLeaders, nil
@@ -238,53 +233,34 @@ func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
 	defer m.leaderMut.RUnlock()
 	shardLeaderInfo := make(map[int64]NodeInfo)
 
-	for _, dbInfo := range m.collLeader {
-		for _, shardLeaders := range dbInfo {
-			for _, nodeInfos := range shardLeaders.shardLeaders {
-				for _, node := range nodeInfos {
-					shardLeaderInfo[node.NodeID] = node
-				}
+	for _, shardLeaders := range m.collLeader {
+		for _, nodeInfos := range shardLeaders.shardLeaders {
+			for _, node := range nodeInfos {
+				shardLeaderInfo[node.NodeID] = node
 			}
 		}
 	}
 	return shardLeaderInfo
 }
 
-func (m *shardClientMgrImpl) RemoveDatabase(database string) {
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	delete(m.collLeader, database)
-}
+// RemoveDatabase is a no-op for the shard cache. DropDatabase requires the database to be empty
+// first (rootcoord rejects a non-empty drop), so every collection has already been dropped
+// individually and evicted by id via InvalidateShardLeaderCache before this is called. The cache
+// is keyed by the cluster-unique collection id and deliberately does not track database
+// membership -- that mapping is mutable (cross-db rename), so making eviction depend on it would
+// let a stale attribution drop a live collection or leak one that moved. Kept on the interface so
+// the DropDatabase meta-cache invalidation path has a symmetric hook.
+func (m *shardClientMgrImpl) RemoveDatabase(database string) {}
 
-// DeprecateShardCache clear the shard leader cache of a collection
-func (m *shardClientMgrImpl) DeprecateShardCache(database, collectionName string) {
-	mlog.Info(context.TODO(), "deprecate shard cache for collection", mlog.FieldCollectionName(collectionName))
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	dbInfo, ok := m.collLeader[database]
-	if ok {
-		delete(dbInfo, collectionName)
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, database)
-		}
-	}
-}
-
-// InvalidateShardLeaderCache called when Shard leader balance happened
+// InvalidateShardLeaderCache drops the cached shard leaders for the given collection ids.
+// Called on shard-leader balance (querycoord), collection drop, and search/query retry. Because
+// the cache is keyed by id, this is a direct O(len(collections)) delete instead of a full scan.
 func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 	mlog.Info(context.TODO(), "Invalidate shard cache for collections", mlog.Int64s("collectionIDs", collections))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
-	collectionSet := typeutil.NewUniqueSet(collections...)
-	for dbName, dbInfo := range m.collLeader {
-		for collectionName, shardLeaders := range dbInfo {
-			if collectionSet.Contain(shardLeaders.collectionID) {
-				delete(dbInfo, collectionName)
-			}
-		}
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, dbName)
-		}
+	for _, collectionID := range collections {
+		delete(m.collLeader, collectionID)
 	}
 }
 
