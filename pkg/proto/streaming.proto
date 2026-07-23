@@ -711,6 +711,30 @@ message VChannelWindowMeta {
     uint64 entry_count = 9;
 }
 
+// PChannelWindowChunkTermRange records which WAL assignment term owns a
+// contiguous physical chunk generation range. Chunks are stored under
+// generation+term scoped object keys, and recovery only reads chunks published
+// by this manifest.
+message PChannelWindowChunkTermRange {
+    // WAL assignment term that wrote the chunks in this range.
+    int64 term = 1;
+    // Inclusive range start.
+    uint64 start_generation = 2;
+    // Inclusive latest generation published for this range. When sealed is
+    // false this is the best-known end and can advance as recovery seals the
+    // previous term.
+    uint64 end_generation = 3;
+    // True when no more chunks can be appended for this term.
+    bool sealed = 4;
+    // Operational hints for range inspection.
+    uint64 start_timetick = 5;
+    uint64 end_timetick = 6;
+}
+
+message PChannelWindowChunkManifest {
+    repeated PChannelWindowChunkTermRange ranges = 1;
+}
+
 // PChannelWindowMeta stores pchannel-level physical window store progress.
 // It points to the latest physical chunk and summarizes the generation range
 // that is still physically available / logically in use by active view metas.
@@ -728,9 +752,13 @@ message PChannelWindowMeta {
     // Physical chunk codec version.
     uint32 codec_version = 7;
     // The WAL assignment term of the owner that last persisted this meta.
-    // Best-effort split-brain fencing: writers refuse to update a meta carrying
-    // a newer term than their own assignment (the save itself is not a CAS).
+    // Split-brain fencing: writers publish this meta through catalog CAS and
+    // refuse to update a meta carrying a newer term than their own assignment.
     int64 term = 8;
+    // Manifest mapping generation ranges to WAL assignment terms. Chunk object
+    // keys include both generation and term; recovery must only read chunks
+    // published through this manifest.
+    PChannelWindowChunkManifest chunk_manifest = 9;
 }
 
 message WindowEntry {

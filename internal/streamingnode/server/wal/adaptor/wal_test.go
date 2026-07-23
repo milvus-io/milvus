@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -76,6 +78,12 @@ func initResourceForTest(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
+	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
+	t.Cleanup(func() {
+		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
+		params.Reset(params.MinioCfg.RootPath.Key)
+	})
 
 	rc := idalloc.NewMockRootCoordClient(t)
 	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
@@ -85,6 +93,12 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().RemoveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().RemovePChannelWindowMeta(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -93,6 +107,7 @@ func initResourceForTest(t *testing.T) {
 		t,
 		resource.OptMixCoordClient(fMixCoordClient),
 		resource.OptStreamingNodeCatalog(catalog),
+		resource.OptChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(params.MinioCfg.RootPath.GetValue()))),
 	)
 }
 

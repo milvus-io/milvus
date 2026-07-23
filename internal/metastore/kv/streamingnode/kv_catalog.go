@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -281,6 +282,43 @@ func (c *catalog) SavePChannelWindowMeta(ctx context.Context, pchannelName strin
 		return errors.Wrapf(err, "marshal pchannel window meta at pchannel %s failed", pchannelName)
 	}
 	return c.metaKV.Save(ctx, buildPChannelWindowMetaKey(pchannelName), string(data))
+}
+
+// CompareAndSwapPChannelWindowMeta atomically replaces pchannel window metadata
+// when the stored value still equals expected. A nil expected value means
+// create-if-absent.
+func (c *catalog) CompareAndSwapPChannelWindowMeta(ctx context.Context, pchannelName string, expected *streamingpb.PChannelWindowMeta, target *streamingpb.PChannelWindowMeta) (bool, error) {
+	if target == nil {
+		return true, nil
+	}
+	storedTarget, err := normalizePChannelWindowMeta(pchannelName, target)
+	if err != nil {
+		return false, err
+	}
+	targetData, err := proto.Marshal(storedTarget)
+	if err != nil {
+		return false, errors.Wrapf(err, "marshal target pchannel window meta at pchannel %s failed", pchannelName)
+	}
+	key := buildPChannelWindowMetaKey(pchannelName)
+	if expected == nil {
+		return c.metaKV.CompareVersionAndSwap(ctx, key, 0, string(targetData))
+	}
+
+	storedExpected, err := normalizePChannelWindowMeta(pchannelName, expected)
+	if err != nil {
+		return false, err
+	}
+	expectedData, err := proto.Marshal(storedExpected)
+	if err != nil {
+		return false, errors.Wrapf(err, "marshal expected pchannel window meta at pchannel %s failed", pchannelName)
+	}
+	if err := c.metaKV.MultiSaveAndRemove(ctx, map[string]string{key: string(targetData)}, nil, predicates.ValueEqual(key, string(expectedData))); err != nil {
+		if errors.Is(err, merr.ErrIoFailed) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // RemovePChannelWindowMeta removes the pchannel-level physical window metadata.

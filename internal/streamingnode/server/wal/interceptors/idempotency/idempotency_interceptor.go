@@ -188,15 +188,16 @@ func (impl *idempotencyInterceptor) sweepWindowsOnTimeTick(ctx context.Context) 
 	})
 }
 
-// removeWindow drops the in-memory window and its metric series for a
-// reclaimed vchannel, mirroring the recovery-side removeIdempotencyWindow.
-// Without this, impl.windows pins minEntries' worth of per-row PKs plus four
-// Prometheus series per dropped vchannel for the WAL's whole lifetime under
+// removeWindow drops the in-memory window, its metric series, and any buffered
+// txn insert results for a reclaimed vchannel, mirroring the recovery-side
+// removeIdempotencyWindow. Without this, dropped vchannels pin retained PKs,
+// Prometheus series, or abandoned txn builders for the WAL's lifetime under
 // collection create/drop churn.
 func (impl *idempotencyInterceptor) removeWindow(vchannel string) {
 	if vchannel == "" {
 		return
 	}
+	impl.txnInsertResultBuffers.RemoveVChannel(vchannel)
 	if _, loaded := impl.windows.GetAndRemove(vchannel); loaded {
 		deleteWindowMetrics(vchannel)
 	}

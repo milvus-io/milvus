@@ -528,9 +528,10 @@ func TestInterceptorOwnerCommitFailsOnLostInsertResults(t *testing.T) {
 	require.Equal(t, 0, interceptor.window("v1").InflightLen())
 }
 
-// A DropCollection append reclaims the vchannel's window and metric series,
-// mirroring the recovery-side removeIdempotencyWindow — without this every
-// dropped vchannel pins minEntries' worth of PK memory for the WAL's lifetime.
+// A DropCollection append reclaims the vchannel's window, metric series, and
+// buffered txn insert results, mirroring the recovery-side
+// removeIdempotencyWindow — without this every dropped vchannel pins retained
+// PK memory or abandoned txn builders for the WAL's lifetime.
 func TestInterceptorRemovesWindowOnDropCollection(t *testing.T) {
 	interceptor := newInterceptor(WindowConfig{})
 
@@ -543,16 +544,32 @@ func TestInterceptorRemovesWindowOnDropCollection(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, interceptor.windows.Contain("v1"))
 
+	txnCtx := message.TxnContext{TxnID: 1, Keepalive: 10}
+	txnBody := newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{100}}},
+		},
+	}).WithTxnContext(txnCtx)
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err = interceptor.DoAppend(ctx, txnBody, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, 101)
+		return newTestMessageID(11), nil
+	})
+	require.NoError(t, err)
+	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(txnBody))
+
 	dropMsg := message.NewDropCollectionMessageBuilderV1().
 		WithVChannel("v1").
 		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
 		WithBody(&msgpb.DropCollectionRequest{}).
 		MustBuildMutable()
 	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), dropMsg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		return newTestMessageID(11), nil
+		return newTestMessageID(12), nil
 	})
 	require.NoError(t, err)
 	require.False(t, interceptor.windows.Contain("v1"))
+	require.Nil(t, interceptor.txnInsertResultBuffers.Build(txnBody))
 }
 
 func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -90,7 +91,7 @@ func (m *windowManager) persistPChannelWindowChunk(
 	if err != nil {
 		return nil, err
 	}
-	chunkKey := buildPChannelWindowChunkKey(m.pchannel, nextGeneration)
+	chunkKey := buildPChannelWindowChunkKey(m.pchannel, nextGeneration, m.term)
 	if err := retryOperationWithBackoff(ctx,
 		logger.With(mlog.String("op", "persistPChannelWindowChunk"), mlog.Uint64("generation", nextGeneration)),
 		func(ctx context.Context) error {
@@ -116,6 +117,7 @@ func pchannelWindowStoreMetaFromCatalog(meta *streamingpb.PChannelWindowMeta) *p
 		MinAvailableGeneration: meta.GetMinAvailableGeneration(),
 		MinInUseGeneration:     meta.GetMinInUseGeneration(),
 		Term:                   meta.GetTerm(),
+		ChunkManifest:          pchannelWindowChunkManifestFromCatalog(meta),
 		SourceCheckpoint: pchannelWindowSourceCheckpointToWALCheckpoint(&pchannelWindowSourceCheckpoint{
 			MessageID: cloneMessageIDProto(meta.GetSourceCheckpointMessageId()),
 			TimeTick:  meta.GetSourceCheckpointTimetick(),
@@ -132,6 +134,7 @@ func (meta *pchannelWindowStoreMeta) intoCatalogMeta() *streamingpb.PChannelWind
 		MinInUseGeneration:       meta.MinInUseGeneration,
 		CodecVersion:             uint32(pchannelWindowCodecVersion),
 		Term:                     meta.Term,
+		ChunkManifest:            clonePChannelWindowChunkManifest(meta.ChunkManifest),
 	}
 	if meta.SourceCheckpoint != nil {
 		catalogMeta.SourceCheckpointTimetick = meta.SourceCheckpoint.TimeTick
@@ -151,30 +154,47 @@ func (m *windowManager) persistPChannelWindowMeta(
 	if persistedChunk == nil {
 		return nil
 	}
-	storeMeta := newPChannelWindowStoreMetaFromChunk(
-		m.pchannel,
-		persistedChunk.footer,
-		persistedChunk.minAvailableGeneration,
-		minInUseGeneration,
-	)
-	storeMeta.Term = m.term
-	return retryOperationWithBackoff(ctx,
+	return updatePChannelWindowMetaWithCAS(ctx,
 		logger.With(mlog.String("op", "persistPChannelWindowMeta")),
-		func(ctx context.Context) error {
-			// The channel assignment model gives one active StreamingNode owner
-			// per pchannel/term, so this path normally has a single writer. This
-			// check is a best-effort split-brain fence (the save itself is not a
-			// CAS): a durable meta stamped with a newer term means another owner
-			// took over, and overwriting it would rewind the current owner's
-			// window boundaries. Fenced errors are terminal in the retry loop.
-			currentPB, err := resource.Resource().StreamingNodeCatalog().GetPChannelWindowMeta(ctx, m.pchannel)
+		m.pchannel,
+		func(currentPB *streamingpb.PChannelWindowMeta, current *pchannelWindowStoreMeta) (*streamingpb.PChannelWindowMeta, error) {
+			if current != nil {
+				if current.Term > m.term {
+					return nil, pchannelWindowStoreFencedf("pchannel window meta of %s already owned by term %d, own term %d", m.pchannel, current.Term, m.term)
+				}
+				if current.LatestGeneration >= persistedChunk.generation {
+					if current.Term == m.term && checkpointCovers(current.SourceCheckpoint, pchannelWindowSourceCheckpointToWALCheckpoint(&pchannelWindowSourceCheckpoint{
+						MessageID: cloneMessageIDProto(persistedChunk.footer.SourceCheckpointMessageID),
+						TimeTick:  persistedChunk.footer.SourceCheckpointTimetick,
+					})) {
+						return nil, nil
+					}
+					return nil, errors.Errorf("pchannel window meta advanced while persisting generation %d", persistedChunk.generation)
+				}
+				if current.LatestGeneration+1 != persistedChunk.generation {
+					return nil, errors.Errorf("pchannel window meta latest generation %d does not precede persisted generation %d", current.LatestGeneration, persistedChunk.generation)
+				}
+			}
+
+			minAvailableGeneration := persistedChunk.minAvailableGeneration
+			manifest := (*streamingpb.PChannelWindowChunkManifest)(nil)
+			if current != nil {
+				minAvailableGeneration = current.MinAvailableGeneration
+				manifest = current.ChunkManifest
+			}
+			manifest, err := pchannelWindowManifestWithChunk(manifest, m.term, persistedChunk.footer.Generation, persistedChunk.footer.SourceCheckpointTimetick)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			if current := pchannelWindowStoreMetaFromCatalog(currentPB); current != nil && current.Term > m.term {
-				return pchannelWindowStoreFencedf("pchannel window meta of %s already owned by term %d, own term %d", m.pchannel, current.Term, m.term)
-			}
-			return resource.Resource().StreamingNodeCatalog().SavePChannelWindowMeta(ctx, m.pchannel, storeMeta.intoCatalogMeta())
+			storeMeta := newPChannelWindowStoreMetaFromChunk(
+				m.pchannel,
+				persistedChunk.footer,
+				minAvailableGeneration,
+				minInUseGeneration,
+			)
+			storeMeta.Term = m.term
+			storeMeta.ChunkManifest = manifest
+			return storeMeta.intoCatalogMeta(), nil
 		})
 }
 
@@ -191,6 +211,9 @@ func (m *windowManager) persistIdempotencyWindowMetas(ctx context.Context, logge
 
 func writePChannelWindowChunkIfAbsent(ctx context.Context, chunkKey string, payload []byte, term int64) error {
 	chunkManager := resource.Resource().ChunkManager()
+	if chunkManager == nil {
+		return merr.WrapErrServiceInternalMsg("pchannel window chunk manager is not initialized")
+	}
 	exists, err := chunkManager.Exist(ctx, chunkKey)
 	if err != nil {
 		return err
@@ -224,9 +247,13 @@ func writePChannelWindowChunkIfAbsent(ctx context.Context, chunkKey string, payl
 	return pchannelWindowStoreCorruptedf("pchannel window chunk already exists with different payload: %s", chunkKey)
 }
 
-func buildPChannelWindowChunkKey(pchannel string, generation uint64) string {
+func buildPChannelWindowChunkKey(pchannel string, generation uint64, term ...int64) string {
+	chunkName := pchannelWindowChunkObjectPrefix + strconv.FormatUint(generation, 10)
+	if len(term) > 0 {
+		chunkName += ".term" + strconv.FormatInt(term[0], 10)
+	}
 	return buildPChannelWindowChunkPrefix(pchannel) +
-		pchannelWindowChunkObjectPrefix + strconv.FormatUint(generation, 10) + pchannelWindowChunkObjectExt
+		chunkName + pchannelWindowChunkObjectExt
 }
 
 // buildPChannelWindowChunkPrefix returns the object prefix holding every chunk of
@@ -286,11 +313,24 @@ func newPChannelWindowStoreMetaFromChunk(
 	minAvailableGeneration uint64,
 	minInUseGeneration uint64,
 ) *pchannelWindowStoreMeta {
+	manifest := &streamingpb.PChannelWindowChunkManifest{
+		Ranges: []*streamingpb.PChannelWindowChunkTermRange{
+			{
+				Term:            footer.Term,
+				StartGeneration: 0,
+				EndGeneration:   footer.Generation,
+				StartTimetick:   footer.SourceCheckpointTimetick,
+				EndTimetick:     footer.SourceCheckpointTimetick,
+			},
+		},
+	}
 	return &pchannelWindowStoreMeta{
 		PChannel:               pchannel,
 		LatestGeneration:       footer.Generation,
 		MinAvailableGeneration: minAvailableGeneration,
 		MinInUseGeneration:     minInUseGeneration,
+		Term:                   footer.Term,
+		ChunkManifest:          manifest,
 		SourceCheckpoint: pchannelWindowSourceCheckpointToWALCheckpoint(&pchannelWindowSourceCheckpoint{
 			MessageID: cloneMessageIDProto(footer.SourceCheckpointMessageID),
 			TimeTick:  footer.SourceCheckpointTimetick,

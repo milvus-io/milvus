@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
@@ -94,4 +95,206 @@ func TestRecoverWindowsFencedByNewerTermMeta(t *testing.T) {
 	})
 	_, err := rs.windowManager.recoverIdempotencyWindowsFromPChannelWindowStore(context.Background(), "p1", &pchannelWindowStoreMeta{PChannel: "p1", Term: 5})
 	require.ErrorIs(t, err, ErrPChannelWindowStoreFenced)
+}
+
+func TestRecoverWindowsReadsOnlyManifestPublishedTerm(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	chunkManager := newTestPChannelWindowCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	staleRecords := map[string][]committedWriteRecord{
+		"v1": {
+			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+				Key:            "stale-key",
+				CommitTimetick: 210,
+				MessageId:      rmq.NewRmqID(210).IntoProto(),
+			}),
+		},
+	}
+	currentRecords := map[string][]committedWriteRecord{
+		"v1": {
+			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+				Key:            "current-key",
+				CommitTimetick: 220,
+				MessageId:      rmq.NewRmqID(220).IntoProto(),
+			}),
+		},
+	}
+	writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 1, 1, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(210),
+		TimeTick:  210,
+	}, staleRecords)
+	writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 1, 2, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(220),
+		TimeTick:  220,
+	}, currentRecords)
+	catalogState.storeMeta = &streamingpb.PChannelWindowMeta{
+		Pchannel:                  "p1",
+		SourceCheckpointTimetick:  220,
+		SourceCheckpointMessageId: rmq.NewRmqID(220).IntoProto(),
+		LatestGeneration:          1,
+		MinAvailableGeneration:    1,
+		MinInUseGeneration:        1,
+		CodecVersion:              uint32(pchannelWindowCodecVersion),
+		Term:                      2,
+		ChunkManifest: &streamingpb.PChannelWindowChunkManifest{
+			Ranges: []*streamingpb.PChannelWindowChunkTermRange{
+				{Term: 1, StartGeneration: 0, EndGeneration: 0, StartTimetick: 100, EndTimetick: 100, Sealed: true},
+				{Term: 2, StartGeneration: 1, EndGeneration: 1, StartTimetick: 220, EndTimetick: 220},
+			},
+		},
+	}
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 2}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(230),
+		TimeTick:  230,
+	})
+	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
+		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	recoverTestIdempotencyWindows(ctx, t, rs, "p1", false)
+	window := rs.windowManager.idempotencyWindows()["v1"]
+	require.NotNil(t, window)
+	require.Contains(t, window.entries, "current-key")
+	require.NotContains(t, window.entries, "stale-key")
+}
+
+func TestRecoverWindowsRejectsManifestFooterTermMismatch(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	chunkManager := newTestPChannelWindowCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	payload, _, _, err := marshalPChannelWindowChunk("p1", 0, 1, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	}, nil)
+	require.NoError(t, err)
+	require.NoError(t, chunkManager.Write(ctx, buildPChannelWindowChunkKey("p1", 0, 2), payload))
+	catalogState.storeMeta = &streamingpb.PChannelWindowMeta{
+		Pchannel:                  "p1",
+		SourceCheckpointTimetick:  100,
+		SourceCheckpointMessageId: rmq.NewRmqID(100).IntoProto(),
+		LatestGeneration:          0,
+		MinAvailableGeneration:    0,
+		MinInUseGeneration:        0,
+		CodecVersion:              uint32(pchannelWindowCodecVersion),
+		Term:                      2,
+		ChunkManifest: &streamingpb.PChannelWindowChunkManifest{
+			Ranges: []*streamingpb.PChannelWindowChunkTermRange{
+				{Term: 2, StartGeneration: 0, EndGeneration: 0, StartTimetick: 100, EndTimetick: 100},
+			},
+		},
+	}
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 2}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	})
+	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
+		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	err = recoverTestIdempotencyWindowsWithError(ctx, rs, "p1", false)
+	require.ErrorIs(t, err, ErrPChannelWindowStoreCorrupted)
+	require.Contains(t, err.Error(), "term mismatch")
+}
+
+func TestRecoverWindowsSealsPreviousTermByScanningChunks(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	chunkManager := newTestPChannelWindowCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	for generation := uint64(0); generation <= 12; generation++ {
+		writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", generation, 4, chunkManager, &utility.WALCheckpoint{
+			MessageID: rmq.NewRmqID(int64(100 + generation)),
+			TimeTick:  100 + generation,
+		}, nil)
+	}
+	catalogState.storeMeta = &streamingpb.PChannelWindowMeta{
+		Pchannel:                  "p1",
+		SourceCheckpointTimetick:  100,
+		SourceCheckpointMessageId: rmq.NewRmqID(100).IntoProto(),
+		LatestGeneration:          0,
+		MinAvailableGeneration:    0,
+		MinInUseGeneration:        0,
+		CodecVersion:              uint32(pchannelWindowCodecVersion),
+		Term:                      4,
+		ChunkManifest: &streamingpb.PChannelWindowChunkManifest{
+			Ranges: []*streamingpb.PChannelWindowChunkTermRange{
+				{Term: 4, StartGeneration: 0, EndGeneration: 0, StartTimetick: 100, EndTimetick: 100},
+			},
+		},
+	}
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 5}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(200),
+		TimeTick:  200,
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	recovered, err := rs.windowManager.recoverIdempotencyWindowsFromPChannelWindowStore(ctx, "p1", pchannelWindowStoreMetaFromCatalog(catalogState.storeMeta))
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), recovered.LatestGeneration)
+	require.Equal(t, int64(5), catalogState.storeMeta.GetTerm())
+	require.Equal(t, uint64(12), catalogState.storeMeta.GetLatestGeneration())
+	require.Equal(t, uint64(112), catalogState.storeMeta.GetSourceCheckpointTimetick())
+	require.Len(t, catalogState.storeMeta.GetChunkManifest().GetRanges(), 1)
+	sealedRange := catalogState.storeMeta.GetChunkManifest().GetRanges()[0]
+	require.Equal(t, int64(4), sealedRange.GetTerm())
+	require.Equal(t, uint64(0), sealedRange.GetStartGeneration())
+	require.Equal(t, uint64(12), sealedRange.GetEndGeneration())
+	require.True(t, sealedRange.GetSealed())
+	require.GreaterOrEqual(t, len(catalogState.operations), 2)
+}
+
+func TestRecoverWindowsAdoptsMultipleCurrentTermOrphanChunks(t *testing.T) {
+	ctx := context.Background()
+	catalog, _ := newTestPChannelWindowCASCatalog(t)
+	chunkManager := newTestPChannelWindowCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	footer, _, _ := writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 0, 2, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	}, nil)
+	writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 1, 2, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(110),
+		TimeTick:  110,
+	}, nil)
+	writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 2, 2, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(120),
+		TimeTick:  120,
+	}, nil)
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 2}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(120),
+		TimeTick:  120,
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	recovered, err := rs.windowManager.recoverIdempotencyWindowsFromPChannelWindowStore(ctx, "p1", newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), recovered.LatestGeneration)
+	require.Len(t, recovered.ChunkManifest.GetRanges(), 1)
+	require.Equal(t, uint64(0), recovered.ChunkManifest.GetRanges()[0].GetStartGeneration())
+	require.Equal(t, uint64(2), recovered.ChunkManifest.GetRanges()[0].GetEndGeneration())
+	require.Equal(t, uint64(120), recovered.SourceCheckpoint.TimeTick)
+}
+
+func TestPChannelWindowManifestRejectsTermSwitchGenerationGap(t *testing.T) {
+	manifest := &streamingpb.PChannelWindowChunkManifest{
+		Ranges: []*streamingpb.PChannelWindowChunkTermRange{
+			{Term: 1, StartGeneration: 0, EndGeneration: 5, Sealed: true},
+		},
+	}
+
+	_, err := pchannelWindowManifestWithChunk(manifest, 3, 7, 700)
+	require.ErrorIs(t, err, ErrPChannelWindowStoreCorrupted)
+	require.Contains(t, err.Error(), "generation gap")
 }

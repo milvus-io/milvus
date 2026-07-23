@@ -42,6 +42,28 @@ func TestTxnInsertResultBuffersDropsEmptyVChannel(t *testing.T) {
 	require.Empty(t, buffers.builders, "an empty vchannel buffer must be dropped so the map does not leak one entry per vchannel")
 }
 
+func TestTxnInsertResultBuffersRemoveVChannel(t *testing.T) {
+	buffers := NewTxnInsertResultBuffers(nil, nil)
+	msg1 := newTestTxnMessage(t, "v1", 1)
+	msg2 := newTestTxnMessage(t, "v1", 2)
+	msgOther := newTestTxnMessage(t, "v2", 3)
+
+	buffers.Add(msg1, intIDsResult([]uint32{0}, 100), 0)
+	buffers.Add(msg2, intIDsResult([]uint32{0}, 200), 0)
+	buffers.Add(msgOther, intIDsResult([]uint32{0}, 300), 0)
+	require.Len(t, buffers.builders["v1"], 2)
+	require.Len(t, buffers.builders["v2"], 1)
+
+	buffers.RemoveVChannel("v1")
+	require.NotContains(t, buffers.builders, "v1")
+	require.Contains(t, buffers.builders, "v2")
+	require.Nil(t, buffers.Build(msg1))
+	require.NotNil(t, buffers.Build(msgOther))
+
+	buffers.RemoveVChannel("")
+	require.Contains(t, buffers.builders, "v2")
+}
+
 func TestTxnInsertResultBuffersMergesBodiesAndCleansUp(t *testing.T) {
 	buffers := NewTxnInsertResultBuffers(nil, nil)
 	msg := newTestTxnMessage(t, "v1", 7)

@@ -110,6 +110,9 @@ func (m *windowManager) cleanPChannelWindow(ctx context.Context, logger *mlog.Lo
 	if meta.MinAvailableGeneration > meta.LatestGeneration {
 		return pchannelWindowStoreCorruptedf("pchannel window generation range mismatch, min available %d, latest %d", meta.MinAvailableGeneration, meta.LatestGeneration)
 	}
+	if err := validatePChannelWindowManifest(meta); err != nil {
+		return err
+	}
 
 	boundary := m.pchannelWindowCleanBoundary(meta.LatestGeneration)
 	if !boundary.canClean {
@@ -156,7 +159,7 @@ func (m *windowManager) cleanPChannelWindow(ctx context.Context, logger *mlog.Lo
 				mlog.Bool("hasActiveViewMinBoundary", boundary.hasActiveViewMinBoundary),
 			),
 			func(ctx context.Context) error {
-				return resource.Resource().StreamingNodeCatalog().SavePChannelWindowMeta(ctx, m.pchannel, intermediateMeta.intoCatalogMeta())
+				return m.repairPChannelWindowMeta(ctx, &intermediateMeta)
 			}); err != nil {
 			return err
 		}
@@ -167,7 +170,7 @@ func (m *windowManager) cleanPChannelWindow(ctx context.Context, logger *mlog.Lo
 	// [MinInUseGeneration, LatestGeneration] is still in use. Starting from the
 	// old MinAvailableGeneration also bounds each cycle's work to the newly
 	// reclaimable range instead of re-probing every generation from 0.
-	if err := m.deletePChannelWindowChunks(ctx, logger, meta.MinAvailableGeneration, updatedMeta.MinAvailableGeneration, updatedMeta.LatestGeneration); err != nil {
+	if err := m.deletePChannelWindowChunks(ctx, logger, meta, meta.MinAvailableGeneration, updatedMeta.MinAvailableGeneration, updatedMeta.LatestGeneration); err != nil {
 		return err
 	}
 
@@ -185,7 +188,7 @@ func (m *windowManager) cleanPChannelWindow(ctx context.Context, logger *mlog.Lo
 			mlog.Bool("hasActiveViewMinBoundary", boundary.hasActiveViewMinBoundary),
 		),
 		func(ctx context.Context) error {
-			return resource.Resource().StreamingNodeCatalog().SavePChannelWindowMeta(ctx, m.pchannel, updatedMeta.intoCatalogMeta())
+			return m.repairPChannelWindowMeta(ctx, &updatedMeta)
 		})
 }
 
@@ -210,7 +213,7 @@ func (m *windowManager) pchannelWindowCleanBoundary(latestGeneration uint64) pch
 	}
 }
 
-func (m *windowManager) deletePChannelWindowChunks(ctx context.Context, logger *mlog.Logger, startGeneration uint64, endGeneration uint64, latestGeneration uint64) error {
+func (m *windowManager) deletePChannelWindowChunks(ctx context.Context, logger *mlog.Logger, meta *pchannelWindowStoreMeta, startGeneration uint64, endGeneration uint64, latestGeneration uint64) error {
 	if startGeneration >= endGeneration {
 		return nil
 	}
@@ -219,7 +222,11 @@ func (m *windowManager) deletePChannelWindowChunks(ctx context.Context, logger *
 		if generation >= latestGeneration {
 			break
 		}
-		chunkKey := buildPChannelWindowChunkKey(m.pchannel, generation)
+		termRange, ok := pchannelWindowManifestRangeForGeneration(meta, generation)
+		if !ok {
+			return pchannelWindowStoreCorruptedf("pchannel window chunk manifest misses generation %d before clean", generation)
+		}
+		chunkKey := buildPChannelWindowChunkKey(m.pchannel, generation, termRange.GetTerm())
 		exists, err := chunkManager.Exist(ctx, chunkKey)
 		if err != nil {
 			return errors.Wrapf(err, "failed to check pchannel window chunk %s before clean", chunkKey)

@@ -51,7 +51,7 @@ func minCheckpointByMessageID(left, right *WALCheckpoint) *WALCheckpoint {
 	if right == nil {
 		return left
 	}
-	if right.MessageID != nil && left.MessageID != nil && right.MessageID.LTE(left.MessageID) {
+	if sameMessageIDWAL(left.MessageID, right.MessageID) && right.MessageID.LTE(left.MessageID) {
 		return right
 	}
 	if right.TimeTick < left.TimeTick {
@@ -71,7 +71,7 @@ func checkpointCovers(covered *WALCheckpoint, target *WALCheckpoint) bool {
 	if covered == nil || target == nil {
 		return false
 	}
-	if covered.MessageID != nil && target.MessageID != nil {
+	if sameMessageIDWAL(covered.MessageID, target.MessageID) {
 		return target.MessageID.LTE(covered.MessageID)
 	}
 	return target.TimeTick <= covered.TimeTick
@@ -87,7 +87,14 @@ func sameWALCheckpoint(left, right *WALCheckpoint) bool {
 	if left.MessageID == nil || right.MessageID == nil {
 		return left.MessageID == nil && right.MessageID == nil
 	}
+	if left.MessageID.WALName() != right.MessageID.WALName() {
+		return true
+	}
 	return left.MessageID.EQ(right.MessageID)
+}
+
+func sameMessageIDWAL(left, right message.MessageID) bool {
+	return left != nil && right != nil && left.WALName() == right.WALName()
 }
 
 func checkpointMessageIDString(checkpoint *WALCheckpoint) string {

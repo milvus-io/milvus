@@ -80,6 +80,10 @@ type openerAdaptorImpl struct {
 	interceptorBuilders []interceptors.InterceptorBuilder
 }
 
+type alterWALWindowPersistence interface {
+	ForcePersistIdempotencyWindowToTimeTick(ctx context.Context, targetTimeTick uint64) (*recovery.WALCheckpoint, error)
+}
+
 // Open opens a wal instance for the channel.
 func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.WAL, error) {
 	if !o.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -333,28 +337,47 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 		mlog.String("channel", opt.Channel.Name),
 		mlog.Uint64("targetTimeTick", targetTimeTick))
 
+	const defaultWALSwitchFlushTimeout = 1 * time.Minute
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-
-	const defaultWALSwitchFlushTimeout = 1 * time.Minute
+	timeout := time.NewTimer(defaultWALSwitchFlushTimeout)
+	defer timeout.Stop()
 
 	// Periodically check flush progress until target time tick is reached
 	var flusherCP *utility.WALCheckpoint
-	for flusherCP == nil || flusherCP.TimeTick < targetTimeTick {
+	var windowCP *recovery.WALCheckpoint
+	windowPersistence, hasWindowPersistence := rs.(alterWALWindowPersistence)
+waitPersistence:
+	for {
 		select {
 		case <-ticker.C:
+			if hasWindowPersistence {
+				var err error
+				windowCP, err = windowPersistence.ForcePersistIdempotencyWindowToTimeTick(ctx, targetTimeTick)
+				if err != nil {
+					return errors.Wrap(err, "failed to persist idempotency window before WAL switch")
+				}
+			}
 			flusherCP = rs.GetFlusherCheckpointByTimeTick(ctx)
 			if flusherCP == nil {
 				mlog.Info(ctx, "waiting for flusher checkpoint initialization")
 				continue
 			}
+			if hasWindowPersistence && (windowCP == nil || windowCP.TimeTick < targetTimeTick) {
+				mlog.Info(ctx, "waiting for idempotency window checkpoint",
+					mlog.String("channel", opt.Channel.Name),
+					mlog.Uint64("currentTS", checkpointTimeTickForLog(windowCP)),
+					mlog.Uint64("targetTS", targetTimeTick))
+				continue
+			}
 			if flusherCP.TimeTick >= targetTimeTick {
-				mlog.Info(ctx, "flush completed, ready for WAL switch",
+				mlog.Info(ctx, "flush and idempotency window persistence completed, ready for WAL switch",
 					mlog.String("channel", opt.Channel.Name),
 					mlog.Uint64("flusherCheckpointTS", flusherCP.TimeTick),
+					mlog.Uint64("windowCheckpointTS", checkpointTimeTickForLog(windowCP)),
 					mlog.Uint64("targetTimeTick", targetTimeTick),
 					mlog.Stringer("targetWAL", targetWALName))
-				break
+				break waitPersistence
 			}
 			remaining := targetTimeTick - flusherCP.TimeTick
 			mlog.Info(ctx, "flush in progress",
@@ -362,7 +385,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 				mlog.Uint64("currentTS", flusherCP.TimeTick),
 				mlog.Uint64("targetTS", targetTimeTick),
 				mlog.Uint64("remainingTS", remaining))
-		case <-time.After(defaultWALSwitchFlushTimeout):
+		case <-timeout.C:
 			mlog.Warn(ctx, "timeout waiting for flush completion",
 				mlog.String("channel", opt.Channel.Name),
 				mlog.Duration("timeout", defaultWALSwitchFlushTimeout))
@@ -476,6 +499,11 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 		finalCheckpoint.ReplicateCheckpoint.MessageID = finalCheckpoint.MessageID
 	}
 
+	if err := recovery.UpdatePChannelWindowMetaSourceCheckpoint(ctx, opt.Channel.Name, finalCheckpoint); err != nil {
+		mlog.Warn(ctx, "failed to update pchannel window checkpoint after advance checkpoint stage", mlog.String("channel", opt.Channel.Name), mlog.Err(err))
+		return errors.Wrap(err, "failed to update pchannel window checkpoint after advance checkpoint stage")
+	}
+
 	// Persist final checkpoint to catalog
 	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, finalCheckpoint.IntoProto()); err != nil {
 		mlog.Warn(ctx, "failed to persist checkpoint after advance checkpoint stage", mlog.String("channel", opt.Channel.Name), mlog.Err(err))
@@ -492,6 +520,13 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 		mlog.Uint64("newCheckpointTS", finalCheckpoint.TimeTick))
 
 	return nil
+}
+
+func checkpointTimeTickForLog(checkpoint *recovery.WALCheckpoint) uint64 {
+	if checkpoint == nil {
+		return 0
+	}
+	return checkpoint.TimeTick
 }
 
 // openROWAL opens a read only wal instance for the channel.
