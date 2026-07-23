@@ -308,7 +308,8 @@ class CommitTimestampV2TestAccess {
         auto next = segment->ClonePublishedState(current);
         next->runtime = segment->ToConstRuntimeState(std::move(runtime));
         segment->NormalizePublishedState(*next);
-        segment->PublishState(std::move(next));
+        std::lock_guard<std::mutex> reopen_guard(segment->reopen_mutex_);
+        segment->PublishStateOnline(std::move(next));
     }
 };
 
