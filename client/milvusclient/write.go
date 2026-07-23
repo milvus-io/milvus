@@ -31,9 +31,10 @@ import (
 )
 
 // withIdempotencyKey derives a child context that carries the idempotency key
-// to the server via gRPC metadata (the "idempotency-key" header). It is applied
-// by Client.Insert per call from the option's WithIdempotencyKey, so the key is
-// scoped to exactly one logical insert and the caller's context stays clean.
+// to the server via gRPC metadata (the "idempotency-key" header). Client.Insert
+// applies it only for a non-empty option-level key: the option then overrides
+// any existing outgoing metadata for this call, while callers that set the
+// header directly on ctx remain compatible when no option key is provided.
 func withIdempotencyKey(ctx context.Context, key string) context.Context {
 	md, ok := metadata.FromOutgoingContext(ctx)
 	if !ok {
@@ -58,9 +59,9 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 	startTime := time.Now()
 	collectionName := option.CollectionName()
 	result := InsertResult{}
-	// Scope any option-level idempotency key onto a per-call child context, so
-	// retries of this logical insert reuse the key while the caller's context
-	// is never left carrying it.
+	// Scope any non-empty option-level idempotency key onto a per-call child
+	// context. With no option key, preserve any existing outgoing metadata so
+	// callers that set the header directly remain compatible.
 	if keyed, ok := option.(interface{ IdempotencyKey() string }); ok {
 		if key := keyed.IdempotencyKey(); key != "" {
 			ctx = withIdempotencyKey(ctx, key)

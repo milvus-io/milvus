@@ -8053,7 +8053,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyWindowTTL = ParamItem{
 		Key:          "streaming.idempotency.windowTTL",
 		Version:      "3.0.0",
-		Doc:          `The retention TTL for completed idempotency key window entries. Recent entries are still retained up to minEntriesPerWindow even after TTL expires.`,
+		Doc:          `The retention TTL target for completed idempotency key window entries. For entries still retained in memory, duplicate visibility does not extend past this TTL; maxEntriesPerWindow and maxBytesPerWindow are hard caps and may evict entries before TTL.`,
 		DefaultValue: "10m",
 		FallbackKeys: []string{"idempotency.windowTTL"},
 		Export:       false,
@@ -8063,7 +8063,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMinEntriesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.minEntriesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The minimum completed idempotency key entries retained for each vchannel window.`,
+		Doc:          `The minimum completed idempotency key entries retained for each vchannel window after TTL eviction. It does not extend duplicate visibility past windowTTL and can be overridden by the hard maxEntriesPerWindow/maxBytesPerWindow caps.`,
 		DefaultValue: "1000",
 		FallbackKeys: []string{"idempotency.minEntriesPerWindow"},
 		Export:       false,
@@ -8073,7 +8073,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMaxEntriesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxEntriesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The maximum completed idempotency key entries retained for each vchannel window; the oldest entries (by commit timetick) are evicted first. This caps entry COUNT only — each entry holds the per-row primary keys of its insert, so use maxBytesPerWindow to bound dedup-metadata memory. 0 means no count cap beyond TTL/minEntries.`,
+		Doc:          `The hard maximum completed idempotency key entries retained for each vchannel window; the oldest entries (by commit timetick) are evicted first, even when they are still within windowTTL. This caps entry COUNT only: each entry holds the per-row primary keys of its insert, so use maxBytesPerWindow to bound dedup-metadata memory. 0 means no count cap beyond TTL/minEntries.`,
 		DefaultValue: "10000",
 		FallbackKeys: []string{"idempotency.maxEntriesPerWindow"},
 		Export:       false,
@@ -8083,7 +8083,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Oldest entries by commit timetick are evicted first; this hard cap overrides minEntriesPerWindow, since an entry-count floor cannot bound memory. 0 disables the byte cap.`,
+		Doc:          `The hard maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Oldest entries by commit timetick are evicted first, even before windowTTL; this hard cap overrides minEntriesPerWindow, since an entry-count floor cannot bound memory. 0 disables the byte cap.`,
 		DefaultValue: "16777216",
 		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
 		Export:       false,

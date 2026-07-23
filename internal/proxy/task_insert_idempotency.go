@@ -196,8 +196,10 @@ func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
 // proxy cannot tell that apart from the pathological case where a shard's window
 // forgot a key its siblings still hold — the retry then re-appends rows that are
 // already in the WAL. Failing here would break the legitimate case, so the mix is
-// only reported; the uniform-TTL rule in the idempotency window is what keeps
-// retention from diverging between shards in the first place.
+// only reported. The idempotency window prevents minEntries from extending a
+// retained entry past TTL, but hard maxEntries/maxBytes caps may still shorten
+// retention independently per vchannel under skewed load; this warning is the
+// visibility hook for either accepted partial-retry progress or cap pressure.
 func warnOnPartialIdempotentDuplicate(ctx context.Context, key string, resp types.AppendResponses) {
 	duplicates := 0
 	total := 0

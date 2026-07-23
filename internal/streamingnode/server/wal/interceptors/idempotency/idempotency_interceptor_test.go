@@ -10,14 +10,18 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/replicate/mock_replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -28,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -133,6 +138,39 @@ func TestInterceptorBypassesReplicatedInsert(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, nativeID.EQ(msgID))
 	require.Equal(t, 4, appendCount)
+}
+
+func TestInterceptorSecondaryNativeDuplicateReachesReplicateGate(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	appendCount := 0
+	firstID := newTestMessageID(10)
+	_, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-1"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return firstID, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount)
+
+	// After demotion, a native client retry can hit a key still present in the
+	// recovered local idempotency window. It must still reach the inner replicate
+	// interceptor, which rejects native writes in secondary role; returning the
+	// previous duplicate result here would acknowledge an append that never
+	// reaches the WAL.
+	interceptor.replicateRole = func() replicateutil.Role { return replicateutil.RoleSecondary }
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err = interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-1"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		return nil, status.NewReplicateViolation("non-replicate message cannot be received in secondary role")
+	})
+	require.Error(t, err)
+	sErr := status.AsStreamingError(err)
+	require.NotNil(t, sErr)
+	require.True(t, sErr.IsReplicateViolation())
+	require.Equal(t, 2, appendCount)
 }
 
 func TestInterceptorBypassesReplicatedTxnCommit(t *testing.T) {
@@ -1083,6 +1121,57 @@ func TestInterceptorOrderShortCircuitsDownstreamOnDuplicate(t *testing.T) {
 	require.Equal(t, 2, redo.calls)
 	require.Equal(t, 2, timetick.calls)
 	require.Equal(t, 2, shard.calls)
+}
+
+func TestInterceptorChainSecondaryNativeDuplicateReachesReplicateGate(t *testing.T) {
+	manager := mock_replicates.NewMockReplicatesManager(t)
+	role := replicateutil.RolePrimary
+	replicateGateCalls := 0
+	manager.EXPECT().Role().RunAndReturn(func() replicateutil.Role {
+		return role
+	}).Maybe()
+	manager.EXPECT().BeginReplicateMessage(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.MutableMessage) (replicates.ReplicateAcker, error) {
+			replicateGateCalls++
+			if role == replicateutil.RoleSecondary {
+				return nil, status.NewReplicateViolation("non-replicate message cannot be received in secondary role")
+			}
+			return nil, replicates.ErrNotHandledByReplicateManager
+		},
+	).Maybe()
+
+	idempotencyInterceptor := newIdempotencyInterceptorWithParam(WindowConfig{Enabled: true}, &interceptors.InterceptorBuildParam{
+		ReplicateManager: manager,
+	})
+	replicateInterceptor := replicate.NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ReplicateManager: manager,
+	})
+	chain := interceptors.NewChainedInterceptor(idempotencyInterceptor, replicateInterceptor)
+	defer chain.Close()
+	<-chain.Ready()
+
+	appendCount := 0
+	finalAppend := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, uint64(100+appendCount))
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(int64(9+appendCount)))
+		return newTestMessageID(int64(10 + appendCount)), nil
+	}
+
+	msg := newIdempotentInsertMessage(t, "v1", "key-1")
+	_, err := chain.DoAppend(newAppendTestContext(msg), msg, finalAppend)
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount)
+	require.Equal(t, 1, replicateGateCalls)
+
+	role = replicateutil.RoleSecondary
+	_, err = chain.DoAppend(newAppendTestContext(msg), msg, finalAppend)
+	require.Error(t, err)
+	sErr := status.AsStreamingError(err)
+	require.NotNil(t, sErr)
+	require.True(t, sErr.IsReplicateViolation())
+	require.Equal(t, 1, appendCount)
+	require.Equal(t, 2, replicateGateCalls)
 }
 
 func newAppendTestContext(msg message.MutableMessage) context.Context {

@@ -56,8 +56,10 @@ type columnBasedDataOption struct {
 	columns       []column.Column
 	partialUpdate bool
 
-	// idempotencyKey is only honored by Insert (Client.Insert scopes it onto the
-	// call's gRPC metadata); Upsert rejects it and Delete has no way to set it.
+	// idempotencyKey is only honored by Insert. A non-empty option key overrides
+	// the call's existing outgoing metadata key; with no option key, Client.Insert
+	// preserves callers that set the gRPC header directly on ctx. Upsert rejects
+	// it and Delete has no way to set it.
 	idempotencyKey string
 
 	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
@@ -415,12 +417,15 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 // WithIdempotencyKey attaches an idempotency key to this insert. The key is
 // scoped to exactly this logical insert: Client.Insert derives a per-call
 // context carrying it as gRPC metadata, so the caller's context is never
-// mutated. Retries of the same request (schema-mismatch / rate-limit) reuse
-// the key, which is exactly what idempotent replay needs; do NOT reuse one key
-// across different payloads or collections — the server would answer the
-// second insert with the first one's IDs. Only Insert honors the key, and only
-// when idempotent write is enabled both globally (streaming.idempotency.enabled)
-// and on the target collection; Upsert rejects it.
+// mutated. A non-empty option key overrides an existing idempotency-key header
+// on ctx for this call; with no option key, Client.Insert preserves a header
+// that the caller set directly on ctx for compatibility. Retries of the same
+// request (schema-mismatch / rate-limit) reuse the key, which is exactly what
+// idempotent replay needs; do NOT reuse one key across different payloads or
+// collections: the server would answer the second insert with the first one's
+// IDs. Only Insert honors the key, and only when idempotent write is enabled
+// both globally (streaming.idempotency.enabled) and on the target collection;
+// Upsert rejects it.
 func (opt *columnBasedDataOption) WithIdempotencyKey(idempotencyKey string) *columnBasedDataOption {
 	opt.idempotencyKey = idempotencyKey
 	return opt

@@ -125,8 +125,49 @@ func (s *WriteSuite) TestInsert() {
 			}, nil
 		}).Once()
 
-		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
+		ctxWithStaleKey := metadata.AppendToOutgoingContext(ctx, idempotencyKeyHeader, "ctx-key")
+		result, err := s.client.Insert(ctxWithStaleKey, NewColumnBasedInsertOption(collName).
 			WithIdempotencyKey("key-1").
+			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithFloat16VectorColumn("fp16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
+			})).
+			WithInt64Column("id", []int64{1, 2, 3}))
+		s.NoError(err)
+		s.EqualValues(3, result.InsertCount)
+	})
+
+	s.Run("preserve_context_idempotency_key_without_option", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collName, s.schema)
+
+		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			s.Require().True(ok)
+			s.Equal([]string{"ctx-key"}, md.Get(idempotencyKeyHeader))
+			return &milvuspb.MutationResult{
+				Status:    merr.Success(),
+				InsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			}, nil
+		}).Once()
+
+		ctxWithKey := metadata.AppendToOutgoingContext(ctx, idempotencyKeyHeader, "ctx-key")
+		result, err := s.client.Insert(ctxWithKey, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
