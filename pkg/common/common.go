@@ -125,7 +125,7 @@ const (
 	//   the existing INVERTED / NGRAM)
 	// - On-disk file format is unchanged from v3
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(3)
 	MaximumScalarIndexEngineVersion = int32(4)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
