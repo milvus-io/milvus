@@ -281,6 +281,12 @@ func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManag
 		m.ref[key] += 1
 	}
 	m.Unlock()
+	downloaded := false
+	defer func() {
+		if !downloaded {
+			m.Release(resources...)
+		}
+	}()
 
 	for _, r := range resources {
 		resource := r
@@ -326,6 +332,7 @@ func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManag
 			return err
 		}
 	}
+	downloaded = true
 	return nil
 }
 
