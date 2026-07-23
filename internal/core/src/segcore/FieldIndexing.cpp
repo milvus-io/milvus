@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <exception>
 #include <map>
+#include <new>
 #include <optional>
 #include <string>
 #include <utility>
@@ -786,6 +787,15 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
                     // re-wrapping would collapse the code into a non-retriable
                     // UnexpectedError.
                     throw;
+                } catch (const std::bad_alloc&) {
+                    // Container/std allocation OOM (e.g. the R-Tree wrapper's
+                    // values_.push_back / rtree_.insert) is the same transient
+                    // resource failure as a GEOS allocation failure and must
+                    // stay retriable -- the generic handler below would
+                    // collapse it into a non-retriable UnexpectedError.
+                    ThrowInfo(ErrorCode::MemAllocateFailed,
+                              "out of memory adding geometry at offset {}",
+                              global_offset);
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "Failed to add geometry at offset {}: {}",

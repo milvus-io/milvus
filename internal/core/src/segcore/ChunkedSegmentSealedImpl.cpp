@@ -28,6 +28,7 @@
 #include <map>
 #include <filesystem>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <optional>
 #include <ratio>
@@ -7917,6 +7918,16 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
         // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
         // the code into a non-retriable UnexpectedError.
         throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM (e.g. the cache's geometries_.resize)
+        // is the same transient resource failure as a GEOS allocation failure
+        // and must stay retriable -- the generic handler below would collapse
+        // it into a non-retriable UnexpectedError.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory loading geometry cache for segment {} field "
+                  "{}",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to load geometry cache for segment {} field {}: {}",

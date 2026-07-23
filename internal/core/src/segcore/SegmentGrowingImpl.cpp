@@ -21,6 +21,7 @@
 #include <map>
 #include <filesystem>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -3128,6 +3129,16 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
         // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
         // the code into a non-retriable UnexpectedError.
         throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM (e.g. the cache's geometries_.resize)
+        // is the same transient resource failure as a GEOS allocation failure
+        // and must stay retriable -- the generic handler below would collapse
+        // it into a non-retriable UnexpectedError.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for growing segment "
+                  "{} field {} insert",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "
@@ -3187,6 +3198,14 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
         // Already typed -- rethrow as-is to keep the code (see the insert-path
         // catch above).
         throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM stays retriable (see the insert-path
+        // catch above).
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for growing segment "
+                  "{} field {} load",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "
