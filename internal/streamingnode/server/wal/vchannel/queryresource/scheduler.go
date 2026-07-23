@@ -2,106 +2,36 @@ package queryresource
 
 import (
 	"context"
-	"errors"
 	"sync"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-type Scheduler interface {
-	Submit(task BuildTask)
-	Close()
-}
-
-type BuildTask interface {
-	Run()
-	Done() <-chan struct{}
-	Result() (*QueryRuntime, error)
-	Cancel()
-}
-
-type defaultScheduler struct {
-	sem    chan struct{}
-	closed chan struct{}
-	once   sync.Once
-	wg     sync.WaitGroup
-}
-
-func NewScheduler(concurrency int) Scheduler {
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-	return &defaultScheduler{
-		sem:    make(chan struct{}, concurrency),
-		closed: make(chan struct{}),
-	}
-}
-
-func (s *defaultScheduler) Submit(task BuildTask) {
-	select {
-	case <-s.closed:
-		task.Cancel()
-		return
-	default:
-	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		select {
-		case s.sem <- struct{}{}:
-			defer func() { <-s.sem }()
-		case <-s.closed:
-			task.Cancel()
-			return
-		}
-		task.Run()
-	}()
-}
-
-func (s *defaultScheduler) Close() {
-	s.once.Do(func() {
-		close(s.closed)
-		s.wg.Wait()
-	})
-}
-
 type resourceBuildTask struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	build  func(context.Context) (*QueryRuntime, error)
-
-	done chan struct{}
+	build        func(context.Context) (*QueryRuntime, error)
+	doneCallback func()
+	done         chan struct{}
 
 	mu       sync.Mutex
-	started  bool
 	finished bool
 	runtime  *QueryRuntime
 	err      error
 }
 
-func newResourceBuildTask(parent context.Context, build func(context.Context) (*QueryRuntime, error)) *resourceBuildTask {
-	ctx, cancel := context.WithCancel(parent)
+func newResourceBuildTask(build func(context.Context) (*QueryRuntime, error)) *resourceBuildTask {
 	return &resourceBuildTask{
-		ctx:    ctx,
-		cancel: cancel,
-		build:  build,
-		done:   make(chan struct{}),
+		build: build,
+		done:  make(chan struct{}),
 	}
 }
 
-func (t *resourceBuildTask) Run() {
-	t.mu.Lock()
-	if t.started || t.finished {
-		t.mu.Unlock()
-		return
-	}
-	t.started = true
-	t.mu.Unlock()
-
-	runtime, err := t.build(t.ctx)
+func (t *resourceBuildTask) Execute(ctx context.Context) error {
+	runtime, err := t.build(ctx)
 	t.finish(runtime, err)
-}
-
-func (t *resourceBuildTask) Done() <-chan struct{} {
-	return t.done
+	if t.doneCallback != nil {
+		t.doneCallback()
+	}
+	return err
 }
 
 func (t *resourceBuildTask) Result() (*QueryRuntime, error) {
@@ -111,37 +41,12 @@ func (t *resourceBuildTask) Result() (*QueryRuntime, error) {
 	return t.runtime, t.err
 }
 
-func (t *resourceBuildTask) Cancel() {
-	t.cancel()
-	t.mu.Lock()
-	if !t.started && !t.finished {
-		t.err = t.ctx.Err()
-		if t.err == nil {
-			t.err = context.Canceled
-		}
-		t.finished = true
-		close(t.done)
-	}
-	t.mu.Unlock()
-}
-
 func (t *resourceBuildTask) finish(runtime *QueryRuntime, err error) {
 	t.mu.Lock()
 	if t.finished {
 		t.mu.Unlock()
-		if runtime != nil {
-			runtime.Close()
-		}
+		closeRuntime(runtime)
 		return
-	}
-	if err == nil && t.ctx.Err() != nil {
-		err = t.ctx.Err()
-		if err == nil {
-			err = context.Canceled
-		}
-	}
-	if err != nil && errors.Is(err, context.Canceled) && t.ctx.Err() != nil {
-		err = t.ctx.Err()
 	}
 	t.runtime = runtime
 	t.err = err
@@ -149,3 +54,40 @@ func (t *resourceBuildTask) finish(runtime *QueryRuntime, err error) {
 	close(t.done)
 	t.mu.Unlock()
 }
+
+type scheduledBuild struct {
+	task   *resourceBuildTask
+	handle nodescheduler.TaskHandle
+}
+
+func scheduleResourceBuild(scheduler nodescheduler.Scheduler, task *resourceBuildTask, callbacks ...func(*scheduledBuild)) *scheduledBuild {
+	scheduled := &scheduledBuild{task: task}
+	task.doneCallback = func() {
+		if len(callbacks) > 0 && callbacks[0] != nil {
+			callbacks[0](scheduled)
+		}
+	}
+	scheduled.handle = scheduler.Submit(task)
+	return scheduled
+}
+
+func (t *scheduledBuild) Cancel() {
+	t.handle.Cancel()
+}
+
+func (t *scheduledBuild) Result() (*QueryRuntime, error) {
+	_ = t.handle.Wait(context.Background())
+	t.task.finish(nil, context.Canceled)
+	return t.task.Result()
+}
+
+var _ nodescheduler.Task = (*resourceBuildTask)(nil)
+
+type resourceCallbackTask func()
+
+func (t resourceCallbackTask) Execute(context.Context) error {
+	t()
+	return nil
+}
+
+var _ nodescheduler.Task = resourceCallbackTask(nil)

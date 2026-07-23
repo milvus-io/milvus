@@ -8,7 +8,7 @@ import (
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 type Module interface {
@@ -137,8 +137,7 @@ type Runtime struct {
 }
 
 type AsyncTaskScheduler interface {
-	Submit(task scheduler.Task) scheduler.TaskHandle
-	Notify()
+	Submit(task nodescheduler.Task) nodescheduler.TaskHandle
 }
 
 type ModuleNotifier interface {

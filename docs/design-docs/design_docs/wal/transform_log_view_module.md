@@ -273,7 +273,7 @@ chunk 2: [ 52 ]
 
 No manifest or per-chunk catalog key is part of the core design. Recovery can
 reconstruct chunk descriptors from the dense chunk id range and deterministic
-paths. Chunk entries are loaded on demand when a scanner, materializer, or
+paths. Chunk entries are loaded on demand when a subscription, materializer, or
 truncate operation needs to inspect that chunk. The important control is timely
 truncation, which keeps `[first_chunk_id, next_chunk_id)` bounded.
 
@@ -293,7 +293,7 @@ aggregation. Runtime ownership is split into three independent modules:
 - `SegmentModule` owns Insert persistence state, segment assignment metadata,
   segment tombstones, L1 output, and segment data checkpoint.
 - `TransformLogModule` owns Delete payload entries, transform barrier entries,
-  transform-log chunks, the open buffer tail, cursor scanners, transform-log
+  transform-log chunks, the open buffer tail, subscription cursors, transform-log
   meta, transform-log tombstones, and transform data checkpoint.
 
 `VChannelModule` is not the transform buffer owner, subscription service, or
@@ -320,7 +320,7 @@ TransformLogModule
   chunks                     // flushed chunk descriptors in [first_chunk_id, next_chunk_id)
                              // each chunk may be cold, loading, or loaded
   buffer                     // in-memory transform log tail not yet flushed to chunks
-  scanners                   // cursor readers over chunks + buffer
+  subscriptions              // vchannel cursor readers over chunks + buffer
   pendingTasks                // unfinished flush/materialization/truncate cleanup tasks
   dirty                       // meta changed and must be persisted
 ```
@@ -359,7 +359,7 @@ RecoveryStorage data stage observes WAL Delete@T
   -> TransformLogModule observes the message
   -> TransformLog.Append(message@T)
   -> append entry to open buffer
-  -> notify scanners waiting at the log tail
+  -> notify subscriptions waiting at the log tail
   -> flush policy seals a prefix of the buffer as a chunk
   -> write TransformLogChunk object using next_chunk_id
   -> install or update the flushed chunk descriptor
@@ -498,7 +498,7 @@ On StreamingNode recovery:
    one TransformLog per recovered vchannel from transform-log meta keys.
 3. TransformLog reconstructs cold chunk descriptors for the deterministic chunk
    files in `[first_chunk_id, next_chunk_id)`.
-4. A chunk is loaded and validated when a scanner, materializer, or truncate
+4. A chunk is loaded and validated when a subscription, materializer, or truncate
    operation first needs its entries:
    - `chunk.chunk_id` matches the expected id;
    - chunk is non-empty;
@@ -711,36 +711,39 @@ type TransformLogHandle interface {
 }
 ```
 
-The reader interface follows the WAL `Read` / `Scanner` style:
+The read interface follows a PChannel stream plus vchannel subscription style:
 
 ```go
-type TransformLogReader interface {
-    Read(ctx context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner
+type TransformLogStreamManager interface {
+    AcquireStream(ctx context.Context, pchannel string) (TransformLogStream, error)
+}
+
+type TransformLogStream interface {
+    Subscribe(ctx context.Context, opt TransformLogSubscriptionOption) (TransformLogSubscription, error)
+    Done() <-chan struct{}
+    Error() error
+    Close() error
 }
 ```
 
-The public `TransformLogReadOption`, `TransformLogScanner`,
-`TransformLogEvent`, and `TransformLogCaughtUp` contracts are defined directly
-in the root `internal/streamingnode/server/wal` package because TransformLog
-subscription is a WAL read capability.
-
-`Read` creates a vchannel-level scanner. The scanner owns a cursor into the
-module-owned TransformLog object instead of receiving entries from a flush-time
-publish path. It drains entries in order from:
+One stream is scoped to a PChannel and multiplexes multiple vchannel
+subscriptions. Each subscription owns its own cursor into the module-owned
+TransformLog object instead of receiving entries from a flush-time publish
+path. It drains entries in order from:
 
 1. flushed chunks, loading cold chunks on demand;
 2. the open buffer tail;
 3. future buffer appends after it reaches the current tail.
 
-The scanner emits entries with `entry.time_tick > StartAfterTimeTick`, emits one
-`CaughtUp` event after it reaches the tail visible at scanner creation time, and
-then waits for append notifications to continue draining future entries.
-`CaughtUp` is an event in the same stream instead of a separate method.
+The subscription emits entries with `entry.time_tick > StartAfterTimeTick`,
+emits one `SyncUp` event after it reaches the requested frontier, and then waits
+for append notifications when it is an unbounded subscription. A bounded
+subscription closes after `EndTimeTick` is reached.
 
-Flush does not emit scanner events. It only moves a buffer prefix into durable
-chunk storage and updates recovery metadata. Scanner cursors are based on
+Flush does not emit subscription events. It only moves a buffer prefix into durable
+chunk storage and updates recovery metadata. Subscription cursors are based on
 TransformLog TimeTick/order, so flush must not create gaps or duplicates while a
-scanner is crossing the buffer/chunk boundary.
+subscription is crossing the buffer/chunk boundary.
 
 The truncation interface is separate from the reader interface:
 
@@ -755,13 +758,10 @@ subscription ack, and it does not depend on QueryNode stream progress.
 
 ## 9. Flattened Local And Remote Subscription
 
-QueryNode consumes one flattened access interface, modeled after WAL
-`WALAccesser.Read`:
+QueryNode consumes the same flattened stream-manager interface:
 
 ```go
-type TransformLogAccesser interface {
-    Read(ctx context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner
-}
+type TransformLogAccesser = TransformLogStreamManager
 ```
 
 The public entry is a sub-capability of the existing WAL accesser:
@@ -769,75 +769,75 @@ The public entry is a sub-capability of the existing WAL accesser:
 ```go
 type WALAccesser interface {
     // Existing WAL methods omitted.
-    TransformLog() wal.TransformLogAccesser
+    TransformLogStreamManager() wal.TransformLogStreamManager
 }
 ```
 
-`TransformLog().Read` mirrors the existing `WALAccesser.Read` implementation:
+`AcquireStream` resolves the PChannel once and returns a resumable multiplexed
+stream:
 
 ```text
-TransformLog.Read(ctx, opt)
-  -> validate opt.VChannel
-  -> pchannel = ToPhysicalChannel(opt.VChannel)
-  -> create a resumable TransformLog scanner
-       factory = walAccesser.handlerClient.ReadTransformLog
+TransformLogStreamManager.AcquireStream(ctx, pchannel)
+  -> create resumable PChannel stream
+  -> acquire local or remote underlying stream
+  -> recreate vchannel subscriptions after reconnect
 ```
 
-The resumable scanner is the only distributed-level wrapper. It tracks the last
-delivered TransformLog TimeTick and recreates the underlying scanner from that
-point if the stream breaks. Assignment discovery, local/remote selection,
+The resumable stream is the only distributed-level wrapper. Each subscription
+tracks its last delivered TransformLog TimeTick and is recreated from that
+point if the underlying stream breaks. Assignment discovery, local/remote selection,
 wait-for-ready, server-id picking, gRPC dialing, interceptors, and rebalance
 error reporting remain in the existing StreamingNode `handlerClient`
 infrastructure.
 
-The resume boundary is the last TransformLog entry forwarded by the resumable
-scanner. The initial underlying scanner is created from the caller's
+The resume boundary is the last TransformLog entry forwarded by each resumable
+subscription. The initial underlying subscription is created from the caller's
 `StartAfterTimeTick`. After an entry with TimeTick `T` is forwarded, the
-resumable scanner records `next_start_after = T`. If the underlying scanner
+resumable subscription records `next_start_after = T`. If the underlying stream
 then closes or returns a retryable transport error, the next attempt recreates
-the scanner with `StartAfterTimeTick = next_start_after`. This makes resume
+the subscription with `StartAfterTimeTick = next_start_after`. This makes resume
 exclusive for entries already emitted by the wrapper.
 
-When the upstream subscription stream breaks, this same resumable scanner
+When the upstream stream breaks, the resumable stream
 creates a new underlying subscription from the resume boundary above. If no
 entry has been forwarded yet, it retries from the original
 `StartAfterTimeTick`. If StreamingNode can still serve entries after the resume
-point, the scanner forwards the missing suffix and live consumption continues.
+point, the subscription forwards the missing suffix and live consumption continues.
 
-`handlerClient.ReadTransformLog` is the raw scanner factory used by this
-wrapper. It chooses a local in-process scanner or a remote `SubscribeTransform`
-scanner for one attempt, but it does not own resume state. Code that needs the
-QueryNode subscription semantics must use `WALAccesser.TransformLog().Read`,
-which installs the resumable scanner around that factory.
+`handlerClient.AcquireTransformLogStream` is the raw underlying-stream factory.
+It chooses a local in-process stream or a remote `SubscribeTransform` stream
+for one attempt, but it does not own resume state. Code that needs QueryNode
+subscription semantics uses the distributed resumable stream manager.
 
-Retry continues until the caller's context is canceled or the underlying
-scanner reports a non-retryable semantic error, such as an invalid read option,
+Retry continues until the stream is closed or the underlying
+subscription reports a non-retryable semantic error, such as an invalid option,
 an unavailable vchannel, or a start point older than the TransformLog truncation
 cursor. In the truncation case, the local buffer can no longer repair the
 required suffix and the affected QueryViews become Unrecoverable.
 
-`handlerClient.ReadTransformLog` uses the same pattern as `CreateConsumer`:
+`handlerClient.AcquireTransformLogStream` uses the same pattern as
+`CreateConsumer`:
 
 ```text
-ReadTransformLog(ctx, opt)
+AcquireTransformLogStream(ctx, pchannel)
   -> createHandlerAfterStreamingNodeReady(pchannel)
       -> try local WAL registry
           -> local TransformLog accesser from the WAL TransformLog module
       -> otherwise use remote StreamingNodeHandlerService
-          -> open SubscribeTransform and wrap it as wal.TransformLogScanner
+          -> open SubscribeTransform as wal.TransformLogStream
 ```
 
-There are two underlying scanner implementations behind this access path:
+There are two underlying stream implementations behind this access path:
 
-- local scanner: the target vchannel is owned by the local StreamingNode
+- local stream: the target pchannel is owned by the local StreamingNode
   process, so `handlerClient` resolves the local WAL from the existing local
   registry and reads the in-process TransformLog state directly;
-- remote scanner: the target vchannel is owned by another StreamingNode, so
+- remote stream: the target pchannel is owned by another StreamingNode, so
   `handlerClient` uses the existing handler service client to open
   `SubscribeTransform` and wrap the gRPC stream as the same
-  `wal.TransformLogScanner`.
+  `wal.TransformLogStream`.
 
-QueryNode does not depend on whether the scanner is local or remote. This keeps
+QueryNode does not depend on whether the stream is local or remote. This keeps
 the first implementation compatible with a gRPC stream and leaves room for a
 future local optimization that skips the gRPC stream layer.
 
@@ -845,15 +845,13 @@ The packages follow existing WAL client boundaries:
 
 ```text
 internal/streamingnode/server/wal/
-    transform_log.go  // TransformLogAccesser, read option, scanner, events, errors
+    transform_log.go  // stream manager, stream, subscription, events, errors
 
 internal/distributed/streaming/internal/transformlog/
-    scanner.go       // resumable scanner interface wrapper
-    scanner_impl.go  // resume loop and last delivered TimeTick
+    streaming.go     // resumable PChannel stream and subscription recovery
 
 internal/streamingnode/client/handler/transformlog/
-    scanner.go        // raw remote SubscribeTransform scanner
-    stream_client.go  // gRPC send/recv conversion
+    streaming.go      // raw remote SubscribeTransform event stream
 
 internal/streamingnode/server/service/handler/transformlog/
     subscribe_server.go
@@ -862,7 +860,7 @@ internal/streamingnode/server/service/handler/transformlog/
 ```
 
 The `transformlog` package is independent, but it is not a new client stack.
-The distributed scanner and remote scanner reuse the existing WAL client
+The distributed resumable stream and remote event stream reuse the existing WAL client
 infrastructure through `walAccesserImpl.handlerClient`.
 
 ## 10. Workflow 1: TransformLog Persistence And Recovery
@@ -873,7 +871,7 @@ This workflow is the operational path implemented by the storage design above.
 WAL Delete@T
   -> RecoveryStorage consumes Delete@T in data stage
   -> TransformLog appends entry@T to the open buffer
-  -> entry@T is immediately readable by TransformLog scanners
+  -> entry@T is immediately readable by TransformLog subscriptions
   -> a buffer prefix is flushed as dense chunk files
   -> TransformLogMeta publishes checkpoint_time_tick
   -> recovery catalog persists independent TransformLogMeta
@@ -893,21 +891,20 @@ them to sealed segments.
 
 1. QueryNode first loads a QueryView for a vchannel.
 2. It reads `QueryView.transform_start_after_timetick = S`.
-3. QueryNode calls `WAL().TransformLog().Read` to create one vchannel-level
-   TransformLog scanner from `S`.
-4. The distributed TransformLog scanner calls
-   `handlerClient.ReadTransformLog`, which reuses the existing WAL assignment
+3. QueryNode acquires or reuses one PChannel TransformLog stream and creates a
+   vchannel subscription from `S`.
+4. The distributed TransformLog stream calls
+   `handlerClient.AcquireTransformLogStream`, which reuses the existing WAL assignment
    and local/remote selection infrastructure:
    - local: resolve the local WAL through the local registry and read the
      WAL TransformLog module's accesser;
    - remote: open `SubscribeTransform` through the existing
-     `StreamingNodeHandlerService` client and wrap the gRPC stream as a
-     `wal.TransformLogScanner`.
+     `StreamingNodeHandlerService` client as a `wal.TransformLogStream`.
 5. The serving side validates vchannel ownership and truncated range:
-   - if `S < truncate_time_tick`, the scanner is unavailable;
+   - if `S < truncate_time_tick`, the subscription is unavailable;
    - otherwise entries with `entry.time_tick > S` are sent.
-6. The scanner emits `CaughtUp` after it drains the entries visible at scanner
-   creation time.
+6. The subscription emits `SyncUp` after it drains through the requested
+   frontier.
 7. QueryNode stores entries in its local vchannel transform buffer.
 8. QueryNode applies those entries to the sealed segments loaded for the
    QueryView.
@@ -1066,18 +1063,18 @@ carry the vchannel-level TransformLog start point.
 
 | Request | Meaning |
 | --- | --- |
-| `create` | Create a remote vchannel scanner from `start_after_time_tick`. |
+| `create` | Create a remote vchannel subscription from `start_after_time_tick`. |
 | `close_subscription` | Close one vchannel subscription on the stream. |
 | `close_stream` | Gracefully close the whole stream. |
 
 There is no `refresh` request in the target protocol. Reconnect creates a new
-scanner from the oldest local point QueryNode still needs to cover.
+subscription from the oldest local point QueryNode still needs to cover.
 
 ### 13.2 Response Types
 
 | Response | Meaning |
 | --- | --- |
-| `create` | Acknowledge scanner creation and report `truncate_time_tick`. |
+| `create` | Acknowledge subscription creation and report `truncate_time_tick`. |
 | `message_batch` | Carry ordered `TransformLogEntry` values, including Delete payload entries and transform barrier entries. |
 | `caught_up` | Barrier for the create/reconnect subscription request. |
 | `subscription_error` | Error scoped to one subscription on a multiplexed stream. |
@@ -1088,8 +1085,8 @@ scanner from the oldest local point QueryNode still needs to cover.
 `caught_up` means:
 
 ```text
-For this scanner request, all entries visible in the TransformLog at scanner
-creation time and after the requested start point have been sent.
+For this subscription request, all entries through its requested frontier and
+after the requested start point have been sent.
 ```
 
 It does not expose a latest TimeTick. It is not an idle progress message.
@@ -1101,12 +1098,12 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 | `RecoveryStorage` | Owns WAL data consumption, module dispatch, checkpoint advancement, recovery catalog persistence, and barrier composition. |
 | `VChannelModule` | Owns vchannel metadata, schema, partition lifecycle, vchannel tombstones, dirty snapshots, and exposes only narrow read-only schema lookup to `SegmentModule`. |
 | `SegmentModule` | Owns Insert data, segment assignment metadata, segment tombstones, L1 output, and segment data checkpoint. It may read `SchemaAt` from `VChannelModule` when creating segment state. |
-| `TransformLogModule` | Owns Delete and Txn(Delete) data, transform barrier entries, transform-log chunks, open buffer tail, cursor scanners, transform-log meta, transform-log tombstones, truncation, L0 materialization, and transform data checkpoint. |
-| `internal/streamingnode/server/wal` | Defines the root WAL contracts, including `TransformLogAccesser`, `TransformLogReadOption`, `TransformLogScanner`, events, and errors. |
-| `WALAccesser.TransformLog()` | Provides the public WAL-Read-style TransformLog access entry. It creates a resumable scanner and reuses the existing WAL `handlerClient`. |
-| `handlerClient.ReadTransformLog` | Reuses WAL assignment discovery, local registry, wait-for-ready, server-id picker, gRPC service client, and rebalance error reporting to choose local or remote scanner creation. |
-| `SubscribeTransform` server | Remote transport adapter: resolves the assigned WAL from stream metadata, opens a TransformLog scanner, and forwards scanner events over gRPC. |
-| `QN TransformClient` | Owns TransformLog scanners and one local transform buffer per vchannel. |
+| `TransformLogModule` | Owns Delete and Txn(Delete) data, transform barrier entries, transform-log chunks, open buffer tail, subscription cursors, transform-log meta, transform-log tombstones, truncation, L0 materialization, and transform data checkpoint. |
+| `internal/streamingnode/server/wal` | Defines the root WAL contracts, including `TransformLogStreamManager`, `TransformLogStream`, subscriptions, events, and errors. |
+| `WALAccesser.TransformLogStreamManager()` | Provides the distributed resumable PChannel stream entry and reuses the existing WAL `handlerClient`. |
+| `handlerClient.AcquireTransformLogStream` | Reuses WAL assignment discovery, local registry, wait-for-ready, server-id picker, gRPC service client, and rebalance error reporting to choose local or remote stream creation. |
+| `SubscribeTransform` server | Remote transport adapter: resolves the assigned WAL from stream metadata, opens one TransformLog stream, and multiplexes vchannel subscriptions over gRPC. |
+| `QN TransformClient` | Owns PChannel TransformLog streams and one local transform buffer per vchannel. |
 | `QN vchannel transform buffer` | Stores received TransformLog entries, applies live entries as a vchannel/resource-level broadcast after segment catch-up, exposes TransformBuffer visibility, and truncates old entries as local views advance. |
 | `QN SegmentManager/TransformApplier` | Loads sealed segments, performs segment catch-up from the local vchannel transform buffer, applies Delete payload entries, consumes barrier entries, and reports Ready or Unrecoverable. |
 | `L0 materializer` | Converts accumulated TransformLog entries into DataCoord-managed L0 delete segments when thresholds or force barriers are met. |
@@ -1150,7 +1147,7 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 16. SubscribeTransform sends TransformLog entries, not WAL records.
 17. QueryNode subscribes at vchannel granularity.
 18. Local and remote TransformLog subscriptions are flattened behind the same
-    WAL-Read-style scanner interface.
+    PChannel stream and vchannel subscription interfaces.
 19. TransformLog exposes its read contract through the root `wal` package and
     reuses the existing WAL accesser and StreamingNode handler client
     infrastructure for assignment, local/remote selection, retry, and gRPC.
@@ -1171,9 +1168,9 @@ It does not expose a latest TimeTick. It is not an idle progress message.
     idempotent.
 30. TransformLog subscription visibility is driven by TransformLog append order,
     not by chunk flush or L0 materialization.
-31. Flush must not create gaps or duplicates for active scanner cursors.
+31. Flush must not create gaps or duplicates for active subscription cursors.
 32. A cold chunk inside `[first_chunk_id, next_chunk_id)` must be loaded and
-    validated before its entries are served to a scanner or materializer.
+    validated before its entries are served to a subscription or materializer.
 33. TransformLogModule does not read VChannel or Segment state for Delete
     replay, tombstone finalize, or cleanup.
 34. The only required cross-module read is `SegmentModule -> VChannelModule`
@@ -1203,17 +1200,17 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 
 - Add TransformLog read contracts directly to the root
   `internal/streamingnode/server/wal` package.
-- Add `WALAccesser.TransformLog().Read`, modeled after current
-  `WALAccesser.Read`.
-- Add `handlerClient.ReadTransformLog` and implement it with the existing
+- Add `WALAccesser.TransformLogStreamManager().AcquireStream`.
+- Add `handlerClient.AcquireTransformLogStream` and implement it with the existing
   `createHandlerAfterStreamingNodeReady` path.
-- Implement local and remote scanner creation behind `handlerClient`:
+- Implement local and remote stream creation behind `handlerClient`:
   - local: local WAL registry and WAL TransformLog module accesser;
   - remote: existing `StreamingNodeHandlerService` client and
     `SubscribeTransform` stream.
 - Add stream metadata helpers for `CreateTransformStreamRequest`, matching the
   existing `CreateConsumerRequest` pattern.
-- Implement one upstream subscription per QueryNode/vchannel.
+- Implement one upstream PChannel stream with multiplexed vchannel
+  subscriptions.
 - Drain TransformLog entries after `start_after_time_tick` from chunks and the
   open buffer, emit caught-up, then continue draining future appends.
 - Store received entries in a local vchannel buffer.

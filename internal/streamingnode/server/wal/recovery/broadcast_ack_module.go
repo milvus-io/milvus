@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 type dataFrontierProvider struct {
@@ -50,7 +50,8 @@ type broadcastAckModule struct {
 	runtime      moduleapi.Runtime
 	acked        *atomic.Uint64
 	mode         moduleMode
-	lastAckTask  scheduler.TaskHandle
+	lastAckTask  *broadcastAckTask
+	ack          func(context.Context, message.ImmutableMessage) error
 }
 
 func newBroadcastAckModule(
@@ -64,6 +65,9 @@ func newBroadcastAckModule(
 		runtime:      runtime,
 		acked:        atomic.NewUint64(0),
 		mode:         moduleModeMetaOnly,
+		ack: func(ctx context.Context, msg message.ImmutableMessage) error {
+			return streaming.WAL().Broadcast().Ack(ctx, msg)
+		},
 	}
 }
 
@@ -81,13 +85,10 @@ func (m *broadcastAckModule) ObserveMessage(ctx context.Context, msg message.Imm
 		timetick: msg.TimeTick(),
 		acked:    m.acked,
 	}
-	task := &broadcastAckTask{
-		module:       m,
-		msg:          msg,
-		precondition: scheduler.All(scheduler.After(m.lastAckTask), m.buildPrecondition(msg)),
-	}
+	task := m.newTask(msg)
 	if m.runtime.Scheduler != nil {
-		m.lastAckTask = m.runtime.Scheduler.Submit(task)
+		m.lastAckTask = task
+		m.runtime.Scheduler.Submit(task)
 	}
 	return moduleapi.ObserveResult{Data: barrier}
 }
@@ -101,40 +102,48 @@ func (m *broadcastAckModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
 	return nil
 }
 
-func (m *broadcastAckModule) buildPrecondition(msg message.ImmutableMessage) scheduler.Precondition {
+func (m *broadcastAckModule) newTask(msg message.ImmutableMessage) *broadcastAckTask {
+	return &broadcastAckTask{
+		module:   m,
+		msg:      msg,
+		previous: m.lastAckTask,
+		frontier: m.buildFrontier(msg),
+	}
+}
+
+func (m *broadcastAckModule) buildFrontier(msg message.ImmutableMessage) walcheckpoint.Barrier {
 	switch msg.MessageType() {
 	case message.MessageTypeDropCollection:
-		return m.vchannelPrecondition(msg.TimeTick(), msg.VChannel(), moduleapi.DataProgressMaterialized)
+		return m.vchannelFrontier(msg.VChannel(), moduleapi.DataProgressMaterialized)
 	case message.MessageTypeTruncateCollection:
-		return m.vchannelPrecondition(msg.TimeTick(), msg.VChannel(), moduleapi.DataProgressDurable)
+		return m.vchannelFrontier(msg.VChannel(), moduleapi.DataProgressDurable)
 	case message.MessageTypeDropPartition:
 		drop := message.MustAsImmutableDropPartitionMessageV1(msg)
 		header := drop.Header()
-		return m.partitionPrecondition(drop.TimeTick(), drop.VChannel(), header.GetCollectionId(), header.GetPartitionId(), moduleapi.DataProgressDurable)
+		return m.partitionFrontier(drop.VChannel(), header.GetCollectionId(), header.GetPartitionId(), moduleapi.DataProgressDurable)
 	case message.MessageTypeManualFlush:
-		return m.vchannelPrecondition(msg.TimeTick(), msg.VChannel(), moduleapi.DataProgressMaterialized)
+		return m.vchannelFrontier(msg.VChannel(), moduleapi.DataProgressMaterialized)
 	case message.MessageTypeFlushAll:
-		return m.allPrecondition(msg.TimeTick(), moduleapi.DataProgressMaterialized)
+		return m.allFrontier(moduleapi.DataProgressMaterialized)
 	case message.MessageTypeAlterCollection:
 		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
 		if messageutil.IsSchemaChange(alter.Header()) {
-			return m.vchannelPrecondition(alter.TimeTick(), alter.VChannel(), moduleapi.DataProgressDurable)
+			return m.vchannelFrontier(alter.VChannel(), moduleapi.DataProgressDurable)
 		}
 	case message.MessageTypeAlterWAL:
-		return m.allPrecondition(msg.TimeTick(), moduleapi.DataProgressDurable)
+		return m.allFrontier(moduleapi.DataProgressDurable)
 	default:
 	}
-	return scheduler.AlwaysReady{}
+	return nil
 }
 
-func (m *broadcastAckModule) partitionPrecondition(
-	timetick uint64,
+func (m *broadcastAckModule) partitionFrontier(
 	vchannel string,
 	collectionID int64,
 	partitionID int64,
 	kind moduleapi.DataProgressKind,
-) scheduler.Precondition {
-	return m.frontierPrecondition(timetick, moduleapi.Scope{
+) walcheckpoint.Barrier {
+	return m.frontier(moduleapi.Scope{
 		Type:         moduleapi.ScopePartition,
 		Kind:         kind,
 		VChannel:     vchannel,
@@ -143,15 +152,15 @@ func (m *broadcastAckModule) partitionPrecondition(
 	})
 }
 
-func (m *broadcastAckModule) allPrecondition(timetick uint64, kind moduleapi.DataProgressKind) scheduler.Precondition {
-	return m.frontierPrecondition(timetick, moduleapi.Scope{
+func (m *broadcastAckModule) allFrontier(kind moduleapi.DataProgressKind) walcheckpoint.Barrier {
+	return m.frontier(moduleapi.Scope{
 		Type: moduleapi.ScopeAll,
 		Kind: kind,
 	})
 }
 
-func (m *broadcastAckModule) vchannelPrecondition(timetick uint64, vchannel string, kind moduleapi.DataProgressKind) scheduler.Precondition {
-	return m.frontierPrecondition(timetick, moduleapi.Scope{
+func (m *broadcastAckModule) vchannelFrontier(vchannel string, kind moduleapi.DataProgressKind) walcheckpoint.Barrier {
+	return m.frontier(moduleapi.Scope{
 		Type:     moduleapi.ScopeVChannel,
 		Kind:     kind,
 		VChannel: vchannel,
@@ -170,17 +179,11 @@ func (m *broadcastAckModule) markAcked(timetick uint64) {
 	}
 }
 
-func (m *broadcastAckModule) frontierPrecondition(
-	timetick uint64,
-	scope moduleapi.Scope,
-) scheduler.Precondition {
+func (m *broadcastAckModule) frontier(scope moduleapi.Scope) walcheckpoint.Barrier {
 	if m.frontierView == nil {
-		return scheduler.AlwaysReady{}
+		return nil
 	}
-	viewFrontier := m.frontierView.DataFrontier(scope)
-	return scheduler.PreconditionFunc(func() bool {
-		return viewFrontier == nil || viewFrontier.TimeTick() >= timetick
-	})
+	return m.frontierView.DataFrontier(scope)
 }
 
 type broadcastAckBarrier struct {
@@ -196,21 +199,26 @@ func (b *broadcastAckBarrier) TimeTick() uint64 {
 }
 
 type broadcastAckTask struct {
-	module       *broadcastAckModule
-	msg          message.ImmutableMessage
-	precondition scheduler.Precondition
+	module   *broadcastAckModule
+	msg      message.ImmutableMessage
+	previous *broadcastAckTask
+	frontier walcheckpoint.Barrier
+	done     atomic.Bool
 }
 
-func (t *broadcastAckTask) Name() string {
-	return "broadcast-ack"
+func (t *broadcastAckTask) Done() bool {
+	return t.done.Load()
 }
 
-func (t *broadcastAckTask) Precondition() scheduler.Precondition {
-	return t.precondition
-}
-
-func (t *broadcastAckTask) Run(ctx context.Context) error {
-	if err := streaming.WAL().Broadcast().Ack(ctx, t.msg); err != nil {
+func (t *broadcastAckTask) Execute(ctx context.Context) error {
+	if t.previous != nil && !t.previous.Done() {
+		return nodescheduler.ErrDelay
+	}
+	if t.frontier != nil && t.frontier.TimeTick() < t.msg.TimeTick() {
+		return nodescheduler.ErrDelay
+	}
+	defer t.done.Store(true)
+	if err := t.module.ack(ctx, t.msg); err != nil {
 		return err
 	}
 	t.module.markAcked(t.msg.TimeTick())
@@ -220,5 +228,8 @@ func (t *broadcastAckTask) Run(ctx context.Context) error {
 	return nil
 }
 
-var _ moduleapi.Module = (*broadcastAckModule)(nil)
-var _ walcheckpoint.Barrier = (*broadcastAckBarrier)(nil)
+var (
+	_ moduleapi.Module      = (*broadcastAckModule)(nil)
+	_ walcheckpoint.Barrier = (*broadcastAckBarrier)(nil)
+	_ nodescheduler.Task    = (*broadcastAckTask)(nil)
+)

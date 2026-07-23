@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
@@ -20,7 +21,8 @@ var (
 func newSealWorker(statsManager *StatsManager) *sealWorker {
 	w := &sealWorker{
 		statsManager:            statsManager,
-		sealNotifier:            make(chan sealSegmentIDWithPolicy, 100),
+		sealNotifier:            make(chan struct{}, 1),
+		pendingSeals:            make(map[int64]policy.SealPolicy),
 		growingBytesNotifier:    syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 100),
 		timePolicyCheckInterval: defaultSealWorkerTimerInterval,
 	}
@@ -31,20 +33,30 @@ func newSealWorker(statsManager *StatsManager) *sealWorker {
 type sealWorker struct {
 	mlog.Binder
 	statsManager            *StatsManager // reference to the stats manager.
-	sealNotifier            chan sealSegmentIDWithPolicy
+	sealMu                  sync.Mutex
+	sealNotifier            chan struct{}
+	pendingSeals            map[int64]policy.SealPolicy
 	growingBytesNotifier    *syncutil.CooldownNotifier[uint64]
 	timePolicyCheckInterval time.Duration
 }
 
 // NotifySealSegment is used to notify the seal worker to seal the segment.
 func (m *sealWorker) NotifySealSegment(segmentID int64, sealPolicy policy.SealPolicy) {
-	// Keep notification bounded and non-blocking. Capacity and binlog policies
-	// are retriggered by later allocation or sync events, with time policies as
-	// a backstop for inactive segments.
+	m.sealMu.Lock()
+	m.pendingSeals[segmentID] = sealPolicy
+	m.sealMu.Unlock()
 	select {
-	case m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}:
+	case m.sealNotifier <- struct{}{}:
 	default:
 	}
+}
+
+func (m *sealWorker) takePendingSeals() map[int64]policy.SealPolicy {
+	m.sealMu.Lock()
+	pending := m.pendingSeals
+	m.pendingSeals = make(map[int64]policy.SealPolicy)
+	m.sealMu.Unlock()
+	return pending
 }
 
 // NotifyGrowingBytes is used to notify the seal worker to seal the segment when the total size exceeds the threshold.
@@ -78,9 +90,10 @@ func (m *sealWorker) loop() {
 
 	for {
 		select {
-		case targetSegment := <-m.sealNotifier:
-			// Notify to seal the segment.
-			m.asyncMustSealSegment(targetSegment.segmentID, targetSegment.sealPolicy)
+		case <-m.sealNotifier:
+			for segmentID, sealPolicy := range m.takePendingSeals() {
+				m.asyncMustSealSegment(segmentID, sealPolicy)
+			}
 		case <-timer.C:
 			m.statsManager.updateConfig()
 			m.notifyToSealSegmentWithTimePolicy()

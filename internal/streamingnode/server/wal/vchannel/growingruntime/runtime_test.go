@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -122,6 +124,55 @@ func newTestRecoveryBarrierMessage(t *testing.T, timetick uint64) message.Immuta
 	return mutable.WithTimeTick(timetick).
 		WithLastConfirmed(rmq.NewRmqID(int64(timetick))).
 		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
+}
+
+func newTestTransformDeleteMessage(t *testing.T, vchannel string, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	mutable := message.NewDeleteMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).
+		WithBody(&msgpb.DeleteRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
+			CollectionID: 1,
+			PartitionID:  10,
+			PrimaryKeys:  &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+			Timestamps:   []uint64{timetick},
+		}).
+		MustBuildMutable()
+	return mutable.WithTimeTick(timetick).
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick))).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
+}
+
+func TestDrainDeleteReplayUsesSharedTransformLogStream(t *testing.T) {
+	ctx := context.Background()
+	manager := transformlog.NewStreamManager("p1")
+	for _, vchannel := range []string{"v1", "v2"} {
+		log := transformlog.New(transformlog.Config{VChannel: vchannel})
+		log.SwitchIntoMetaAndData()
+		require.NotNil(t, log.ObserveMessage(ctx, newTestTransformDeleteMessage(t, vchannel, 10)).Data)
+		manager.Register(vchannel, log)
+	}
+	stream, err := manager.AcquireStream(ctx, "p1")
+	require.NoError(t, err)
+	defer stream.Close()
+
+	for _, vchannel := range []string{"v1", "v2"} {
+		entries, err := drainDeleteReplay(ctx, walview.VChannelWALView{
+			VChannel:                       vchannel,
+			BaseTransformTimeTick:          10,
+			TransformLogStream:             stream,
+			DeleteReplayStartAfterTimeTick: 0,
+		})
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		require.Equal(t, uint64(10), entries[0].GetTimeTick())
+		select {
+		case <-stream.Done():
+			t.Fatal("shared transform log stream was closed by vchannel replay")
+		default:
+		}
+	}
 }
 
 func TestRecoveryBarrierAdvancesBothRuntimeFrontiers(t *testing.T) {

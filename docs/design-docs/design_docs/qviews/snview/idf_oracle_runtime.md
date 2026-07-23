@@ -37,12 +37,12 @@ catchup, and the transition to `Ready`.
 |---|---|---|
 | `VChannelRecoveryModule` | VChannel-local owner of QueryView references. It creates the vchannel `QueryRuntime`, waits for runtime initialization on `Acquire`, and advances the runtime by oldest active QueryView DataVersion. | It does not compute BM25 stats diffs and does not evict IDF internal segment stats. |
 | `QueryRuntime` | VChannel-level singleton runtime. Owns one live-event buffer and one consumer, calls `IDFOracleRuntime.Prepare`, forwards live events, and calls `IDFOracleRuntime.Advance`. | It does not compute BM25 stats or fetch sealed resources directly. |
-| `IDFOracleRuntime` | QueryRuntime module that owns the vchannel singleton oracle, growing BM25 stats store, sealed contribution leases, current DataVersion, and advance worker. | It does not own the vchannel live-event buffer, expose external truncation, or own QueryView references. |
+| `IDFOracleRuntime` | QueryRuntime module that owns the vchannel singleton oracle, growing BM25 stats store, sealed contribution leases, current DataVersion, and coalesced advance-task state. | It does not own the vchannel live-event buffer, expose external truncation, or own QueryView references. |
 | `VChannelWALView` | Provides the initial schema, settings, segment snapshot, historical insert input, and no-gap live resource event stream. | Its capture and no-gap contract are defined in [StreamingNode VChannel WAL View Design](../../wal/streamingnode_vchannel_wal_view.md). |
 | `SealedBM25ResourceProvider` | Calls DataCoord to fetch the complete sealed BM25 resource set for a target DataVersion. | It does not cache local files or merge oracle stats. |
 | `SealedBM25SegmentCache` | Downloads, parses, reuses, and leases sealed BM25 stats. | It does not decide DataVersion advancement or contribution membership. |
 | `GrowingBM25StatsStore` | Maintains local BM25 stats for growing segments generated from snapshot and live WAL events, plus flushed/sealed metadata. | It does not fetch sealed resources from QueryCoord. |
-| `IDFAdvanceWorker` | Serializes asynchronous oracle advancement requests and coalesces them to the newest allowed requested DataVersion. | It is internal to `IDFOracleRuntime` and is not the resource build scheduler. |
+| `IDFAdvanceTask` | Runs on the node-level `NodeScheduler`, serializes asynchronous oracle advancement requests, and coalesces them to the newest allowed requested DataVersion. | One oracle has at most one queued or running task and owns no dedicated advance goroutine. |
 
 ## 3. Component Relationships And Invariants
 
@@ -94,7 +94,7 @@ QueryRuntime
         |
         | IDFOracleRuntime.Advance(oldestDataVersion)
         v
-IDFAdvanceWorker
+NodeScheduler / IDFAdvanceTask
 ```
 
 ### 3.2 Runtime State
@@ -111,7 +111,8 @@ IDFOracleRuntime
   growingStore GrowingBM25StatsStore
   sealedCache SealedBM25SegmentCache
   provider SealedBM25ResourceProvider
-  advanceWorker
+  pendingDataVersion
+  advanceTaskHandle
   close/cancel
 ```
 
@@ -159,7 +160,8 @@ BM25 stats can be removed.
     complete successfully.
 12. `Advance(oldestDataVersion)` may enqueue asynchronous IDF advancement, but
     QueryView activation does not wait for the advancement to finish.
-13. IDF advancement is vchannel-local, serial, asynchronous, and monotonic.
+13. IDF advancement is vchannel-local, serial, asynchronous, monotonic, and
+    executed by the node-level `NodeScheduler`.
 14. BM25 stats diff is computed outside the commit path.
 15. The current oracle is changed only by one atomic diff commit.
 16. The runtime owns cleanup of obsolete growing stats, sealed leases, and
@@ -272,18 +274,22 @@ The store records BM25 stats for local growing segments and records
 `sealedAtDataVersion` for flushed growing segments. It is internal to
 `IDFOracleRuntime`.
 
-### 4.6 IDFAdvanceWorker
+### 4.6 IDFAdvanceTask
 
 ```go
-type IDFAdvanceWorker interface {
-    Request(target qviews.DataVersion)
-    Close()
+type IDFAdvanceTask interface {
+    Execute(ctx context.Context) error
 }
 ```
 
-The worker serializes advancement. Multiple requests may be coalesced as long as
-the worker never commits an oracle newer than the latest allowed
-`oldestDataVersion` observed from the resource manager.
+`IDFOracleRuntime.Advance` records the greatest pending target and submits at
+most one task to the node-level scheduler. Multiple requests may be coalesced as
+long as the task never commits an oracle newer than the latest allowed
+`oldestDataVersion` observed from the resource manager. If a newer target
+arrives during execution, or a revision conflict requires recomputation, the
+task returns `nodescheduler.ErrDelay` and moves to the scheduler queue tail.
+
+There is no dedicated goroutine, notification channel, or worker per vchannel.
 
 ## 5. Actual Behavior
 
@@ -332,10 +338,11 @@ QueryView references move forward
   -> VChannelRecoveryModule computes oldestDataVersion
   -> QueryRuntime.Advance(oldestDataVersion)
   -> IDFOracleRuntime.Advance(oldestDataVersion)
-  -> IDFAdvanceWorker.Request(oldestDataVersion)
+  -> coalesce pending DataVersion
+  -> NodeScheduler.Submit(IDFAdvanceTask), at most once per oracle
 ```
 
-If the target is newer than the current oracle DataVersion, the worker computes
+If the target is newer than the current oracle DataVersion, the task computes
 and commits a BM25 diff asynchronously. QueryView activation does not wait for
 this background handoff.
 
@@ -351,7 +358,7 @@ positive contributions:
   growing segment stats still not covered by the target sealed set
 ```
 
-The worker computes all stats and leases outside the commit path. Commit is one
+The task computes all stats and leases outside the commit path. Commit is one
 atomic update to the current oracle.
 
 ### 5.5 Cleanup
@@ -364,6 +371,7 @@ operation.
 
 ### 5.6 Close
 
-`Close` stops the advance worker, releases current sealed leases, releases
-in-flight advance resources, closes the growing stats store, and makes the
-oracle unavailable. It is called only by `QueryRuntime.Close`.
+`Close` marks the oracle closed, cancels and waits for its scheduled task,
+releases current sealed leases and in-flight advance resources, closes the
+growing stats store, and makes the oracle unavailable. It is called only by
+`QueryRuntime.Close`.

@@ -35,14 +35,12 @@ const (
 // The decision rules, in order:
 //
 //  1. Desired absent + current exists     → Release
-//  2. Desired present + only Preparing    → None (avoid stacking)
-//  3. Desired present + no current view   → Must (initial load / post-Unrecoverable)
-//  4. Both absent                         → None
-//  5. Current DataVersion < DataView DV   → Must (data changed)
-//  6. Current view references an unavailable node → Must (node lost)
-//  7. LoadInfoVersion differs            → Must
-//  8. Already has a Preparing view        → None (avoid stacking)
-//  9. Otherwise                           → MayOptimize
+//  2. Desired present + no Up view        → Must unless Preparing exists
+//  3. Already has a Preparing view        → None (avoid stacking)
+//  4. Current DataVersion < DataView DV   → Must (data changed)
+//  5. Current view references an unavailable node → Must (node lost)
+//  6. LoadInfoVersion differs            → Must
+//  7. Otherwise                           → MayOptimize
 func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)
 	stats := snap.ShardStatsMap()[shardID]
@@ -66,24 +64,26 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 		return actionMust
 	}
 
-	// 3. DataVersion advanced?
+	// 3. Already have a Preparing view? Skip this cycle even if a newer
+	// DataVersion or load config has arrived. The next reconcile after the
+	// in-flight view reaches Up will pick up the latest snapshot.
+	if hasPreparing {
+		return actionNone
+	}
+
+	// 4. DataVersion advanced?
 	if dataViewVersionAdvanced(snap, desired, stats) {
 		return actionMust
 	}
 
-	// 4. Any node in the current Up view is unavailable?
+	// 5. Any node in the current Up view is unavailable?
 	if hasUnavailableNode(stats, snap.Nodes) {
 		return actionMust
 	}
 
-	// 5. LoadInfo differs between desired and current?
+	// 6. LoadInfo differs between desired and current?
 	if loadInfoDiffer(snap, desired, stats) {
 		return actionMust
-	}
-
-	// 6. Already have a Preparing view? skip this cycle.
-	if hasPreparing {
-		return actionNone
 	}
 
 	// 7. Steady-state — candidate for balance optimization.

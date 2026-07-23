@@ -61,12 +61,6 @@ type deletePressure struct {
 	bytes uint64
 }
 
-// sealSegmentIDWithPolicy is the struct that contains the segment ID and the seal policy.
-type sealSegmentIDWithPolicy struct {
-	segmentID  int64
-	sealPolicy policy.SealPolicy
-}
-
 // NewStatsManager creates a new stats manager.
 func NewStatsManager() *StatsManager {
 	cfg := newStatsConfig()

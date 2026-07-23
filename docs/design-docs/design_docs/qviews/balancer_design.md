@@ -300,10 +300,9 @@ WAL ack of collection-vchannel DropLoadConfig broadcast
 
 `AlterLoadConfig` and `DropLoadConfig` are broadcast to all vchannels of the collection,
 not only to CChannel. Coord still uses the broadcast completion callback to update
-`CollectionLoadManager`; StreamingNode uses each vchannel-targeted WAL message to update
-`VChannelMeta.load_config` and prepare or release local latest resources. On one
-pchannel, a collection has at most one vchannel, so the SN consumer mutates exactly the
-vchannel carried by the message.
+`CollectionLoadManager`. StreamingNode does not persist a vchannel-local load config;
+QueryView metadata identifies the versioned load info used when the local state machine
+acquires resources.
 
 **Release semantics (Option A)**: `ReleaseCollection` immediately removes the LoadConfig and triggers Balancer. Orphan views (view exists but no config) are naturally detected by reconcile Phase 1 and released via `RequestRelease`. No "releasing" state needed. Crash recovery is handled uniformly by reconcile.
 

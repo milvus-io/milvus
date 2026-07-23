@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/gc"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/symbolizer" // support symbolizer and crash dump
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -495,6 +496,10 @@ func (mr *MilvusRoles) Run() {
 
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
+	if mr.EnableQueryNode || mr.EnableStreamingNode {
+		nodescheduler.Init(paramtable.Get().CommonCfg.NodeSchedulerMaxConcurrency.GetAsInt())
+		defer nodescheduler.Close()
+	}
 
 	if paramtable.Get().CommonCfg.GCEnabled.GetAsBool() {
 		if paramtable.Get().CommonCfg.GCHelperEnabled.GetAsBool() {

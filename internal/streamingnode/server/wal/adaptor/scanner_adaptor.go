@@ -388,13 +388,9 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			}
 			s.pendingQueue.Add(msgs)
 		}
-		if msg.IsPersisted() || s.pendingQueue.Len() == 0 {
-			// If the ts message is persisted, it must can be seen by the consumer.
-			//
-			// Otherwise if there's no new message incoming and there's no pending message in the queue.
-			// Add current timetick message into pending queue to make timetick push forward.
-			// TODO: current milvus can only run on timetick pushing,
-			// after qview is applied, those trival time tick message can be erased.
+		// TimeTick only advances the confirmation frontier and is not delivered to consumers.
+		// Other confirmation barriers keep their existing delivery behavior.
+		if msg.MessageType() != message.MessageTypeTimeTick {
 			s.pendingQueue.Add([]message.ImmutableMessage{msg})
 		}
 		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())

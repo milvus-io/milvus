@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -53,6 +54,7 @@ var (
 type ShardManagerRecoverParam struct {
 	ChannelInfo            types.PChannelInfo
 	WAL                    *syncutil.Future[wal.WAL]
+	Scheduler              nodescheduler.Scheduler
 	InitialRecoverSnapshot *recovery.RecoverySnapshot
 	TxnManager             TxnManager
 }
@@ -85,6 +87,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				ctx,
 				logger,
 				param.WAL,
+				param.Scheduler,
 				param.ChannelInfo,
 				collectionInfo.VChannel,
 				collectionID,
@@ -102,6 +105,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		ctx:               ctx,
 		cancel:            cancel,
 		wal:               param.WAL,
+		scheduler:         param.Scheduler,
 		pchannel:          param.ChannelInfo,
 		partitionManagers: managers,
 		collections:       collections,
@@ -208,6 +212,7 @@ type shardManagerImpl struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	wal               *syncutil.Future[wal.WAL]
+	scheduler         nodescheduler.Scheduler
 	pchannel          types.PChannelInfo
 	partitionManagers map[PartitionUniqueKey]*partitionManager // map partitionID to partition manager
 	collections       map[int64]*CollectionInfo                // map collectionID to collectionInfo

@@ -26,8 +26,9 @@ type VChannelWALView struct {
 	IndexInfos      []*indexpb.IndexInfo
 	Schema          *schemapb.CollectionSchema
 
-	SegmentSnapshot VisibleSegmentSnapshot
-	DeleteReplay    wal.TransformLogScanner
+	SegmentSnapshot                VisibleSegmentSnapshot
+	TransformLogStream             wal.TransformLogStream
+	DeleteReplayStartAfterTimeTick uint64
 }
 
 // VisibleSegmentSnapshot is the historical growing-side insert state captured at a WAL observe point.

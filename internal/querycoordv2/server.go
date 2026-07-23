@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	snmanagerclient "github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -127,9 +128,9 @@ type Server struct {
 
 	metricsRequest *metricsinfo.MetricsRequest
 
-	// for balance streaming node request
-	// now only used for run analyzer and validate analyzer
-	nodeIdx atomic.Uint32
+	// for balancing requests across streaming nodes
+	nodeIdx              atomic.Uint32
+	streamingNodeManager snmanagerclient.ManagerClient
 
 	// load config watcher
 	loadConfigWatcher *LoadConfigWatcher
@@ -338,6 +339,10 @@ func (s *Server) initQueryCoord() error {
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 	mlog.Info(s.ctx, "init proxy manager done")
 
+	if s.streamingNodeManager == nil {
+		s.streamingNodeManager = snmanagerclient.NewManagerClient(s.etcdCli)
+	}
+
 	// Init global assign policy factory
 	mlog.Info(s.ctx, "init global assign policy factory")
 	assign.InitGlobalAssignPolicyFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
@@ -542,6 +547,9 @@ func (s *Server) Stop() error {
 	if s.qviewsRuntime != nil {
 		mlog.Info(s.ctx, "stop query view runtime...")
 		s.qviewsRuntime.stop()
+	}
+	if s.streamingNodeManager != nil {
+		s.streamingNodeManager.Close()
 	}
 
 	if s.jobScheduler != nil {

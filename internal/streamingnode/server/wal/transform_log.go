@@ -17,19 +17,6 @@ var (
 // TransformLogAccesser is the WAL entry for transform log event streams.
 type TransformLogAccesser = TransformLogStreamManager
 
-type TransformLogScanner interface {
-	Name() string
-	Chan() <-chan TransformLogEvent
-	Error() error
-	Done() <-chan struct{}
-	Close() error
-}
-
-type TransformLogEvent struct {
-	Entry  *streamingpb.TransformLogEntry
-	SyncUp *TransformLogSyncUp
-}
-
 type TransformLogSyncUp struct {
 	TimeTick uint64
 }
@@ -82,42 +69,4 @@ func NewTransformLogErrorAccesser(err error) TransformLogAccesser {
 
 func (a transformLogErrorAccesser) AcquireStream(context.Context, string) (TransformLogStream, error) {
 	return nil, a.err
-}
-
-type transformLogErrorScanner struct {
-	name string
-	done chan struct{}
-	err  error
-}
-
-func NewTransformLogErrorScanner(name string, err error) TransformLogScanner {
-	done := make(chan struct{})
-	close(done)
-	return transformLogErrorScanner{name: name, done: done, err: err}
-}
-
-func NewEmptyTransformLogScanner(name string) TransformLogScanner {
-	return NewTransformLogErrorScanner(name, nil)
-}
-
-func (s transformLogErrorScanner) Name() string {
-	return s.name
-}
-
-func (s transformLogErrorScanner) Chan() <-chan TransformLogEvent {
-	ch := make(chan TransformLogEvent)
-	close(ch)
-	return ch
-}
-
-func (s transformLogErrorScanner) Error() error {
-	return s.err
-}
-
-func (s transformLogErrorScanner) Done() <-chan struct{} {
-	return s.done
-}
-
-func (s transformLogErrorScanner) Close() error {
-	return s.err
 }

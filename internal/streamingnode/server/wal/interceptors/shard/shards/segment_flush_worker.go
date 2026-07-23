@@ -2,15 +2,14 @@ package shards
 
 import (
 	"context"
-	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 var errDelayFlush = errors.New("delay flush")
@@ -39,7 +38,7 @@ func (m *partitionManager) asyncFlushSegment(
 			wal:          l,
 		}
 		w.SetLogger(m.Logger())
-		w.do()
+		m.scheduler.Submit(w)
 	}()
 }
 
@@ -54,65 +53,45 @@ type segmentFlushWorker struct {
 	wal          wal.WAL
 }
 
-// do is the main loop of the segment flush worker.
-func (w *segmentFlushWorker) do() {
-	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 10 * time.Millisecond
-	backoff.MaxInterval = 1 * time.Second
-	backoff.MaxElapsedTime = 0
-	backoff.Reset()
-
-	// waitForTxnManagerRecoverReady waits for the txn manager to be ready for recovery.
-	// The segment assignment manager lost the txnSem for the recovered txn message,
-	// So the seal worker should wait for all the recovered txn to be done.
-	// Otherwise, the flush message may be sent into wal before the txn is done.
-	// Break the wal consistency: All insert message is written into wal before the flush message.
-	if err := w.waitForTxnManagerRecoverDone(); err != nil {
-		w.Logger().Error(w.ctx, "failed to wait for txn manager recover ready", mlog.Err(err))
-		return
+func (w *segmentFlushWorker) Execute(schedulerCtx context.Context) error {
+	ctx, cancel := mergeSegmentTaskContext(schedulerCtx, w.ctx)
+	defer cancel()
+	if segmentTaskStopped(ctx, w.wal) {
+		return nil
 	}
-
-	for {
-		err := w.doOnce()
-		if err == nil {
-			return
-		}
-		if e := status.AsStreamingError(err); e.IsUnrecoverable() {
-			w.Logger().Warn(w.ctx, "flush growing segement with unrecoverable error, stop retrying", mlog.Err(err))
-			return
-		}
-
-		nextInterval := backoff.NextBackOff()
-		w.Logger().Info(w.ctx, "failed to flush new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
-		select {
-		case <-w.ctx.Done():
-			w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
-			return
-		case <-w.wal.Available():
-			// wal is unavailable, stop the worker.
-			w.Logger().Warn(w.ctx, "wal is unavailable, stop flush segment")
-			return
-		case <-time.After(backoff.NextBackOff()):
-		}
+	if !txnManagerRecovered(w.txnManager) {
+		return nodescheduler.ErrDelay
 	}
+	if !w.checkIfReady() {
+		return nodescheduler.ErrDelay
+	}
+	if err := w.doOnceWithContext(ctx); err != nil {
+		if segmentTaskStopped(ctx, w.wal) {
+			return nil
+		}
+		if status.AsStreamingError(err).IsUnrecoverable() {
+			return err
+		}
+		return nodescheduler.ErrDelay
+	}
+	return nil
 }
 
-// waitForTxnManagerRecoverDone waits for the txn manager to be recovery done.
-func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
+func txnManagerRecovered(txnManager TxnManager) bool {
 	select {
-	case <-w.txnManager.RecoverDone():
-		// txn manager is ready, continue to do the flush.
-		return nil
-	case <-w.ctx.Done():
-		w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
-		return w.ctx.Err()
-	case <-w.wal.Available():
-		return status.NewOnShutdownError("wal is unavailable")
+	case <-txnManager.RecoverDone():
+		return true
+	default:
+		return false
 	}
 }
 
 // doOnce performs the flush operation once.
 func (w *segmentFlushWorker) doOnce() error {
+	return w.doOnceWithContext(w.ctx)
+}
+
+func (w *segmentFlushWorker) doOnceWithContext(ctx context.Context) error {
 	if !w.checkIfReady() {
 		return errDelayFlush
 	}
@@ -129,9 +108,9 @@ func (w *segmentFlushWorker) doOnce() error {
 		}).
 		WithBody(&message.FlushMessageBody{}).MustBuildMutable()
 
-	result, err := w.wal.Append(w.ctx, msg)
+	result, err := w.wal.Append(ctx, msg)
 	if err != nil {
-		w.Logger().Error(w.ctx, "failed to append flush message", mlog.FieldMessage(msg), mlog.Err(err))
+		w.Logger().Error(ctx, "failed to append flush message", mlog.FieldMessage(msg), mlog.Err(err))
 		return err
 	}
 	policy := w.segment.SealPolicy()
@@ -145,6 +124,31 @@ func (w *segmentFlushWorker) doOnce() error {
 		mlog.Uint64("timetick", result.TimeTick))
 	return nil
 }
+
+func mergeSegmentTaskContext(schedulerCtx, taskCtx context.Context) (context.Context, context.CancelFunc) {
+	if taskCtx == nil {
+		taskCtx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(taskCtx)
+	stop := context.AfterFunc(schedulerCtx, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+func segmentTaskStopped(ctx context.Context, wal wal.WAL) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	case <-wal.Available():
+		return true
+	default:
+		return false
+	}
+}
+
+var _ nodescheduler.Task = (*segmentFlushWorker)(nil)
 
 // checkIfReady checks if the segments are ready to be flushed.
 func (w *segmentFlushWorker) checkIfReady() bool {

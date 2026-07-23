@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 func TestVChannelRecoveryModuleObservesOnlyItsVChannel(t *testing.T) {
@@ -78,13 +78,12 @@ func TestVChannelRecoveryModuleRuntimeCreatedSegmentInheritsMetaAndData(t *testi
 
 	require.NotNil(t, result.Data)
 	require.Len(t, scheduler.tasks, 1)
-	assert.Equal(t, "growing-ensure-growing-segment", scheduler.tasks[0].Name())
 	require.NotNil(t, module.segments[10])
 
 	result = module.ObserveMessage(ctx, newTestManualFlushMessage(t, "v1", 30))
 
 	require.NotNil(t, result.Data)
-	assert.Contains(t, scheduler.taskNames(), "growing-commit-l1-segment")
+	assert.Len(t, scheduler.tasks, 2)
 }
 
 func newTestModule(t *testing.T, pchannel string, vchannel string) *VChannelRecoveryModule {
@@ -111,7 +110,6 @@ func newTestModule(t *testing.T, pchannel string, vchannel string) *VChannelReco
 					},
 				},
 			},
-			LoadConfig: &streamingpb.VChannelLoadConfig{},
 		},
 		TransformLogMeta: &streamingpb.VChannelTransformLogMeta{},
 		Runtime:          moduleapi.Runtime{},
@@ -168,31 +166,19 @@ func newTestDeleteMessage(t *testing.T, vchannel string, timetick uint64) messag
 }
 
 type recordingScheduler struct {
-	tasks []scheduler.Task
+	tasks []nodescheduler.Task
 }
 
-func (s *recordingScheduler) Submit(task scheduler.Task) scheduler.TaskHandle {
+func (s *recordingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
 	s.tasks = append(s.tasks, task)
-	return taskHandle{done: true}
+	return taskHandle{}
 }
 
-func (s *recordingScheduler) Notify() {}
+type taskHandle struct{}
 
-func (s *recordingScheduler) taskNames() []string {
-	names := make([]string, 0, len(s.tasks))
-	for _, task := range s.tasks {
-		names = append(names, task.Name())
-	}
-	return names
-}
+func (taskHandle) Cancel() {}
 
-type taskHandle struct {
-	done bool
-}
-
-func (h taskHandle) Done() bool {
-	return h.done
-}
+func (taskHandle) Wait(context.Context) error { return nil }
 
 func newTestRecoveryBarrierMessage(t *testing.T, timetick uint64) message.ImmutableMessage {
 	t.Helper()

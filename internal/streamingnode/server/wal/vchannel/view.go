@@ -84,7 +84,6 @@ type VChannelView struct {
 
 type WALViewSnapshot struct {
 	CollectionID int64
-	LoadConfig   *streamingpb.VChannelLoadConfig
 	Schema       *schemapb.CollectionSchema
 }
 
@@ -141,9 +140,6 @@ func (info *VChannelView) WALViewSnapshot() (WALViewSnapshot, bool) {
 func (info *VChannelView) buildWALViewSnapshotLocked() *WALViewSnapshot {
 	snapshot := &WALViewSnapshot{
 		CollectionID: info.meta.GetCollectionInfo().GetCollectionId(),
-	}
-	if loadConfig := info.meta.GetLoadConfig(); loadConfig != nil {
-		snapshot.LoadConfig = proto.Clone(loadConfig).(*streamingpb.VChannelLoadConfig)
 	}
 	if _, schema := info.GetSchemaLocked(0); schema != nil {
 		snapshot.Schema = proto.Clone(schema).(*schemapb.CollectionSchema)
@@ -537,12 +533,8 @@ func (info *VChannelView) ObserveAlterLoadConfigMessageV2(msg message.ImmutableA
 	if info.meta.GetCollectionInfo().GetCollectionId() != msg.Header().GetCollectionId() {
 		return emptyObserveResult()
 	}
-	info.meta.LoadConfig = &streamingpb.VChannelLoadConfig{
-		Header: proto.Clone(msg.Header()).(*message.AlterLoadConfigMessageHeader),
-	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
-	info.invalidateWALViewSnapshotLocked()
 	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
 }
 
@@ -558,10 +550,8 @@ func (info *VChannelView) ObserveDropLoadConfigMessageV2(msg message.ImmutableDr
 	if info.meta.GetCollectionInfo().GetCollectionId() != msg.Header().GetCollectionId() {
 		return emptyObserveResult()
 	}
-	info.meta.LoadConfig = nil
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
-	info.invalidateWALViewSnapshotLocked()
 	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
 }
 

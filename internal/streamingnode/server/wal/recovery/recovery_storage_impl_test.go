@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -21,10 +21,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 type testRecoveryModule struct {
-	result moduleapi.ObserveResult
+	result   moduleapi.ObserveResult
+	snapshot moduleapi.ModuleSnapshot
 }
 
 func (m *testRecoveryModule) Name() moduleapi.ModuleName {
@@ -36,7 +38,7 @@ func (m *testRecoveryModule) ObserveMessage(ctx context.Context, msg message.Imm
 }
 
 func (m *testRecoveryModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
-	return nil
+	return m.snapshot
 }
 
 func (m *testRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
@@ -88,6 +90,17 @@ type recordingRecoveryStreamBuilder struct {
 	param BuildRecoveryStreamParam
 }
 
+func newTestRecoveryStorage(t *testing.T, checkpoint *utility.WALCheckpoint) *recoveryStorageImpl {
+	t.Helper()
+	nodeScheduler := nodescheduler.New(4)
+	t.Cleanup(nodeScheduler.Close)
+	return newRecoveryStorage(
+		types.PChannelInfo{Name: "test-pchannel"},
+		checkpoint,
+		WithNodeScheduler(nodeScheduler),
+	)
+}
+
 func (b *recordingRecoveryStreamBuilder) WALName() message.WALName {
 	return message.WALNameTest
 }
@@ -135,7 +148,7 @@ func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
 			TimeTick:  2,
 		},
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 
@@ -156,7 +169,7 @@ func TestRecoveryStorageRegistersImmediateCheckpointForBarrierlessMessage(t *tes
 			TimeTick:  1,
 		},
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
@@ -191,12 +204,13 @@ func TestRecoveryStorageUsesVChannelRecoveryManagerForQueryResourcesAndTransform
 			TimeTick:  1,
 		},
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
-		PChannel: "test-pchannel",
+		PChannel:      "test-pchannel",
+		NodeScheduler: storage.nodeScheduler,
 		Runtime: moduleapi.Runtime{
 			Scheduler: storage.taskScheduler,
 			Notifier:  storage,
@@ -211,6 +225,54 @@ func TestRecoveryStorageUsesVChannelRecoveryManagerForQueryResourcesAndTransform
 	assert.Same(t, manager, storage.VChannelManager())
 }
 
+func TestRecoveryStorageSwitchModulesMergesModuleSnapshots(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+	}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	defer storage.metrics.Close()
+	defer storage.taskScheduler.Close()
+
+	storage.modules = []moduleapi.Module{
+		&testRecoveryModule{snapshot: moduleapi.CompositeModuleSnapshot{
+			&moduleapi.VChannelModuleSnapshot{VChannels: map[string]*streamingpb.VChannelMeta{
+				"v1": {Vchannel: "v1"},
+			}},
+			&moduleapi.SegmentModuleSnapshot{
+				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+					1: {SegmentId: 1, Vchannel: "v1"},
+				},
+				DataVersionSummaries: map[string]*streamingpb.SegmentDataVersionSummary{
+					"v1": {},
+				},
+			},
+		}},
+		&testRecoveryModule{snapshot: moduleapi.CompositeModuleSnapshot{
+			&moduleapi.VChannelModuleSnapshot{VChannels: map[string]*streamingpb.VChannelMeta{
+				"v2": {Vchannel: "v2"},
+			}},
+			&moduleapi.SegmentModuleSnapshot{
+				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+					2: {SegmentId: 2, Vchannel: "v2"},
+				},
+				DataVersionSummaries: map[string]*streamingpb.SegmentDataVersionSummary{
+					"v2": {},
+				},
+			},
+		}},
+	}
+
+	snapshot := storage.switchModulesIntoMetaAndData()
+
+	assert.Contains(t, snapshot.VChannels, "v1")
+	assert.Contains(t, snapshot.VChannels, "v2")
+	assert.Contains(t, snapshot.SegmentAssignments, int64(1))
+	assert.Contains(t, snapshot.SegmentAssignments, int64(2))
+	assert.Contains(t, snapshot.SegmentDataVersionSummaries, "v1")
+	assert.Contains(t, snapshot.SegmentDataVersionSummaries, "v2")
+}
+
 func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
@@ -220,7 +282,7 @@ func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T
 			TimeTick:  1,
 		},
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
@@ -255,7 +317,7 @@ func TestRecoveryStorageNotifyBarrierUpdatedDoesNotAdvanceDataCheckpointWithoutD
 			TimeTick:  50,
 		},
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 	storage.modules = []moduleapi.Module{&testRecoveryModule{}}
@@ -278,7 +340,7 @@ func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModule
 			TimeTick:  100,
 		},
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 	storage.modules = []moduleapi.Module{&notifyingDirtyModule{
@@ -348,7 +410,7 @@ func TestEnsureDataCheckpointInitializesLegacyCheckpoint(t *testing.T) {
 		MessageID: walimplstest.NewTestMessageID(10),
 		TimeTick:  100,
 	}
-	storage := newRecoveryStorage(types.PChannelInfo{Name: "test-pchannel"}, checkpoint)
+	storage := newTestRecoveryStorage(t, checkpoint)
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
 
@@ -389,6 +451,9 @@ func TestBroadcastAckModulePreconditionsFollowMessageFlow(t *testing.T) {
 		vchannel:  blockingBarrier,
 		all:       blockingBarrier,
 	}, moduleapi.Runtime{})
+	module.ack = func(context.Context, message.ImmutableMessage) error {
+		return nil
+	}
 
 	tests := []struct {
 		name  string
@@ -436,7 +501,13 @@ func TestBroadcastAckModulePreconditionsFollowMessageFlow(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.ready, module.buildPrecondition(test.msg).Ready())
+			task := module.newTask(test.msg)
+			err := task.Execute(context.Background())
+			if test.ready {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, nodescheduler.ErrDelay)
+			}
 		})
 	}
 }
@@ -445,6 +516,9 @@ func TestBroadcastAckModuleUsesMaterializedFrontierForSynchronousFlushAndDrop(t 
 	blockingBarrier := walcheckpoint.BarrierFunc(func() uint64 { return 9 })
 	view := &recordingFrontierView{barrier: blockingBarrier}
 	module := newBroadcastAckModule("test-pchannel", view, moduleapi.Runtime{})
+	module.ack = func(context.Context, message.ImmutableMessage) error {
+		return nil
+	}
 
 	tests := []struct {
 		name string
@@ -488,7 +562,7 @@ func TestBroadcastAckModuleUsesMaterializedFrontierForSynchronousFlushAndDrop(t 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			view.scopes = nil
-			assert.False(t, module.buildPrecondition(test.msg).Ready())
+			require.ErrorIs(t, module.newTask(test.msg).Execute(context.Background()), nodescheduler.ErrDelay)
 			require.Len(t, view.scopes, 1)
 			assert.Equal(t, test.kind, view.scopes[0].Kind)
 		})
@@ -518,7 +592,8 @@ func newAckPreconditionMessage(t *testing.T, builder interface{ MustBuildMutable
 
 func newBroadcastAckMessage(t *testing.T, builder interface {
 	MustBuildBroadcast() message.BroadcastMutableMessage
-}) message.ImmutableMessage {
+},
+) message.ImmutableMessage {
 	t.Helper()
 	msgs := builder.MustBuildBroadcast().
 		WithBroadcastID(1).

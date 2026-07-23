@@ -5,10 +5,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 type SnapshotBuilder struct{}
@@ -72,7 +70,7 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 			return context.Canceled
 		}
 	}
-	deleteEntries, err := drainDeleteReplay(ctx, view.DeleteReplay)
+	deleteEntries, err := drainDeleteReplay(ctx, view)
 	if err != nil {
 		return err
 	}
@@ -122,30 +120,4 @@ func validateWALViewSnapshot(view walview.VChannelWALView) error {
 		)
 	}
 	return nil
-}
-
-func drainDeleteReplay(ctx context.Context, scanner wal.TransformLogScanner) ([]*streamingpb.TransformLogEntry, error) {
-	if scanner == nil {
-		return nil, nil
-	}
-	entries := make([]*streamingpb.TransformLogEntry, 0)
-	for {
-		select {
-		case event, ok := <-scanner.Chan():
-			if !ok {
-				return entries, scanner.Close()
-			}
-			if event.Entry != nil {
-				entries = append(entries, event.Entry)
-			}
-			if event.SyncUp != nil {
-				return entries, scanner.Close()
-			}
-		case <-scanner.Done():
-			return entries, scanner.Close()
-		case <-ctx.Done():
-			_ = scanner.Close()
-			return nil, ctx.Err()
-		}
-	}
 }

@@ -6,39 +6,47 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+type transformTask interface {
+	nodescheduler.Task
+	Done() bool
+}
 
 type transformTaskBase struct {
 	log          *TransformLog
-	name         string
 	timetick     uint64
-	precondition scheduler.Precondition
+	predecessors []transformTask
 	done         atomic.Bool
-}
-
-func (t *transformTaskBase) Name() string {
-	return "vchan-transformlog-" + t.name
-}
-
-func (t *transformTaskBase) Precondition() scheduler.Precondition {
-	return t.precondition
 }
 
 func (t *transformTaskBase) Done() bool {
 	return t.done.Load()
 }
 
+func (t *transformTaskBase) predecessorsDone() bool {
+	for _, predecessor := range t.predecessors {
+		if predecessor != nil && !predecessor.Done() {
+			return false
+		}
+	}
+	return true
+}
+
 type transformFlushTask struct {
 	transformTaskBase
 }
 
-func (t *transformFlushTask) Run(ctx context.Context) error {
+func (t *transformFlushTask) Execute(ctx context.Context) error {
+	if !t.predecessorsDone() {
+		return nodescheduler.ErrDelay
+	}
+	defer t.done.Store(true)
 	result, err := t.log.flush(ctx, flushOption{TargetTimeTick: t.timetick})
 	if err != nil {
 		return err
 	}
-	t.done.Store(true)
 	if result.NextTargetTimeTick > 0 {
 		t.log.submitFlushTask(result.NextTargetTimeTick)
 	}
@@ -53,12 +61,15 @@ type transformMaterializeTask struct {
 	transformTaskBase
 }
 
-func (t *transformMaterializeTask) Run(ctx context.Context) error {
+func (t *transformMaterializeTask) Execute(ctx context.Context) error {
+	if !t.predecessorsDone() || t.log.LatestTimeTick() < t.timetick {
+		return nodescheduler.ErrDelay
+	}
+	defer t.done.Store(true)
 	_, err := t.log.materialize(ctx, materializeOption{TargetTimeTick: t.timetick})
 	if err != nil {
 		return err
 	}
-	t.done.Store(true)
 	t.log.notifyUpdated()
 	return nil
 }
@@ -70,13 +81,12 @@ func (t *TransformLog) submitFlushTask(timetick uint64) {
 	task := &transformFlushTask{
 		transformTaskBase: transformTaskBase{
 			log:          t,
-			name:         "flush",
 			timetick:     timetick,
-			precondition: t.taskPrecondition(),
+			predecessors: t.taskPredecessors(),
 		},
 	}
-	handle := t.runtime.Scheduler.Submit(task)
-	t.flushTasks = append(t.flushTasks, handle)
+	t.flushTasks = append(t.flushTasks, task)
+	t.runtime.Scheduler.Submit(task)
 }
 
 func (t *TransformLog) submitMaterializeTask(timetick uint64) {
@@ -85,44 +95,35 @@ func (t *TransformLog) submitMaterializeTask(timetick uint64) {
 	}
 	task := &transformMaterializeTask{
 		transformTaskBase: transformTaskBase{
-			log:      t,
-			name:     "materialize",
-			timetick: timetick,
-			precondition: scheduler.All(t.taskPrecondition(), scheduler.PreconditionFunc(func() bool {
-				return t.LatestTimeTick() >= timetick
-			})),
+			log:          t,
+			timetick:     timetick,
+			predecessors: t.taskPredecessors(),
 		},
 	}
-	handle := t.runtime.Scheduler.Submit(task)
-	t.materializeTasks = append(t.materializeTasks, handle)
+	t.materializeTasks = append(t.materializeTasks, task)
+	t.runtime.Scheduler.Submit(task)
 }
 
-func (t *TransformLog) taskPrecondition() scheduler.Precondition {
-	t.flushTasks = compactPendingTasks(t.flushTasks)
-	t.materializeTasks = compactPendingTasks(t.materializeTasks)
-	preconditions := make([]scheduler.Precondition, 0, len(t.flushTasks)+len(t.materializeTasks))
+func (t *TransformLog) taskPredecessors() []transformTask {
+	t.flushTasks = compactTransformFlushTasks(t.flushTasks)
+	t.materializeTasks = compactTransformMaterializeTasks(t.materializeTasks)
+	predecessors := make([]transformTask, 0, len(t.flushTasks)+len(t.materializeTasks))
 	for _, task := range t.flushTasks {
-		if task == nil || task.Done() {
-			continue
-		}
-		preconditions = append(preconditions, scheduler.After(task))
+		predecessors = append(predecessors, task)
 	}
 	for _, task := range t.materializeTasks {
-		if task == nil || task.Done() {
-			continue
-		}
-		preconditions = append(preconditions, scheduler.After(task))
+		predecessors = append(predecessors, task)
 	}
-	return scheduler.All(preconditions...)
+	return predecessors
 }
 
 func (t *TransformLog) HasPendingFlushTask() bool {
-	t.flushTasks = compactPendingTasks(t.flushTasks)
+	t.flushTasks = compactTransformFlushTasks(t.flushTasks)
 	return len(t.flushTasks) > 0
 }
 
 func (t *TransformLog) HasPendingMaterializeTask() bool {
-	t.materializeTasks = compactPendingTasks(t.materializeTasks)
+	t.materializeTasks = compactTransformMaterializeTasks(t.materializeTasks)
 	return len(t.materializeTasks) > 0
 }
 
@@ -134,7 +135,7 @@ func (t *TransformLog) notifyUpdated() {
 	t.runtime.Notifier.NotifyBarrierUpdated()
 }
 
-func compactPendingTasks(tasks []scheduler.TaskHandle) []scheduler.TaskHandle {
+func compactTransformFlushTasks(tasks []*transformFlushTask) []*transformFlushTask {
 	pending := tasks[:0]
 	for _, task := range tasks {
 		if task == nil || task.Done() {
@@ -145,5 +146,18 @@ func compactPendingTasks(tasks []scheduler.TaskHandle) []scheduler.TaskHandle {
 	return pending
 }
 
-var _ scheduler.Task = (*transformFlushTask)(nil)
-var _ scheduler.Task = (*transformMaterializeTask)(nil)
+func compactTransformMaterializeTasks(tasks []*transformMaterializeTask) []*transformMaterializeTask {
+	pending := tasks[:0]
+	for _, task := range tasks {
+		if task == nil || task.Done() {
+			continue
+		}
+		pending = append(pending, task)
+	}
+	return pending
+}
+
+var (
+	_ nodescheduler.Task = (*transformFlushTask)(nil)
+	_ nodescheduler.Task = (*transformMaterializeTask)(nil)
+)

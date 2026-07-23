@@ -291,6 +291,7 @@ func currentSplitFromPersistedStorage(schema *schemapb.CollectionSchema, storage
 				GroupID: fieldBinlog.GetFieldID(),
 				Fields:  fields,
 				Columns: lo.Map(fields, func(fieldID int64, _ int) int { return fieldIndexes[fieldID] }),
+				Format:  fieldBinlog.GetFormat(),
 			})
 		}
 		return result
@@ -311,11 +312,12 @@ func currentSplitForGrowingPack(
 	if currentSplit := currentSplitFromPersistedStorage(schema, meta.GetPersistedStorage()); len(currentSplit) > 0 {
 		return currentSplit
 	}
-	return storagecommon.SplitColumns(
+	currentSplit := storagecommon.SplitColumns(
 		typeutil.GetAllFieldSchemas(schema),
 		calcGrowingColumnStats(insertData),
 		storagecommon.DefaultPolicies()...,
 	)
+	return storagecommon.FillColumnGroupFormats(currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 }
 
 func calcGrowingColumnStats(insertData []*storage.InsertData) map[int64]storagecommon.ColumnStats {

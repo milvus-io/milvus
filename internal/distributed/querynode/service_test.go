@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -42,9 +43,57 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+type distributedQueryNodeTaskFunc func(context.Context) error
+
+func (f distributedQueryNodeTaskFunc) Execute(ctx context.Context) error {
+	return f(ctx)
+}
+
+func TestLazyQNSegmentManagerNilCallbacksUseNodeScheduler(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	t.Cleanup(scheduler.Close)
+
+	started := make(chan struct{})
+	releaseBlocker := make(chan struct{})
+	blocker := scheduler.Submit(distributedQueryNodeTaskFunc(func(context.Context) error {
+		close(started)
+		<-releaseBlocker
+		return nil
+	}))
+	<-started
+
+	mgr := &lazyQNSegmentManager{scheduler: scheduler}
+	unrecoverable := make(chan struct{}, 1)
+	dropped := make(chan struct{}, 1)
+	mgr.Acquire(qnview.AcquireSegments{OnUnrecoverable: func() { unrecoverable <- struct{}{} }})
+	mgr.Release(qnview.ReleaseSegments{OnDropped: func() { dropped <- struct{}{} }})
+
+	select {
+	case <-unrecoverable:
+		t.Fatal("acquire callback bypassed node scheduler")
+	case <-dropped:
+		t.Fatal("release callback bypassed node scheduler")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseBlocker)
+	require.NoError(t, blocker.Wait(context.Background()))
+	select {
+	case <-unrecoverable:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for acquire callback")
+	}
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for release callback")
+	}
+}
 
 type MockRootCoord struct {
 	types.RootCoord
@@ -85,7 +134,10 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	os.Exit(m.Run())
+	nodescheduler.Init(4)
+	code := m.Run()
+	nodescheduler.Close()
+	os.Exit(code)
 }
 
 func Test_NewServer(t *testing.T) {
@@ -433,7 +485,7 @@ func TestLazyQueryViewLoadMetadataProvider_GetQueryViewLoadInfo(t *testing.T) {
 	assert.Equal(t, uint64(7), client.getQVCollectionLoadInfoReqs[0].GetVersion())
 }
 
-func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionRetriesRecoverableError(t *testing.T) {
+func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionAttemptsRecoverableErrorOnce(t *testing.T) {
 	client := &fakeQueryViewMetadataMixCoordClient{
 		describeErrs: []error{merr.WrapErrNodeNotMatch(1, 2)},
 		describeResps: []*milvuspb.DescribeCollectionResponse{{
@@ -447,12 +499,10 @@ func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionRetriesRecoverableE
 
 	resp, err := provider.DescribeCollection(context.Background(), 100)
 
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	assert.Equal(t, "qv", resp.GetSchema().GetName())
-	require.Len(t, client.describeReqs, 2)
+	require.ErrorIs(t, err, merr.ErrNodeNotMatch)
+	assert.Nil(t, resp)
+	require.Len(t, client.describeReqs, 1)
 	assert.Equal(t, int64(100), client.describeReqs[0].GetCollectionID())
-	assert.Equal(t, int64(100), client.describeReqs[1].GetCollectionID())
 }
 
 func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionDoesNotRetryPermanentError(t *testing.T) {

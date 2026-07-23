@@ -46,6 +46,9 @@ type ManagerClient interface {
 	// Remove the wal instance for the channel on streaming node of given server id.
 	Remove(ctx context.Context, pchannel types.PChannelInfoAssigned) error
 
+	// ValidateRuntime validates runtime-dependent artifacts on the streaming node of given server id.
+	ValidateRuntime(ctx context.Context, serverID int64, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error)
+
 	// Close closes the manager client.
 	// It close the underlying connection, stop the node watcher and release all resources.
 	Close()

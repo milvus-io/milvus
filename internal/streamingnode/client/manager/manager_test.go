@@ -125,6 +125,31 @@ func TestManager(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
+	// Test ValidateRuntime
+	serverID = int64(2)
+	validateReq := &streamingpb.StreamingNodeManagerValidateRuntimeRequest{
+		Validation: &streamingpb.StreamingNodeManagerValidateRuntimeRequest_Analyzer{
+			Analyzer: &streamingpb.StreamingNodeRuntimeAnalyzerValidation{
+				AnalyzerInfos: []*streamingpb.StreamingNodeRuntimeAnalyzerInfo{
+					{
+						Field:  "test_field",
+						Name:   "test_analyzer",
+						Params: `{}`,
+					},
+				},
+			},
+		},
+	}
+	managerServiceClient.EXPECT().ValidateRuntime(mock.Anything, validateReq).RunAndReturn(
+		func(ctx context.Context, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest, co ...grpc.CallOption) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error) {
+			pickedServerID, ok := contextutil.GetPickServerID(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, serverID, pickedServerID)
+			return &streamingpb.StreamingNodeManagerValidateRuntimeResponse{}, nil
+		})
+	_, err = m.ValidateRuntime(context.Background(), serverID, validateReq)
+	assert.NoError(t, err)
+
 	// Test Close
 	managerService.EXPECT().Close().Return()
 	rb.EXPECT().Close().Return()
@@ -139,6 +164,8 @@ func TestManager(t *testing.T) {
 	err = m.Assign(context.Background(), types.PChannelInfoAssigned{})
 	assert.Error(t, err)
 	err = m.Remove(context.Background(), types.PChannelInfoAssigned{})
+	assert.Error(t, err)
+	_, err = m.ValidateRuntime(context.Background(), serverID, validateReq)
 	assert.Error(t, err)
 	resultCh, err = m.WatchNodeChanged(context.Background())
 	assert.Nil(t, resultCh)

@@ -71,6 +71,7 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		m.ctx,
 		m.Logger(),
 		m.wal,
+		m.scheduler,
 		m.pchannel,
 		m.collections[collectionID].VChannel,
 		collectionID,

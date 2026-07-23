@@ -18,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -125,10 +124,10 @@ type SegmentView struct {
 	// lifecycle commits data-side segment state to the coordinator after object
 	// storage output is ready.
 	lifecycle    Lifecycle
-	packWriter   PackWriter             // writes pending insert data to object storage.
-	runtime      moduleapi.Runtime      // schedules segment-owned data tasks.
-	pendingTasks []scheduler.TaskHandle // unfinished segment tasks used as preconditions.
-	pending      writeOnlyInsertBuffer  // in-memory insert buffer not yet written as L1.
+	packWriter   PackWriter            // writes pending insert data to object storage.
+	runtime      moduleapi.Runtime     // schedules segment-owned data tasks.
+	pendingTasks []segmentTask         // unfinished segment tasks used as predecessors.
+	pending      writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
 	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks.
 	// Chunks stay here until segment data checkpoint advances over them.
 	pendingFlushChunks []writeOnlyInsertBuffer
@@ -261,7 +260,7 @@ func (s *SegmentView) ObserveInsertMessageV1(
 }
 
 func (s *SegmentView) ObserveTxnMessage(_ context.Context, msg message.ImmutableTxnMessage) moduleapi.ObserveResult {
-	var task scheduler.Task
+	var task segmentTask
 	matched := false
 	appliedData := false
 	timetick := msg.TimeTick()

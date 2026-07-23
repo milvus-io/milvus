@@ -37,7 +37,7 @@ type TransformRegistration interface {
 // QueryViewCollectionRuntimeManager pins QueryView-scoped collection runtime before any
 // physical segment load is submitted.
 type QueryViewCollectionRuntimeManager interface {
-	Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, error)
+	Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (guard CollectionRuntimeGuard, retryable bool, err error)
 }
 
 // CollectionRuntimeGuard releases a QueryView-scoped collection runtime pin.
@@ -173,7 +173,6 @@ type PhysicalSegmentLoader interface {
 type SegmentLoadScheduler interface {
 	Submit(task SegmentLoadTask)
 	Update(task SegmentUpdateTask)
-	Cancel(segmentID int64)
 }
 
 type SegmentResourceEstimator interface {
@@ -194,6 +193,7 @@ type SegmentLoadTask struct {
 
 	OnLoaded        func(segment TransformSegment)
 	OnUnrecoverable func(error)
+	OnFinished      func()
 }
 
 type SegmentUpdateTask struct {

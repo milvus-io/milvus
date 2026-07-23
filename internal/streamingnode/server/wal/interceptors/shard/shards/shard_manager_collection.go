@@ -95,6 +95,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 			m.ctx,
 			m.Logger(),
 			m.wal,
+			m.scheduler,
 			m.pchannel,
 			vchannel,
 			collectionID,
