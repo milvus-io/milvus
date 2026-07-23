@@ -26,6 +26,8 @@ PINYIN_OUTPUT_MODES = [
             "keep_separate_first_letter": False,
         },
         "zhong",
+        ["中文", "zhong", "wen", "测试", "ce", "shi"],
+        ["zhongwen", "zw"],
         id="full-pinyin",
     ),
     pytest.param(
@@ -36,6 +38,8 @@ PINYIN_OUTPUT_MODES = [
             "keep_separate_first_letter": False,
         },
         "zhongwen",
+        ["中文", "zhongwen", "测试", "ceshi"],
+        ["zhong", "zw"],
         id="joined-pinyin",
     ),
     pytest.param(
@@ -46,6 +50,8 @@ PINYIN_OUTPUT_MODES = [
             "keep_separate_first_letter": True,
         },
         "zw",
+        ["中文", "zw", "测试", "cs"],
+        ["zhong", "zhongwen"],
         id="first-letters",
     ),
 ]
@@ -74,17 +80,30 @@ def build_rows(start, count, include_vector):
 class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
     """Independent Pinyin filter cases with per-test analyzer configuration."""
 
-    def _query_text_match_until_ids(self, client, collection_name, query_text, expected_ids, timeout=30):
+    @staticmethod
+    def _assert_exact_ids(rows, expected_ids):
+        ids = [row["id"] for row in rows]
+        assert len(ids) == len(expected_ids), ids
+        assert len(ids) == len(set(ids)), ids
+        assert set(ids) == expected_ids, ids
+
+    def _search_text_match_until_ids(self, client, collection_name, query_text, expected_ids, timeout=30):
         deadline = time.monotonic() + timeout
         rows = []
         while time.monotonic() < deadline:
-            rows, _ = self.query(
+            results, _ = self.search(
                 client,
                 collection_name,
+                data=[[0.0, 0.0]],
+                anns_field="vector",
+                search_params={"metric_type": "L2", "params": {"nprobe": 64}},
                 filter=f'text_match(text, "{query_text}")',
+                limit=TOTAL_COUNT,
                 output_fields=["id", "text"],
             )
-            if {row["id"] for row in rows} == expected_ids:
+            rows = results[0] if results else []
+            ids = [row["id"] for row in rows]
+            if len(ids) == len(expected_ids) and len(ids) == len(set(ids)) and set(ids) == expected_ids:
                 return rows
             threading.Event().wait(1)
         return rows
@@ -169,31 +188,74 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("options,pinyin_query", PINYIN_OUTPUT_MODES)
-    def test_pinyin_filter_text_match_output_modes(self, options, pinyin_query):
+    @pytest.mark.parametrize(
+        "options,pinyin_query,expected_tokens,disabled_queries",
+        PINYIN_OUTPUT_MODES,
+    )
+    def test_pinyin_filter_text_match_output_modes(
+        self,
+        options,
+        pinyin_query,
+        expected_tokens,
+        disabled_queries,
+    ):
         """
-        target: verify Pinyin output modes across indexed, unindexed, and growing segments
-        method: build 3000 indexed, 500 unindexed, and 500 growing rows, then query Pinyin and Chinese
-        expected: both query forms return the target row from every segment state
+        target: verify exact Pinyin output modes across indexed, unindexed, and growing search paths
+        method: verify analyzer tokens, then vector-search 3000 indexed, 500 unindexed, and 500 growing rows
+        expected: enabled tokens match every path while tokens from disabled modes do not match
         """
         client = self._client()
-        collection_name = self._create_text_match_collection(client, pinyin_analyzer(options))
+        analyzer_params = pinyin_analyzer(options)
 
-        pinyin_rows = self._query_text_match_until_ids(
+        analyzer_result, _ = self.run_analyzer(client, "中文测试", analyzer_params)
+        assert analyzer_result.tokens == expected_tokens
+
+        collection_name = self._create_text_match_collection(client, analyzer_params)
+
+        pinyin_rows = self._search_text_match_until_ids(
             client,
             collection_name,
             pinyin_query,
             TARGET_IDS,
         )
-        assert {row["id"] for row in pinyin_rows} == TARGET_IDS
+        self._assert_exact_ids(pinyin_rows, TARGET_IDS)
 
-        original_rows = self._query_text_match_until_ids(
+        original_rows = self._search_text_match_until_ids(
             client,
             collection_name,
             "中文",
             TARGET_IDS,
         )
-        assert {row["id"] for row in original_rows} == TARGET_IDS
+        self._assert_exact_ids(original_rows, TARGET_IDS)
+
+        for disabled_query in disabled_queries:
+            disabled_rows = self._search_text_match_until_ids(
+                client,
+                collection_name,
+                disabled_query,
+                set(),
+            )
+            self._assert_exact_ids(disabled_rows, set())
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_pinyin_filter_analyzer_without_original(self):
+        """
+        target: verify keep_original=false removes the original Chinese tokens
+        method: run the joined-Pinyin analyzer directly
+        expected: only joined Pinyin tokens are emitted
+        """
+        client = self._client()
+        analyzer_params = pinyin_analyzer(
+            {
+                "keep_original": False,
+                "keep_full_pinyin": False,
+                "keep_joined_full_pinyin": True,
+                "keep_separate_first_letter": False,
+            }
+        )
+
+        analyzer_result, _ = self.run_analyzer(client, "中文测试", analyzer_params)
+        assert analyzer_result.tokens == ["zhongwen", "ceshi"]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_pinyin_filter_bm25_search_joined_and_original(self):
@@ -259,5 +321,5 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
                 limit=TOTAL_COUNT,
                 output_fields=["id", "text"],
             )
-            assert {hit["id"] for hit in results[0]} == TARGET_IDS
+            self._assert_exact_ids(results[0], TARGET_IDS)
             assert all(hit["entity"]["text"] == "中文测试" for hit in results[0])
