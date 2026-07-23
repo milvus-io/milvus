@@ -137,7 +137,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<std::string>(context);
                     break;
                 default:
-                    ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
+                    ThrowInfo(UnexpectedError, "unknown data type: {}", type);
             }
             break;
         }
@@ -161,12 +161,12 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateArray<std::string>(context);
                     break;
                 default:
-                    ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
+                    ThrowInfo(UnexpectedError, "unknown data type: {}", type);
             }
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -229,7 +229,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         default: {
-            ThrowInfo(DataTypeInvalid, "unsupported data type {}", pk_type_);
+            ThrowInfo(UnexpectedError, "unsupported data type {}", pk_type_);
         }
     }
 

@@ -129,7 +129,7 @@ MatchEmptyElements(MatchType match_type, int64_t threshold) {
         case MatchType::MatchExact:
             return threshold == 0;
         default:
-            ThrowInfo(OpTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "Unsupported match type: {}",
                       static_cast<int>(match_type));
     }
@@ -376,7 +376,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     threshold);
                 break;
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "Unsupported match type: {}",
                           static_cast<int>(match_type));
         }

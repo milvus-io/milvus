@@ -43,7 +43,7 @@ struct LogicalElementFunc {
                 left[i] |= right[i];
             } else {
                 ThrowInfo(
-                    OpTypeInvalid, "unsupported logical operator: {}", op);
+                    UnexpectedError, "unsupported logical operator: {}", op);
             }
         }
         */
@@ -57,7 +57,7 @@ struct LogicalElementFunc {
         } else if constexpr (op == LogicalOpType::Minus) {
             left.inplace_sub(right, n);
         } else {
-            ThrowInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
+            ThrowInfo(UnexpectedError, "unsupported logical operator: {}", op);
         }
     }
 };

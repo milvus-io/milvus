@@ -73,14 +73,21 @@ TEST(DriverTest, PreservesSegcoreErrorCode) {
                 raw_data.raw_);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
-    // A NullExpr with an Invalid op on a non-nullable column passes plan
-    // construction but throws SegcoreError(ExprInvalid) inside
-    // PhyNullExpr::PreCheckNullable during operator execution — exactly the
+    // A modulus-by-zero arithmetic filter ("counter % 0 == 0") passes plan
+    // construction but throws SegcoreError(ExprInvalid) inside safe_mod during
+    // operator execution — a genuine user-input error (the request content
+    // forces the branch, so the input classification is correct), exactly the
     // classified-throw-inside-CALL_OPERATOR path this test pins down.
-    auto null_expr = std::make_shared<milvus::expr::NullExpr>(
-        milvus::expr::ColumnInfo(i64_fid, DataType::INT64),
-        proto::plan::NullExpr_NullOp_Invalid);
-    auto plan = milvus::test::CreateRetrievePlanByExpr(null_expr);
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    auto arith_expr =
+        std::make_shared<milvus::expr::BinaryArithOpEvalRangeExpr>(
+            milvus::expr::ColumnInfo(i64_fid, DataType::INT64),
+            proto::plan::OpType::Equal,
+            proto::plan::ArithOpType::Mod,
+            zero,   // compare value
+            zero);  // right operand (the modulus == 0 -> modulus by zero)
+    auto plan = milvus::test::CreateRetrievePlanByExpr(arith_expr);
 
     try {
         auto result = ExecuteQueryExpr(plan, seg_promote, N, MAX_TIMESTAMP);
@@ -89,7 +96,7 @@ TEST(DriverTest, PreservesSegcoreErrorCode) {
         // The classified code chosen at the throw site survives the driver
         // wrap; the message still carries the operator context.
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ExprInvalid);
-        EXPECT_NE(std::string(e.what()).find("unsupported null expr type"),
+        EXPECT_NE(std::string(e.what()).find("modulus by zero"),
                   std::string::npos);
         EXPECT_NE(std::string(e.what()).find("Operator::"), std::string::npos);
     }
@@ -218,10 +225,16 @@ TEST(DriverTest, AsyncConsumePreservesSegcoreErrorCode) {
                 raw_data.raw_);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
-    auto null_expr = std::make_shared<milvus::expr::NullExpr>(
-        milvus::expr::ColumnInfo(i64_fid, DataType::INT64),
-        proto::plan::NullExpr_NullOp_Invalid);
-    auto plan = milvus::test::CreateRetrievePlanByExpr(null_expr);
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    auto arith_expr =
+        std::make_shared<milvus::expr::BinaryArithOpEvalRangeExpr>(
+            milvus::expr::ColumnInfo(i64_fid, DataType::INT64),
+            proto::plan::OpType::Equal,
+            proto::plan::ArithOpType::Mod,
+            zero,   // compare value
+            zero);  // right operand (the modulus == 0 -> modulus by zero)
+    auto plan = milvus::test::CreateRetrievePlanByExpr(arith_expr);
 
     // Drive the plan through the async future: ExecuteQueryExpr runs the exec
     // Driver, whose CALL_OPERATOR throws ExecOperatorException(ExprInvalid); the
