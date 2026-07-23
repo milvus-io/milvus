@@ -152,6 +152,25 @@ ComputeScorerScoresOnPreparedChunks(
         return;
     }
 
+    // Preflight before the potentially expensive whole-segment filter
+    // evaluation below (ComputeNonNativeFilterBitset): observe a
+    // pre-cancelled request now instead of after a full segment scan, and
+    // catch a null per-chunk output pointer before doing any work rather
+    // than midway through the chunk loop.
+    milvus::futures::throwIfCancelled(cancel_token);
+    for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
+         ++chunk_idx) {
+        if (scorer_offset_chunks[chunk_idx].empty()) {
+            continue;
+        }
+        AssertInfo(output_score_chunks[chunk_idx] != nullptr,
+                   "output score chunk {} is null",
+                   chunk_idx);
+        AssertInfo(output_has_score_chunks[chunk_idx] != nullptr,
+                   "output has score chunk {} is null",
+                   chunk_idx);
+    }
+
     auto active_count = segment->get_active_count(timestamp);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID,
@@ -189,13 +208,7 @@ ComputeScorerScoresOnPreparedChunks(
         if (scorer_offsets.empty()) {
             continue;
         }
-        AssertInfo(output_score_chunks[chunk_idx] != nullptr,
-                   "output score chunk {} is null",
-                   chunk_idx);
-        AssertInfo(output_has_score_chunks[chunk_idx] != nullptr,
-                   "output has score chunk {} is null",
-                   chunk_idx);
-
+        // Output pointers were validated by the preflight above.
         milvus::rescores::ComputeScorerScores(
             &exec_context,
             &op_context,
