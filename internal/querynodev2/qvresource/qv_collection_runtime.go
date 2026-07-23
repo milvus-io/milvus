@@ -2,7 +2,8 @@ package qvresource
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type queryViewCollectionRuntimeManager struct {
@@ -26,22 +28,22 @@ func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvi
 	}
 }
 
-func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.CollectionRuntimeGuard, error) {
+func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.CollectionRuntimeGuard, bool, error) {
 	if view == nil {
-		return nil, fmt.Errorf("query view is nil")
+		return nil, false, merr.WrapErrServiceInternalMsg("query view is nil")
 	}
 	pb := view.IntoProto()
 	meta := pb.GetMeta()
 	collection, err := m.meta.DescribeCollection(ctx, meta.GetCollectionId())
 	if err != nil {
-		return nil, err
+		return nil, isRetryableCollectionRuntimeError(err), err
 	}
 	if collection == nil || collection.GetSchema() == nil {
-		return nil, fmt.Errorf("collection metadata is incomplete")
+		return nil, false, merr.WrapErrServiceInternalMsg("collection metadata is incomplete")
 	}
 	loadInfo, err := m.loadInfo(ctx, meta)
 	if err != nil {
-		return nil, err
+		return nil, isRetryableCollectionRuntimeError(err), err
 	}
 	if err := m.collections.PutOrRef(
 		meta.GetCollectionId(),
@@ -56,7 +58,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 			SchemaBarrierTs: collection.GetUpdateTimestamp(),
 		},
 	); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var ccollection *segcore.CCollection
 	if local := m.collections.Get(meta.GetCollectionId()); local != nil {
@@ -69,7 +71,18 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		schema:        collection.GetSchema(),
 		schemaVersion: int64(collection.GetUpdateTimestamp()),
 		ccollection:   ccollection,
-	}, nil
+	}, false, nil
+}
+
+func isRetryableCollectionRuntimeError(err error) bool {
+	if err == nil || merr.GetErrorType(err) == merr.InputError {
+		return false
+	}
+	return !errors.Is(err, merr.ErrCollectionNotFound) &&
+		!errors.Is(err, merr.ErrDatabaseNotFound) &&
+		!errors.Is(err, merr.ErrPartitionNotFound) &&
+		!errors.Is(err, merr.ErrSegmentNotFound) &&
+		!errors.Is(err, merr.ErrIndexNotFound)
 }
 
 func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *viewpb.QueryViewMeta) (qnview.QueryViewLoadInfo, error) {

@@ -55,8 +55,9 @@ QueryViewStateMachine.Acquire(qv)
   -> invoke OnReady asynchronously
 ```
 
-`AlterLoadConfig` updates VChannel load state, but it does not start resource
-loading. The QueryView state machine is the load trigger.
+`AlterLoadConfig` does not create VChannel-local load state. QueryView metadata
+identifies the versioned load info, and the QueryView state machine is the load
+trigger.
 
 ## 4. Live DML
 

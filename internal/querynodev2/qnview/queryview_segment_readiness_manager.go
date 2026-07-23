@@ -10,12 +10,14 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 // QueryViewSegmentReadinessManager turns physically loaded segments into
 // QueryView-ready segments by registering them with the TransformLogBuffer and
 // waiting for catch-up.
 type QueryViewSegmentReadinessManager struct {
+	scheduler    nodescheduler.Scheduler
 	physical     PhysicalSegmentManager
 	buffer       TransformLogBuffer
 	collections  QueryViewCollectionRuntimeManager
@@ -29,11 +31,16 @@ type QueryViewSegmentReadinessManager struct {
 const transformCatchupWorkerCount = 4
 
 func NewQueryViewSegmentReadinessManager(physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
+	return NewQueryViewSegmentReadinessManagerWithScheduler(nodescheduler.Get(), physical, buffer, collections...)
+}
+
+func NewQueryViewSegmentReadinessManagerWithScheduler(scheduler nodescheduler.Scheduler, physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
 	var collectionManager QueryViewCollectionRuntimeManager
 	if len(collections) > 0 {
 		collectionManager = collections[0]
 	}
 	m := &QueryViewSegmentReadinessManager{
+		scheduler:    scheduler,
 		physical:     physical,
 		buffer:       buffer,
 		collections:  collectionManager,
@@ -98,7 +105,7 @@ func (m *QueryViewSegmentReadinessManager) acquire(req AcquireSegments) {
 	guard, err := m.buffer.Acquire(ctx, view)
 	if err != nil {
 		cancel()
-		invokeUnrecoverable(req.OnUnrecoverable)
+		m.submitCallback(req.OnUnrecoverable)
 		return
 	}
 
@@ -108,27 +115,48 @@ func (m *QueryViewSegmentReadinessManager) acquire(req AcquireSegments) {
 		guard.Release()
 		return
 	}
-	go m.continueAcquire(req, ref, view, ctx, cancel)
+	m.scheduler.Submit(schedulerTaskFunc(func(schedulerCtx context.Context) error {
+		ctx, stop := mergeTaskContext(schedulerCtx, ctx)
+		defer stop()
+		return m.continueAcquire(req, ref, view, ctx, cancel)
+	}))
 }
 
-func (m *QueryViewSegmentReadinessManager) continueAcquire(req AcquireSegments, ref *transformViewRef, view *qviews.QueryViewAtQueryNode, ctx context.Context, cancel context.CancelFunc) {
-	collectionGuard, err := m.acquireCollectionRuntime(ctx, view)
+func (m *QueryViewSegmentReadinessManager) submitCallback(callback func()) {
+	if callback == nil {
+		return
+	}
+	m.scheduler.Submit(schedulerTaskFunc(func(context.Context) error {
+		callback()
+		return nil
+	}))
+}
+
+func (m *QueryViewSegmentReadinessManager) continueAcquire(req AcquireSegments, ref *transformViewRef, view *qviews.QueryViewAtQueryNode, ctx context.Context, cancel context.CancelFunc) error {
+	collectionGuard, retryable, err := m.acquireCollectionRuntime(ctx, view)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if retryable {
+			return nodescheduler.ErrDelay
+		}
 		cancel()
 		if detached, current := m.detachViewIfCurrent(req.Key, ref); current {
 			detached.releaseTransform()
 			detached.unregister()
 			detached.releaseSegments()
 			invokeUnrecoverable(req.OnUnrecoverable)
+			return err
 		}
-		return
+		return nil
 	}
 
 	readyNow, physicalRefSegments, noAssignedSegments, current := m.activateAcquire(req, ref, collectionGuard)
 	if !current {
 		cancel()
 		collectionGuard.Release()
-		return
+		return nil
 	}
 
 	for _, waiter := range readyNow {
@@ -138,10 +166,10 @@ func (m *QueryViewSegmentReadinessManager) continueAcquire(req AcquireSegments, 
 		req.OnReady(map[int64][]int64{})
 	}
 	if noAssignedSegments {
-		return
+		return nil
 	}
 	if len(physicalRefSegments) == 0 {
-		return
+		return nil
 	}
 	viewToLoad := filterViewSegments(req.View, physicalRefSegments)
 
@@ -160,11 +188,12 @@ func (m *QueryViewSegmentReadinessManager) continueAcquire(req AcquireSegments, 
 			m.failView(req.Key)
 		},
 	})
+	return nil
 }
 
-func (m *QueryViewSegmentReadinessManager) acquireCollectionRuntime(ctx context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, error) {
+func (m *QueryViewSegmentReadinessManager) acquireCollectionRuntime(ctx context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
 	if m.collections == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	return m.collections.Acquire(ctx, view)
 }

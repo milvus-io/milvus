@@ -22,7 +22,8 @@ The purpose of `GrowingRuntime` is to:
 
 1. own all growing-side segment resources for one vchannel;
 2. load historical visible segment data from `VChannelWALView.SegmentSnapshot`;
-3. apply historical deletes from `VChannelWALView.DeleteReplay`;
+3. create a bounded vchannel subscription on
+   `VChannelWALView.TransformLogStream` and apply its historical deletes;
 4. apply live resource events forwarded by `QueryRuntime`;
 5. retain flushed segment markers needed for recovery replay idempotency;
 6. release growing segment state no longer needed by active QueryViews.
@@ -41,7 +42,7 @@ catchup, and the transition to `Ready`.
 | `GrowingSegment` | Owns one segment's local resource handle and applies segment-scoped persisted data, inserts, deletes, and sealed metadata. | It does not own vchannel-level message dispatch or DataVersion watermarks. |
 | `VChannelWALView` | Provides no-gap WAL input for the selected base DataVersion. | Its contract is defined in [StreamingNode VChannel WAL View Design](../../wal/streamingnode_vchannel_wal_view.md). |
 | `SegmentModule` | Owns segment metadata, visible snapshot construction, and segment metadata GC. | It is consumed only through `VChannelWALView`; runtime components do not call it directly. |
-| `TransformLogModule` | Owns transform log storage and delete replay scanner construction. | It is consumed only through `VChannelWALView.DeleteReplay`. |
+| `TransformLogModule` | Owns transform log storage published through the PChannel-level shared stream. | `GrowingRuntime.Prepare` creates and closes its own bounded vchannel subscription. |
 
 ## 3. Component Relationships And Invariants
 
@@ -146,7 +147,8 @@ DataVersion.
    `VChannelWALView.SegmentSnapshot.Segments`.
 8. Persisted segment data is loaded before snapshot insert messages are replayed
    for the same segment.
-9. `DeleteReplay` is drained and applied before `Prepare` returns.
+9. The bounded delete replay subscription is drained, applied, and closed
+   before `Prepare` returns; the shared PChannel stream remains open.
 10. `SealedAtDataVersion` updates after the WALView capture point are delivered
     by resource events from `QueryRuntime`.
 11. Live apply is not a recoverable resource-level error path. If a ready
@@ -260,7 +262,7 @@ QueryRuntime.Initialize
   -> load SegmentSnapshot.FlushedSegments as non-queryable flushed segment markers
   -> load persisted segment data
   -> replay snapshot inserts
-  -> drain DeleteReplay
+  -> subscribe and drain bounded vchannel DeleteReplay
   -> mark GrowingRuntime Ready
 ```
 

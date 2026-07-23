@@ -4,8 +4,11 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ ManagerService = (*managerServiceImpl)(nil)
@@ -57,4 +60,38 @@ func (ms *managerServiceImpl) CollectStatus(ctx context.Context, req *streamingp
 	return &streamingpb.StreamingNodeManagerCollectStatusResponse{
 		Metrics: types.NewProtoFromStreamingNodeMetrics(*metrics),
 	}, nil
+}
+
+// ValidateRuntime validates runtime-dependent artifacts on this streaming node.
+func (ms *managerServiceImpl) ValidateRuntime(ctx context.Context, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error) {
+	switch validation := req.GetValidation().(type) {
+	case *streamingpb.StreamingNodeManagerValidateRuntimeRequest_Analyzer:
+		return validateRuntimeAnalyzer(validation.Analyzer), nil
+	default:
+		return &streamingpb.StreamingNodeManagerValidateRuntimeResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("unsupported runtime validation")),
+		}, nil
+	}
+}
+
+func validateRuntimeAnalyzer(validation *streamingpb.StreamingNodeRuntimeAnalyzerValidation) *streamingpb.StreamingNodeManagerValidateRuntimeResponse {
+	resourceSet := typeutil.NewSet[int64]()
+	for _, info := range validation.GetAnalyzerInfos() {
+		ids, err := analyzer.ValidateAnalyzer(info.GetParams(), "")
+		if err != nil {
+			if info.GetName() != "" {
+				return &streamingpb.StreamingNodeManagerValidateRuntimeResponse{
+					Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err)),
+				}
+			}
+			return &streamingpb.StreamingNodeManagerValidateRuntimeResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err)),
+			}
+		}
+		resourceSet.Insert(ids...)
+	}
+	return &streamingpb.StreamingNodeManagerValidateRuntimeResponse{
+		Status:      merr.Success(),
+		ResourceIds: resourceSet.Collect(),
+	}
 }

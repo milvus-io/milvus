@@ -2,7 +2,6 @@ package grpcquerynode
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -20,8 +19,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -45,7 +44,8 @@ func (s *queryNodeViewSyncServer) SyncQueryView(stream viewpb.ViewSyncService_Sy
 }
 
 type lazyQNSegmentManager struct {
-	build func() qnview.SegmentManager
+	build     func() qnview.SegmentManager
+	scheduler nodescheduler.Scheduler
 
 	mu      sync.Mutex
 	manager qnview.SegmentManager
@@ -54,11 +54,7 @@ type lazyQNSegmentManager struct {
 func (m *lazyQNSegmentManager) Acquire(req qnview.AcquireSegments) {
 	manager := m.get()
 	if manager == nil {
-		go func() {
-			if req.OnUnrecoverable != nil {
-				req.OnUnrecoverable()
-			}
-		}()
+		m.submitCallback(req.OnUnrecoverable)
 		return
 	}
 	manager.Acquire(req)
@@ -67,14 +63,26 @@ func (m *lazyQNSegmentManager) Acquire(req qnview.AcquireSegments) {
 func (m *lazyQNSegmentManager) Release(req qnview.ReleaseSegments) {
 	manager := m.get()
 	if manager == nil {
-		go func() {
-			if req.OnDropped != nil {
-				req.OnDropped()
-			}
-		}()
+		m.submitCallback(req.OnDropped)
 		return
 	}
 	manager.Release(req)
+}
+
+func (m *lazyQNSegmentManager) submitCallback(callback func()) {
+	if callback == nil {
+		return
+	}
+	m.scheduler.Submit(queryNodeTaskFunc(func(context.Context) error {
+		callback()
+		return nil
+	}))
+}
+
+type queryNodeTaskFunc func(context.Context) error
+
+func (f queryNodeTaskFunc) Execute(ctx context.Context) error {
+	return f(ctx)
 }
 
 func (m *lazyQNSegmentManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]qnview.SealedSegmentHandle, error) {
@@ -123,7 +131,7 @@ func (p *lazyQueryViewLoadMetadataProvider) client(ctx context.Context) (types.M
 
 func (p *lazyQueryViewLoadMetadataProvider) DescribeCollection(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 	var resp *milvuspb.DescribeCollectionResponse
-	err := retryQueryViewMetadataRPC(ctx, func(rpcCtx context.Context) error {
+	err := queryViewMetadataRPC(ctx, func(rpcCtx context.Context) error {
 		client, err := p.client(rpcCtx)
 		if err != nil {
 			return merr.Wrapf(err, "describe collection %d for query view", collectionID)
@@ -147,7 +155,7 @@ func (p *lazyQueryViewLoadMetadataProvider) DescribeCollection(ctx context.Conte
 
 func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
 	var resp *querypb.GetQueryViewLoadInfoResponse
-	err := retryQueryViewMetadataRPC(ctx, func(rpcCtx context.Context) error {
+	err := queryViewMetadataRPC(ctx, func(rpcCtx context.Context) error {
 		client, err := p.client(rpcCtx)
 		if err != nil {
 			return merr.Wrapf(err, "get query view load info for collection %d", collectionID)
@@ -174,41 +182,8 @@ func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(ctx context.Con
 	}, nil
 }
 
-func retryQueryViewMetadataRPC(ctx context.Context, fn func(context.Context) error) error {
-	var lastErr error
-	err := retry.Do(ctx, func() error {
-		rpcCtx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
-		defer cancel()
-
-		err := fn(rpcCtx)
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		if !isRecoverableQueryViewMetadataError(err) {
-			return retry.Unrecoverable(err)
-		}
-		return err
-	}, retry.AttemptAlways())
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
-	}
-	if err != nil && lastErr != nil {
-		return lastErr
-	}
-	return err
-}
-
-func isRecoverableQueryViewMetadataError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if merr.GetErrorType(err) == merr.InputError {
-		return false
-	}
-	return !errors.Is(err, merr.ErrCollectionNotFound) &&
-		!errors.Is(err, merr.ErrDatabaseNotFound) &&
-		!errors.Is(err, merr.ErrPartitionNotFound) &&
-		!errors.Is(err, merr.ErrSegmentNotFound) &&
-		!errors.Is(err, merr.ErrIndexNotFound)
+func queryViewMetadataRPC(ctx context.Context, fn func(context.Context) error) error {
+	rpcCtx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	return fn(rpcCtx)
 }
