@@ -51,11 +51,11 @@ func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode)
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	buf := b.channels[vchannel]
 	if buf == nil {
 		stream, err := b.getOrCreateStreamLocked(ctx, pchannel)
 		if err != nil {
+			b.mu.Unlock()
 			return nil, err
 		}
 		buf = newVChannelBuffer(b, pchannel, vchannel, startFrom)
@@ -63,11 +63,16 @@ func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode)
 		stream.refs[vchannel] = buf
 	}
 	if err := buf.acquireLocked(startFrom); err != nil {
+		b.mu.Unlock()
 		return nil, err
 	}
 	stream := b.streamsByPChannel[pchannel]
+	b.mu.Unlock()
 	if stream != nil {
-		buf.ensureSubscribed(stream.stream)
+		if err := buf.ensureSubscribed(ctx, stream.stream); err != nil {
+			buf.releaseGuard(startFrom)
+			return nil, err
+		}
 	}
 	return &guard{buffer: buf, startFrom: startFrom}, nil
 }
@@ -217,10 +222,7 @@ type vchannelBuffer struct {
 	vchannel string
 	sub      wal.TransformLogSubscription
 
-	initCtx    context.Context
-	initCancel context.CancelFunc
-	initOnce   sync.Once
-	closing    bool
+	subscribeAttempt *subscribeAttempt
 
 	mu               sync.Mutex
 	retentionStart   uint64
@@ -235,13 +237,10 @@ type vchannelBuffer struct {
 }
 
 func newVChannelBuffer(owner *Buffer, pchannel string, vchannel string, startFrom uint64) *vchannelBuffer {
-	initCtx, initCancel := context.WithCancel(context.Background())
 	return &vchannelBuffer{
 		owner:            owner,
 		pchannel:         pchannel,
 		vchannel:         vchannel,
-		initCtx:          initCtx,
-		initCancel:       initCancel,
 		retentionStart:   startFrom,
 		visibleTimeTick:  startFrom,
 		visibilityNotify: make(chan struct{}),
@@ -251,53 +250,101 @@ func newVChannelBuffer(owner *Buffer, pchannel string, vchannel string, startFro
 	}
 }
 
-func (b *vchannelBuffer) ensureSubscribed(stream wal.TransformLogStream) {
-	b.initOnce.Do(func() {
-		go b.subscribe(stream)
-	})
+type subscribeAttempt struct {
+	done chan struct{}
+	err  error
 }
 
-func (b *vchannelBuffer) subscribe(stream wal.TransformLogStream) {
-	sub, err := stream.Subscribe(b.initCtx, wal.TransformLogSubscriptionOption{
+func (b *vchannelBuffer) ensureSubscribed(ctx context.Context, stream wal.TransformLogStream) error {
+	b.mu.Lock()
+	if b.sub != nil {
+		b.mu.Unlock()
+		return nil
+	}
+	if b.err != nil {
+		err := b.err
+		b.mu.Unlock()
+		return err
+	}
+	if b.subscribeAttempt != nil {
+		attempt := b.subscribeAttempt
+		b.mu.Unlock()
+		return b.waitSubscribe(ctx, attempt)
+	}
+
+	attempt := &subscribeAttempt{done: make(chan struct{})}
+	b.subscribeAttempt = attempt
+	startAfter := b.retentionStart
+	b.mu.Unlock()
+	return b.subscribe(ctx, stream, attempt, startAfter)
+}
+
+func (b *vchannelBuffer) waitSubscribe(ctx context.Context, attempt *subscribeAttempt) error {
+	select {
+	case <-attempt.done:
+		return attempt.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogStream, attempt *subscribeAttempt, startAfter uint64) error {
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
 		VChannel:           b.vchannel,
-		StartAfterTimeTick: b.retentionStart,
+		StartAfterTimeTick: startAfter,
 		Handler:            bufEventHandler{buffer: b},
 	})
 	if err != nil {
-		if b.isClosing() && errors.Is(err, context.Canceled) {
-			return
+		if isUnrecoverableSubscribeError(err) {
+			b.fail(err)
 		}
-		b.fail(err)
-		return
-	}
-	b.mu.Lock()
-	if b.closing {
+		b.mu.Lock()
+		b.completeSubscribeLocked(attempt, err)
 		b.mu.Unlock()
-		_ = sub.Close()
-		return
+		return err
 	}
-	b.sub = sub
+
+	closeSub := false
+	b.mu.Lock()
+	if b.err != nil {
+		err = b.err
+		closeSub = true
+		b.completeSubscribeLocked(attempt, err)
+	} else {
+		b.sub = sub
+		b.completeSubscribeLocked(attempt, nil)
+	}
 	b.mu.Unlock()
+	if closeSub {
+		_ = sub.Close()
+		return err
+	}
 	mlog.Debug(context.TODO(), "querynode transform log buffer subscribed vchannel",
 		mlog.FieldPChannel(b.pchannel),
 		mlog.FieldVChannel(b.vchannel),
-		mlog.Uint64("startAfterTimeTick", b.retentionStart),
+		mlog.Uint64("startAfterTimeTick", startAfter),
 		mlog.Int64("subscriptionID", sub.ID()),
 	)
+	return nil
 }
 
-func (b *vchannelBuffer) isClosing() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.closing
+func (b *vchannelBuffer) completeSubscribeLocked(attempt *subscribeAttempt, err error) {
+	if b.subscribeAttempt == attempt {
+		attempt.err = err
+		b.subscribeAttempt = nil
+		close(attempt.done)
+	}
+}
+
+func isUnrecoverableSubscribeError(err error) bool {
+	return errors.Is(err, wal.ErrTransformLogInvalidReadOption) ||
+		errors.Is(err, wal.ErrTransformLogVChannelUnavailable) ||
+		errors.Is(err, wal.ErrTransformLogStartPointTruncated)
 }
 
 func (b *vchannelBuffer) acquireLocked(startFrom uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closing {
-		return context.Canceled
-	}
 	if b.err != nil {
 		return b.err
 	}
@@ -481,10 +528,6 @@ func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
 	}
 	delete(b.guards, startFrom)
 	if len(b.guards) == 0 {
-		b.closing = true
-		if b.initCancel != nil {
-			b.initCancel()
-		}
 		sub := b.sub
 		stream := b.owner.removeLocked(b.vchannel, b)
 		b.mu.Unlock()

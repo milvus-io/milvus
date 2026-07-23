@@ -760,6 +760,7 @@ message VChannelSummaryInsertRecord {
 // Client: log coord. There should be only one client globally to call this
 // service on all streamingnode.
 service StreamingNodeManagerService {
+ rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest) returns (StreamingNodeManagerValidateRuntimeResponse) {};
     // Assign is a unary RPC to assign a channel on a log node.
     // Block until the channel assignd is ready to read or write on the log
     // node. Error: If the channel already exists, return error with code
@@ -1123,3 +1124,24 @@ message ShardAssignmentEntry {
 }
 
 
+
+message StreamingNodeRuntimeAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeRuntimeAnalyzerValidation {
+    repeated StreamingNodeRuntimeAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeManagerValidateRuntimeRequest {
+    oneof validation {
+        StreamingNodeRuntimeAnalyzerValidation analyzer = 1;
+    }
+}
+
+message StreamingNodeManagerValidateRuntimeResponse {
+    common.Status status = 1;
+    repeated int64 resource_ids = 2;
+}

@@ -834,15 +834,17 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingNodeManagerService_Assign_FullMethodName        = "/milvus.proto.streaming.StreamingNodeManagerService/Assign"
-	StreamingNodeManagerService_Remove_FullMethodName        = "/milvus.proto.streaming.StreamingNodeManagerService/Remove"
-	StreamingNodeManagerService_CollectStatus_FullMethodName = "/milvus.proto.streaming.StreamingNodeManagerService/CollectStatus"
+	StreamingNodeManagerService_ValidateRuntime_FullMethodName = "/milvus.proto.streaming.StreamingNodeManagerService/ValidateRuntime"
+	StreamingNodeManagerService_Assign_FullMethodName          = "/milvus.proto.streaming.StreamingNodeManagerService/Assign"
+	StreamingNodeManagerService_Remove_FullMethodName          = "/milvus.proto.streaming.StreamingNodeManagerService/Remove"
+	StreamingNodeManagerService_CollectStatus_FullMethodName   = "/milvus.proto.streaming.StreamingNodeManagerService/CollectStatus"
 )
 
 // StreamingNodeManagerServiceClient is the client API for StreamingNodeManagerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeManagerServiceClient interface {
+	ValidateRuntime(ctx context.Context, in *StreamingNodeManagerValidateRuntimeRequest, opts ...grpc.CallOption) (*StreamingNodeManagerValidateRuntimeResponse, error)
 	// Assign is a unary RPC to assign a channel on a log node.
 	// Block until the channel assignd is ready to read or write on the log
 	// node. Error: If the channel already exists, return error with code
@@ -868,6 +870,15 @@ type streamingNodeManagerServiceClient struct {
 
 func NewStreamingNodeManagerServiceClient(cc grpc.ClientConnInterface) StreamingNodeManagerServiceClient {
 	return &streamingNodeManagerServiceClient{cc}
+}
+
+func (c *streamingNodeManagerServiceClient) ValidateRuntime(ctx context.Context, in *StreamingNodeManagerValidateRuntimeRequest, opts ...grpc.CallOption) (*StreamingNodeManagerValidateRuntimeResponse, error) {
+	out := new(StreamingNodeManagerValidateRuntimeResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeManagerService_ValidateRuntime_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingNodeManagerServiceClient) Assign(ctx context.Context, in *StreamingNodeManagerAssignRequest, opts ...grpc.CallOption) (*StreamingNodeManagerAssignResponse, error) {
@@ -901,6 +912,7 @@ func (c *streamingNodeManagerServiceClient) CollectStatus(ctx context.Context, i
 // All implementations should embed UnimplementedStreamingNodeManagerServiceServer
 // for forward compatibility
 type StreamingNodeManagerServiceServer interface {
+	ValidateRuntime(context.Context, *StreamingNodeManagerValidateRuntimeRequest) (*StreamingNodeManagerValidateRuntimeResponse, error)
 	// Assign is a unary RPC to assign a channel on a log node.
 	// Block until the channel assignd is ready to read or write on the log
 	// node. Error: If the channel already exists, return error with code
@@ -924,6 +936,9 @@ type StreamingNodeManagerServiceServer interface {
 type UnimplementedStreamingNodeManagerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeManagerServiceServer) ValidateRuntime(context.Context, *StreamingNodeManagerValidateRuntimeRequest) (*StreamingNodeManagerValidateRuntimeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateRuntime not implemented")
+}
 func (UnimplementedStreamingNodeManagerServiceServer) Assign(context.Context, *StreamingNodeManagerAssignRequest) (*StreamingNodeManagerAssignResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Assign not implemented")
 }
@@ -943,6 +958,24 @@ type UnsafeStreamingNodeManagerServiceServer interface {
 
 func RegisterStreamingNodeManagerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeManagerServiceServer) {
 	s.RegisterService(&StreamingNodeManagerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeManagerService_ValidateRuntime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeManagerValidateRuntimeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeManagerServiceServer).ValidateRuntime(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeManagerService_ValidateRuntime_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeManagerServiceServer).ValidateRuntime(ctx, req.(*StreamingNodeManagerValidateRuntimeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingNodeManagerService_Assign_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -1006,6 +1039,10 @@ var StreamingNodeManagerService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.streaming.StreamingNodeManagerService",
 	HandlerType: (*StreamingNodeManagerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ValidateRuntime",
+			Handler:    _StreamingNodeManagerService_ValidateRuntime_Handler,
+		},
 		{
 			MethodName: "Assign",
 			Handler:    _StreamingNodeManagerService_Assign_Handler,

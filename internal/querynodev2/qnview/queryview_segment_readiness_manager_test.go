@@ -13,7 +13,52 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+func TestQueryViewSegmentReadinessManager_AcquireUsesNodeScheduler(t *testing.T) {
+	nodeScheduler := nodescheduler.New(1)
+	t.Cleanup(nodeScheduler.Close)
+
+	blockStarted := make(chan struct{})
+	releaseBlocker := make(chan struct{})
+	blocker := nodeScheduler.Submit(qnTaskFunc(func(context.Context) error {
+		close(blockStarted)
+		<-releaseBlocker
+		return nil
+	}))
+	<-blockStarted
+
+	meta := buildHandlerTestMeta(1)
+	view := buildHandlerTestQNView(1)
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	collections := &fakeQueryViewCollectionRuntimeManager{}
+	physicalCalled := make(chan struct{}, 1)
+	physical := fakePhysicalSegmentManager{
+		acquire: func(AcquirePhysicalSegments) { physicalCalled <- struct{}{} },
+		release: func(req ReleaseSegments) { req.OnDropped() },
+	}
+	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physical, &fakeTransformLogBuffer{}, collections)
+
+	mgr.Acquire(AcquireSegments{
+		Key: key, Meta: meta, View: view,
+		OnReady:         func(map[int64][]int64) { t.Fatal("unexpected ready") },
+		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
+	})
+	select {
+	case <-physicalCalled:
+		t.Fatal("acquire bypassed node scheduler")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseBlocker)
+	require.NoError(t, blocker.Wait(context.Background()))
+	select {
+	case <-physicalCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for scheduled acquire")
+	}
+}
 
 func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
@@ -37,7 +82,7 @@ func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.
 		},
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan map[int64][]int64, 1)
 	mgr.Acquire(AcquireSegments{
@@ -101,7 +146,7 @@ func TestQueryViewSegmentReadinessManager_AcquiresTransformGuardBeforePhysicalAc
 		},
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	mgr.Acquire(AcquireSegments{
 		Key: key, Meta: meta, View: view,
@@ -133,7 +178,7 @@ func TestQueryViewSegmentReadinessManager_WaitTransformVisibleUsesTransformGuard
 		},
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan map[int64][]int64, 1)
 	mgr.Acquire(AcquireSegments{
@@ -182,7 +227,7 @@ func TestQueryViewSegmentReadinessManager_AcquiresCollectionGuardBeforePhysicalA
 		},
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer, collections)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer, collections)
 
 	mgr.Acquire(AcquireSegments{
 		Key: key, Meta: meta, View: view,
@@ -213,7 +258,7 @@ func TestQueryViewSegmentReadinessManager_CollectionGuardFailureStopsPhysicalAcq
 		},
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer, collections)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer, collections)
 
 	unrecoverable := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{
@@ -239,11 +284,51 @@ type blockingQueryViewCollectionRuntimeManager struct {
 	done    chan struct{}
 }
 
-func (m *blockingQueryViewCollectionRuntimeManager) Acquire(ctx context.Context, _ *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, error) {
+func (m *blockingQueryViewCollectionRuntimeManager) Acquire(ctx context.Context, _ *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
 	close(m.entered)
 	<-ctx.Done()
 	close(m.done)
-	return nil, ctx.Err()
+	return nil, true, ctx.Err()
+}
+
+func TestQueryViewSegmentReadinessManager_RetriesRetryableCollectionAcquireInNodeScheduler(t *testing.T) {
+	nodeScheduler := nodescheduler.New(1)
+	t.Cleanup(nodeScheduler.Close)
+
+	meta := buildHandlerTestMeta(1)
+	view := buildHandlerTestQNView(1)
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	collections := &fakeQueryViewCollectionRuntimeManager{
+		acquireErrs: []error{errors.New("collection temporarily unavailable")},
+		retryable:   []bool{true},
+	}
+	physicalCalled := make(chan struct{}, 1)
+	physical := fakePhysicalSegmentManager{
+		acquire: func(AcquirePhysicalSegments) { physicalCalled <- struct{}{} },
+		release: func(req ReleaseSegments) { req.OnDropped() },
+	}
+	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physical, &fakeTransformLogBuffer{}, collections)
+
+	unrecoverable := make(chan struct{}, 1)
+	mgr.Acquire(AcquireSegments{
+		Key: key, Meta: meta, View: view,
+		OnReady:         func(map[int64][]int64) { t.Fatal("unexpected ready") },
+		OnUnrecoverable: func() { unrecoverable <- struct{}{} },
+	})
+
+	select {
+	case <-physicalCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for collection acquire retry")
+	}
+	collections.mu.Lock()
+	assert.Equal(t, 2, collections.acquireCalls)
+	collections.mu.Unlock()
+	select {
+	case <-unrecoverable:
+		t.Fatal("retryable collection acquire must not become unrecoverable")
+	default:
+	}
 }
 
 func TestQueryViewSegmentReadinessManager_ReleaseCancelsPendingCollectionAcquire(t *testing.T) {
@@ -263,7 +348,7 @@ func TestQueryViewSegmentReadinessManager_ReleaseCancelsPendingCollectionAcquire
 		},
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer, collections)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer, collections)
 
 	unrecoverable := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{
@@ -323,7 +408,7 @@ func TestQueryViewSegmentReadinessManager_ReleasesLoadedSegmentAfterLastView(t *
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan map[int64][]int64, 1)
 	mgr.Acquire(AcquireSegments{
@@ -366,7 +451,7 @@ func TestQueryViewSegmentReadinessManager_QueryHandleDefersSegmentRelease(t *tes
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan map[int64][]int64, 1)
 	mgr.Acquire(AcquireSegments{
@@ -416,7 +501,7 @@ func TestQueryViewSegmentReadinessManager_ReleasesLateLoadedSegmentAfterViewRele
 		},
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{
@@ -457,7 +542,7 @@ func TestQueryViewSegmentReadinessManager_ReportsReadyIncrementallyPerSegment(t 
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan map[int64][]int64, 2)
 	mgr.Acquire(AcquireSegments{
@@ -521,7 +606,7 @@ func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseShar
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	ready1 := make(chan map[int64][]int64, 1)
 	mgr.Acquire(AcquireSegments{
@@ -567,9 +652,9 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeSegmentLoadScheduler{}
-	physical := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{registerErr: errors.New("register failed")}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	unrecoverable1 := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{
@@ -627,9 +712,9 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeSegmentLoadScheduler{}
-	physical := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	unrecoverable1 := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{
@@ -682,9 +767,9 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeSegmentLoadScheduler{}
-	physical := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	unrecoverable1 := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{
@@ -763,7 +848,7 @@ func TestQueryViewSegmentReadinessManager_KeepsEnsureRegisterVChannelTogether(t 
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
 	buffer := newInterleavingTransformLogBuffer()
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	readyCh := make(chan struct{}, 2)
 	mgr.Acquire(AcquireSegments{Key: key1, Meta: meta1, View: view1, OnReady: func(map[int64][]int64) { readyCh <- struct{}{} }, OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") }})
@@ -791,7 +876,7 @@ func TestQueryViewSegmentReadinessManager_FailureReportsUnrecoverable(t *testing
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
 	buffer := &fakeTransformLogBuffer{acquireErr: errors.New("truncated")}
-	mgr := NewQueryViewSegmentReadinessManager(physical, buffer)
+	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
 
 	unrecoverable := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{

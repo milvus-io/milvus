@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs(t *testing.T) {
@@ -33,7 +34,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 	}
 	manager := newQueryViewCollectionRuntimeManager(provider, collection)
 
-	guard, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
+	guard, retryable, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
 		&viewpb.QueryViewMeta{
 			CollectionId:    1,
 			LoadInfoVersion: 7,
@@ -46,6 +47,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 		},
 	).(*qviews.QueryViewAtQueryNode))
 	require.NoError(t, err)
+	assert.False(t, retryable)
 	require.NotNil(t, guard)
 
 	assert.Equal(t, int64(1), guard.CollectionID())
@@ -81,7 +83,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireUsesLoadInfoVersion(t *testing
 	}
 	manager := newQueryViewCollectionRuntimeManager(provider, collection)
 
-	guard, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
+	guard, retryable, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
 		&viewpb.QueryViewMeta{
 			CollectionId:    1,
 			LoadInfoVersion: 7,
@@ -93,10 +95,44 @@ func TestQueryViewCollectionRuntimeManager_AcquireUsesLoadInfoVersion(t *testing
 		},
 	).(*qviews.QueryViewAtQueryNode))
 	require.NoError(t, err)
+	assert.False(t, retryable)
 	require.NotNil(t, guard)
 
 	assert.Equal(t, []int64{10, 20}, collection.putLoadMeta.GetPartitionIDs())
 	assert.Equal(t, []int64{100, 101, 102}, collection.putLoadMeta.GetLoadFields())
+}
+
+func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *testing.T) {
+	view := qviews.NewQueryViewAtQueryNode(
+		&viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7},
+		&viewpb.QueryViewOfQueryNode{},
+	).(*qviews.QueryViewAtQueryNode)
+
+	t.Run("transient", func(t *testing.T) {
+		manager := newQueryViewCollectionRuntimeManager(
+			&fakeQVLoadMetadataProvider{err: merr.WrapErrNodeNotMatch(1, 2)},
+			&fakeQVCollectionManager{},
+		)
+
+		guard, retryable, err := manager.Acquire(context.Background(), view)
+
+		assert.Nil(t, guard)
+		assert.True(t, retryable)
+		require.ErrorIs(t, err, merr.ErrNodeNotMatch)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		manager := newQueryViewCollectionRuntimeManager(
+			&fakeQVLoadMetadataProvider{err: merr.WrapErrCollectionNotFound(1)},
+			&fakeQVCollectionManager{},
+		)
+
+		guard, retryable, err := manager.Acquire(context.Background(), view)
+
+		assert.Nil(t, guard)
+		assert.False(t, retryable)
+		require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	})
 }
 
 func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaRefsAndUnrefsCollection(t *testing.T) {
