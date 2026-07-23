@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -496,6 +497,27 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.True(t, m.collections[104].HasTextField())
 	assert.True(t, m.collections[104].RequiresStorageV3())
 	assert.False(t, m.collections[104].AllowGrowingSourceFlush())
+
+	legacySchema := proto.Clone(textSchema).(*schemapb.CollectionSchema)
+	legacySchema.Version = 5
+	legacySchemaBytes, err := proto.Marshal(legacySchema)
+	require.NoError(t, err)
+	createMsgLegacySchema := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v_legacy_schema").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 105,
+			PartitionIds: []int64{205},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: legacySchemaBytes}).
+		MustBuildMutable().
+		WithTimeTick(275).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(14))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgLegacySchema))
+
+	storedLegacySchema, err := m.GetCollectionSchema(105, legacySchema.GetVersion())
+	require.NoError(t, err)
+	require.True(t, proto.Equal(legacySchema, storedLegacySchema))
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
