@@ -165,6 +165,34 @@ TEST_F(GeometryValueSemanticsTest, TryParseFromWkbBadDataReturnsFalse) {
     EXPECT_TRUE(g.IsValid());
 }
 
+// --- Tri-state GEOS predicate results (PR #50951 review, round Df4a298c5f4) --
+
+// GEOS binary predicates return char 1/0/2, where 2 means an exception was
+// caught inside GEOS's execute() guard. GeosPredicateIsTrue must map 2 to
+// false (row-level leniency: one unevaluable row must not fail the query)
+// while logging it -- never to true.
+TEST(GeosPredicateResult, TriStateMapping) {
+    EXPECT_TRUE(milvus::GeosPredicateIsTrue(1, "test"));
+    EXPECT_FALSE(milvus::GeosPredicateIsTrue(0, "test"));
+    EXPECT_FALSE(milvus::GeosPredicateIsTrue(2, "test"));
+}
+
+// Drive the exception path through a real predicate: GEOS relate-family
+// predicates (touches/crosses/...) throw IllegalArgumentException for
+// GEOMETRYCOLLECTION inputs, which execute() converts to a return of 2. The
+// predicate must come back false -- an unevaluable row does not match -- and
+// must not crash or return true.
+TEST_F(GeometryValueSemanticsTest, PredicateExceptionEvaluatesToFalse) {
+    Geometry collection(ctx_,
+                        "GEOMETRYCOLLECTION(POINT(1 1),LINESTRING(0 0,2 2))");
+    Geometry point(ctx_, "POINT (1 1)");
+    ASSERT_TRUE(collection.IsValid());
+    ASSERT_TRUE(point.IsValid());
+
+    EXPECT_FALSE(collection.touches(point, ctx_));
+    EXPECT_FALSE(collection.crosses(point, ctx_));
+}
+
 TEST_F(GeometryValueSemanticsTest,
        TryParseFromWkbNullContextThrowsRetriableSystemError) {
     Geometry valid(ctx_, "POINT (1 2)");

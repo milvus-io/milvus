@@ -16,8 +16,35 @@
 #include <new>
 #include <string>
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 
 namespace milvus {
+
+/**
+ * Reduce a tri-state GEOS predicate result to bool, observably.
+ *
+ * The GEOS capi binary predicates (GEOSIntersects_r, GEOSPreparedContains_r,
+ * GEOSisValid_r, ...) return char 1 = true, 0 = false, 2 = an exception was
+ * caught inside GEOS's execute() guard (a topology error on data GEOS cannot
+ * evaluate, or an allocation failure swallowed the same way -- see the KNOWN
+ * LIMIT note on Geometry::TryParseFromWkb). A bare `== 1` silently maps 2 to
+ * "no match", turning an evaluation failure into an unlogged false negative.
+ * Mapping 2 to false is still the deliberate choice -- the filter paths'
+ * single-row-leniency contract says one bad row must not fail the whole
+ * query, matching how corrupt WKB is skipped -- but it must be visible, so
+ * the exception case is logged. See PR #50951 review.
+ */
+inline bool
+GeosPredicateIsTrue(char result, const char* op) {
+    if (result == 2) {
+        LOG_WARN(
+            "GEOS predicate {} raised an exception; treating the row as not "
+            "matching",
+            op);
+        return false;
+    }
+    return result == 1;
+}
 
 /**
  * Create a GEOS context, translating allocation failure into a retriable
@@ -281,7 +308,7 @@ class Geometry {
             return false;
         }
         char result = GEOSEquals_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "equals");
     }
 
     bool
@@ -295,7 +322,7 @@ class Geometry {
             return false;
         }
         char result = GEOSTouches_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "touches");
     }
 
     bool
@@ -309,7 +336,7 @@ class Geometry {
             return false;
         }
         char result = GEOSOverlaps_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "overlaps");
     }
 
     bool
@@ -323,7 +350,7 @@ class Geometry {
             return false;
         }
         char result = GEOSCrosses_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "crosses");
     }
 
     bool
@@ -337,7 +364,7 @@ class Geometry {
             return false;
         }
         char result = GEOSContains_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "contains");
     }
 
     bool
@@ -351,7 +378,7 @@ class Geometry {
             return false;
         }
         char result = GEOSIntersects_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "intersects");
     }
 
     bool
@@ -365,7 +392,7 @@ class Geometry {
             return false;
         }
         char result = GEOSWithin_r(ctx, geometry_, other.geometry_);
-        return result == 1;
+        return GeosPredicateIsTrue(result, "within");
     }
 
     // Distance within check using GEOS distance calculation
@@ -416,6 +443,13 @@ class Geometry {
             }
         }
 
+        // Reached only when GEOS distance/coordinate extraction failed (those
+        // calls return 0 on an exception caught inside GEOS). Same deliberate
+        // exception->false mapping as GeosPredicateIsTrue: keep the row-level
+        // leniency, but make the failure visible.
+        LOG_WARN(
+            "GEOS distance/coordinate extraction failed in dwithin; treating "
+            "the row as not matching");
         return false;
     }
 
@@ -429,7 +463,7 @@ class Geometry {
         if (!IsValid()) {
             return false;
         }
-        return GEOSisValid_r(ctx, geometry_) == 1;
+        return GeosPredicateIsTrue(GEOSisValid_r(ctx, geometry_), "is_valid");
     }
 
  private:
