@@ -263,16 +263,6 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             if constexpr (std::is_same_v<ValueType, int64_t>) {
-                const auto has_unsafe_literal = std::any_of(
-                    expr_->vals_.begin(),
-                    expr_->vals_.end(),
-                    [this](const auto& val) {
-                        return val.has_int64_val() &&
-                               !IsInt64SafeForJsonDoubleIndex(val.int64_val());
-                    });
-                if (has_unsafe_literal) {
-                    return ExecTermJsonFieldInVariable<int64_t>(context);
-                }
                 if (PinnedJsonIndexIsFlat()) {
                     return ExecVisitorImplForIndex<int64_t>();
                 }
@@ -1252,14 +1242,14 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
+    if (expr_->column_.data_type_ == DataType::JSON && expr_->is_in_field_) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ != ExprExecPath::ScalarIndex) {
+    // JsonStats
+    if (CanUseJsonStatsAtInit()) {
+        exec_path_ = ExprExecPath::JsonStats;
         return;
     }
 
@@ -1268,9 +1258,28 @@ PhyTermFilterExpr::DetermineExecPath() {
         data_type = expr_->column_.element_type_;
     }
 
-    // ARRAY type cannot use scalar index
+    // ARRAY type cannot use scalar index.
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    if (data_type == DataType::JSON && !expr_->vals_.empty() &&
+        expr_->vals_[0].val_case() ==
+            proto::plan::GenericValue::ValCase::kInt64Val) {
+        const auto has_unsafe_literal = std::any_of(
+            expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
+                return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
+            });
+        if (has_unsafe_literal && !PinnedJsonIndexIsFlat()) {
+            exec_path_ = ExprExecPath::RawData;
+        }
+        return;
     }
 }
 

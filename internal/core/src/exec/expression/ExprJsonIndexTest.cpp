@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "ExprTestBase.h"
+#include "ExprBatchTestUtils.h"
 
 template <typename T>
 class JsonIndexTestFixture : public testing::Test {
@@ -409,6 +410,7 @@ TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
 }
 
 TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(2);
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -462,6 +464,14 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         1, 1, 1, json_fid.get(), {json_field}, cm);
     seg->LoadFieldData(load_info);
 
+    const auto evaluate = [&](const expr::TypedExprPtr& expr) {
+        milvus::test::ExprBatchEvalResult evaluation;
+        EXPECT_NO_THROW(evaluation = milvus::test::EvalExprInBatches(
+                            expr, seg.get(), json_strs.size()));
+        EXPECT_EQ(evaluation.batch_sizes, (std::vector<int64_t>{2, 1}));
+        return evaluation.result;
+    };
+
     proto::plan::GenericValue value;
     value.set_int64_val(9007199254740993LL);
     auto equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -469,10 +479,7 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
-    auto plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, equal_expr);
-    auto result = milvus::test::gen_filter_res(
-        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    auto result = evaluate(equal_expr);
     TargetBitmapView result_view(result->GetRawData(), result->size());
     TargetBitmapView valid_view(result->GetValidRawData(), result->size());
     for (size_t i = 0; i < result->size(); ++i) {
@@ -486,10 +493,7 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{value},
         false);
-    plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
-    result = milvus::test::gen_filter_res(
-        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    result = evaluate(term_expr);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_FALSE(result_view[0]);
@@ -501,10 +505,7 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         proto::plan::OpType::GreaterThan,
         value,
         std::vector<proto::plan::GenericValue>());
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                  greater_expr);
-    result = milvus::test::gen_filter_res(
-        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    result = evaluate(greater_expr);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_FALSE(result_view[0]);
@@ -517,10 +518,7 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         value,
         true,
         true);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                  between_expr);
-    result = milvus::test::gen_filter_res(
-        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    result = evaluate(between_expr);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_FALSE(result_view[0]);
@@ -860,6 +858,7 @@ INSTANTIATE_TEST_SUITE_P(JsonIndexBinaryExprTestParams,
                                          JsonCastType::FromString("VARCHAR")));
 
 TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(7);
     auto json_strs = std::vector<std::string>{
         R"({"a": 1})",
         R"({"a": 2})",
@@ -1044,6 +1043,10 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
             upper_val,
             lower_inclusive,
             upper_inclusive);
+        std::vector<int64_t> batch_sizes;
+        EXPECT_NO_THROW(batch_sizes = milvus::test::EvalExprBatchSizes(
+                            binary_expr, seg.get(), json_strs.size()));
+        EXPECT_EQ(batch_sizes, (std::vector<int64_t>{7, 7, 1}));
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            binary_expr);
         auto res =

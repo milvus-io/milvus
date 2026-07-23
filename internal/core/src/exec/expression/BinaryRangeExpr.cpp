@@ -132,10 +132,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 if (is_numeric) {
-                    if (has_unsafe_int_bound) {
-                        result =
-                            ExecRangeVisitorImplForJsonPreciseNumeric(context);
-                    } else if (!use_double && PinnedJsonIndexIsFlat()) {
+                    if (!use_double && PinnedJsonIndexIsFlat()) {
                         result = ExecRangeVisitorImplForIndex<int64_t>();
                     } else {
                         proto::plan::GenericValue double_lower_val;
@@ -1148,19 +1145,41 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ != ExprExecPath::ScalarIndex) {
-        return;
-    }
-
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
     }
 
-    // ARRAY type cannot use scalar index
+    if (data_type == DataType::JSON) {
+        const auto lower_type = expr_->lower_val_.val_case();
+        const auto upper_type = expr_->upper_val_.val_case();
+        const auto is_numeric =
+            (lower_type == proto::plan::GenericValue::ValCase::kInt64Val ||
+             lower_type == proto::plan::GenericValue::ValCase::kFloatVal) &&
+            (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
+             upper_type == proto::plan::GenericValue::ValCase::kFloatVal);
+        const auto has_unsafe_int_bound =
+            is_numeric &&
+            ((lower_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+              !IsInt64SafeForJsonDoubleIndex(expr_->lower_val_.int64_val())) ||
+             (upper_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+              !IsInt64SafeForJsonDoubleIndex(expr_->upper_val_.int64_val())));
+        if (lower_type == proto::plan::GenericValue::ValCase::kStringVal ||
+            has_unsafe_int_bound) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+    }
+
+    // ARRAY type cannot use scalar index.
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
     }
 }
 
