@@ -187,8 +187,6 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		case *LeaderAction:
 			ex.executeLeaderAction(task.(*LeaderTask), step)
 
-		case *DropIndexAction:
-			ex.executeDropIndexAction(task.(*DropIndexTask), step)
 		}
 	}()
 
@@ -553,60 +551,6 @@ func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
 	case ActionTypeStatsUpdate:
 		ex.updatePartStatsVersions(task, step)
 	}
-}
-
-func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
-	action := task.Actions()[step].(*DropIndexAction)
-	defer action.rpcReturned.Store(true)
-	ctx := task.Context()
-
-	var err error
-	defer func() {
-		if err != nil {
-			task.Fail(err)
-		}
-		ex.removeTask(task, step)
-	}()
-
-	replica := ex.meta.Get(ctx, task.ReplicaID())
-	if replica == nil {
-		err = merr.WrapErrNodeNotAvailable(action.Node())
-		mlog.Warn(context.TODO(), "node doesn't belong to any replica", mlog.Err(err))
-		return
-	}
-	view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
-	if view == nil {
-		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-		mlog.Warn(context.TODO(), "failed to get shard leader", mlog.Err(err))
-		return
-	}
-
-	req := &querypb.DropIndexRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DropIndex),
-			commonpbutil.WithMsgID(task.ID()),
-		),
-		SegmentID:    task.SegmentID(),
-		IndexIDs:     action.indexIDs,
-		Channel:      task.Shard(),
-		NeedTransfer: true,
-	}
-
-	startTs := time.Now()
-	mlog.Info(context.TODO(), "drop index...")
-	status, err := ex.cluster.DropIndex(task.Context(), view.Node, req)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to drop index", mlog.Err(err))
-		return
-	}
-	if !merr.Ok(status) {
-		err = merr.Error(status)
-		mlog.Warn(context.TODO(), "failed to drop index", mlog.Err(err))
-		return
-	}
-
-	elapsed := time.Since(startTs)
-	mlog.Info(context.TODO(), "drop index done", mlog.Duration("elapsed", elapsed))
 }
 
 func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
