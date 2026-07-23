@@ -174,7 +174,7 @@ struct ArithOpElementFunc {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) == val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -208,7 +208,7 @@ struct ArithOpElementFunc {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) != val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -243,7 +243,7 @@ struct ArithOpElementFunc {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) > val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -278,7 +278,7 @@ struct ArithOpElementFunc {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) >= val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -312,7 +312,7 @@ struct ArithOpElementFunc {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) < val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -346,7 +346,7 @@ struct ArithOpElementFunc {
                         res[i] =
                             (long(src[offset]) ^ long(right_operand)) <= val;
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
                                               "ArithOpElementFunc",
                                               arith_op));
@@ -368,14 +368,14 @@ struct ArithOpElementFunc {
                     src, right_operand, val, size);
             } else {
                 ThrowInfo(
-                    OpTypeInvalid,
+                    UnexpectedError,
                     fmt::format(
                         "unsupported arith type:{} for ArithOpElementFunc",
                         arith_op));
             }
         } else {
             ThrowInfo(
-                OpTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported cmp type:{} for ArithOpElementFunc",
                             cmp_op));
         }
@@ -446,7 +446,7 @@ struct ArithOpIndexFunc {
                     res[i] = (long(raw.value()) ^ long(right_operand)) == val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -477,7 +477,7 @@ struct ArithOpIndexFunc {
                     res[i] = (long(raw.value()) ^ long(right_operand)) != val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -508,7 +508,7 @@ struct ArithOpIndexFunc {
                     res[i] = (long(raw.value()) ^ long(right_operand)) > val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -539,7 +539,7 @@ struct ArithOpIndexFunc {
                     res[i] = (long(raw.value()) ^ long(right_operand)) >= val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -570,7 +570,7 @@ struct ArithOpIndexFunc {
                     res[i] = (long(raw.value()) ^ long(right_operand)) < val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));
@@ -601,7 +601,7 @@ struct ArithOpIndexFunc {
                     res[i] = (long(raw.value()) ^ long(right_operand)) <= val;
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported arith type:{} for ArithOpElementFunc",
                             arith_op));

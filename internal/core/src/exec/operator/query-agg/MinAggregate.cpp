@@ -70,7 +70,7 @@ registerMin(const std::string& name) {
                 case DataType::TEXT:
                     return std::make_unique<MinStringAggregate>(inputType);
                 default:
-                    ThrowInfo(DataTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "Unknown input type for {} aggregation {}",
                               name,
                               GetDataTypeName(inputType));

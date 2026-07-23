@@ -290,21 +290,53 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
     return result;
 }
 
-#define CALL_OPERATOR(call_func, operator, method_name)            \
-    try {                                                          \
-        call_func;                                                 \
-    } catch (std::exception & e) {                                 \
-        std::string stack_trace = milvus::impl::EasyStackTrace();  \
-        auto err_msg = fmt::format(                                \
-            "Operator::{} failed for [Operator:{}, plan node id: " \
-            "{}] : {}\nStack trace: {}",                           \
-            method_name,                                           \
-            operator->ToString(),                                  \
-            operator->get_plannode_id(),                           \
-            e.what(),                                              \
-            stack_trace);                                          \
-        LOG_ERROR("{}", err_msg);                                  \
-        throw ExecOperatorException(err_msg);                      \
+// Wraps an operator call so a failure carries the operator context, mapping
+// each exception class the way the async consume arm (futures/Future.h) does:
+//   - folly::FutureCancellation (query cancel; a timeout is converted to a
+//     cancel upstream) -> ErrorCode::FollyCancel, so a canceled query surfaces
+//     as a real cancellation at the CGO boundary and is retried by the
+//     scheduler, instead of collapsing to a retriable-looking UnexpectedError.
+//     Expected control flow, not a crash, so no stack trace is attached.
+//   - milvus::SegcoreError -> rethrown with its ORIGINAL error code preserved
+//     (the classification chosen at the throw site, e.g. ExprInvalid, must
+//     survive to the CGO boundary instead of collapsing to UnexpectedError).
+//   - any other std::exception -> legacy UnexpectedError classification.
+#define CALL_OPERATOR(call_func, operator, method_name)               \
+    try {                                                             \
+        call_func;                                                    \
+    } catch (folly::FutureCancellation & e) {                         \
+        auto err_msg = fmt::format(                                   \
+            "Operator::{} cancelled for [Operator:{}, plan node "     \
+            "id: {}] : {}",                                           \
+            method_name,                                              \
+            operator->ToString(),                                     \
+            operator->get_plannode_id(),                              \
+            e.what());                                                \
+        throw ExecOperatorException(ErrorCode::FollyCancel, err_msg); \
+    } catch (milvus::SegcoreError & e) {                              \
+        std::string stack_trace = milvus::impl::EasyStackTrace();     \
+        auto err_msg = fmt::format(                                   \
+            "Operator::{} failed for [Operator:{}, plan node id: "    \
+            "{}] : {}\nStack trace: {}",                              \
+            method_name,                                              \
+            operator->ToString(),                                     \
+            operator->get_plannode_id(),                              \
+            e.what(),                                                 \
+            stack_trace);                                             \
+        LOG_ERROR("{}", err_msg);                                     \
+        throw ExecOperatorException(e.get_error_code(), err_msg);     \
+    } catch (std::exception & e) {                                    \
+        std::string stack_trace = milvus::impl::EasyStackTrace();     \
+        auto err_msg = fmt::format(                                   \
+            "Operator::{} failed for [Operator:{}, plan node id: "    \
+            "{}] : {}\nStack trace: {}",                              \
+            method_name,                                              \
+            operator->ToString(),                                     \
+            operator->get_plannode_id(),                              \
+            e.what(),                                                 \
+            stack_trace);                                             \
+        LOG_ERROR("{}", err_msg);                                     \
+        throw ExecOperatorException(err_msg);                         \
     }
 
 StopReason
