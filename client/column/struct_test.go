@@ -655,6 +655,26 @@ func (s *StructArraySuite) TestAppendValueRollback() {
 	s.EqualValues(1, col.Len(), "struct array length stays consistent after rollback")
 }
 
+func (s *StructArraySuite) TestAppendValueRollbackPreservesVectorArrayAppendAPI() {
+	vectorCol := NewColumnFloatVectorArray("embedding", 2, nil)
+	strCol := NewColumnVarCharArray("tag", nil)
+	col := NewColumnStructArray("rows", []Column{vectorCol, strCol}).(*columnStructArray)
+
+	err := col.AppendValue(map[string]any{
+		"embedding": [][]float32{{1, 2}},
+		"tag":       42,
+	})
+	s.Require().Error(err)
+	s.IsType((*ColumnFloatVectorArray)(nil), col.fields[0])
+	s.Zero(col.Len())
+
+	s.Require().NoError(col.AppendValue(map[string]any{
+		"embedding": [][]float32{{3, 4}},
+		"tag":       []string{"valid"},
+	}))
+	s.Equal(1, col.Len())
+}
+
 func (s *StructArraySuite) TestLenMismatchPanics() {
 	// Manually drift sub-column lengths to simulate a prior corruption and verify Len reports it.
 	intCol := NewColumnInt32Array("a", [][]int32{{1}, {2}})
