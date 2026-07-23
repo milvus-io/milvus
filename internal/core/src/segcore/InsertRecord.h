@@ -503,9 +503,9 @@ class OffsetOrderedMap : public OffsetMap {
         // to avoid returning stale versions.
         // Element ranges are resolved in windows: gather the next
         // kRangeBatchSize candidate doc offsets in traversal order and
-        // resolve them with ONE CopyRowElementRanges call (one shared lock
-        // for the whole window on growing) instead of one locking virtual
-        // call per doc. Ranges prefetched for docs the traversal ends up
+        // resolve them with ONE CopyRowElementRanges call (one lock-free
+        // published snapshot for the whole window on growing) instead of one
+        // virtual call per doc. Ranges prefetched for docs the traversal ends up
         // skipping (older offsets of an already-hit PK, or docs past the
         // limit) are simply unused — the lookups are pure.
         constexpr int64_t kRangeBatchSize = 64;

@@ -53,6 +53,59 @@ LocateElement(const std::vector<int32_t>& row_to_element_start,
     return {row_id, elem_id - row_element_start, row_element_start, *it};
 }
 
+template <typename Starts>
+ElementRowInfo
+LocateElement(const Starts& starts, int64_t row_count, int32_t elem_id) {
+    const int64_t total_elements = starts[row_count];
+    assert(elem_id >= 0 && elem_id < total_elements);
+    (void)total_elements;
+
+    // upper_bound over logical starts[0..row_count].
+    int64_t lo = 0;
+    int64_t hi = row_count + 1;
+    while (lo < hi) {
+        const int64_t mid = lo + ((hi - lo) >> 1);
+        if (starts[mid] <= elem_id) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    const int32_t row_id = static_cast<int32_t>(lo - 1);
+    const int32_t row_element_start = starts[row_id];
+    const int32_t row_element_end = starts[row_id + 1];
+    return {row_id,
+            elem_id - row_element_start,
+            row_element_start,
+            row_element_end};
+}
+
+// Lock-free random-access reader over the chunk directory. Callers only hand
+// it logical indices covered by an acquire-loaded committed watermark.
+template <typename T>
+class ChunkedReader {
+ public:
+    using Directory = oneapi::tbb::concurrent_vector<std::unique_ptr<T[]>>;
+
+    explicit ChunkedReader(const Directory& dir) : dir_(dir) {
+    }
+
+    T
+    operator[](int64_t idx) const {
+        const int64_t chunk_id = idx >> ArrayOffsetsGrowing::kChunkBits;
+        if (chunk_id != cached_chunk_id_) {
+            cached_chunk_id_ = chunk_id;
+            cached_chunk_ = dir_[static_cast<size_t>(chunk_id)].get();
+        }
+        return cached_chunk_[idx & ArrayOffsetsGrowing::kChunkMask];
+    }
+
+ private:
+    const Directory& dir_;
+    mutable int64_t cached_chunk_id_{-1};
+    mutable const T* cached_chunk_{nullptr};
+};
+
 // Word-wise ANY-semantics reduction shared by the sealed and growing
 // implementations of ElementBitsetToRowBitsetAny.
 //
@@ -67,8 +120,9 @@ LocateElement(const std::vector<int32_t>& row_to_element_start,
 // marked the scan jumps directly to the row's end, skipping its remaining
 // words. Complexity is O(total_elements / 64 + row_count + hit_rows)
 // instead of the per-bit O(total_elements).
+template <typename Starts>
 void
-ElementBitsetAnyReduce(const int32_t* starts,
+ElementBitsetAnyReduce(const Starts& starts,
                        const TargetBitmapView& elem_bitset,
                        int64_t elem_offset,
                        int64_t row_start,
@@ -491,27 +545,32 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
 
 std::pair<int32_t, int32_t>
 ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
-    std::shared_lock lock(mutex_);
-    const auto info = LocateElement(row_to_element_start_, elem_id);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+    const auto info =
+        LocateElement(ChunkedReader(starts_chunks_), committed, elem_id);
     return {info.row_id, info.element_index};
 }
 
 ElementRowInfo
 ArrayOffsetsGrowing::ElementIDToRowInfo(int32_t elem_id) const {
-    std::shared_lock lock(mutex_);
-    return LocateElement(row_to_element_start_, elem_id);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+    return LocateElement(ChunkedReader(starts_chunks_), committed, elem_id);
 }
 
 std::pair<int32_t, int32_t>
 ArrayOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
-    std::shared_lock lock(mutex_);
-    assert(row_id >= 0 && row_id <= committed_row_count_);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+    assert(row_id >= 0 && row_id <= committed);
 
-    if (row_id == committed_row_count_) {
-        auto total = row_to_element_start_[committed_row_count_];
+    ChunkedReader starts(starts_chunks_);
+    if (row_id == committed) {
+        const int32_t total = starts[committed];
         return {total, total};
     }
-    return {row_to_element_start_[row_id], row_to_element_start_[row_id + 1]};
+    return {starts[row_id], starts[row_id + 1]};
 }
 
 void
@@ -519,26 +578,43 @@ ArrayOffsetsGrowing::CopyRowElementRanges(
     const int32_t* row_ids,
     int64_t count,
     std::pair<int32_t, int32_t>* out) const {
-    // ONE shared lock for the whole batch (the per-row method locks per
-    // call, which contends with Insert's unique lock on hot scan paths).
-    std::shared_lock lock(mutex_);
-    const int32_t* starts = row_to_element_start_.data();
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+    ChunkedReader starts(starts_chunks_);
+    const int32_t total = starts[committed];
     for (int64_t i = 0; i < count; ++i) {
         const int32_t row_id = row_ids[i];
         AssertInfo(
             row_id >= 0, "row id must be non-negative: row_id={}", row_id);
-        // Out-of-range insurance: with zero committed rows the vector is
-        // empty, and a not-yet-committed row has no range yet.
-        if (row_id > committed_row_count_ || row_to_element_start_.empty()) {
+        // A not-yet-committed row has no published range yet.
+        if (row_id > committed) {
             out[i] = {0, 0};
             continue;
         }
-        if (row_id == committed_row_count_) {
-            auto total = starts[committed_row_count_];
+        if (row_id == committed) {
             out[i] = {total, total};
         } else {
             out[i] = {starts[row_id], starts[row_id + 1]};
         }
+    }
+}
+
+void
+ArrayOffsetsGrowing::CopyStartsSlice(int64_t first_idx,
+                                     int64_t entry_count,
+                                     int32_t* out) const {
+    int64_t idx = first_idx;
+    int64_t copied = 0;
+    while (copied < entry_count) {
+        const int64_t chunk_id = idx >> kChunkBits;
+        const int64_t off = idx & kChunkMask;
+        const int64_t run =
+            std::min(kEntriesPerChunk - off, entry_count - copied);
+        std::memcpy(out + copied,
+                    starts_chunks_[static_cast<size_t>(chunk_id)].get() + off,
+                    sizeof(int32_t) * run);
+        idx += run;
+        copied += run;
     }
 }
 
@@ -550,26 +626,22 @@ ArrayOffsetsGrowing::CopyRowElementStarts(int64_t row_start,
                "invalid row range: row_start={}, row_count={}",
                row_start,
                row_count);
-    std::shared_lock lock(mutex_);
-    if (row_to_element_start_.empty()) {
-        // No committed rows yet: every requested row clamps to total == 0.
-        std::fill(out, out + row_count + 1, 0);
-        return;
-    }
-    const int32_t* starts = row_to_element_start_.data();
-    const int64_t committed = committed_row_count_;
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
     if (row_start + row_count <= committed) {
-        // Fast path: fully committed range, straight copy under the lock.
-        std::memcpy(out, starts + row_start, sizeof(int32_t) * (row_count + 1));
+        CopyStartsSlice(row_start, row_count + 1, out);
         return;
     }
     // Rows at or beyond the committed count clamp to the committed total
     // ({total, total}-style safety: not-yet-committed rows read as empty).
-    const int32_t total = starts[committed];
-    for (int64_t i = 0; i <= row_count; ++i) {
-        const int64_t row = row_start + i;
-        out[i] = row <= committed ? starts[row] : total;
+    const int32_t total = LoadStart(committed);
+    int64_t i = 0;
+    if (row_start <= committed) {
+        const int64_t prefix = committed - row_start + 1;
+        CopyStartsSlice(row_start, prefix, out);
+        i = prefix;
     }
+    std::fill(out + i, out + row_count + 1, total);
 }
 
 std::pair<TargetBitmap, TargetBitmap>
@@ -577,18 +649,20 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
     const TargetBitmapView& valid_row_bitset,
     int64_t row_start) const {
-    std::shared_lock lock(mutex_);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
 
     int64_t row_count = row_bitset.size();
-    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
                "row range out of bounds: row_start={}, row_count={}, "
                "committed_rows={}",
                row_start,
                row_count,
-               committed_row_count_);
+               committed);
 
-    int64_t element_start = row_to_element_start_[row_start];
-    int64_t element_end = row_to_element_start_[row_start + row_count];
+    ChunkedReader starts(starts_chunks_);
+    int64_t element_start = starts[row_start];
+    int64_t element_end = starts[row_start + row_count];
     int64_t element_count = element_end - element_start;
 
     TargetBitmap element_bitset(element_count);
@@ -597,8 +671,8 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
     // Use row-based iteration (more efficient than element-based)
     for (int64_t i = 0; i < row_count; ++i) {
         int64_t row_id = row_start + i;
-        int64_t start = row_to_element_start_[row_id] - element_start;
-        int64_t end = row_to_element_start_[row_id + 1] - element_start;
+        int64_t start = starts[row_id] - element_start;
+        int64_t end = starts[row_id + 1] - element_start;
         if (start < end) {
             element_bitset.set(start, end - start, row_bitset[i]);
             valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
@@ -611,15 +685,16 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
 FixedVector<int32_t>
 ArrayOffsetsGrowing::RowBitsetToElementOffsets(
     const TargetBitmapView& row_bitset, int64_t row_start) const {
-    std::shared_lock lock(mutex_);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
 
     int64_t row_count = row_bitset.size();
-    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
                "row range out of bounds: row_start={}, row_count={}, "
                "committed_rows={}",
                row_start,
                row_count,
-               committed_row_count_);
+               committed);
 
     int64_t selected_rows = row_bitset.count();
     FixedVector<int32_t> element_offsets;
@@ -627,15 +702,16 @@ ArrayOffsetsGrowing::RowBitsetToElementOffsets(
         return element_offsets;
     }
 
-    int64_t total_elements = row_to_element_start_.back();
-    int64_t avg_elem_per_row = total_elements / committed_row_count_;
+    ChunkedReader starts(starts_chunks_);
+    int64_t total_elements = starts[committed];
+    int64_t avg_elem_per_row = total_elements / committed;
     element_offsets.reserve(selected_rows * avg_elem_per_row);
 
     for (int64_t i = 0; i < row_count; ++i) {
         if (row_bitset[i]) {
             int64_t row_id = row_start + i;
-            int32_t first_elem = row_to_element_start_[row_id];
-            int32_t last_elem = row_to_element_start_[row_id + 1];
+            int32_t first_elem = starts[row_id];
+            int32_t last_elem = starts[row_id + 1];
             for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
                 element_offsets.push_back(elem_id);
             }
@@ -648,21 +724,23 @@ ArrayOffsetsGrowing::RowBitsetToElementOffsets(
 FixedVector<int32_t>
 ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
     const FixedVector<int32_t>& row_offsets) const {
-    std::shared_lock lock(mutex_);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
 
     FixedVector<int32_t> element_offsets;
     if (row_offsets.empty()) {
         return element_offsets;
     }
 
-    int64_t total_elements = row_to_element_start_.back();
-    int64_t avg_elem_per_row = total_elements / committed_row_count_;
+    ChunkedReader starts(starts_chunks_);
+    int64_t total_elements = starts[committed];
+    int64_t avg_elem_per_row = total_elements / committed;
     element_offsets.reserve(row_offsets.size() * avg_elem_per_row);
 
     for (auto row_id : row_offsets) {
-        assert(row_id >= 0 && row_id < committed_row_count_);
-        int32_t first_elem = row_to_element_start_[row_id];
-        int32_t last_elem = row_to_element_start_[row_id + 1];
+        assert(row_id >= 0 && row_id < committed);
+        int32_t first_elem = starts[row_id];
+        int32_t last_elem = starts[row_id + 1];
         for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
             element_offsets.push_back(elem_id);
         }
@@ -676,21 +754,23 @@ ArrayOffsetsGrowing::ForEachRowElementRange(
     const ElementRangePredicate& predicate,
     int64_t row_start,
     int64_t row_count) const {
-    std::shared_lock lock(mutex_);
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
 
-    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
                "row range out of bounds: row_start={}, row_count={}, "
                "committed_rows={}",
                row_start,
                row_count,
-               committed_row_count_);
+               committed);
 
+    ChunkedReader starts(starts_chunks_);
     TargetBitmap result(row_count);
 
     for (int64_t i = 0; i < row_count; ++i) {
         int64_t row_id = row_start + i;
-        int32_t elem_start = row_to_element_start_[row_id];
-        int32_t elem_end = row_to_element_start_[row_id + 1];
+        int32_t elem_start = starts[row_id];
+        int32_t elem_end = starts[row_id + 1];
         result[i] = predicate(elem_start, elem_end);
     }
 
@@ -703,110 +783,76 @@ ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
     int64_t elem_offset,
     int64_t row_start,
     TargetBitmapView row_result) const {
-    std::shared_lock lock(mutex_);
-
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
     const int64_t row_count = row_result.size();
-    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
                "row range out of bounds: row_start={}, row_count={}, "
                "committed_rows={}",
                row_start,
                row_count,
-               committed_row_count_);
+               committed);
 
-    ElementBitsetAnyReduce(row_to_element_start_.data(),
-                           elem_bitset,
-                           elem_offset,
-                           row_start,
-                           row_count,
-                           row_result);
+    ChunkedReader starts(starts_chunks_);
+    ElementBitsetAnyReduce(
+        starts, elem_bitset, elem_offset, row_start, row_count, row_result);
 }
 
 void
 ArrayOffsetsGrowing::Insert(int64_t row_id_start,
                             const int32_t* array_lengths,
                             int64_t count) {
-    std::unique_lock lock(mutex_);
-
-    // NOTE: no reserve() here on purpose. An exact-size reserve per insert
-    // batch (row_id_start + count + 1) defeats the vector's geometric growth:
-    // every batch whose target exceeded the previous exact capacity forced a
-    // full reallocation + memcpy of the whole table while holding the writer
-    // lock, turning N batched inserts into O(N^2) copied bytes. push_back's
-    // amortized doubling is the right behavior.
+    std::lock_guard lock(write_mutex_);
     for (int64_t i = 0; i < count; ++i) {
-        int32_t row_id = row_id_start + i;
+        int64_t row_id = row_id_start + i;
         int32_t array_len = array_lengths[i];
 
-        if (row_id == committed_row_count_) {
-            // Get current total element count (from sentinel or compute)
-            int32_t current_total = row_to_element_start_.empty()
-                                        ? 0
-                                        : row_to_element_start_.back();
-
-            // Record the start position for this row
-            if (row_to_element_start_.size() >
-                static_cast<size_t>(committed_row_count_)) {
-                // Sentinel exists, overwrite it with row start
-                row_to_element_start_[committed_row_count_] = current_total;
-            } else {
-                row_to_element_start_.push_back(current_total);
-            }
-
-            // Update sentinel (new total after this row)
-            int32_t new_total = current_total + array_len;
-            if (row_to_element_start_.size() >
-                static_cast<size_t>(committed_row_count_ + 1)) {
-                row_to_element_start_[committed_row_count_ + 1] = new_total;
-            } else {
-                row_to_element_start_.push_back(new_total);
-            }
-
-            committed_row_count_++;
+        if (row_id == committed_rows_writer_) {
+            CommitRow(array_len);
         } else {
             pending_rows_[row_id] = {row_id, array_len};
         }
     }
 
     DrainPendingRows();
+    PublishCommitted();
+}
+
+void
+ArrayOffsetsGrowing::WriteStart(int64_t idx, int32_t value) {
+    const auto chunk_id = static_cast<size_t>(idx >> kChunkBits);
+    while (starts_chunks_.size() <= chunk_id) {
+        starts_chunks_.push_back(std::make_unique<int32_t[]>(kEntriesPerChunk));
+    }
+    starts_chunks_[chunk_id][idx & kChunkMask] = value;
+}
+
+void
+ArrayOffsetsGrowing::CommitRow(int32_t array_len) {
+    const int32_t row = committed_rows_writer_;
+    const int32_t current_total = LoadStart(row);
+    WriteStart(row + 1, current_total + array_len);
+    committed_rows_writer_ = row + 1;
 }
 
 void
 ArrayOffsetsGrowing::DrainPendingRows() {
     while (true) {
-        auto it = pending_rows_.find(committed_row_count_);
+        auto it = pending_rows_.find(committed_rows_writer_);
         if (it == pending_rows_.end()) {
             break;
         }
 
         const auto& pending = it->second;
-
-        // Get current total element count
-        int32_t current_total =
-            (committed_row_count_ > 0)
-                ? row_to_element_start_[committed_row_count_]
-                : 0;
-
-        // If sentinel exists at current position, overwrite it; otherwise push_back
-        if (row_to_element_start_.size() >
-            static_cast<size_t>(committed_row_count_)) {
-            row_to_element_start_[committed_row_count_] = current_total;
-        } else {
-            row_to_element_start_.push_back(current_total);
-        }
-
-        // Update sentinel for next row
-        int32_t new_total = current_total + pending.array_len;
-        if (row_to_element_start_.size() >
-            static_cast<size_t>(committed_row_count_ + 1)) {
-            row_to_element_start_[committed_row_count_ + 1] = new_total;
-        } else {
-            row_to_element_start_.push_back(new_total);
-        }
-
-        committed_row_count_++;
-
+        CommitRow(pending.array_len);
         pending_rows_.erase(it);
     }
+}
+
+void
+ArrayOffsetsGrowing::PublishCommitted() {
+    committed_row_count_.store(committed_rows_writer_,
+                               std::memory_order_release);
 }
 
 }  // namespace milvus

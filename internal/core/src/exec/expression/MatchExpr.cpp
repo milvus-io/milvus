@@ -158,9 +158,8 @@ ProcessContiguousRows(int64_t row_count,
         return;
     }
     // ONE batched virtual call for the whole batch instead of one
-    // ElementIDRangeOfRow per row (on growing segments the per-row call is a
-    // shared_lock acquire/release each, contending with Insert's unique
-    // lock).
+    // ElementIDRangeOfRow per row. Growing segments acquire-load one published
+    // watermark and read the whole batch from that lock-free snapshot.
     FixedVector<int32_t> row_elem_starts(row_count + 1);
     array_offsets->CopyRowElementStarts(
         row_start, row_count, row_elem_starts.data());
@@ -189,7 +188,7 @@ ProcessOffsetRows(const OffsetVector* row_offsets,
                   TargetBitmapView& result_bitset,
                   int64_t threshold) {
     // ONE batched virtual call for all requested rows instead of one
-    // ElementIDRangeOfRow per row (single shared_lock on growing).
+    // ElementIDRangeOfRow per row (one lock-free snapshot on growing).
     const auto row_count = static_cast<int64_t>(row_offsets->size());
     FixedVector<std::pair<int32_t, int32_t>> ranges(row_count);
     array_offsets->CopyRowElementRanges(

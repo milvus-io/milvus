@@ -1043,8 +1043,8 @@ class SegmentExpr : public Expr {
             // Same run exploitation as the sealed branch: element ids from
             // RowOffsetsToElementOffsets list each row's elements
             // consecutively ascending, so resolve the row and its range with
-            // one virtual call/shared lock and pin the Array chunk ONCE per
-            // run instead of once per element. The
+            // one virtual call against a published offsets snapshot and pin
+            // the Array chunk ONCE per run instead of once per element. The
             // consecutive-id guard below keeps this correct for arbitrary
             // input orders.
             while (i < element_ids->size()) {

@@ -612,7 +612,7 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 		return err
 	}
 	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return nil
+	return function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -1263,7 +1263,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	}
 }
 
-func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest) (float64, error) {
+func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
 		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
@@ -1284,51 +1284,33 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	var tfArray *schemapb.SparseFloatArray
-	schemaVersion := sd.collection.Schema().GetVersion()
-	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
-		if functionType != schemapb.FunctionType_BM25 {
-			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+	datas := []any{texts}
+	if len(functionRunner.GetInputFields()) == 2 {
+		analyzerName := "default"
+		if name := req.GetAnalyzerName(); name != "" {
+			// use user provided analyzer name
+			analyzerName = name
 		}
 
-		datas := []any{texts}
-		if len(functionRunner.GetInputFields()) == 2 {
-			analyzerName := "default"
-			if name := req.GetAnalyzerName(); name != "" {
-				// use user provided analyzer name
-				analyzerName = name
-			}
+		analyzers := make([]string, len(texts))
+		for i := range texts {
+			analyzers[i] = analyzerName
+		}
+		datas = append(datas, analyzers)
+	}
 
-			analyzers := make([]string, len(texts))
-			for i := range texts {
-				analyzers[i] = analyzerName
-			}
-			datas = append(datas, analyzers)
-		}
-
-		// get search text term frequency
-		output, err := functionRunner.BatchRun(datas...)
-		if err != nil {
-			return err
-		}
-		if len(output) == 0 {
-			return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
-		}
-
-		var ok bool
-		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
-		if !ok {
-			return merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
-		}
-		return nil
-	})
+	// get search text term frequency
+	output, err := functionRunner.BatchRun(datas...)
 	if err != nil {
 		return 0, err
 	}
+	if len(output) == 0 {
+		return 0, merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
+	}
+
+	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		// internal invariant: runners are populated with the schema, never by
-		// the request — classified system, keeps cross-replica failover
-		return 0, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		return 0, merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 	}
 
 	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
@@ -1353,7 +1335,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	return avgdl, nil
 }
 
-func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.SearchRequest) error {
+func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) error {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
 		return merr.WrapErrParameterInvalidMsg("failed to unmarshal MinHash placeholder group: %v", err)
@@ -1369,33 +1351,17 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	var fieldData *schemapb.FieldData
-	schemaVersion := sd.collection.Schema().GetVersion()
-	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
-		if functionType != schemapb.FunctionType_MinHash {
-			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
-		}
-
-		output, err := functionRunner.BatchRun(texts)
-		if err != nil {
-			return err
-		}
-		if len(output) == 0 {
-			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
-		}
-
-		var ok bool
-		fieldData, ok = output[0].(*schemapb.FieldData)
-		if !ok {
-			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
-		}
-		return nil
-	})
+	output, err := functionRunner.BatchRun(texts)
 	if err != nil {
 		return err
 	}
+	if len(output) == 0 {
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
+	}
+
+	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
 	}
 
 	vectorField := fieldData.GetVectors()

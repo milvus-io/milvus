@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -954,7 +956,7 @@ TEST_F(ArrayOffsetsTest, GrowingCopyRowElementStartsClamp) {
     std::vector<int32_t> lens = {2, 3, 0, 1};
     offsets.Insert(0, lens.data(), 4);
 
-    // Fully committed range (fast copy path), includes the empty row 2.
+    // Fully committed range, including the empty row 2.
     {
         std::vector<int32_t> out(5, -1);
         offsets.CopyRowElementStarts(0, 4, out.data());
@@ -1068,5 +1070,516 @@ TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
             pending_rows.data(), 2, pending_out.data());
         EXPECT_EQ(pending_out[0], (std::pair<int32_t, int32_t>{0, 0}));
         EXPECT_EQ(pending_out[1], (std::pair<int32_t, int32_t>{0, 0}));
+    }
+}
+
+TEST_F(ArrayOffsetsTest, GrowingEmptyTableRange) {
+    ArrayOffsetsGrowing offsets;
+
+    EXPECT_EQ(offsets.GetRowCount(), 0);
+    EXPECT_EQ(offsets.GetTotalElementCount(), 0);
+    EXPECT_EQ(offsets.ElementIDRangeOfRow(0),
+              (std::pair<int32_t, int32_t>{0, 0}));
+
+    TargetBitmap rows(0);
+    TargetBitmap valid_rows(0);
+    auto [elements, valid_elements] =
+        offsets.RowBitsetToElementBitset(rows.view(), valid_rows.view(), 0);
+    EXPECT_TRUE(elements.empty());
+    EXPECT_TRUE(valid_elements.empty());
+}
+
+TEST_F(ArrayOffsetsTest, GrowingChunkBoundary) {
+    constexpr int64_t kChunk = ArrayOffsetsGrowing::kEntriesPerChunk;
+    constexpr int64_t kTotalRows = 2 * kChunk + 137;
+
+    std::vector<int32_t> lens(kTotalRows);
+    std::vector<int32_t> expected(kTotalRows + 1, 0);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        lens[i] = static_cast<int32_t>(i % 4);
+        expected[i + 1] = expected[i] + lens[i];
+    }
+
+    ArrayOffsetsGrowing offsets;
+
+    // Leave a gap before each chunk boundary, insert the following rows as
+    // pending, then fill the gap and drain across the boundary.
+    offsets.Insert(0, lens.data(), kChunk - 3);
+    offsets.Insert(kChunk + 3, lens.data() + kChunk + 3, 37);
+    EXPECT_EQ(offsets.GetRowCount(), kChunk - 3);
+    offsets.Insert(kChunk - 3, lens.data() + kChunk - 3, 6);
+    EXPECT_EQ(offsets.GetRowCount(), kChunk + 40);
+
+    offsets.Insert(2 * kChunk + 1,
+                   lens.data() + 2 * kChunk + 1,
+                   kTotalRows - (2 * kChunk + 1));
+    EXPECT_EQ(offsets.GetRowCount(), kChunk + 40);
+    offsets.Insert(
+        kChunk + 40, lens.data() + kChunk + 40, 2 * kChunk + 1 - (kChunk + 40));
+
+    EXPECT_EQ(offsets.GetRowCount(), kTotalRows);
+    EXPECT_EQ(offsets.GetTotalElementCount(), expected[kTotalRows]);
+
+    for (int64_t row : {int64_t{0},
+                        kChunk - 2,
+                        kChunk - 1,
+                        kChunk,
+                        kChunk + 1,
+                        2 * kChunk - 1,
+                        2 * kChunk,
+                        2 * kChunk + 1,
+                        kTotalRows - 1}) {
+        auto [start, end] =
+            offsets.ElementIDRangeOfRow(static_cast<int32_t>(row));
+        EXPECT_EQ(start, expected[row]) << "row " << row;
+        EXPECT_EQ(end, expected[row + 1]) << "row " << row;
+    }
+    EXPECT_EQ(offsets.ElementIDRangeOfRow(kTotalRows),
+              (std::pair<int32_t, int32_t>{expected[kTotalRows],
+                                           expected[kTotalRows]}));
+
+    auto check_element = [&](int32_t element) {
+        auto it = std::upper_bound(expected.begin(), expected.end(), element);
+        const auto expected_row =
+            static_cast<int32_t>(it - expected.begin()) - 1;
+        auto [row, index] = offsets.ElementIDToRowID(element);
+        EXPECT_EQ(row, expected_row) << "element " << element;
+        EXPECT_EQ(index, element - expected[expected_row])
+            << "element " << element;
+        const auto info = offsets.ElementIDToRowInfo(element);
+        EXPECT_EQ(info.row_id, expected_row) << "element " << element;
+        EXPECT_EQ(info.element_index, element - expected[expected_row])
+            << "element " << element;
+        EXPECT_EQ(info.row_element_start, expected[expected_row])
+            << "element " << element;
+        EXPECT_EQ(info.row_element_end, expected[expected_row + 1])
+            << "element " << element;
+    };
+    for (int32_t element : {0,
+                            expected[kChunk] - 1,
+                            expected[kChunk],
+                            expected[kChunk] + 1,
+                            expected[2 * kChunk] - 1,
+                            expected[2 * kChunk],
+                            expected[kTotalRows] - 1}) {
+        check_element(element);
+    }
+
+    const int64_t row_start = kChunk - 8;
+    const int64_t row_count = 16;
+    TargetBitmap row_bits(row_count);
+    TargetBitmap valid_bits(row_count, true);
+    for (int64_t i = 0; i < row_count; i += 2) {
+        row_bits[i] = true;
+    }
+
+    auto [element_bits, valid_element_bits] = offsets.RowBitsetToElementBitset(
+        row_bits.view(), valid_bits.view(), row_start);
+    ASSERT_EQ(static_cast<int64_t>(element_bits.size()),
+              expected[row_start + row_count] - expected[row_start]);
+    for (int64_t i = 0; i < row_count; ++i) {
+        for (int32_t element = expected[row_start + i];
+             element < expected[row_start + i + 1];
+             ++element) {
+            const auto local = element - expected[row_start];
+            EXPECT_EQ(bool(element_bits[local]), bool(row_bits[i]));
+            EXPECT_TRUE(valid_element_bits[local]);
+        }
+    }
+
+    std::vector<int32_t> copied_starts(row_count + 1, -1);
+    offsets.CopyRowElementStarts(row_start, row_count, copied_starts.data());
+    for (int64_t i = 0; i <= row_count; ++i) {
+        EXPECT_EQ(copied_starts[i], expected[row_start + i]);
+    }
+
+    TargetBitmap any_rows(row_count);
+    offsets.ElementBitsetToRowBitsetAny(
+        element_bits.view(), expected[row_start], row_start, any_rows.view());
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(bool(any_rows[i]),
+                  bool(row_bits[i]) && lens[row_start + i] > 0);
+    }
+
+    auto element_offsets =
+        offsets.RowBitsetToElementOffsets(row_bits.view(), row_start);
+    std::vector<int32_t> expected_offsets;
+    for (int64_t i = 0; i < row_count; i += 2) {
+        for (int32_t element = expected[row_start + i];
+             element < expected[row_start + i + 1];
+             ++element) {
+            expected_offsets.push_back(element);
+        }
+    }
+    EXPECT_TRUE(std::equal(element_offsets.begin(),
+                           element_offsets.end(),
+                           expected_offsets.begin(),
+                           expected_offsets.end()));
+
+    FixedVector<int32_t> row_offsets = {static_cast<int32_t>(kChunk - 1),
+                                        static_cast<int32_t>(kChunk),
+                                        static_cast<int32_t>(kChunk + 1),
+                                        static_cast<int32_t>(2 * kChunk)};
+    std::vector<std::pair<int32_t, int32_t>> copied_ranges(row_offsets.size());
+    offsets.CopyRowElementRanges(row_offsets.data(),
+                                 static_cast<int64_t>(row_offsets.size()),
+                                 copied_ranges.data());
+    for (size_t i = 0; i < row_offsets.size(); ++i) {
+        const int32_t row = row_offsets[i];
+        EXPECT_EQ(
+            copied_ranges[i],
+            (std::pair<int32_t, int32_t>{expected[row], expected[row + 1]}));
+    }
+
+    auto selected = offsets.RowOffsetsToElementOffsets(row_offsets);
+    expected_offsets.clear();
+    for (auto row : row_offsets) {
+        for (int32_t element = expected[row]; element < expected[row + 1];
+             ++element) {
+            expected_offsets.push_back(element);
+        }
+    }
+    EXPECT_TRUE(std::equal(selected.begin(),
+                           selected.end(),
+                           expected_offsets.begin(),
+                           expected_offsets.end()));
+
+    auto ranges = offsets.ForEachRowElementRange(
+        [](int32_t start, int32_t end) { return end - start >= 2; },
+        row_start,
+        row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(bool(ranges[i]), lens[row_start + i] >= 2);
+    }
+}
+
+TEST_F(ArrayOffsetsTest, GrowingConcurrentWriterReaderStress) {
+    constexpr int64_t kTotalRows = 100000;
+    constexpr int64_t kInsertBatch = 32;
+    static_assert(kTotalRows % kInsertBatch == 0);
+
+    std::vector<int32_t> lens(kTotalRows);
+    std::vector<int32_t> expected(kTotalRows + 1, 0);
+    std::mt19937 gen(4242);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        lens[i] = static_cast<int32_t>(gen() % 5);
+        expected[i + 1] = expected[i] + lens[i];
+    }
+
+    // Precompute the exact row-count endpoints that the deterministic writer
+    // plan may publish. For an out-of-order pair, the high batch leaves the
+    // watermark unchanged and the following low batch publishes both batches
+    // together; the intermediate prefix is deliberately not an endpoint.
+    std::vector<bool> allowed_counts(kTotalRows + 1, false);
+    allowed_counts[0] = true;
+    std::mt19937 plan_gen(999);
+    int64_t planned_next = 0;
+    while (planned_next < kTotalRows) {
+        if (plan_gen() % 4 == 0 &&
+            planned_next + 2 * kInsertBatch <= kTotalRows) {
+            planned_next += 2 * kInsertBatch;
+        } else {
+            planned_next += kInsertBatch;
+        }
+        allowed_counts[planned_next] = true;
+    }
+
+    ArrayOffsetsGrowing offsets;
+    std::atomic<bool> start{false};
+    std::atomic<bool> done{false};
+    std::atomic<int32_t> ready{0};
+    std::atomic<int64_t> live_reads{0};
+    std::atomic<int64_t> partial_reads{0};
+
+    std::thread writer([&]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        while (live_reads.load(std::memory_order_acquire) == 0) {
+            std::this_thread::yield();
+        }
+
+        std::mt19937 writer_gen(999);
+        int64_t next = 0;
+        while (next < kTotalRows) {
+            if (writer_gen() % 4 == 0 &&
+                next + 2 * kInsertBatch <= kTotalRows) {
+                offsets.Insert(next + kInsertBatch,
+                               lens.data() + next + kInsertBatch,
+                               kInsertBatch);
+                offsets.Insert(next, lens.data() + next, kInsertBatch);
+                next += 2 * kInsertBatch;
+            } else {
+                offsets.Insert(next, lens.data() + next, kInsertBatch);
+                next += kInsertBatch;
+            }
+
+            // Keep the first published prefix visible until a reader has
+            // observed it, proving the stress actually overlaps ingest.
+            if (partial_reads.load(std::memory_order_acquire) == 0) {
+                while (partial_reads.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::yield();
+                }
+            }
+            std::this_thread::yield();
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    std::vector<std::thread> readers;
+    for (int thread_id = 0; thread_id < 4; ++thread_id) {
+        readers.emplace_back([&, thread_id]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            std::mt19937 reader_gen(1000 + thread_id);
+            int64_t last_count = 0;
+            int64_t iterations = 0;
+            while (!done.load(std::memory_order_acquire) || iterations < 200) {
+                ++iterations;
+                if (!done.load(std::memory_order_acquire)) {
+                    live_reads.fetch_add(1, std::memory_order_release);
+                }
+                const int64_t count = offsets.GetRowCount();
+                EXPECT_GE(count, last_count);
+                if (count < 0 || count > kTotalRows) {
+                    ADD_FAILURE() << "invalid committed row count " << count;
+                    continue;
+                }
+                EXPECT_TRUE(allowed_counts[count])
+                    << "reader observed a count that was not an Insert-call "
+                       "endpoint: "
+                    << count;
+                last_count = count;
+                if (count > 0 && count < kTotalRows) {
+                    partial_reads.fetch_add(1, std::memory_order_release);
+                }
+
+                const int64_t total = offsets.GetTotalElementCount();
+                if (total < expected[count] || total > expected[kTotalRows]) {
+                    ADD_FAILURE() << "invalid total element count " << total
+                                  << " for committed rows " << count;
+                    continue;
+                }
+                if (count == 0) {
+                    continue;
+                }
+
+                const int64_t row_start = reader_gen() % count;
+                const int64_t row_count =
+                    std::min<int64_t>(128, count - row_start);
+
+                auto [first_start, first_end] =
+                    offsets.ElementIDRangeOfRow(row_start);
+                EXPECT_EQ(first_start, expected[row_start]);
+                EXPECT_EQ(first_end, expected[row_start + 1]);
+                auto [last_start, last_end] =
+                    offsets.ElementIDRangeOfRow(row_start + row_count - 1);
+                EXPECT_EQ(last_start, expected[row_start + row_count - 1]);
+                EXPECT_EQ(last_end, expected[row_start + row_count]);
+
+                int32_t copied_starts[129];
+                offsets.CopyRowElementStarts(
+                    row_start, row_count, copied_starts);
+                for (int64_t i = 0; i <= row_count; ++i) {
+                    EXPECT_EQ(copied_starts[i], expected[row_start + i]);
+                }
+
+                int32_t copied_rows[2] = {
+                    static_cast<int32_t>(row_start),
+                    static_cast<int32_t>(row_start + row_count - 1)};
+                std::pair<int32_t, int32_t> copied_ranges[2];
+                offsets.CopyRowElementRanges(copied_rows, 2, copied_ranges);
+                EXPECT_EQ(copied_ranges[0],
+                          (std::pair<int32_t, int32_t>{
+                              expected[row_start], expected[row_start + 1]}));
+                EXPECT_EQ(copied_ranges[1],
+                          (std::pair<int32_t, int32_t>{
+                              expected[row_start + row_count - 1],
+                              expected[row_start + row_count]}));
+
+                if (total > 0) {
+                    const auto element =
+                        static_cast<int32_t>(reader_gen() % total);
+                    auto it = std::upper_bound(
+                        expected.begin(), expected.end(), element);
+                    const auto expected_row =
+                        static_cast<int32_t>(it - expected.begin()) - 1;
+                    auto [row, index] = offsets.ElementIDToRowID(element);
+                    EXPECT_EQ(row, expected_row);
+                    EXPECT_EQ(index, element - expected[expected_row]);
+                    const auto info = offsets.ElementIDToRowInfo(element);
+                    EXPECT_EQ(info.row_id, expected_row);
+                    EXPECT_EQ(info.element_index,
+                              element - expected[expected_row]);
+                    EXPECT_EQ(info.row_element_start, expected[expected_row]);
+                    EXPECT_EQ(info.row_element_end, expected[expected_row + 1]);
+                }
+
+                TargetBitmap row_bits(row_count);
+                TargetBitmap valid_bits(row_count, true);
+                for (int64_t i = 0; i < row_count; i += 3) {
+                    row_bits[i] = true;
+                }
+                auto [element_bits, valid_element_bits] =
+                    offsets.RowBitsetToElementBitset(
+                        row_bits.view(), valid_bits.view(), row_start);
+                EXPECT_EQ(
+                    static_cast<int64_t>(element_bits.size()),
+                    expected[row_start + row_count] - expected[row_start]);
+                EXPECT_EQ(element_bits.size(), valid_element_bits.count());
+                for (int64_t i = 0; i < row_count; ++i) {
+                    for (int32_t element = expected[row_start + i];
+                         element < expected[row_start + i + 1];
+                         ++element) {
+                        EXPECT_EQ(
+                            bool(element_bits[element - expected[row_start]]),
+                            bool(row_bits[i]));
+                    }
+                }
+
+                TargetBitmap any_rows(row_count);
+                offsets.ElementBitsetToRowBitsetAny(element_bits.view(),
+                                                    expected[row_start],
+                                                    row_start,
+                                                    any_rows.view());
+                for (int64_t i = 0; i < row_count; ++i) {
+                    EXPECT_EQ(bool(any_rows[i]),
+                              bool(row_bits[i]) && lens[row_start + i] > 0);
+                }
+
+                auto selected = offsets.RowBitsetToElementOffsets(
+                    row_bits.view(), row_start);
+                int64_t expected_selected = 0;
+                std::vector<int32_t> expected_selected_offsets;
+                for (int64_t i = 0; i < row_count; i += 3) {
+                    expected_selected += lens[row_start + i];
+                    for (int32_t element = expected[row_start + i];
+                         element < expected[row_start + i + 1];
+                         ++element) {
+                        expected_selected_offsets.push_back(element);
+                    }
+                }
+                EXPECT_EQ(static_cast<int64_t>(selected.size()),
+                          expected_selected);
+                EXPECT_TRUE(std::equal(selected.begin(),
+                                       selected.end(),
+                                       expected_selected_offsets.begin(),
+                                       expected_selected_offsets.end()));
+
+                FixedVector<int32_t> rows = {static_cast<int32_t>(row_start)};
+                if (row_count > 1) {
+                    rows.push_back(
+                        static_cast<int32_t>(row_start + row_count - 1));
+                }
+                auto row_elements = offsets.RowOffsetsToElementOffsets(rows);
+                std::vector<int32_t> expected_row_elements;
+                for (auto row : rows) {
+                    for (int32_t element = expected[row];
+                         element < expected[row + 1];
+                         ++element) {
+                        expected_row_elements.push_back(element);
+                    }
+                }
+                EXPECT_TRUE(std::equal(row_elements.begin(),
+                                       row_elements.end(),
+                                       expected_row_elements.begin(),
+                                       expected_row_elements.end()));
+
+                auto ranges = offsets.ForEachRowElementRange(
+                    [](int32_t begin, int32_t end) {
+                        return (end - begin) % 2 == 0;
+                    },
+                    row_start,
+                    row_count);
+                for (int64_t i = 0; i < row_count; ++i) {
+                    EXPECT_EQ(bool(ranges[i]), lens[row_start + i] % 2 == 0);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != 5) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    writer.join();
+    for (auto& reader : readers) {
+        reader.join();
+    }
+
+    EXPECT_EQ(offsets.GetRowCount(), kTotalRows);
+    EXPECT_EQ(offsets.GetTotalElementCount(), expected[kTotalRows]);
+    EXPECT_GT(live_reads.load(std::memory_order_relaxed), 0);
+    EXPECT_GT(partial_reads.load(std::memory_order_relaxed), 0);
+    for (int64_t row = 0; row < kTotalRows; ++row) {
+        auto [begin, end] = offsets.ElementIDRangeOfRow(row);
+        ASSERT_EQ(begin, expected[row]) << "row " << row;
+        ASSERT_EQ(end, expected[row + 1]) << "row " << row;
+    }
+}
+
+TEST_F(ArrayOffsetsTest, GrowingConcurrentWriters) {
+    constexpr int64_t kTotalRows = 20000;
+    constexpr int64_t kBatchSize = 25;
+    constexpr int64_t kBatchCount = kTotalRows / kBatchSize;
+    constexpr int32_t kWriterCount = 4;
+
+    std::vector<int32_t> lens(kTotalRows);
+    std::vector<int32_t> expected(kTotalRows + 1, 0);
+    for (int64_t row = 0; row < kTotalRows; ++row) {
+        lens[row] = static_cast<int32_t>(row % 5);
+        expected[row + 1] = expected[row] + lens[row];
+    }
+
+    std::vector<int64_t> batches(kBatchCount);
+    for (int64_t batch = 0; batch < kBatchCount; ++batch) {
+        batches[batch] = batch;
+    }
+    std::mt19937 gen(2026);
+    std::shuffle(batches.begin(), batches.end(), gen);
+
+    ArrayOffsetsGrowing offsets;
+    std::atomic<int64_t> next_batch{0};
+    std::atomic<int32_t> ready{0};
+    std::atomic<bool> start{false};
+    std::vector<std::thread> writers;
+    for (int32_t writer_id = 0; writer_id < kWriterCount; ++writer_id) {
+        writers.emplace_back([&]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            while (true) {
+                const int64_t index =
+                    next_batch.fetch_add(1, std::memory_order_relaxed);
+                if (index >= kBatchCount) {
+                    break;
+                }
+                const int64_t batch = batches[index];
+                const int64_t row_start = batch * kBatchSize;
+                offsets.Insert(row_start, lens.data() + row_start, kBatchSize);
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != kWriterCount) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& writer : writers) {
+        writer.join();
+    }
+
+    EXPECT_EQ(offsets.GetRowCount(), kTotalRows);
+    EXPECT_EQ(offsets.GetTotalElementCount(), expected[kTotalRows]);
+    for (int64_t row = 0; row < kTotalRows; ++row) {
+        auto [begin, end] = offsets.ElementIDRangeOfRow(row);
+        ASSERT_EQ(begin, expected[row]) << "row " << row;
+        ASSERT_EQ(end, expected[row + 1]) << "row " << row;
     }
 }
