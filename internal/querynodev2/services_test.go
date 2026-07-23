@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -66,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -96,6 +98,27 @@ type ServiceSuite struct {
 
 	// Mock
 	factory *dependency.MockFactory
+}
+
+func TestDropIndexPropagatesSegmentError(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	dropErr := merr.SegcoreError(2038, "publication drain canceled")
+
+	segmentManager.EXPECT().GetAndPinBy(mock.Anything).
+		Return([]segments.Segment{segment}, nil).Once()
+	segmentManager.EXPECT().Unpin(mock.Anything).Once()
+	segment.EXPECT().DropIndex(mock.Anything, int64(10)).Return(dropErr).Once()
+
+	node := &QueryNode{
+		manager: &segments.Manager{Segment: segmentManager},
+	}
+	status, err := node.DropIndex(context.Background(), &querypb.DropIndexRequest{
+		SegmentID: 1,
+		IndexIDs:  []int64{10},
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(status), merr.ErrSegcoreFollyCancel)
 }
 
 func (suite *ServiceSuite) SetupSuite() {
@@ -857,6 +880,11 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 
 func (suite *ServiceSuite) TestLoadSegmentsRejectsUnknownScope() {
 	ctx := context.Background()
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
 	schema := mock_segcore.GenTestCollectionSchema(
 		suite.collectionName, schemapb.DataType_Int64, false)
 	req := &querypb.LoadSegmentsRequest{
@@ -873,14 +901,25 @@ func (suite *ServiceSuite) TestLoadSegmentsRejectsUnknownScope() {
 		IndexInfoList: []*indexpb.IndexInfo{{}},
 	}
 
+	time.Sleep(time.Nanosecond)
 	status, err := suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
 	suite.Contains(status.GetReason(), "unsupported segment load scope")
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Empty(deltaResp.GetSegments())
+	suite.Empty(deltaResp.GetRemovedSegmentIds())
 }
 
 func (suite *ServiceSuite) TestLoadSegmentsRejectsLegacyIndexScope() {
 	ctx := context.Background()
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
 	schema := mock_segcore.GenTestCollectionSchema(
 		suite.collectionName, schemapb.DataType_Int64, false)
 	req := &querypb.LoadSegmentsRequest{
@@ -901,11 +940,80 @@ func (suite *ServiceSuite) TestLoadSegmentsRejectsLegacyIndexScope() {
 	suite.node.loader = segments.NewMockLoader(suite.T())
 	defer func() { suite.node.loader = loader }()
 
+	time.Sleep(time.Nanosecond)
 	status, err := suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrServiceInternal)
 	suite.Contains(status.GetReason(), "legacy segment index load scope 2")
 	suite.Contains(status.GetReason(), "use LoadScope_Reopen")
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Empty(deltaResp.GetSegments())
+	suite.Empty(deltaResp.GetRemovedSegmentIds())
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
+	ctx := context.Background()
+	suite.TestLoadSegments_Int64()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
+	infos := suite.genSegmentLoadInfos(schema, indexInfos)[:1]
+	targetSegmentID := infos[0].GetSegmentID()
+	suite.Require().NotNil(suite.node.manager.Segment.GetSealed(targetSegmentID))
+
+	tests := []struct {
+		name      string
+		reopenErr error
+	}{
+		{name: "success"},
+		{name: "error", reopenErr: errors.New("mocked reopen error")},
+	}
+
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+			suite.Require().False(fullResp.GetIsDelta())
+			suite.Require().NotZero(fullResp.GetLastModifyTs())
+
+			loader := suite.node.loader
+			mockLoader := segments.NewMockLoader(suite.T())
+			suite.node.loader = mockLoader
+			defer func() { suite.node.loader = loader }()
+
+			req := &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:    rand.Int63(),
+					TargetID: suite.node.session.ServerID,
+				},
+				CollectionID:  suite.collectionID,
+				DstNodeID:     suite.node.session.ServerID,
+				Infos:         infos,
+				Schema:        schema,
+				NeedTransfer:  false,
+				LoadScope:     querypb.LoadScope_Reopen,
+				IndexInfoList: indexInfos,
+			}
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
+
+			time.Sleep(time.Nanosecond)
+			status, err := suite.node.LoadSegments(ctx, req)
+			suite.Require().NoError(err)
+			if test.reopenErr == nil {
+				suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+			} else {
+				suite.NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
+				suite.Contains(status.GetReason(), test.reopenErr.Error())
+			}
+
+			deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+			suite.Require().True(deltaResp.GetIsDelta())
+			suite.Require().Len(deltaResp.GetSegments(), 1)
+			suite.Equal(targetSegmentID, deltaResp.GetSegments()[0].GetID())
+			suite.Empty(deltaResp.GetRemovedSegmentIds())
+		})
+	}
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Failed() {
@@ -1981,6 +2089,152 @@ func (suite *ServiceSuite) TestGetDataDistribution_LeaderViewStatus() {
 	}
 }
 
+func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsStreamingDataCaughtUp() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
+	shardDelegator, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	suite.Require().True(shardDelegator.CatchingUpStreamingData())
+
+	time.Sleep(time.Nanosecond)
+	shardDelegator.UpdateTSafe(tsoutil.ComposeTSByTime(time.Now()))
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
+	suite.Equal(suite.vchannel, deltaResp.GetLeaderViews()[0].GetChannel())
+	suite.False(deltaResp.GetLeaderViews()[0].GetStatus().GetCatchingUpStreamingData())
+}
+
+func (suite *ServiceSuite) getDataDistributionWithDeltaSupport(ctx context.Context, lastUpdateTs int64) *querypb.GetDataDistributionResponse {
+	resp, err := suite.node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		LastUpdateTs: lastUpdateTs,
+		SupportDelta: true,
+	})
+	suite.Require().NoError(err)
+	suite.Require().Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	return resp
+}
+
+func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegmentRelease() {
+	ctx := context.Background()
+	channel := "failed-release-delta-channel"
+	segmentID := int64(10001)
+	nodeID := paramtable.GetNodeID()
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
+	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
+	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().GetSegmentInfo(false).Return(
+		[]delegator.SnapshotItem{
+			{
+				NodeID: nodeID,
+				Segments: []delegator.SegmentEntry{
+					{SegmentID: segmentID, NodeID: nodeID, Version: 1},
+				},
+			},
+		},
+		nil,
+	).Maybe()
+	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
+	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
+	mockDelegator.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"), false).
+		Return(errors.New("mocked error"))
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotEmpty(fullResp.GetLeaderViews())
+
+	status, err := suite.node.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		Shard:        channel,
+		CollectionID: suite.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		NeedTransfer: true,
+		Scope:        querypb.DataScope_Historical,
+		NodeID:       nodeID,
+	})
+	suite.Require().NoError(err)
+	suite.Require().NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
+	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
+}
+
+func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegmentLoad() {
+	ctx := context.Background()
+	channel := "failed-load-delta-channel"
+	segmentID := int64(10001)
+	nodeID := paramtable.GetNodeID()
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
+	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
+	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
+	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
+	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
+	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(errors.New("mocked error"))
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
+	status, err := suite.node.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		DstNodeID:    nodeID,
+		NeedTransfer: true,
+		LoadScope:    querypb.LoadScope_Full,
+		Schema:       schema,
+		IndexInfoList: mock_segcore.GenTestIndexInfoList(
+			suite.collectionID,
+			schema,
+		),
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     segmentID,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionIDs[0],
+				InsertChannel: channel,
+			},
+		},
+	})
+	suite.Require().NoError(err)
+	suite.Require().NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
+	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
+}
+
 func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	ctx := context.Background()
 	// prepare
@@ -2060,6 +2314,185 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 	suite.True(versionMatch)
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_PartialSetFailureReportsLeaderViewDelta() {
+	ctx := context.Background()
+	channel := "partial-set-failure-delta-channel"
+	nodeID := paramtable.GetNodeID()
+	loadedSegmentID := int64(10001)
+	failedSegmentID := int64(10002)
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
+	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
+	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().GetSegmentInfo(false).Return(
+		[]delegator.SnapshotItem{
+			{
+				NodeID: nodeID,
+				Segments: []delegator.SegmentEntry{
+					{SegmentID: loadedSegmentID, NodeID: nodeID, Version: 1},
+				},
+			},
+		},
+		nil,
+	).Maybe()
+	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
+	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
+	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+			if req.GetInfos()[0].GetSegmentID() == failedSegmentID {
+				return errors.New("mocked load failure")
+			}
+			return nil
+		})
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
+	status, err := suite.node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      channel,
+		Actions: []*querypb.SyncAction{
+			{
+				Type:      querypb.SyncType_Set,
+				SegmentID: loadedSegmentID,
+				NodeID:    nodeID,
+				Version:   1,
+				Info: &querypb.SegmentLoadInfo{
+					SegmentID:    loadedSegmentID,
+					CollectionID: suite.collectionID,
+					PartitionID:  suite.partitionIDs[0],
+				},
+			},
+			{
+				Type:      querypb.SyncType_Set,
+				SegmentID: failedSegmentID,
+				NodeID:    nodeID,
+				Version:   1,
+				Info: &querypb.SegmentLoadInfo{
+					SegmentID:    failedSegmentID,
+					CollectionID: suite.collectionID,
+					PartitionID:  suite.partitionIDs[0],
+				},
+			},
+		},
+	})
+	suite.Require().NoError(err)
+	suite.Require().NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
+	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_RemoveFailureAfterLeaderViewUpdateReportsDelta() {
+	ctx := context.Background()
+	channel := "remove-failure-after-leader-update-delta-channel"
+	partitionID := suite.partitionIDs[0]
+	partitionStatsVersion := int64(10001)
+	partitionStatsVersions := map[int64]int64{}
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
+	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
+	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
+	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
+	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).RunAndReturn(func(context.Context) map[int64]int64 {
+		return partitionStatsVersions
+	}).Maybe()
+	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
+	mockDelegator.EXPECT().SyncPartitionStats(mock.Anything, mock.Anything).Run(func(ctx context.Context, versions map[int64]int64) {
+		partitionStatsVersions = versions
+	}).Return()
+	mockDelegator.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"), true).
+		Return(errors.New("mocked release failure"))
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
+	status, err := suite.node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      channel,
+		Actions: []*querypb.SyncAction{
+			{
+				Type:                   querypb.SyncType_UpdatePartitionStats,
+				PartitionStatsVersions: map[int64]int64{partitionID: partitionStatsVersion},
+			},
+			{
+				Type:      querypb.SyncType_Remove,
+				SegmentID: 10001,
+			},
+		},
+	})
+	suite.Require().NoError(err)
+	suite.Require().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
+	leaderView := deltaResp.GetLeaderViews()[0]
+	suite.Equal(channel, leaderView.GetChannel())
+	suite.Equal(partitionStatsVersion, leaderView.GetPartitionStatsVersions()[partitionID])
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_ErrorReportsLeaderViewDelta() {
+	ctx := context.Background()
+	channel := "sync-error-delta-channel"
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
+	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
+	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
+	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
+	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	suite.node.updateDistributionModifyTS()
+	fullResp := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().False(fullResp.GetIsDelta())
+	suite.Require().NotZero(fullResp.GetLastModifyTs())
+
+	status, err := suite.node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      channel,
+		Actions: []*querypb.SyncAction{
+			{
+				Type: querypb.SyncType(999),
+			},
+		},
+	})
+	suite.Require().NoError(err)
+	suite.Require().NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
+	suite.Require().True(deltaResp.GetIsDelta())
+	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
+	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_UpdatePartitionStats() {

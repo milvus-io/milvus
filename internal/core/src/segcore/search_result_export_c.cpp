@@ -39,6 +39,7 @@
 #include "prometheus/histogram.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/ThreadPools.h"
@@ -87,6 +88,23 @@ AssertEmptyCProto(const CProto* proto) {
     AssertInfo(proto != nullptr, "null CProto output");
     AssertInfo(proto->proto_blob == nullptr && proto->proto_size == 0,
                "CProto output must be empty before FillOutputFieldsOrdered");
+}
+
+void
+AssertSearchResultReadLease(const SearchResult* result) {
+    AssertInfo(result != nullptr, "null search result");
+    if (result->segment_ == nullptr) {
+        return;
+    }
+
+    auto segment =
+        static_cast<const milvus::segcore::SegmentInterface*>(result->segment_);
+    if (segment->type() == SegmentType::Sealed) {
+        AssertInfo(
+            result->read_lease_ != nullptr && result->read_lease_->valid(),
+            "sealed search result for segment {} has no read lease",
+            segment->get_segment_id());
+    }
 }
 
 constexpr const char* kMilvusFieldIDMetadataKey = "milvus.field_id";
@@ -820,6 +838,8 @@ ExportSearchResultAsArrowRecordBatch(CSearchResult c_search_result,
                    "ArrowSchema output must be empty before export");
         AssertInfo(out_array->release == nullptr,
                    "ArrowArray output must be empty before export");
+        AssertSearchResultReadLease(
+            static_cast<SearchResult*>(c_search_result));
         auto cancel_token = folly::CancellationToken();
         if (cancellation_source != nullptr) {
             auto source =
@@ -876,6 +896,11 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
         AssertEmptyCProto(out_result);
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
         milvus::OpContext op_ctx(cancel_token);
+
+        for (int64_t i = 0; i < num_search_results; ++i) {
+            AssertSearchResultReadLease(
+                static_cast<SearchResult*>(search_results[i]));
+        }
 
         if (plan->target_entries_.empty()) {
             return milvus::SuccessCStatus();
@@ -1131,8 +1156,10 @@ PrepareSearchResultsForExportImpl(
             AssertInfo(c_search_results[i] != nullptr,
                        "null search result at index {}",
                        i);
-            search_results.push_back(
-                static_cast<milvus::SearchResult*>(c_search_results[i]));
+            auto result =
+                static_cast<milvus::SearchResult*>(c_search_results[i]);
+            AssertSearchResultReadLease(result);
+            search_results.push_back(result);
         }
 
         milvus::OpContext op_ctx(cancel_token);

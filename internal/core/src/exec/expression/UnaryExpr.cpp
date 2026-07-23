@@ -473,6 +473,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val,
             int index) {
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFuncForArray<ValueType,
@@ -889,6 +893,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             ExprValueType val) {
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         switch (op_type) {
             case proto::plan::GreaterThan: {

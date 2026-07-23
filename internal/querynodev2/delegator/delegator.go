@@ -120,6 +120,19 @@ type ShardDelegator interface {
 
 var _ ShardDelegator = (*shardDelegator)(nil)
 
+// ShardDelegatorOption customizes shard delegator creation.
+type ShardDelegatorOption func(*shardDelegator)
+
+// WithLeaderViewUpdatedCallback registers a callback for leader view changes.
+func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegatorOption {
+	return func(sd *shardDelegator) {
+		sd.leaderViewUpdatedCallback = callback
+		if sd.distribution != nil {
+			sd.distribution.leaderViewUpdatedCallback = callback
+		}
+	}
+}
+
 type idfOracleHolder struct {
 	oracle IDFOracle
 }
@@ -192,6 +205,8 @@ type shardDelegator struct {
 	// delegator's optional growing-source source.
 	growingSourceRegistration *syncmgr.GrowingSourceRegistration
 	growingSourceProvider     *delegatorGrowingSourceProvider
+
+	leaderViewUpdatedCallback func(channel string)
 }
 
 // getLogger returns the logger with pre-defined shard attributes.
@@ -213,6 +228,12 @@ func (sd *shardDelegator) getIDFOracle() IDFOracle {
 
 func (sd *shardDelegator) publishIDFOracle(idfOracle IDFOracle) {
 	sd.idfOracle.Store(&idfOracleHolder{oracle: idfOracle})
+}
+
+func (sd *shardDelegator) notifyLeaderViewUpdated() {
+	if sd.leaderViewUpdatedCallback != nil {
+		sd.leaderViewUpdatedCallback(sd.vchannelName)
+	}
 }
 
 func (sd *shardDelegator) NotStopped(state lifetime.State) error {
@@ -1219,6 +1240,7 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 				mlog.Bool("caughtUp", caughtUp))
 			if caughtUp {
 				sd.catchingUpStreamingData.Store(false)
+				sd.notifyLeaderViewUpdated()
 			}
 		}
 	}
@@ -1489,6 +1511,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
 	binlogSaver segments.BinlogSaver,
+	opts ...ShardDelegatorOption,
 ) (ShardDelegator, error) {
 	log := mlog.With(mlog.Int64("collectionID", collectionID),
 		mlog.Int64("replicaID", replicaID),
@@ -1550,6 +1573,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		catchingUpStreamingData:       atomic.NewBool(catchingUpStreamingData),
 		skipStreamingForExternalTable: skipStreamingForExternalTable,
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
+	}
+	for _, opt := range opts {
+		opt(sd)
 	}
 
 	functionState, err := buildFunctionRuntimeState(collection.Schema())

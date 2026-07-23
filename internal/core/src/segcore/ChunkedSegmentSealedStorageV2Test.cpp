@@ -612,6 +612,9 @@ TEST_P(TestChunkSegmentStorageV2, ReduceStringPkWithSimulatedAnnResult) {
     plan.plan_node_->search_info_.metric_type_ = knowhere::metric::L2;
     plan.target_entries_.push_back(fields.at("string1"));
 
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
     auto offset_at = [this, candidate_topk](int64_t qi, int64_t rank) {
         auto lookup_index = qi * candidate_topk + rank;
         return (lookup_index * 499979 + qi * 9973) % RowCount();
@@ -623,6 +626,8 @@ TEST_P(TestChunkSegmentStorageV2, ReduceStringPkWithSimulatedAnnResult) {
         result.unity_topK_ = candidate_topk;
         result.total_data_cnt_ = RowCount();
         result.segment_ = segment.get();
+        result.read_lease_ =
+            sealed->AcquireReadLease(folly::CancellationToken());
         result.seg_offsets_.resize(nq * candidate_topk);
         result.distances_.resize(nq * candidate_topk);
         for (int64_t qi = 0; qi < nq; ++qi) {

@@ -40,6 +40,7 @@ set(MILVUS_TEST_FILES
         test_loading.cpp
         test_exec.cpp
         test_timestamptz_arith_compare.cpp
+        test_offsets_eval_correctness.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
         test_search_group_by.cpp
@@ -72,6 +73,7 @@ set(MILVUS_TEST_FILES
         test_commit_timestamp.cpp
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
+        test_segment_read_lease.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

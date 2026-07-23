@@ -310,50 +310,75 @@ func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
+	validInsertData := func() *InsertData {
+		return &InsertData{
+			RowIDs:        []int64{0, 1},
+			PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+			Timestamps:    []uint64{10, 10},
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{},
+			InsertRecord: &segcorepb.InsertRecord{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "id",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1, 2},
+									},
+								},
+							},
+						},
+						FieldId: 100,
+					},
+					{
+						Type:      schemapb.DataType_FloatVector,
+						FieldName: "vector",
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 128,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
+								},
+							},
+						},
+						FieldId: 101,
+					},
+				},
+				NumRows: 2,
+			},
+		}
+	}
+
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
-			100: {
-				RowIDs:        []int64{0, 1},
-				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-				Timestamps:    []uint64{10, 10},
-				PartitionID:   500,
-				StartPosition: &msgpb.MsgPosition{},
-				InsertRecord: &segcorepb.InsertRecord{
-					FieldsData: []*schemapb.FieldData{
-						{
-							Type:      schemapb.DataType_Int64,
-							FieldName: "id",
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: []int64{1, 2},
-										},
-									},
-								},
-							},
-							FieldId: 100,
-						},
-						{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: "vector",
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: 128,
-									Data: &schemapb.VectorField_FloatVector{
-										FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
-									},
-								},
-							},
-							FieldId: 101,
-						},
-					},
-					NumRows: 2,
-				},
-			},
+			100: validInsertData(),
 		})
 
 		s.NotNil(s.manager.Segment.GetGrowing(100))
+	})
+
+	s.Run("notify_new_growing_segment_once", func() {
+		var notifiedChannels []string
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil,
+			WithLeaderViewUpdatedCallback(func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			}))
+		s.Require().NoError(err)
+		sd := delegator.(*shardDelegator)
+
+		insert := func() {
+			sd.ProcessInsert(map[int64]*InsertData{
+				101: validInsertData(),
+			})
+		}
+
+		insert()
+		insert()
+
+		s.Equal([]string{s.vchannelName}, notifiedChannels)
 	})
 
 	s.Run("insert_bad_data", func() {
@@ -1731,6 +1756,31 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
+	ctx := context.Background()
+	// the target worker is offline/unhealthy, GetWorker returns no worker
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).
+		Return(nil, merr.WrapErrNodeNotAvailable(1))
+
+	err := s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		NodeID:     1,
+		SegmentIDs: []int64{1000},
+		Scope:      querypb.DataScope_All,
+	}, false)
+	s.Error(err)
+	// pin the contract: GetWorker's error code must reach the caller unmasked
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
+
+	// growingSegmentLock must be released even when the remote release fails,
+	// otherwise the channel's insert pipeline blocks forever
+	locked := s.delegator.growingSegmentLock.TryLock()
+	s.True(locked, "growingSegmentLock should be released after failed release")
+	if locked {
+		s.delegator.growingSegmentLock.Unlock()
+	}
 }
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {

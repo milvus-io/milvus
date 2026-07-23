@@ -156,6 +156,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	method := "ProcessInsert"
 	tr := timerecord.NewTimeRecorder(method)
 	log := sd.getLogger(context.Background())
+	growingSegmentAdded := false
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
@@ -233,6 +234,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					TargetVersion: initialTargetVersion,
 					Candidate:     growing, // growing segment itself is the Candidate
 				})
+				growingSegmentAdded = true
 			}
 
 			sd.growingSegmentLock.Unlock()
@@ -245,6 +247,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			mlog.Int("rowCount", len(insertData.RowIDs)),
 			mlog.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
 		)
+	}
+	if growingSegmentAdded {
+		sd.notifyLeaderViewUpdated()
 	}
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -1180,12 +1185,12 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		if err != nil {
 			log.Warn(ctx, "delegator failed to find worker", mlog.Err(err))
 			releaseErr = err
-		}
-		req.Base.TargetID = targetNodeID
-		err = worker.ReleaseSegments(ctx, req)
-		if err != nil {
-			log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
-			releaseErr = err
+		} else {
+			req.Base.TargetID = targetNodeID
+			if err = worker.ReleaseSegments(ctx, req); err != nil {
+				log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
+				releaseErr = err
+			}
 		}
 	}
 	if len(growing) > 0 {

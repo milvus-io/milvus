@@ -141,8 +141,9 @@ type QueryNode struct {
 	queryHook optimizers.QueryHook
 
 	// record the last modify ts of segment/channel distribution
-	lastModifyLock lock.RWMutex
-	lastModifyTs   int64
+	lastModifyLock   lock.RWMutex
+	lastModifyTs     int64
+	distDeltaTracker *dataDistributionDeltaTracker
 
 	metricsRequest *metricsinfo.MetricsRequest
 
@@ -154,11 +155,12 @@ type QueryNode struct {
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		ctx:            ctx,
-		cancel:         cancel,
-		factory:        factory,
-		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
-		metricsRequest: metricsinfo.NewMetricsRequest(),
+		ctx:              ctx,
+		cancel:           cancel,
+		factory:          factory,
+		lifetime:         lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		metricsRequest:   metricsinfo.NewMetricsRequest(),
+		distDeltaTracker: newDataDistributionDeltaTracker(),
 	}
 
 	expr.Register("querynode", node)
