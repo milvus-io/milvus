@@ -39,6 +39,49 @@
 
 namespace milvus::index {
 
+namespace {
+// RAII holder for the GEOS resources the write paths keep alive across
+// container operations. values_.push_back / rtree_.insert /
+// local_values.emplace_back can throw std::bad_alloc, which the segcore
+// callers now translate into a retriable MemAllocateFailed -- so the batch
+// is retried, and any context/reader/geometry released only by trailing
+// cleanup calls would leak once per attempt, compounding the very OOM being
+// retried. Destruction order matters: geometry and reader must be destroyed
+// while the context is still alive.
+struct ScopedGeosResources {
+    GEOSContextHandle_t ctx{nullptr};
+    GEOSWKBReader* reader{nullptr};
+    GEOSGeometry* geom{nullptr};
+
+    explicit ScopedGeosResources(const char* purpose)
+        : ctx(InitGEOSContext(purpose)) {
+    }
+    ScopedGeosResources(const ScopedGeosResources&) = delete;
+    ScopedGeosResources&
+    operator=(const ScopedGeosResources&) = delete;
+
+    ~ScopedGeosResources() {
+        release_geom();
+        if (reader != nullptr) {
+            GEOSWKBReader_destroy_r(ctx, reader);
+            reader = nullptr;
+        }
+        if (ctx != nullptr) {
+            GEOS_finish_r(ctx);
+            ctx = nullptr;
+        }
+    }
+
+    void
+    release_geom() {
+        if (geom != nullptr) {
+            GEOSGeom_destroy_r(ctx, geom);
+            geom = nullptr;
+        }
+    }
+};
+}  // namespace
+
 RTreeIndexWrapper::RTreeIndexWrapper(std::string& path, bool is_build_mode)
     : index_path_(path), is_build_mode_(is_build_mode) {
     if (is_build_mode_) {
@@ -94,23 +137,21 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     // Parse WKB data using GEOS for consistency. InitGEOSContext throws a
     // retriable MemAllocateFailed on a transient allocation failure, so a
     // valid geometry fails the insert (and can be retried) rather than being
-    // permanently mis-indexed.
-    GEOSContextHandle_t ctx = InitGEOSContext("add_geometry");
+    // permanently mis-indexed. All GEOS resources are scoped: if any
+    // container op below throws (retried by the caller), nothing leaks.
+    ScopedGeosResources geos("add_geometry");
 
-    GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
-    if (reader == nullptr) {
-        GEOS_finish_r(ctx);
+    geos.reader = GEOSWKBReader_create_r(geos.ctx);
+    if (geos.reader == nullptr) {
         // Transient resource failure -- see above; throw rather than placeholder.
         ThrowInfo(ErrorCode::MemAllocateFailed,
                   "Failed to create GEOS WKB reader for row {}",
                   row_offset);
     }
 
-    GEOSGeometry* geom = GEOSWKBReader_read_r(ctx, reader, wkb_data, len);
-    GEOSWKBReader_destroy_r(ctx, reader);
+    geos.geom = GEOSWKBReader_read_r(geos.ctx, geos.reader, wkb_data, len);
 
-    if (geom == nullptr) {
-        GEOS_finish_r(ctx);
+    if (geos.geom == nullptr) {
         // nullptr here is *usually* unparseable WKB, but GEOS's execute()
         // wrapper also swallows a transient OOM during parsing into the same
         // nullptr -- the two are indistinguishable at this boundary, and both
@@ -129,22 +170,21 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     // filter, the exact predicate refines it out, and dropping the row here
     // would desynchronize the index row count from the segment row count.
     double minX = 0, minY = 0, maxX = 0, maxY = 0;
-    if (!get_bounding_box(geom, ctx, minX, minY, maxX, maxY)) {
+    if (!get_bounding_box(geos.geom, geos.ctx, minX, minY, maxX, maxY)) {
         LOG_WARN(
             "geometry at row {} has no computable envelope (empty?); indexing "
             "with a placeholder MBR, exact refinement will filter it",
             row_offset);
     }
+    // The geometry is no longer needed once the MBR is extracted; release it
+    // before the (potentially throwing) container ops.
+    geos.release_geom();
 
     // Create Boost box and insert
     Box box(Point(minX, minY), Point(maxX, maxY));
     Value val(box, row_offset);
     values_.push_back(val);
     rtree_.insert(val);
-
-    // Clean up
-    GEOSGeom_destroy_r(ctx, geom);
-    GEOS_finish_r(ctx);
 }
 
 // No IDataStream; bulk-load implemented directly for Boost R-tree
@@ -161,12 +201,13 @@ RTreeIndexWrapper::bulk_load_from_field_data(
     // Initialize GEOS context for bulk operations. A transient allocation
     // failure here would otherwise silently drop EVERY row from the index --
     // InitGEOSContext throws a retriable error so the build fails and can be
-    // retried instead.
-    GEOSContextHandle_t ctx = InitGEOSContext("bulk load");
+    // retried instead. Scoped so a throwing container op inside the loop
+    // (e.g. local_values.emplace_back on OOM) cannot leak the reader/context
+    // across the retry.
+    ScopedGeosResources geos("bulk load");
 
-    GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
-    if (reader == nullptr) {
-        GEOS_finish_r(ctx);
+    geos.reader = GEOSWKBReader_create_r(geos.ctx);
+    if (geos.reader == nullptr) {
         ThrowInfo(ErrorCode::MemAllocateFailed,
                   "Failed to create GEOS WKB reader for bulk load");
     }
@@ -201,12 +242,12 @@ RTreeIndexWrapper::bulk_load_from_field_data(
                 continue;
             }
 
-            GEOSGeometry* geom = GEOSWKBReader_read_r(
-                ctx,
-                reader,
+            geos.geom = GEOSWKBReader_read_r(
+                geos.ctx,
+                geos.reader,
                 reinterpret_cast<const unsigned char*>(wkb_str->data()),
                 wkb_str->size());
-            if (geom == nullptr) {
+            if (geos.geom == nullptr) {
                 // Same classification as add_geometry(): unparseable WKB and
                 // a GEOS-swallowed parse-time OOM both surface as nullptr and
                 // both get a placeholder MBR (see Geometry::TryParseFromWkb).
@@ -218,22 +259,21 @@ RTreeIndexWrapper::bulk_load_from_field_data(
             // geometry without a computable envelope so the row stays indexed
             // and the row count remains consistent.
             double minX = 0, minY = 0, maxX = 0, maxY = 0;
-            if (!get_bounding_box(geom, ctx, minX, minY, maxX, maxY)) {
+            if (!get_bounding_box(
+                    geos.geom, geos.ctx, minX, minY, maxX, maxY)) {
                 LOG_WARN(
                     "geometry at row {} has no computable envelope (empty?); "
                     "indexing with a placeholder MBR",
                     absolute_offset);
             }
-            GEOSGeom_destroy_r(ctx, geom);
+            // Release before the (potentially throwing) emplace_back.
+            geos.release_geom();
 
             Box box(Point(minX, minY), Point(maxX, maxY));
             local_values.emplace_back(box, absolute_offset);
         }
     }
 
-    // Clean up GEOS resources
-    GEOSWKBReader_destroy_r(ctx, reader);
-    GEOS_finish_r(ctx);
     values_.swap(local_values);
     rtree_ = RTree(values_.begin(), values_.end());
     LOG_INFO("R-Tree bulk load (Boost) completed with {} entries",

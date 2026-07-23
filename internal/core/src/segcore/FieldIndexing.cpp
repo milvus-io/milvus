@@ -760,6 +760,19 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
                         "Initialized R-Tree index for immediate incremental "
                         "building from {}",
                         log_source);
+                } catch (const SegcoreError&) {
+                    // Already typed -- rethrow as-is; re-wrapping would
+                    // collapse the code (same ordered handlers as the
+                    // AddGeometry loop below).
+                    throw;
+                } catch (const std::bad_alloc&) {
+                    // Wrapper allocation OOM on the first batch is the same
+                    // transient resource failure as on the AddGeometry path
+                    // -- keep it retriable.
+                    ThrowInfo(ErrorCode::MemAllocateFailed,
+                              "out of memory initializing R-Tree index from "
+                              "{}",
+                              log_source);
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "R-Tree index initialization error: {}",
