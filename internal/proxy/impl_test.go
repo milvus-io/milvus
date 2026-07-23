@@ -105,7 +105,7 @@ func TestProxy_InvalidateCollectionMetaCache_AliasScanGating(t *testing.T) {
 		cache := NewMockCache(t)
 		globalMetaCache = cache
 		shard := shardclient.NewMockShardClientManager(t)
-		shard.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+		shard.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
 		node := &Proxy{shardMgr: shard}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		return node, cache
