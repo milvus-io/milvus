@@ -518,6 +518,14 @@ func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOf
 }
 
 func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
+}
+
+func (kc *Catalog) ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, DataViewPrefix+"/")
+}
+
+func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) ([]*viewpb.DataViewOfCollection, error) {
 	dataViews := make([]*viewpb.DataViewOfCollection, 0)
 	applyFn := func(key []byte, value []byte) error {
 		dataView := &viewpb.DataViewOfCollection{}
@@ -528,7 +536,7 @@ func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*vi
 		return nil
 	}
 
-	if err := kc.MetaKv.WalkWithPrefix(ctx, buildDataViewVersionPrefix(collectionID), kc.paginationSize, applyFn); err != nil {
+	if err := kc.MetaKv.WalkWithPrefix(ctx, prefix, kc.paginationSize, applyFn); err != nil {
 		return nil, err
 	}
 	return dataViews, nil

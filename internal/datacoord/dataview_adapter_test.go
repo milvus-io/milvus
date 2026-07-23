@@ -132,7 +132,7 @@ func TestDataViewRecoveryUsesCollectionPartitions(t *testing.T) {
 	})))
 	manager := newDataViewManager(m.catalog, m)
 
-	require.NoError(t, manager.RecoverCollection(ctx, 1))
+	require.NoError(t, manager.RepairCollection(ctx, 1))
 	view, err := manager.LatestVisibleDataView(ctx, 1)
 
 	require.NoError(t, err)

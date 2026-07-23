@@ -133,12 +133,60 @@ func (m *PChannelRecoveryManager) SwitchIntoMetaAndData() moduleapi.ModuleSnapsh
 		return nil
 	}
 	m.metaAndData.Store(true)
-	snapshots := make(moduleapi.CompositeModuleSnapshot, 0, m.modules.Len()*3)
+	snapshots := make([]moduleapi.ModuleSnapshot, 0, m.modules.Len()*3)
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
 		snapshots = append(snapshots, moduleapi.FlattenModuleSnapshot(module.SwitchIntoMetaAndData())...)
 		return true
 	})
-	return snapshots
+	return aggregateModuleSnapshots(snapshots)
+}
+
+func aggregateModuleSnapshots(snapshots []moduleapi.ModuleSnapshot) moduleapi.ModuleSnapshot {
+	vchannels := make(map[string]*streamingpb.VChannelMeta)
+	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
+	summaries := make(map[string]*streamingpb.SegmentDataVersionSummary)
+	transformLogs := make(map[string]*streamingpb.VChannelTransformLogMeta)
+	others := make(moduleapi.CompositeModuleSnapshot, 0)
+
+	for _, snapshot := range snapshots {
+		switch typed := snapshot.(type) {
+		case *moduleapi.VChannelModuleSnapshot:
+			for vchannel, meta := range typed.VChannels {
+				vchannels[vchannel] = meta
+			}
+		case *moduleapi.SegmentModuleSnapshot:
+			for segmentID, meta := range typed.Segments {
+				segments[segmentID] = meta
+			}
+			for vchannel, summary := range typed.DataVersionSummaries {
+				summaries[vchannel] = summary
+			}
+		case *moduleapi.TransformLogModuleSnapshot:
+			for vchannel, meta := range typed.TransformLogs {
+				transformLogs[vchannel] = meta
+			}
+		default:
+			if snapshot != nil {
+				others = append(others, snapshot)
+			}
+		}
+	}
+
+	result := make(moduleapi.CompositeModuleSnapshot, 0, 3+len(others))
+	if len(vchannels) > 0 {
+		result = append(result, &moduleapi.VChannelModuleSnapshot{VChannels: vchannels})
+	}
+	if len(segments) > 0 || len(summaries) > 0 {
+		result = append(result, &moduleapi.SegmentModuleSnapshot{
+			Segments:             segments,
+			DataVersionSummaries: summaries,
+		})
+	}
+	if len(transformLogs) > 0 {
+		result = append(result, &moduleapi.TransformLogModuleSnapshot{TransformLogs: transformLogs})
+	}
+	result = append(result, others...)
+	return result
 }
 
 func (m *PChannelRecoveryManager) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
