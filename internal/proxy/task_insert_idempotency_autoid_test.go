@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -264,6 +265,92 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testi
 		require.Equal(t, firstKey, task.idempotencyKey)
 		require.Equal(t, firstRoutes, routes)
 	}
+}
+
+func TestInsertTaskReassignAutoIDForIdempotencySkipsNamespacePartitionKeyRouting(t *testing.T) {
+	namespace := "tenant-a"
+	primary := &schemapb.FieldSchema{
+		FieldID:      1,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	chMgr := NewMockChannelsMgr(t)
+	task := insertTask{
+		idempotencyEnabled: true,
+		idempotencyKey:     "stable-key",
+		chMgr:              chMgr,
+		schema: &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceShardingEnabledKey, Value: "true"},
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+			},
+			Fields: []*schemapb.FieldSchema{
+				primary,
+				{Name: common.NamespaceFieldName, FieldID: 2, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: &msgpb.InsertRequest{
+				NumRows:   2,
+				RowIDs:    []int64{1000, 1001},
+				Namespace: &namespace,
+			},
+		},
+	}
+	originalRowIDs := slices.Clone(task.insertMsg.GetRowIDs())
+
+	require.NoError(t, task.reassignAutoIDForIdempotencyIfNeeded(context.Background(), true, primary))
+	require.Equal(t, originalRowIDs, task.insertMsg.GetRowIDs())
+	require.Empty(t, task.vChannels)
+}
+
+func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(t *testing.T) {
+	ctx := context.Background()
+	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
+	channels := []string{"ch0", "ch1"}
+	primary := &schemapb.FieldSchema{
+		FieldID:      1,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	chMgr := NewMockChannelsMgr(t)
+	chMgr.EXPECT().getVChannels(UniqueID(100)).Return(slices.Clone(channels), nil)
+	task := insertTask{
+		ctx:                ctx,
+		collectionID:       100,
+		idAllocator:        idAllocator,
+		idempotencyEnabled: true,
+		idempotencyKey:     "stable-key",
+		chMgr:              chMgr,
+		schema: &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceShardingEnabledKey, Value: "true"},
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+			},
+			Fields: []*schemapb.FieldSchema{
+				primary,
+				{Name: common.NamespaceFieldName, FieldID: 2, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+			},
+		},
+		result: &milvuspb.MutationResult{},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: &msgpb.InsertRequest{
+				NumRows: 4,
+				RowIDs:  []int64{1000, 1001, 1002, 1003},
+			},
+		},
+	}
+
+	require.NoError(t, task.reassignAutoIDForIdempotencyIfNeeded(ctx, true, primary))
+	require.Equal(t, channels, task.vChannels)
+	require.Equal(t, task.insertMsg.GetRowIDs(), task.result.GetIDs().GetIntId().GetData())
+	requireOffsetRoutesToModuloChannels(t, task.result.GetIDs(), channels)
 }
 
 // requireInsertRoutesMatchDeleteRoutes asserts that every PK produced by the

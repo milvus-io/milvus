@@ -102,7 +102,9 @@ func (m *windowManager) advanceIdleSourceCheckpoint(ctx context.Context) {
 		m.Logger().Warn(ctx, "pchannel window source checkpoint advance lost CAS race")
 		return
 	}
+	m.mu.Lock()
 	m.markPChannelWindowSnapshotCheckpointPersisted(current)
+	m.mu.Unlock()
 }
 
 // drainDroppedWindowMetas removes the persisted vchannel window metas of

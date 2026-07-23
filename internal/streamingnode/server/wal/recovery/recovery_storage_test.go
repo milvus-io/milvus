@@ -38,6 +38,10 @@ import (
 func TestRecoveryStorage(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryPersistInterval.Key, "1ms")
 	paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "10ms")
+	paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key)
+	})
 
 	vchannelMetas := make(map[string]*streamingpb.VChannelMeta)
 	segmentMetas := make(map[int64]*streamingpb.SegmentAssignmentMeta)

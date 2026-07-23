@@ -184,6 +184,7 @@ func recoverTestIdempotencyWindows(ctx context.Context, t require.TestingT, rs *
 }
 
 func recoverTestIdempotencyWindowsWithError(ctx context.Context, rs *recoveryStorageImpl, pchannel string, allowBootstrap bool) error {
+	rs.windowManager.cfg.idempotencyEnabled = true
 	info, err := rs.windowManager.loadWindowInfoFromMeta(ctx, pchannel, allowBootstrap, rs.checkpoint)
 	if err != nil {
 		return err
@@ -613,6 +614,7 @@ func TestCommittedWriteRecordWithoutDIDDoesNotEnterDIDWindow(t *testing.T) {
 }
 
 func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencyWindow(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	resource.InitForTest(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
@@ -1730,6 +1732,7 @@ func TestPChannelWindowPersistsCheckpointOnlyGeneration(t *testing.T) {
 }
 
 func TestForcePersistIdempotencyWindowToTimeTickPersistsCleanCheckpoint(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))

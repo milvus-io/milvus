@@ -185,6 +185,7 @@ func TestBootstrapReapsChunksLeftByIncompleteDrop(t *testing.T) {
 // observe loop: the per-message checkpoint advance must not materialize windows
 // for active vchannels, while a vchannel becoming active does create its window.
 func TestIdempotencyWindowLifecycleMovedToVChannelEvents(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	catalog, _ := newTestPChannelWindowCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
@@ -220,6 +221,7 @@ func TestIdempotencyWindowLifecycleMovedToVChannelEvents(t *testing.T) {
 // consume checkpoint (120) has advanced together with the chunk, modeling the
 // truncated-WAL reality where key-1@99 is not replayable.
 func TestRecoverWindowsFailsOnReferencedChunkCorruption(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -266,6 +268,7 @@ func TestRecoverWindowsFailsOnReferencedChunkCorruption(t *testing.T) {
 // probe drops it inline — recovery must still succeed with the referenced
 // window intact.
 func TestRecoverWindowsSelfHealsCorruptOrphanChunk(t *testing.T) {
+	enableRecoveryIdempotency(t)
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
