@@ -3098,7 +3098,9 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
             // out-of-bounds read. Rows beyond either bound are classified
             // NULL here exactly as the accessor returns {"", false}, keeping
             // the cache and the R-Tree index verdicts identical for the
-            // same input.
+            // same input. This NULL classification is intentional leniency
+            // toward a malformed (truncated) producer payload -- tolerate it
+            // rather than fail the whole append.
             bool is_valid =
                 valid_data.empty() || (i < valid_data.size() && valid_data[i]);
             if (is_valid && i < geometry_data.data_size()) {

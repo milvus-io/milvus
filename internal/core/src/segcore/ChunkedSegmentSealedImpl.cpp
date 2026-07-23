@@ -7883,7 +7883,8 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
                 // so an unchecked index is an out-of-bounds read that would
                 // desynchronize the cache's nullness from the segment. Rows
                 // beyond the span are classified NULL, matching the index
-                // side.
+                // side -- intentional leniency toward a short valid_data
+                // span rather than failing the whole segment load.
                 if (valid_data.empty() ||
                     (i < valid_data.size() && valid_data[i])) {
                     // Valid geometry data

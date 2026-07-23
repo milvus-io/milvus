@@ -663,7 +663,11 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                     // Guard valid_data[i] the same way the geometry payload is
                     // guarded below: a nullable DataArray may carry a shorter
                     // valid_data than the row count, so an unchecked index is
-                    // an out-of-bounds read.
+                    // an out-of-bounds read. Classifying the out-of-span rows
+                    // as NULL (instead of throwing on the malformed producer
+                    // payload) is intentional leniency: it keeps a truncated
+                    // DataArray from failing the whole ingest, and the cache
+                    // side applies the identical rule so both verdicts agree.
                     bool is_valid = valid_data.empty() ||
                                     (i < valid_data.size() && valid_data[i]);
                     if (is_valid && i < geometry_array.data_size()) {
