@@ -4075,6 +4075,42 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 	})
 }
 
+func TestSearchTask_tryGeneratePlanRejectsBinaryVectorPluralGroupByFields(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{FieldID: 102, Name: "g", DataType: schemapb.DataType_Int64},
+		},
+	}
+	task := &searchTask{
+		ctx: ctx,
+		SearchRequest: &internalpb.SearchRequest{
+			CollectionID: 1,
+		},
+		request: &milvuspb.SearchRequest{
+			CollectionName: "test_collection",
+		},
+		schema: newSchemaInfo(schema),
+	}
+	params := []*commonpb.KeyValuePair{
+		{Key: AnnsFieldKey, Value: "vec"},
+		{Key: TopKKey, Value: "4"},
+		{Key: common.MetricTypeKey, Value: metric.HAMMING},
+		{Key: ParamsKey, Value: `{}`},
+		{Key: GroupByFieldsKey, Value: "g"},
+		{Key: GroupSizeKey, Value: "1"},
+	}
+
+	plan, queryInfo, _, _, err := task.tryGeneratePlan(params, "", nil)
+	assert.Error(t, err)
+	assert.Nil(t, plan)
+	assert.Nil(t, queryInfo)
+	assert.Contains(t, err.Error(), "not support search_group_by operation based on binary vector column")
+}
+
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
 	result := schemapb.SearchResultData{
 		NumQueries: nq,
