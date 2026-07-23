@@ -285,6 +285,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
+	var admissionCandidates []*SegmentInfo
 	for _, group := range partSegments {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.segments = FilterInIndexedSegments(ctx, policy.handler, policy.meta, false, group.segments...)
@@ -292,16 +293,31 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 
 		for _, segment := range group.segments {
 			if hasTooManyDeletions(segment) {
-				segmentViews := GetViewsByInfo(segment)
-				view := &MixSegmentView{
-					label:         segmentViews[0].label,
-					segments:      segmentViews,
-					collectionTTL: collectionTTL,
-					triggerID:     newTriggerID,
-				}
-				views = append(views, view)
+				admissionCandidates = append(admissionCandidates, segment)
 			}
 		}
+	}
+	// Share the single-compaction admission budget with the legacy trigger so
+	// mass eligibility drains as a paced stream instead of an avalanche;
+	// deferred segments are stateless and re-evaluated next round. L2 candidates
+	// are all delete-driven (hasTooManyDeletions), so they enter the
+	// accumulation class; there are no retention/index candidates here.
+	admitted, deferred := getSingleCompactionAdmitter().admit(ctx, admissionCandidates, nil)
+	for _, segment := range admitted {
+		segmentViews := GetViewsByInfo(segment)
+		view := &MixSegmentView{
+			label:         segmentViews[0].label,
+			segments:      segmentViews,
+			collectionTTL: collectionTTL,
+			triggerID:     newTriggerID,
+		}
+		views = append(views, view)
+	}
+	if deferred > 0 {
+		mlog.RatedInfo(ctx, rate.Limit(10), "deferred L2 single compaction candidates by admission limit",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int("admitted", len(admitted)),
+			mlog.Int("deferred", deferred))
 	}
 
 	if len(views) > 0 {

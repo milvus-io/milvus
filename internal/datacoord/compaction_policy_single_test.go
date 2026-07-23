@@ -48,6 +48,10 @@ type SingleCompactionPolicySuite struct {
 }
 
 func (s *SingleCompactionPolicySuite) SetupTest() {
+	// these cases assert the exact legacy threshold boundaries, so disable
+	// the per-segment threshold jitter
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+
 	s.testLabel = &CompactionGroupLabel{
 		CollectionID: 1,
 		PartitionID:  10,
@@ -72,6 +76,10 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 		Schema: &schemapb.CollectionSchema{},
 	}, nil).Maybe()
 	s.singlePolicy = newSingleCompactionPolicy(meta, s.mockAlloc, mockHandler)
+}
+
+func (s *SingleCompactionPolicySuite) TearDownTest() {
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionThresholdJitter.Key)
 }
 
 func (s *SingleCompactionPolicySuite) TestTrigger() {
