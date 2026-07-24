@@ -64,7 +64,7 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 			}
 		case models.TruncationDirectionParamKey:
 			if truncationDirection := param.Value; truncationDirection != "Left" && truncationDirection != "Right" {
-				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
 			} else {
 				truncateParams[models.TruncationDirectionParamKey] = truncationDirection
 			}
