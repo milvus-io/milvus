@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -644,4 +645,189 @@ func (s *CipherSuite) TestGetPluginContext() {
 	parts := strings.Split(result[0].Value, ":")
 	s.Equal("123", parts[0])
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+}
+
+func (s *CipherSuite) TestWorkerPluginContextRequiresCipherPlugin() {
+	pluginContext := []*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: encodeEZContext(17, []byte("unsafe key")),
+	}}
+
+	err := RegisterRequiredEZsFromPluginContext(pluginContext)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+
+	context, err := GetRequiredCPluginContext(pluginContext, 23)
+	s.Nil(context)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+}
+
+func (s *CipherSuite) TestWorkerPluginContextAllowsPlaintextWithoutCipherPlugin() {
+	s.NoError(RegisterEZsFromPluginContext(nil))
+	s.NoError(RegisterRequiredEZsFromPluginContext(nil))
+
+	context, err := GetCPluginContext(nil, 23)
+	s.NoError(err)
+	s.Nil(context)
+
+	context, err = GetRequiredCPluginContext(nil, 23)
+	s.NoError(err)
+	s.Nil(context)
+
+	context, err = GetCPluginContext([]*commonpb.KeyValuePair{{Key: "unrelated", Value: "value"}}, 23)
+	s.NoError(err)
+	s.Nil(context)
+
+	context, err = GetRequiredCPluginContext([]*commonpb.KeyValuePair{{Key: "unrelated", Value: "value"}}, 23)
+	s.NoError(err)
+	s.Nil(context)
+}
+
+func (s *CipherSuite) TestWorkerPluginContextWithCipherPlugin() {
+	InitTestCipher()
+	pluginContext := []*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: encodeEZContext(17, []byte("unsafe key")),
+	}}
+
+	s.NoError(RegisterRequiredEZsFromPluginContext(pluginContext))
+
+	context, err := GetRequiredCPluginContext(pluginContext, 23)
+	s.NoError(err)
+	s.Equal(int64(17), context.GetEncryptionZoneId())
+	s.Equal(int64(23), context.GetCollectionId())
+	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), context.GetEncryptionKey())
+}
+
+func (s *CipherSuite) TestLegacyPluginContextBehaviorRemainsUnchanged() {
+	pluginContext := []*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: encodeEZContext(17, []byte("unsafe key")),
+	}}
+
+	s.NoError(RegisterEZsFromPluginContext(pluginContext))
+	context, err := GetCPluginContext(pluginContext, 23)
+	s.NoError(err)
+	s.Nil(context)
+
+	InitTestCipher()
+	const secret = "never-echo-this-key"
+	err = RegisterEZsFromPluginContext([]*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: secret,
+	}})
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Equal(merr.InputError, merr.GetErrorType(err))
+
+	context, err = GetCPluginContext([]*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: secret,
+	}}, 23)
+	s.Nil(context)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Equal(merr.InputError, merr.GetErrorType(err))
+
+	legacyContext := []*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: "17:not-base64",
+	}}
+	s.NoError(RegisterEZsFromPluginContext(legacyContext))
+	context, err = GetCPluginContext(legacyContext, 23)
+	s.NoError(err)
+	s.Equal("not-base64", context.GetEncryptionKey())
+
+	numericContext := []*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: secret + ":YWJj",
+	}}
+	_, _, decodeErr := decodeEZContext(numericContext[0].GetValue())
+	s.Require().Error(decodeErr)
+
+	err = RegisterEZsFromPluginContext(numericContext)
+	s.Equal(merr.Code(decodeErr), merr.Code(err))
+	s.Equal(merr.IsRetryableErr(decodeErr), merr.IsRetryableErr(err))
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+	s.NotContains(err.Error(), secret)
+
+	context, err = GetCPluginContext(numericContext, 23)
+	s.Nil(context)
+	s.Equal(merr.Code(decodeErr), merr.Code(err))
+	s.Equal(merr.IsRetryableErr(decodeErr), merr.IsRetryableErr(err))
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+	s.NotContains(err.Error(), secret)
+}
+
+func (s *CipherSuite) TestRequiredPluginContextClassifiesMalformedWorkerContextAsSystemError() {
+	InitTestCipher()
+	const secret = "never-echo-this-key"
+
+	pluginContext := []*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: secret,
+	}}
+
+	err := RegisterRequiredEZsFromPluginContext(pluginContext)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.NotErrorIs(err, merr.ErrServiceInternal)
+	s.Equal(merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+	s.NotContains(err.Error(), secret)
+
+	context, err := GetRequiredCPluginContext(pluginContext, 23)
+	s.Nil(context)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.NotErrorIs(err, merr.ErrServiceInternal)
+	s.Equal(merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+	s.NotContains(err.Error(), secret)
+
+	context, err = GetRequiredCPluginContext([]*commonpb.KeyValuePair{
+		{
+			Key:   CipherConfigUnsafeEZK,
+			Value: encodeEZContext(17, []byte("unsafe key")),
+		},
+		pluginContext[0],
+	}, 23)
+	s.Nil(context)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+	s.NotContains(err.Error(), secret)
+}
+
+func (s *CipherSuite) TestRequiredPluginContextPreservesLegacyNumericErrorSemantics() {
+	InitTestCipher()
+	const secret = "never-echo-this-key"
+	encoded := secret + ":YWJj"
+
+	_, _, legacyErr := decodeEZContext(encoded)
+	s.Require().Error(legacyErr)
+	s.Equal(merr.SystemError, merr.GetErrorType(legacyErr))
+
+	context, err := GetRequiredCPluginContext([]*commonpb.KeyValuePair{{
+		Key:   CipherConfigUnsafeEZK,
+		Value: encoded,
+	}}, 23)
+	s.Nil(context)
+	s.Equal(merr.Code(legacyErr), merr.Code(err))
+	s.Equal(merr.IsRetryableErr(legacyErr), merr.IsRetryableErr(err))
+	s.Equal(merr.SystemError, merr.GetErrorType(err))
+	s.NotContains(err.Error(), secret)
+}
+
+func (s *CipherSuite) TestRequiredEZContextRejectsAndRedactsMalformedValues() {
+	secret := "never-echo-this-key"
+	for _, encoded := range []string{
+		"missing-separator-" + secret,
+		secret + ":YWJj",
+		"17:" + secret,
+		"17:",
+	} {
+		_, _, err := decodeRequiredEZContext(encoded)
+		s.Require().Error(err)
+		s.NotContains(err.Error(), secret)
+		s.NotContains(err.Error(), encoded)
+	}
 }

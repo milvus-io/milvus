@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -93,6 +94,10 @@ func createTextIndex(ctx context.Context,
 	}
 
 	newStorageConfig, err := util.ParseStorageConfig(compactionParams.StorageConfig)
+	if err != nil {
+		return nil, err
+	}
+	pluginContext, err := hookutil.GetRequiredCPluginContext(plan.GetPluginContext(), collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +159,7 @@ func createTextIndex(ctx context.Context,
 				StorageVersion:            storageVersion,
 				Manifest:                  segment.GetManifest(),
 				StatsBasePath:             statsBasePath,
+				StoragePluginContext:      pluginContext,
 				IndexParams: []*commonpb.KeyValuePair{
 					{Key: "index_type", Value: "INVERTED"},
 					{Key: "is_text_match", Value: "true"},
