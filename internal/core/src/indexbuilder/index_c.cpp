@@ -323,9 +323,6 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
 
-        auto loon_properties =
-            MakePropertiesFromStorageConfig(ToCStorageConfig(storage_config));
-
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
             build_index_info->collectionid(),
