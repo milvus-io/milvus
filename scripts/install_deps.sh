@@ -450,12 +450,55 @@ install_centos_deps() {
 }
 
 #######################################
+# Arch Linux: Install dependencies
+#######################################
+install_arch_deps() {
+    print_info "Detected Arch Linux / EndeavourOS"
+
+    # Update package database
+    sudo pacman -Syu --needed --noconfirm
+
+    # Base build tools and dependencies
+    # Arch doesn't split -dev packages, so we install the main ones
+    local packages=(
+        base-devel
+        cmake ninja ccache
+        git wget curl zip unzip
+        gcc-fortran
+        libaio util-linux-libs
+        gperftools
+        python python-pip python-virtualenv
+        clang
+        openssl zlib
+        pkgconf
+    )
+
+    print_info "Installing packages via pacman..."
+    sudo pacman -S --needed --noconfirm "${packages[@]}"
+
+    # Install Conan (using the existing helper which handles PEP 668)
+    install_conan
+
+    # Install Rust
+    install_rust
+
+    print_info "Arch Linux dependencies installed successfully!"
+    print_info ""
+    print_info "To build Milvus, run: make"
+}
+
+#######################################
 # Detect Linux distribution
 #######################################
 detect_linux_distro() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
-        echo "$ID"
+        # Check ID and ID_LIKE for derivatives
+        if [[ "$ID" == "arch" || "$ID_LIKE" == *"arch"* ]]; then
+            echo "arch"
+        else
+            echo "$ID"
+        fi
     elif [ -f /etc/centos-release ]; then
         echo "centos"
     else
@@ -500,6 +543,9 @@ main() {
                 rocky|almalinux)
                     install_rocky_deps
                     ;;
+                arch)
+                    install_arch_deps
+                    ;;
                 amzn)
                     install_amazon_linux_deps
                     ;;
@@ -508,7 +554,7 @@ main() {
                     ;;
                 *)
                     print_error "Unsupported Linux distribution: ${distro}"
-                    print_info "Supported distributions: Ubuntu, Rocky Linux, Amazon Linux, CentOS"
+                    print_info "Supported distributions: Ubuntu, Rocky Linux, Amazon Linux, CentOS, Arch"
                     exit 1
                     ;;
             esac
