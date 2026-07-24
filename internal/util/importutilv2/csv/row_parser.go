@@ -472,7 +472,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 		return num, typeutil.VerifyFloats64([]float64{num})
 	case schemapb.DataType_Text:
 		return obj, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		maxLength, err := parameterutil.GetMaxLength(field)
 		if err != nil {
 			return nil, err
@@ -725,7 +725,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 				},
 			},
 		}, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		values := make([]string, len(arr))
 		for i, v := range arr {
 			value, ok := v.(string)

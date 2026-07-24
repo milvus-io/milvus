@@ -99,6 +99,38 @@ func TestIDColumns(t *testing.T) {
 	})
 }
 
+func TestFieldDataColumn_UUID(t *testing.T) {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_UUID,
+		FieldName: "uuid_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{
+							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							"550e8400-e29b-41d4-a716-446655440000",
+						},
+					},
+				},
+			},
+		},
+	}
+	column, err := FieldDataColumn(fd, 0, -1)
+	assert.NoError(t, err)
+	assert.NotNil(t, column)
+	assert.Equal(t, "uuid_field", column.Name())
+	assert.Equal(t, entity.FieldTypeUUID, column.Type())
+	assert.Equal(t, 2, column.Len())
+	uuidCol, ok := column.(*ColumnUUID)
+	if assert.True(t, ok) {
+		assert.Equal(t, []string{
+			"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"550e8400-e29b-41d4-a716-446655440000",
+		}, uuidCol.Data())
+	}
+}
+
 func TestGetIntData(t *testing.T) {
 	type testCase struct {
 		tag      string

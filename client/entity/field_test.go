@@ -73,6 +73,24 @@ func TestFieldSchema(t *testing.T) {
 	})
 }
 
+func TestFieldTypeUUID_Constants(t *testing.T) {
+	assert.EqualValues(t, 31, FieldTypeUUID)
+}
+
+func TestFieldTypeUUID_Name(t *testing.T) {
+	assert.Equal(t, "UUID", FieldTypeUUID.Name())
+}
+
+func TestFieldTypeUUID_String(t *testing.T) {
+	assert.Equal(t, "string", FieldTypeUUID.String())
+}
+
+func TestFieldTypeUUID_PbFieldType(t *testing.T) {
+	pbName, pbGoType := FieldTypeUUID.PbFieldType()
+	assert.Equal(t, "UUID", pbName)
+	assert.Equal(t, "string", pbGoType)
+}
+
 func TestStructSchema(t *testing.T) {
 	// Test NewStructSchema
 	schema := NewStructSchema()

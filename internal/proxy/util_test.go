@@ -661,6 +661,19 @@ func TestValidatePrimaryKey(t *testing.T) {
 	}))
 }
 
+func TestValidatePrimaryKey_AcceptsUUID(t *testing.T) {
+	uuidField := &schemapb.FieldSchema{
+		Name:         "uuidField",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_UUID,
+	}
+
+	assert.NoError(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:   "coll1",
+		Fields: []*schemapb.FieldSchema{uuidField},
+	}))
+}
+
 func TestValidateFieldType(t *testing.T) {
 	type testCase struct {
 		dt       schemapb.DataType

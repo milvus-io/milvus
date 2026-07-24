@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/client/v3/entity"
@@ -30,6 +31,68 @@ import (
 
 type ScalarSuite struct {
 	suite.Suite
+}
+
+func (s *ScalarSuite) TestColumnUUID() {
+	name := fmt.Sprintf("field_%d", rand.Intn(1000))
+	data := []string{
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		"550e8400-e29b-41d4-a716-446655440000",
+	}
+	column := NewColumnUUID(name, data)
+	s.Equal(entity.FieldTypeUUID, column.Type())
+	s.Equal(name, column.Name())
+	s.Equal(data, column.Data())
+	s.Equal(2, column.Len())
+
+	// GetAsString
+	val, err := column.GetAsString(0)
+	s.NoError(err)
+	s.Equal(data[0], val)
+
+	val, err = column.GetAsString(1)
+	s.NoError(err)
+	s.Equal(data[1], val)
+
+	// FieldData stores UUID as binary bytes
+	fd := column.FieldData()
+	s.Equal(name, fd.GetFieldName())
+	bytesData := fd.GetScalars().GetBytesData().GetData()
+	s.Len(bytesData, 2)
+	u0, err := uuid.FromBytes(bytesData[0])
+	s.NoError(err)
+	s.Equal(data[0], u0.String())
+	u1, err := uuid.FromBytes(bytesData[1])
+	s.NoError(err)
+	s.Equal(data[1], u1.String())
+
+	// Round-trip through FieldDataColumn
+	result, err := FieldDataColumn(fd, 0, -1)
+	s.NoError(err)
+	parsed, ok := result.(*ColumnUUID)
+	if s.True(ok) {
+		s.Equal(name, parsed.Name())
+		s.Equal(data, parsed.Data())
+		s.Equal(entity.FieldTypeUUID, column.Type())
+	}
+}
+
+func (s *ScalarSuite) TestColumnUUID_Slice() {
+	n := 100
+	name := fmt.Sprintf("field_%d", rand.Intn(1000))
+	data := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		data = append(data, fmt.Sprintf("a0eebc99-9c0b-4ef8-bb6d-6bb9bd%08x", i))
+	}
+	column := NewColumnUUID(name, data)
+
+	l := rand.Intn(n)
+	sliced := column.Slice(0, l)
+	slicedColumn, ok := sliced.(*ColumnUUID)
+	if s.True(ok) {
+		s.Equal(column.Type(), slicedColumn.Type())
+		s.Equal(data[:l], slicedColumn.Data())
+	}
 }
 
 func (s *ScalarSuite) TestBasic() {

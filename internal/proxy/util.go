@@ -607,6 +607,9 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 			if !field.IsPrimaryKey {
 				return merr.WrapErrParameterInvalidMsg("only primary field can speficy AutoID with true, field name = %s", field.Name)
 			}
+			if field.DataType == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("autoID is not supported for UUID primary key, use Int64 instead")
+			}
 		}
 	}
 	for _, structArrayField := range coll.StructArrayFields {
@@ -801,9 +804,9 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 				return merr.WrapErrParameterInvalidMsg("there are more than one primary key, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
 
-			// The type of the primary key field can only be int64 and varchar
-			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
-				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64 or VarChar")
+			// The type of the primary key field can only be int64, varchar, and uuid
+			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64, VarChar, or UUID")
 			}
 
 			// varchar field do not support autoID
@@ -1044,7 +1047,7 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 				StrId: scalarField.GetStringData(),
 			}
 		default:
-			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as PrimaryField")
+			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64, VarChar, or UUID as PrimaryField")
 		}
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as PrimaryField")
