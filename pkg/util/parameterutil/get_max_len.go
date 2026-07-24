@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -36,7 +37,20 @@ func GetMaxCapacity(field *schemapb.FieldSchema) (int64, error) {
 		msg := fmt.Sprintf("%s is not of array/vector array type", field.GetDataType())
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_Array, field.GetDataType(), msg)
 	}
-	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
+	return getMaxCapacityFromParams(append(field.GetIndexParams(), field.GetTypeParams()...))
+}
+
+// GetMaxCapacityFromTypeSchema gets max capacity from the current nested array schema node.
+func GetMaxCapacityFromTypeSchema(typeSchema *schemapb.TypeSchema) (int64, error) {
+	if !typeutil.IsArrayType(typeSchema.GetDataType()) {
+		msg := fmt.Sprintf("%s is not of array type", typeSchema.GetDataType())
+		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_Array, typeSchema.GetDataType(), msg)
+	}
+	return getMaxCapacityFromParams(typeSchema.GetTypeParams())
+}
+
+func getMaxCapacityFromParams(params []*commonpb.KeyValuePair) (int64, error) {
+	h := typeutil.NewKvPairs(params)
 	maxCapacityStr, err := h.Get(common.MaxCapacityKey)
 	if err != nil {
 		msg := "max capacity not found"

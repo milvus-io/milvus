@@ -90,6 +90,10 @@ func genEmptyVarCharFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 }
 
 func genEmptyArrayFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	elementType := field.GetElementType()
+	if field.GetElementSchema() != nil {
+		elementType = schemapb.DataType_Array
+	}
 	return &schemapb.FieldData{
 		Type:      field.GetDataType(),
 		FieldName: field.GetName(),
@@ -98,7 +102,7 @@ func genEmptyArrayFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 				Data: &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
 						Data:        nil,
-						ElementType: field.GetElementType(),
+						ElementType: elementType,
 					},
 				},
 			},

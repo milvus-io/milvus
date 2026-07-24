@@ -15,10 +15,17 @@
 // limitations under the License.
 #pragma once
 
+#include <optional>
+#include <span>
+#include <utility>
+#include <vector>
+
 #include "common/Array.h"
+#include "common/ArrayChunkBuilder.h"
+#include "common/ArrayValue.h"
 #include "common/FastMem.h"
-#include "common/VectorTrait.h"
 #include "common/Utils.h"
+#include "common/VectorTrait.h"
 #include "storage/MmapManager.h"
 
 namespace milvus {
@@ -95,6 +102,101 @@ struct VariableLengthChunk {
     int64_t size_ = 0;
     FixedVector<ChunkViewType<Type>> data_;
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
+};
+
+template <>
+struct VariableLengthChunk<ArrayValue> {
+ public:
+    VariableLengthChunk() = delete;
+
+    explicit VariableLengthChunk(
+        const uint64_t size, storage::MmapChunkDescriptorPtr mmap_descriptor)
+        : size_(size),
+          mmap_descriptor_(std::move(mmap_descriptor)),
+          data_(size) {
+    }
+
+    void
+    set(const ArrayValue* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
+        AssertInfo(begin <= size_ && length <= size_ - begin,
+                   "failed to set nested ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   length,
+                   begin,
+                   size_);
+        if (length == 0) {
+            return;
+        }
+
+        std::vector<ScalarFieldProto> materialized_rows(length);
+        std::vector<const ScalarFieldProto*> rows;
+        rows.reserve(length);
+        for (uint32_t i = 0; i < length; ++i) {
+            const bool valid = !check_data_valid.has_value() ||
+                               check_data_valid.value()(begin + i);
+            if (valid) {
+                AssertInfo(!src[i].is_null(),
+                           "valid nested ARRAY row {} has no payload",
+                           begin + i);
+                src[i].output_data(materialized_rows[i]);
+            }
+            rows.push_back(&materialized_rows[i]);
+        }
+
+        set_rows(
+            std::span<const ScalarFieldProto* const>(rows.data(), rows.size()),
+            begin,
+            src[0].type(),
+            check_data_valid.has_value());
+    }
+
+    void
+    set_rows(std::span<const ScalarFieldProto* const> rows,
+             size_t begin,
+             const proto::schema::TypeSchema& type,
+             bool nullable) {
+        AssertInfo(begin <= size_ && rows.size() <= size_ - begin,
+                   "failed to set nested ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   rows.size(),
+                   begin,
+                   size_);
+        if (rows.empty()) {
+            return;
+        }
+
+        auto chunk = CreateMmapColumnarArrayChunkFromProtoRows(
+            rows, type, nullable, mmap_descriptor_);
+        blocks_.push_back(chunk);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            data_[begin + i] = chunk->View(i);
+        }
+    }
+
+    const ArrayValueView&
+    view(const int i) const {
+        return data_[i];
+    }
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() {
+        return size_;
+    }
+
+ private:
+    int64_t size_{0};
+    // Keep the descriptor alive until every Chunk tree has been destroyed.
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    FixedVector<ArrayValueView> data_;
+    std::vector<ColumnarArrayChunk::Ptr> blocks_;
 };
 
 // Template specialization for string

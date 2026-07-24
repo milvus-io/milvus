@@ -8551,3 +8551,190 @@ func Test_fillVectorArrayNullValueImpl(t *testing.T) {
 		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 	})
 }
+
+func TestValidateNestedArrayFieldData(t *testing.T) {
+	arrayRow := func(rows ...*schemapb.ScalarField) *schemapb.ScalarField {
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{
+				ArrayData: &schemapb.ArrayArray{Data: rows},
+			},
+		}
+	}
+	intRow := func(values ...int32) *schemapb.ScalarField {
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: values},
+			},
+		}
+	}
+	stringRow := func(values ...string) *schemapb.ScalarField {
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: values},
+			},
+		}
+	}
+	fieldData := func(row *schemapb.ScalarField) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "nested",
+			Type:      schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{Data: []*schemapb.ScalarField{row}},
+					},
+				},
+			},
+		}
+	}
+	intSchema := func(leafCapacity string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:       "nested",
+					DataType:   schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+					ElementSchema: &schemapb.TypeSchema{
+						DataType:   schemapb.DataType_Array,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+						ElementSchema: &schemapb.TypeSchema{
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: leafCapacity}},
+						},
+					},
+				},
+			},
+		}
+	}
+	quadIntSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:       "nested",
+					DataType:   schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+					ElementSchema: &schemapb.TypeSchema{
+						DataType:   schemapb.DataType_Array,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+						ElementSchema: &schemapb.TypeSchema{
+							DataType:   schemapb.DataType_Array,
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+							ElementSchema: &schemapb.TypeSchema{
+								DataType:    schemapb.DataType_Array,
+								ElementType: schemapb.DataType_Int32,
+								TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("valid triple nested array normalizes metadata", func(t *testing.T) {
+		data := fieldData(arrayRow(
+			arrayRow(intRow(1), intRow(2, 3)),
+			arrayRow(),
+		))
+		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		require.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Array, data.GetScalars().GetArrayData().GetElementType())
+		assert.Equal(t, schemapb.DataType_Array, data.GetScalars().GetArrayData().GetData()[0].GetArrayData().GetElementType())
+		assert.Equal(t, schemapb.DataType_Int32, data.GetScalars().GetArrayData().GetData()[0].GetArrayData().GetData()[0].GetArrayData().GetElementType())
+	})
+
+	t.Run("valid quadruple nested array normalizes every level", func(t *testing.T) {
+		data := fieldData(arrayRow(arrayRow(arrayRow(intRow(1, 2), intRow(3)))))
+		helper, err := typeutil.CreateSchemaHelper(quadIntSchema())
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		require.NoError(t, err)
+
+		root := data.GetScalars().GetArrayData()
+		levelOne := root.GetData()[0].GetArrayData()
+		levelTwo := levelOne.GetData()[0].GetArrayData()
+		levelThree := levelTwo.GetData()[0].GetArrayData()
+		assert.Equal(t, schemapb.DataType_Array, root.GetElementType())
+		assert.Equal(t, schemapb.DataType_Array, levelOne.GetElementType())
+		assert.Equal(t, schemapb.DataType_Array, levelTwo.GetElementType())
+		assert.Equal(t, schemapb.DataType_Int32, levelThree.GetElementType())
+	})
+
+	t.Run("incorrect nested element metadata is rejected", func(t *testing.T) {
+		data := fieldData(arrayRow(arrayRow(intRow(1))))
+		leafArray := data.GetScalars().GetArrayData().GetData()[0].GetArrayData().GetData()[0].GetArrayData()
+		leafArray.ElementType = schemapb.DataType_Array
+		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expects Int32 element type, got Array")
+	})
+
+	t.Run("undeclared nested null is rejected", func(t *testing.T) {
+		data := fieldData(arrayRow(
+			arrayRow(intRow(1), intRow(2, 3)),
+			arrayRow(),
+			&schemapb.ScalarField{},
+		))
+		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "undeclared null value at level 1")
+	})
+
+	t.Run("leaf capacity is checked at its own level", func(t *testing.T) {
+		data := fieldData(arrayRow(arrayRow(intRow(1, 2, 3))))
+		helper, err := typeutil.CreateSchemaHelper(intSchema("2"))
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max capacity")
+	})
+
+	t.Run("leaf type mismatch is rejected", func(t *testing.T) {
+		data := fieldData(arrayRow(arrayRow(stringRow("wrong"))))
+		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "insert data does not match")
+	})
+
+	t.Run("nested varchar max length is checked", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:       "nested",
+					DataType:   schemapb.DataType_Array,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "3"}},
+					ElementSchema: &schemapb.TypeSchema{
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_VarChar,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.MaxCapacityKey, Value: "3"},
+							{Key: common.MaxLengthKey, Value: "2"},
+						},
+					},
+				},
+			},
+		}
+		data := fieldData(arrayRow(stringRow("too long")))
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck(), withMaxLenCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max length")
+	})
+}

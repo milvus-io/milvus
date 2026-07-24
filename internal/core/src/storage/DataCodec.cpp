@@ -41,7 +41,8 @@ namespace milvus::storage {
 std::unique_ptr<DataCodec>
 DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                     int64_t length,
-                    bool is_field_data) {
+                    bool is_field_data,
+                    std::optional<proto::schema::TypeSchema> array_type) {
     auto buff_to_keep = input_data;  // ref += 1
     auto reader =
         std::make_shared<BinlogReader>(buff_to_keep, length);  //ref += 1
@@ -111,8 +112,12 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
     auto event_data_length = header.event_length_ - GetEventHeaderSize(header);
     switch (header.event_type_) {
         case EventType::InsertEvent: {
-            auto insert_event_data = InsertEventData(
-                reader, event_data_length, data_type, nullable, is_field_data);
+            auto insert_event_data = InsertEventData(reader,
+                                                     event_data_length,
+                                                     data_type,
+                                                     nullable,
+                                                     is_field_data,
+                                                     std::move(array_type));
 
             std::unique_ptr<InsertData> insert_data;
             insert_data =

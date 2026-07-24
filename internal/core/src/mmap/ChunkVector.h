@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <span>
 #include <type_traits>
 
 #include "common/FastMem.h"
@@ -126,6 +127,24 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         }
     }
 
+    void
+    copy_array_rows_to_chunk(int64_t chunk_id,
+                             size_t offset,
+                             std::span<const ScalarFieldProto* const> rows,
+                             const proto::schema::TypeSchema& type,
+                             bool nullable) {
+        static_assert(std::is_same_v<Type, ArrayValue> && IsMmap,
+                      "copy_array_rows_to_chunk is only available for mmap "
+                      "ArrayValue chunks");
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        const auto counter = this->counter_.load();
+        AssertInfo(chunk_id < counter,
+                   "nested ARRAY chunk index {} out of range {}",
+                   chunk_id,
+                   counter);
+        vec_[chunk_id].set_rows(rows, offset, type, nullable);
+    }
+
     ChunkViewType<Type>
     view_element(int64_t chunk_id, int64_t chunk_offset) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
@@ -142,6 +161,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                              src.byte_size(),
                              src.get_element_type(),
                              src.get_offsets_data());
+        } else if constexpr (std::is_same_v<ArrayValue, Type>) {
+            return chunk[chunk_offset].View();
         } else if constexpr (std::is_same_v<VectorArray, Type>) {
             auto& src = chunk[chunk_offset];
             return VectorArrayView(const_cast<char*>(src.data()),
@@ -189,7 +210,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     int64_t
     get_element_size() override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
+        if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
+                                 std::is_same_v<ArrayValue, Type>)) {
             return sizeof(ChunkViewType<Type>);
         }
         return sizeof(Type);
@@ -208,7 +230,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     SpanBase
     get_span(int64_t chunk_id) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
+        if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
+                                 std::is_same_v<ArrayValue, Type>)) {
             return SpanBase(get_chunk_data(chunk_id),
                             get_chunk_size(chunk_id),
                             sizeof(ChunkViewType<Type>));

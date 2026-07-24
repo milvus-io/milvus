@@ -116,7 +116,9 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = LOCAL_FORMAT_RAW)
+              std::string local_format = LOCAL_FORMAT_RAW,
+              std::optional<milvus::proto::schema::TypeSchema> element_schema =
+                  std::nullopt)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -124,7 +126,8 @@ class FieldMeta {
           nullable_(nullable),
           default_value_(std::move(default_value)),
           external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
+          local_format_(std::move(local_format)),
+          element_schema_(std::move(element_schema)) {
         Assert(IsArrayDataType(type_));
     }
 
@@ -255,6 +258,33 @@ class FieldMeta {
         return element_type_;
     }
 
+    DataType
+    get_array_element_type() const {
+        return element_schema_.has_value() ? DataType::ARRAY : element_type_;
+    }
+
+    milvus::proto::schema::TypeSchema
+    get_array_type_schema() const {
+        milvus::proto::schema::TypeSchema type_schema;
+        type_schema.set_data_type(milvus::proto::schema::DataType::Array);
+        if (element_schema_.has_value()) {
+            *type_schema.mutable_element_schema() = *element_schema_;
+        } else {
+            type_schema.set_element_type(ToProtoDataType(element_type_));
+        }
+        return type_schema;
+    }
+
+    bool
+    has_element_schema() const {
+        return element_schema_.has_value();
+    }
+
+    const std::optional<milvus::proto::schema::TypeSchema>&
+    get_element_schema() const {
+        return element_schema_;
+    }
+
     bool
     is_vector() const {
         return IsVectorDataType(type_);
@@ -369,6 +399,7 @@ class FieldMeta {
     int64_t main_field_id_ = INVALID_FIELD_ID;
     std::string external_field_mapping_;
     std::string local_format_ = LOCAL_FORMAT_RAW;
+    std::optional<milvus::proto::schema::TypeSchema> element_schema_;
 };
 
 }  // namespace milvus

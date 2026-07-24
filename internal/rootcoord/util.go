@@ -468,6 +468,27 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 				msg := fmt.Sprintf("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
+			if field.GetDataType() == schemapb.DataType_ArrayOfVector &&
+				(field.GetElementSchema() != nil || field.GetElementType() == schemapb.DataType_ArrayOfVector) {
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.Name)
+			}
+			if field.GetElementSchema() != nil {
+				if field.GetElementType() != schemapb.DataType_None {
+					return merr.WrapErrParameterInvalidMsg("element_type should not be specified for nested field %s", field.Name)
+				}
+				if field.GetElementSchema().GetDataType() != field.GetDataType() {
+					return merr.WrapErrParameterInvalidMsg("element_schema data type should match nested field type for field %s", field.Name)
+				}
+			} else {
+				switch field.GetElementType() {
+				case schemapb.DataType_Array:
+					return merr.WrapErrParameterInvalidMsg("nested array field %s should be specified by element_schema", field.GetName())
+				case schemapb.DataType_ArrayOfVector:
+					return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.GetName())
+				case schemapb.DataType_ArrayOfStruct:
+					return merr.WrapErrParameterInvalidMsg("nested ArrayOfStruct is not supported for field %s", field.GetName())
+				}
+			}
 
 			if field.IsPartitionKey || field.IsPrimaryKey {
 				msg := fmt.Sprintf("partition key or primary key can not be in struct array field. data type:%s, element type:%s, name:%s",
@@ -599,9 +620,26 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
 				return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
 			}
-			if subField.GetElementType() == schemapb.DataType_ArrayOfStruct || subField.GetElementType() == schemapb.DataType_ArrayOfVector ||
-				subField.GetElementType() == schemapb.DataType_Array {
-				return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", subField.Name)
+			if subField.GetDataType() == schemapb.DataType_ArrayOfVector &&
+				(subField.GetElementSchema() != nil || subField.GetElementType() == schemapb.DataType_ArrayOfVector) {
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", subField.Name)
+			}
+			if subField.GetElementSchema() != nil {
+				if subField.GetElementType() != schemapb.DataType_None {
+					return merr.WrapErrParameterInvalidMsg("element_type should not be specified for nested field %s", subField.Name)
+				}
+				if subField.GetElementSchema().GetDataType() != subField.GetDataType() {
+					return merr.WrapErrParameterInvalidMsg("element_schema data type should match nested field type for field %s", subField.Name)
+				}
+				continue
+			}
+			switch subField.GetElementType() {
+			case schemapb.DataType_Array:
+				return merr.WrapErrParameterInvalidMsg("nested array field %s should be specified by element_schema", subField.GetName())
+			case schemapb.DataType_ArrayOfVector:
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", subField.GetName())
+			case schemapb.DataType_ArrayOfStruct:
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfStruct is not supported for field %s", subField.GetName())
 			}
 			if _, ok := schemapb.DataType_name[int32(subField.GetElementType())]; !ok || subField.GetElementType() == schemapb.DataType_None {
 				return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", subField.GetElementType()))

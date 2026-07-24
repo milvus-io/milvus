@@ -415,7 +415,8 @@ SegmentInternalInterface::FillOrderByResult(
             auto& field_meta = plan->schema_->operator[](field_id);
             if (field_meta.get_data_type() == DataType::ARRAY) {
                 col->mutable_scalars()->mutable_array_data()->set_element_type(
-                    proto::schema::DataType(field_meta.get_element_type()));
+                    proto::schema::DataType(
+                        field_meta.get_array_element_type()));
             }
             fields_data->AddAllocated(col.release());
         }
@@ -568,7 +569,7 @@ SegmentInternalInterface::FillTargetEntry(
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
-                proto::schema::DataType(field_meta.get_element_type()));
+                proto::schema::DataType(field_meta.get_array_element_type()));
         }
         if (fill_ids && is_pk_field(field_id)) {
             // fill_ids should be true when the first Retrieve was called. The reduce phase depends on the ids to do

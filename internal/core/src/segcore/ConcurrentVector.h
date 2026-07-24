@@ -20,6 +20,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <shared_mutex>
 #include <string>
 #include <type_traits>
@@ -388,6 +389,11 @@ class ConcurrentVectorImpl : public VectorBase {
             fmt::format(
                 "The value of elements_per_row_ is not 1, elements_per_row_={}",
                 elements_per_row_));
+        if constexpr (std::is_same_v<Type, ArrayValue>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap nested ARRAY rows must be accessed through "
+                       "view_element()");
+        }
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         auto data =
@@ -600,6 +606,47 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
         auto chunk_offset = element_index % size_per_chunk_;
         return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
+};
+
+template <>
+class ConcurrentVector<ArrayValue>
+    : public ConcurrentVectorImpl<ArrayValue, true> {
+    using Base = ConcurrentVectorImpl<ArrayValue, true>;
+
+ public:
+    explicit ConcurrentVector(
+        int64_t size_per_chunk,
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
+        : Base(1,
+               size_per_chunk,
+               std::move(mmap_descriptor),
+               std::move(valid_data_ptr)) {
+    }
+
+    using Base::set_data_raw;
+
+    void
+    set_data_raw(ssize_t element_offset,
+                 ssize_t element_count,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) override;
+
+    ArrayValueView
+    view_element(ssize_t element_index) const {
+        auto chunk_id = element_index / size_per_chunk_;
+        auto chunk_offset = element_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
+    }
+
+ private:
+    void
+    set_mmap_proto_rows(ssize_t element_offset,
+                        std::span<const ScalarFieldProto* const> rows,
+                        bool nullable);
+
+    std::once_flag array_type_once_;
+    std::shared_ptr<const proto::schema::TypeSchema> array_type_;
 };
 
 template <>
