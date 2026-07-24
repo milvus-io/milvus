@@ -17,8 +17,6 @@
 package storage
 
 import (
-	"errors"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -167,66 +165,4 @@ func (pks *VarcharPrimaryKeys) MustMerge(another PrimaryKeys) {
 func (pks *VarcharPrimaryKeys) Reset() {
 	pks.values = pks.values[:0]
 	pks.size = 0
-}
-
-// UUIDPrimaryKeys implements PrimaryKeys for UUID primary keys
-type UUIDPrimaryKeys struct {
-	keys   []PrimaryKey
-	values [][16]byte
-}
-
-func NewUUIDPrimaryKeys() *UUIDPrimaryKeys {
-	return &UUIDPrimaryKeys{}
-}
-
-func (pks *UUIDPrimaryKeys) Append(pks2 ...PrimaryKey) error {
-	for _, pk := range pks2 {
-		tp, ok := pk.(*UUIDPrimaryKey)
-		if !ok {
-			return errors.New("cannot append non-UUID primary key to UUIDPrimaryKeys")
-		}
-		pks.keys = append(pks.keys, tp)
-		pks.values = append(pks.values, tp.Value)
-	}
-	return nil
-}
-
-func (pks *UUIDPrimaryKeys) MustAppend(values ...PrimaryKey) {
-	err := pks.Append(values...)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func (pks *UUIDPrimaryKeys) Get(idx int) PrimaryKey {
-	if idx < 0 || idx >= len(pks.keys) {
-		return nil
-	}
-	return pks.keys[idx]
-}
-
-func (pks *UUIDPrimaryKeys) Type() schemapb.DataType {
-	return schemapb.DataType_UUID
-}
-
-func (pks *UUIDPrimaryKeys) Size() int64 {
-	return int64(len(pks.values))
-}
-
-func (pks *UUIDPrimaryKeys) Len() int {
-	return len(pks.keys)
-}
-
-func (pks *UUIDPrimaryKeys) MustMerge(pks2 PrimaryKeys) {
-	other, ok := pks2.(*UUIDPrimaryKeys)
-	if !ok {
-		panic("cannot merge non-UUIDPrimaryKeys")
-	}
-	pks.keys = append(pks.keys, other.keys...)
-	pks.values = append(pks.values, other.values...)
-}
-
-func (pks *UUIDPrimaryKeys) Reset() {
-	pks.keys = nil
-	pks.values = nil
 }

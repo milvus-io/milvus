@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -363,14 +362,6 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 		case schemapb.DataType_VarChar:
 			pkArray := r.Column(w.GetPkID()).(*array.String)
 			pk := storage.NewVarCharPrimaryKey(pkArray.Value(i))
-			w.pkstats.Update(pk)
-		case schemapb.DataType_UUID:
-			pkArray := r.Column(w.GetPkID()).(*array.FixedSizeBinary)
-			u, err := uuid.FromBytes(pkArray.Value(i))
-			if err != nil {
-				return merr.WrapErrServiceInternalMsg("invalid UUID data in segment writer")
-			}
-			pk := storage.NewUUIDPrimaryKey(u)
 			w.pkstats.Update(pk)
 		default:
 			panic("invalid data type")

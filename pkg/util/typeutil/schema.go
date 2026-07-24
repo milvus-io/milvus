@@ -3452,10 +3452,8 @@ func GetPKSize(fieldData *schemapb.FieldData) int {
 	switch fieldData.GetType() {
 	case schemapb.DataType_Int64:
 		return len(fieldData.GetScalars().GetLongData().GetData())
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return len(fieldData.GetScalars().GetStringData().GetData())
-	case schemapb.DataType_UUID:
-		return len(fieldData.GetScalars().GetBytesData().GetData())
 	}
 	return 0
 }

@@ -205,7 +205,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 				DoubleData: &schemapb.DoubleArray{Data: floatData},
 			},
 		}, nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		strData := make([]string, len(data))
 		for i, v := range data {
 			val, ok := v.(string)

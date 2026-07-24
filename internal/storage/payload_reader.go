@@ -178,9 +178,6 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Geometry:
 		val, validData, err := r.GetGeometryFromPayload()
 		return val, validData, 0, err
-	case schemapb.DataType_UUID:
-		val, validData, err := r.GetUUIDFromPayload()
-		return val, validData, 0, err
 	default:
 		return nil, nil, 0, merr.WrapErrDataIntegrityMsg("unknown type")
 	}
@@ -571,49 +568,6 @@ func (r *PayloadReader) GetGeometryFromPayload() ([][]byte, []bool, error) {
 		return nil, nil, err
 	}
 	return value, nil, nil
-}
-
-func (r *PayloadReader) GetUUIDFromPayload() ([][]byte, []bool, error) {
-	if r.colType != schemapb.DataType_UUID {
-		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get UUID from datatype %v", r.colType.String())
-	}
-
-	if r.nullable {
-		values := make([]parquet.FixedLenByteArray, r.numRows)
-		validData := make([]bool, r.numRows)
-		valuesRead, err := ReadData[parquet.FixedLenByteArray, *array.FixedSizeBinary](r.reader, values, validData, r.numRows)
-		if err != nil {
-			return nil, nil, err
-		}
-		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
-		}
-		ret := make([][]byte, r.numRows)
-		for i := 0; i < int(r.numRows); i++ {
-			buf := make([]byte, 16)
-			copy(buf, values[i])
-			ret[i] = buf
-		}
-		return ret, validData, nil
-	}
-
-	values := make([]parquet.FixedLenByteArray, r.numRows)
-	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
-	}
-
-	ret := make([][]byte, r.numRows)
-	for i := 0; i < int(r.numRows); i++ {
-		buf := make([]byte, 16)
-		copy(buf, values[i])
-		ret[i] = buf
-	}
-	return ret, nil, nil
 }
 
 func (r *PayloadReader) GetByteArrayDataSet() (*DataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader], error) {

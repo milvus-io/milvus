@@ -21,7 +21,6 @@
 #include <string.h>
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <iosfwd>
 #include <optional>
 #include <type_traits>
@@ -250,54 +249,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             AssertInfo(array->type()->id() == arrow::Type::type::STRING,
                        "inconsistent data type");
-            auto string_array =
-                std::dynamic_pointer_cast<arrow::StringArray>(array);
-            return FillFieldData(string_array);
-        }
-        case DataType::UUID: {
-            if (array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY) {
-                auto fsb_array =
-                    std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
-                        array);
-                AssertInfo(fsb_array != nullptr,
-                           "failed to cast to FixedSizeBinaryArray");
-                AssertInfo(fsb_array->byte_width() == 16,
-                           "UUID must be exactly 16 bytes");
-                std::vector<std::string> uuid_strings;
-                uuid_strings.reserve(fsb_array->length());
-                for (int64_t i = 0; i < fsb_array->length(); i++) {
-                    if (fsb_array->IsNull(i)) {
-                        uuid_strings.emplace_back();
-                    } else {
-                        auto view = fsb_array->GetView(i);
-                        const auto* bytes =
-                            reinterpret_cast<const uint8_t*>(view.data());
-                        char buf[37];
-                        std::snprintf(buf,
-                                     sizeof(buf),
-                                     "%02x%02x%02x%02x-%02x%02x-%02x%02x"
-                                     "-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                                     bytes[0], bytes[1], bytes[2], bytes[3],
-                                     bytes[4], bytes[5], bytes[6], bytes[7],
-                                     bytes[8], bytes[9], bytes[10], bytes[11],
-                                     bytes[12], bytes[13], bytes[14], bytes[15]);
-                        uuid_strings.emplace_back(buf, 36);
-                    }
-                }
-                if (nullable_) {
-                    return FillFieldData(uuid_strings.data(),
-                                         fsb_array->null_bitmap_data(),
-                                         fsb_array->length(),
-                                         fsb_array->offset());
-                }
-                return FillFieldData(uuid_strings.data(),
-                                     uuid_strings.size());
-            }
-            AssertInfo(array->type()->id() == arrow::Type::type::STRING,
-                       "UUID must be FIXED_SIZE_BINARY or STRING");
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
             return FillFieldData(string_array);

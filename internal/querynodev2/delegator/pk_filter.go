@@ -19,7 +19,6 @@ package delegator
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -223,14 +222,8 @@ func pkFromGenericValue(dataType schemapb.DataType, value *planpb.GenericValue) 
 	switch dataType {
 	case schemapb.DataType_Int64:
 		return storage.NewInt64PrimaryKey(value.GetInt64Val()), true
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return storage.NewVarCharPrimaryKey(value.GetStringVal()), true
-	case schemapb.DataType_UUID:
-		u, err := uuid.Parse(value.GetStringVal())
-		if err != nil {
-			return nil, false
-		}
-		return storage.NewUUIDPrimaryKey(u), true
 	default:
 		mlog.Warn(context.TODO(), "unknown pk type", mlog.Int("type", int(dataType)))
 		return nil, false

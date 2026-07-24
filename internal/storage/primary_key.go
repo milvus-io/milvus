@@ -17,13 +17,9 @@
 package storage
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/google/uuid"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -263,93 +259,6 @@ func (vcp *VarCharPrimaryKey) Size() int64 {
 	return int64(len(vcp.Value) + 8)
 }
 
-// UUIDPrimaryKey is a UUID primary key (16-byte fixed).
-type UUIDPrimaryKey struct {
-	Value uuid.UUID
-}
-
-func NewUUIDPrimaryKey(v uuid.UUID) *UUIDPrimaryKey {
-	return &UUIDPrimaryKey{
-		Value: v,
-	}
-}
-
-func (pk *UUIDPrimaryKey) GT(key PrimaryKey) bool {
-	other := key.(*UUIDPrimaryKey).Value
-	return bytes.Compare(pk.Value[:], other[:]) > 0
-}
-
-func (pk *UUIDPrimaryKey) GE(key PrimaryKey) bool {
-	other := key.(*UUIDPrimaryKey).Value
-	return bytes.Compare(pk.Value[:], other[:]) >= 0
-}
-
-func (pk *UUIDPrimaryKey) LT(key PrimaryKey) bool {
-	other := key.(*UUIDPrimaryKey).Value
-	return bytes.Compare(pk.Value[:], other[:]) < 0
-}
-
-func (pk *UUIDPrimaryKey) LE(key PrimaryKey) bool {
-	other := key.(*UUIDPrimaryKey).Value
-	return bytes.Compare(pk.Value[:], other[:]) <= 0
-}
-
-func (pk *UUIDPrimaryKey) EQ(key PrimaryKey) bool {
-	other := key.(*UUIDPrimaryKey).Value
-	return pk.Value == other
-}
-
-func (pk *UUIDPrimaryKey) MarshalJSON() ([]byte, error) {
-	return json.Marshal(pk.Value.String())
-}
-
-func (pk *UUIDPrimaryKey) UnmarshalJSON(data []byte) error {
-	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
-	}
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return err
-	}
-	pk.Value = u
-	return nil
-}
-
-func (pk *UUIDPrimaryKey) SetValue(data interface{}) error {
-	switch v := data.(type) {
-	case string:
-		u, err := uuid.Parse(v)
-		if err != nil {
-			return err
-		}
-		pk.Value = u
-	case uuid.UUID:
-		pk.Value = v
-	case []byte:
-		u, err := uuid.FromBytes(v)
-		if err != nil {
-			return err
-		}
-		pk.Value = u
-	default:
-		return errors.New("UUIDPrimaryKey must be set with string, uuid.UUID, or []byte")
-	}
-	return nil
-}
-
-func (pk *UUIDPrimaryKey) GetValue() interface{} {
-	return pk.Value
-}
-
-func (pk *UUIDPrimaryKey) Type() schemapb.DataType {
-	return schemapb.DataType_UUID
-}
-
-func (pk *UUIDPrimaryKey) Size() int64 {
-	return 16
-}
-
 func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
 	var result PrimaryKey
 	switch pkType {
@@ -361,20 +270,6 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 		result = &VarCharPrimaryKey{
 			Value: data.(string),
 		}
-	case schemapb.DataType_UUID:
-		var u uuid.UUID
-		switch v := data.(type) {
-		case string:
-			u, err = uuid.Parse(v)
-		case []byte:
-			u, err = uuid.FromBytes(v)
-		default:
-			return nil, merr.WrapErrServiceInternalMsg("UUID primary key must be string or []byte, got %T", data)
-		}
-		if err != nil {
-			return nil, err
-		}
-		result = &UUIDPrimaryKey{Value: u}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("not supported primary data type")
 	}
@@ -427,15 +322,6 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 			pk := NewVarCharPrimaryKey(value)
 			ret = append(ret, pk)
 		}
-	case schemapb.DataType_UUID:
-		for _, value := range scalarData.GetBytesData().GetData() {
-			u, err := uuid.FromBytes(value)
-			if err != nil {
-				return nil, err
-			}
-			pk := &UUIDPrimaryKey{Value: u}
-			ret = append(ret, pk)
-		}
 	default:
 		return ret, merr.WrapErrServiceInternalMsg("not supported primary data type")
 	}
@@ -455,8 +341,6 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 	case *schemapb.IDs_StrId:
 		stringPks := ids.GetStrId().GetData()
 		for _, v := range stringPks {
-			// UUID PKs also use the StrId proto field,
-			// distinguished via the containing field's DataType.
 			pk := NewVarCharPrimaryKey(v)
 			ret = append(ret, pk)
 		}
@@ -477,8 +361,6 @@ func ParseIDs2PrimaryKeysBatch(ids *schemapb.IDs) PrimaryKeys {
 		result = pks
 	case *schemapb.IDs_StrId:
 		stringPks := ids.GetStrId().GetData()
-		// UUID PKs also use the StrId proto field.
-		// The caller must use pks.Type() to distinguish UUID from VarChar.
 		pks := NewVarcharPrimaryKeys(int64(len(stringPks)))
 		pks.AppendRaw(stringPks...)
 		result = pks
@@ -508,17 +390,6 @@ func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
 				Data: varcharPks.values,
 			},
 		}
-	case schemapb.DataType_UUID:
-		uuidPks := pks.(*UUIDPrimaryKeys)
-		stringValues := make([]string, len(uuidPks.values))
-		for i, v := range uuidPks.values {
-			stringValues[i] = uuid.UUID(v).String()
-		}
-		ret.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: stringValues,
-			},
-		}
 	default:
 		return nil, merr.WrapErrServiceInternal("parsing unsupported pk type", pks.Type().String())
 	}
@@ -546,16 +417,6 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 		stringPks := make([]string, 0)
 		for _, pk := range pks {
 			stringPks = append(stringPks, pk.(*VarCharPrimaryKey).Value)
-		}
-		ret.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: stringPks,
-			},
-		}
-	case schemapb.DataType_UUID:
-		stringPks := make([]string, 0)
-		for _, pk := range pks {
-			stringPks = append(stringPks, pk.(*UUIDPrimaryKey).Value.String())
 		}
 		ret.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -568,114 +567,6 @@ func nullableVectorValidDataForTest(fieldData FieldData) []bool {
 	default:
 		return nil
 	}
-}
-
-func TestNewUUIDFieldData(t *testing.T) {
-	schema := &schemapb.FieldSchema{
-		FieldID:  100,
-		Name:     "uuid_field",
-		DataType: schemapb.DataType_UUID,
-	}
-	fd, err := NewFieldData(schemapb.DataType_UUID, schema, 10)
-	assert.NoError(t, err)
-	_, ok := fd.(*UUIDFieldData)
-	assert.True(t, ok)
-}
-
-func TestUUIDFieldData_AppendRow(t *testing.T) {
-	uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-	uuid2 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
-
-	t.Run("append from []byte", func(t *testing.T) {
-		fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-		bin, _ := uuid1.MarshalBinary()
-		err := fd.AppendRow(bin)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, fd.RowNum())
-		assert.Equal(t, bin, fd.GetRow(0).([]byte))
-	})
-
-	t.Run("append from string", func(t *testing.T) {
-		fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-		err := fd.AppendRow("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-		assert.NoError(t, err)
-		assert.Equal(t, 1, fd.RowNum())
-		bin, _ := uuid1.MarshalBinary()
-		assert.Equal(t, bin, fd.GetRow(0).([]byte))
-	})
-
-	t.Run("append invalid bytes (wrong length)", func(t *testing.T) {
-		fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-		err := fd.AppendRow([]byte{1, 2, 3})
-		assert.Error(t, err)
-	})
-
-	t.Run("append invalid type", func(t *testing.T) {
-		fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-		err := fd.AppendRow(123)
-		assert.Error(t, err)
-	})
-
-	t.Run("append multiple and verify order", func(t *testing.T) {
-		fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-		bin1, _ := uuid1.MarshalBinary()
-		bin2, _ := uuid2.MarshalBinary()
-		assert.NoError(t, fd.AppendRow(bin1))
-		assert.NoError(t, fd.AppendRow(bin2))
-		assert.Equal(t, 2, fd.RowNum())
-		assert.Equal(t, bin1, fd.GetRow(0).([]byte))
-		assert.Equal(t, bin2, fd.GetRow(1).([]byte))
-	})
-}
-
-func TestUUIDFieldData_GetMemorySize(t *testing.T) {
-	fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-	// Empty: 0 bytes + overhead of ValidData(nil, 0) + Nullable(false, 1)
-	assert.Equal(t, 1, fd.GetMemorySize())
-
-	uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-	bin, _ := uuid1.MarshalBinary()
-	assert.NoError(t, fd.AppendRow(bin))
-	// 1 row × 16 bytes + 1 (Nullable overhead)
-	assert.Equal(t, 17, fd.GetMemorySize())
-
-	assert.NoError(t, fd.AppendRow(bin))
-	// 2 rows × 16 bytes + 1 (Nullable overhead)
-	assert.Equal(t, 33, fd.GetMemorySize())
-}
-
-func TestUUIDFieldData_GetDataType(t *testing.T) {
-	fd := &UUIDFieldData{DataType: schemapb.DataType_UUID}
-	assert.Equal(t, schemapb.DataType_UUID, fd.GetDataType())
-}
-
-func TestUUIDFieldData_Nullable(t *testing.T) {
-	fd := &UUIDFieldData{
-		DataType:  schemapb.DataType_UUID,
-		Nullable:  true,
-		ValidData: make([]bool, 0),
-	}
-
-	assert.True(t, fd.GetNullable())
-
-	// Append nil
-	err := fd.AppendRow(nil)
-	assert.NoError(t, err)
-	assert.Equal(t, 1, fd.RowNum())
-	assert.Nil(t, fd.GetRow(0))
-
-	// Append valid UUID
-	uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-	bin, _ := uuid1.MarshalBinary()
-	err = fd.AppendRow(bin)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, fd.RowNum())
-	assert.NotNil(t, fd.GetRow(1))
-	assert.Equal(t, bin, fd.GetRow(1).([]byte))
-
-	// Verify valid data
-	validData := fd.GetValidData()
-	assert.Equal(t, []bool{false, true}, validData)
 }
 
 func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {

@@ -945,11 +945,13 @@ func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema
 		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
 	}
 
-	// Validate each UUID string format
+	// Validate each UUID string format and normalize to lowercase
 	for i, s := range strArr {
-		if _, err := uuid.Parse(s); err != nil {
+		u, err := uuid.Parse(s)
+		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("invalid UUID format for field %s at row %d: %s", fieldSchema.GetName(), i, s)
 		}
+		strArr[i] = u.String()
 	}
 
 	return nil

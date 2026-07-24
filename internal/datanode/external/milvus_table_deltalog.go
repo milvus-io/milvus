@@ -25,7 +25,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/google/uuid"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -758,16 +757,6 @@ func milvusTablePrimaryKeyMapKey(pkType schemapb.DataType, pkColumn arrow.Array,
 			return "", merr.WrapErrServiceInternalMsg("milvus-table varchar primary key column has unexpected type %T", pkColumn)
 		}
 		return "s:" + stringArray.Value(index), nil
-	case schemapb.DataType_UUID:
-		uuidArray, ok := pkColumn.(*array.FixedSizeBinary)
-		if !ok {
-			return "", merr.WrapErrServiceInternalMsg("milvus-table uuid primary key column has unexpected type %T", pkColumn)
-		}
-		u, err := uuid.FromBytes(uuidArray.Value(index))
-		if err != nil {
-			return "", merr.WrapErrServiceInternalMsg("invalid UUID in milvus-table deltalog: %s", err)
-		}
-		return "u:" + string(u[:]), nil
 	default:
 		return "", merr.WrapErrServiceInternalMsg("milvus-table source primary key type %s is unsupported", pkType)
 	}

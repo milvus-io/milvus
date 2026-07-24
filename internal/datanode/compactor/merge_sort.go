@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -119,24 +118,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 		predicate = func(r storage.Record, ri, i int) bool {
 			segmentTotalRows[ri]++
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
-			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			expireTs := int64(-1)
-			if hasTTLField {
-				col := r.Column(ttlFieldID).(*array.Int64)
-				if col.IsValid(i) {
-					expireTs = col.Value(i)
-				}
-			}
-			return !segmentFilters[ri].Filtered(pk, uint64(ts), expireTs)
-		}
-	case schemapb.DataType_UUID:
-		predicate = func(r storage.Record, ri, i int) bool {
-			segmentTotalRows[ri]++
-			u, err := uuid.FromBytes(r.Column(pkField.FieldID).(*array.FixedSizeBinary).Value(i))
-			if err != nil {
-				panic("invalid UUID data in merge sort")
-			}
-			pk := u
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {

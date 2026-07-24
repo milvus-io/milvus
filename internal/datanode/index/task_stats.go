@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
@@ -246,16 +245,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
-			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts), -1)
-		}
-	case schemapb.DataType_UUID:
-		predicate = func(r storage.Record, ri, i int) bool {
-			u, err := uuid.FromBytes(r.Column(pkField.FieldID).(*array.FixedSizeBinary).Value(i))
-			if err != nil {
-				panic("invalid UUID data in index task stats")
-			}
-			pk := u
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}

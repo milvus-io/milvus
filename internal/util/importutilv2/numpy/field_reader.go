@@ -224,7 +224,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data = int64Ts
 		c.readPosition += int(readCount)
-	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar:
 		data, err = c.ReadString(readCount)
 		c.readPosition += int(readCount)
 		if err != nil {

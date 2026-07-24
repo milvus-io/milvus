@@ -30,7 +30,6 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -422,55 +421,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return merr.WrapErrServiceInternalMsg("expected *array.StringBuilder or *array.BinaryBuilder, got %T", b)
 		},
 	}
-
-	uuidEntry := serdeEntry{
-		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
-			return &arrow.FixedSizeBinaryType{ByteWidth: 16}
-		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
-			if a.IsNull(i) {
-				return nil, nil
-			}
-			arr, ok := a.(*array.FixedSizeBinary)
-			if !ok {
-				return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary, got %T", a)
-			}
-			val := arr.Value(i)
-			buf := make([]byte, 16)
-			copy(buf, val)
-			return buf, nil
-		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
-			if v == nil {
-				b.AppendNull()
-				return nil
-			}
-			builder, ok := b.(*array.FixedSizeBinaryBuilder)
-			if !ok {
-				return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder, got %T", b)
-			}
-			switch val := v.(type) {
-			case []byte:
-				if len(val) != 16 {
-					return merr.WrapErrServiceInternalMsg("UUID must be exactly 16 bytes, got %d", len(val))
-				}
-				builder.Append(val)
-			case [16]byte:
-				builder.Append(val[:])
-			case string:
-				u, err := uuid.Parse(val)
-				if err != nil {
-					return merr.WrapErrServiceInternalMsg("invalid UUID: %s", err)
-				}
-				bytes, _ := u.MarshalBinary()
-				builder.Append(bytes)
-			default:
-				return merr.WrapErrServiceInternalMsg("expected []byte, [16]byte, or string for UUID, got %T", v)
-			}
-			return nil
-		},
-	}
-	m[schemapb.DataType_UUID] = uuidEntry
 
 	// We're not using the deserialized data in go, so we can skip the heavy pb serde.
 	// If there is need in the future, just assign it to m[schemapb.DataType_Array]

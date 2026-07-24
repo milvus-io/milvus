@@ -1700,11 +1700,11 @@ func TestGetPKSize_UUID(t *testing.T) {
 		Type: schemapb.DataType_UUID,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_BytesData{
-					BytesData: &schemapb.BytesArray{
-						Data: [][]byte{
-							[]byte("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
-							[]byte("550e8400-e29b-41d4-a716-446655440000"),
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{
+							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							"550e8400-e29b-41d4-a716-446655440000",
 						},
 					},
 				},

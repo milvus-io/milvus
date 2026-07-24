@@ -25,8 +25,6 @@ import (
 	"math"
 	"path"
 
-	"github.com/google/uuid"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
@@ -101,9 +99,6 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	case schemapb.DataType_VarChar:
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
-	case schemapb.DataType_UUID:
-		stats.MaxPk = &UUIDPrimaryKey{}
-		stats.MinPk = &UUIDPrimaryKey{}
 	default:
 		return merr.WrapErrServiceInternalMsg("Invalid PK Data Type")
 	}
@@ -171,22 +166,6 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			stats.UpdateMinMax(pk)
 			stats.BF.AddString(str)
 		}
-	case schemapb.DataType_UUID:
-		data := msgs.(*UUIDFieldData).Data
-		if len(data) < 1 {
-			// return error: msgs must has one element at least
-			return
-		}
-
-		for _, uuidBytes := range data {
-			u, err := uuid.FromBytes(uuidBytes)
-			if err != nil {
-				continue
-			}
-			pk := &UUIDPrimaryKey{Value: u}
-			stats.UpdateMinMax(pk)
-			stats.BF.Add(u[:])
-		}
 	default:
 		// TODO::
 	}
@@ -203,9 +182,6 @@ func (stats *PrimaryKeyStats) Update(pk PrimaryKey) {
 	case schemapb.DataType_VarChar:
 		data := pk.GetValue().(string)
 		stats.BF.AddString(data)
-	case schemapb.DataType_UUID:
-		uuidPk := pk.(*UUIDPrimaryKey)
-		stats.BF.Add(uuidPk.Value[:])
 	default:
 		mlog.Warn(context.TODO(), "Update pk stats with invalid data type")
 	}
