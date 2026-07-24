@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -125,6 +126,46 @@ func TestWALLifetime(t *testing.T) {
 	assert.NotNil(t, wlt.GetWAL())
 	assert.Equal(t, channel, wlt.GetWAL().Channel().Name)
 	assert.Equal(t, int64(12), wlt.GetWAL().Channel().Term)
+
+	wlt.Close()
+}
+
+func TestWALLifetimeRemoveAfterOpenInterruptedByAssignTimeout(t *testing.T) {
+	channel := "test"
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+	)
+
+	assignCtx, assignCancel := context.WithCancel(context.Background())
+	opener := mock_wal.NewMockOpener(t)
+	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			// Simulate a slow wal recovery interrupted by the assign rpc reaching
+			// its deadline, same error shape as recovery_stream.go.
+			assignCancel()
+			<-ctx.Done()
+			return nil, errors.Wrap(ctx.Err(), "failed to recover from wal")
+		})
+
+	wlt := newWALLifetime(opener, channel, mlog.With())
+
+	err := wlt.Open(assignCtx, types.PChannelInfo{
+		Name: channel,
+		Term: 1,
+	})
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, wlt.GetWAL())
+
+	// The balancer then removes the channel with a fresh context.
+	// The wal is not open at this term, so the remove must succeed even if the
+	// previous open failure wraps context.Canceled (issue #51078).
+	err = wlt.Remove(context.Background(), 1)
+	assert.NoError(t, err)
+	assert.Nil(t, wlt.GetWAL())
 
 	wlt.Close()
 }
