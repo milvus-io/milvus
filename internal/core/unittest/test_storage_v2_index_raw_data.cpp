@@ -14,7 +14,10 @@
 #include <nlohmann/json.hpp>
 #include <parquet/properties.h>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <exception>
 #include <iostream>
 #include <map>
@@ -46,11 +49,13 @@
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -271,5 +276,103 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         } catch (const std::exception& e) {
             std::cout << "Exception: " << e.what() << std::endl;
         }
+    }
+}
+// End-to-end coverage for the raw-data spill used by disk index build:
+// manifest -> CacheRawDataToDisk -> local file, asserting the on-disk
+// header and payload against the source data. The pre-existing
+// TestGetRawData above is skipped, which left this path — the one that
+// downloads and writes tens of GB per build — without any effective test.
+// A regression that changed this path's file-creation semantics shipped
+// unnoticed because of that gap; this case reproduces it in one run.
+class CacheRawDataToDiskTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        auto storage_config = gen_local_storage_config(path_);
+        fs_ = storage::InitArrowFileSystem(storage_config);
+        cm_ = storage::CreateChunkManager(storage_config);
+    }
+
+    storage::ChunkManagerPtr cm_;
+    milvus_storage::ArrowFileSystemPtr fs_;
+    std::string path_ = TestLocalPath;
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4101;
+    int64_t index_version = 4101;
+};
+
+TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
+    constexpr int64_t kDim = 16;
+    constexpr int64_t kPerBatch = 500;
+    constexpr int64_t kNumBatch = 3;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, kDim, "L2");
+    schema->set_primary_field_id(pk_fid);
+
+    std::string base_path = "cache_raw_data_e2e_seg";
+    milvus::test::V3SegmentTestData data(
+        schema, kNumBatch, kPerBatch, kDim, path_, base_path);
+    const int64_t total_rows = data.TotalRows();
+
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     vec_fid.get(),
+                                     DataType::VECTOR_FLOAT,
+                                     DataType::NONE,
+                                     false);
+    auto index_meta = gen_index_meta(
+        segment_id, vec_fid.get(), index_build_id, index_version);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
+    ctx.set_loon_ffi_properties(
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties());
+
+    milvus::Config config;
+    config[STORAGE_VERSION_KEY] = STORAGE_V3;
+    config[SEGMENT_MANIFEST_KEY] = data.ManifestPathJson();
+    config[DATA_TYPE_KEY] = DataType::VECTOR_FLOAT;
+    config[ELEMENT_TYPE_KEY] = DataType::NONE;
+    config[DIM_KEY] = kDim;
+    config[INDEX_NUM_ROWS_KEY] = total_rows;
+    config[SEGMENT_INSERT_FILES_KEY] =
+        std::vector<std::vector<std::string>>{{}};
+
+    auto file_manager =
+        std::make_shared<milvus::storage::DiskFileManagerImpl>(ctx);
+    auto local_path = file_manager->CacheRawDataToDisk<float>(config);
+    ASSERT_EQ(local_path,
+              file_manager->GetLocalRawDataObjectPrefix() + "raw_data");
+
+    // The file must exist and be exactly header + payload; a wrong size
+    // means the header reservation or the tail handling is broken.
+    ASSERT_TRUE(std::filesystem::exists(local_path)) << local_path;
+    const int64_t expected_size =
+        2 * sizeof(uint32_t) + total_rows * kDim * sizeof(float);
+    EXPECT_EQ(std::filesystem::file_size(local_path),
+              static_cast<uintmax_t>(expected_size));
+
+    std::ifstream in(local_path, std::ios::binary);
+    ASSERT_TRUE(in.is_open());
+    uint32_t got_rows = 0, got_dim = 0;
+    in.read(reinterpret_cast<char*>(&got_rows), sizeof(got_rows));
+    in.read(reinterpret_cast<char*>(&got_dim), sizeof(got_dim));
+    EXPECT_EQ(got_rows, static_cast<uint32_t>(total_rows));
+    EXPECT_EQ(got_dim, static_cast<uint32_t>(kDim));
+
+    // Payload must be finite and fully written; a short read here would
+    // mean the tail of the last batch never reached the file.
+    std::vector<float> payload(total_rows * kDim);
+    in.read(reinterpret_cast<char*>(payload.data()),
+            payload.size() * sizeof(float));
+    EXPECT_EQ(in.gcount(),
+              static_cast<std::streamsize>(payload.size() * sizeof(float)));
+    for (size_t i = 0; i < payload.size(); ++i) {
+        ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
     }
 }
