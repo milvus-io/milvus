@@ -82,6 +82,36 @@ func TestValidateCollectionName(t *testing.T) {
 	}
 }
 
+func TestParseGroupByInfoGroupByFieldsCompatibility(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "singular", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "plural", DataType: schemapb.DataType_Int64},
+			{FieldID: 103, Name: "another", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	t.Run("reject multi-field group_by_fields in v2.6", func(t *testing.T) {
+		info, err := parseGroupByInfo([]*commonpb.KeyValuePair{
+			{Key: GroupByFieldsKey, Value: "plural,another"},
+		}, schema)
+
+		assert.Nil(t, info)
+		assert.ErrorContains(t, err, "multi-field group_by_fields is not supported in v2.6")
+	})
+
+	t.Run("group_by_field wins over group_by_fields", func(t *testing.T) {
+		info, err := parseGroupByInfo([]*commonpb.KeyValuePair{
+			{Key: GroupByFieldKey, Value: "singular"},
+			{Key: GroupByFieldsKey, Value: "plural"},
+		}, schema)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(101), info.groupByFieldId)
+	})
+}
+
 func TestValidateCollectionDescription(t *testing.T) {
 	maxLength := Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()
 	tests := []struct {

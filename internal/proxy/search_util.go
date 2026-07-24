@@ -495,10 +495,31 @@ func (g *groupByInfo) GetStrictCast() bool {
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {
 	ret := &groupByInfo{}
 
-	// 1. parse group_by_field
-	groupByFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair)
-	if err != nil {
-		groupByFieldName = ""
+	// 1. parse group-by field name(s).
+	// `group_by_field` (singular, legacy SDK) wins over `group_by_fields` (plural, new SDK).
+	// When both are set the plural list is ignored to preserve old-client behavior.
+	var groupByFieldNames []string
+	if legacy, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair); err == nil {
+		if trimmed := strings.TrimSpace(legacy); trimmed != "" {
+			groupByFieldNames = []string{trimmed}
+		}
+	}
+	if len(groupByFieldNames) == 0 {
+		if plural, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, searchParamsPair); err == nil {
+			for _, f := range strings.Split(plural, ",") {
+				if trimmed := strings.TrimSpace(f); trimmed != "" {
+					groupByFieldNames = append(groupByFieldNames, trimmed)
+				}
+			}
+		}
+	}
+	if len(groupByFieldNames) > 1 {
+		return nil, merr.WrapErrParameterInvalidMsg("multi-field group_by_fields is not supported in v2.6")
+	}
+
+	groupByFieldName := ""
+	if len(groupByFieldNames) == 1 {
+		groupByFieldName = groupByFieldNames[0]
 	}
 	var groupByFieldId int64 = -1
 	if groupByFieldName != "" {
