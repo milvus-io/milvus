@@ -76,10 +76,6 @@ set(MILVUS_TEST_FILES
         test_segment_read_lease.cpp
         )
 
-if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "KmeansClusteringTest\\.cpp$")
-endif()
-
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757.
 # now we always remove this file from MILVUS_TEST_FILES thus it is never compiled.
 # once done, compile this test file only if `BUILD_DISK_ANN STREQUAL "ON"`.

@@ -183,7 +183,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Equal(true, s.task.memoryLimit > 0)
 	s.Equal(8, s.task.getWorkerPoolSize())
 	s.Equal(8, s.task.mappingPool.Cap())
-	s.Equal(8, s.task.flushPool.Cap())
+	s.Equal(16, s.task.flushPool.Cap())
 }
 
 func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {

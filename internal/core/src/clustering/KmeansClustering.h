@@ -1,9 +1,8 @@
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
+// for additional information regarding copyright ownership.
+// The ASF licenses this file under the Apache License, Version 2.0
+// ("License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
@@ -13,26 +12,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #pragma once
-
-#include <stdint.h>
 #include <map>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "boost/filesystem/path.hpp"
-#include "common/Consts.h"
-#include "common/EasyAssert.h"
-#include "knowhere/cluster/cluster.h"
-#include "knowhere/cluster/cluster_node.h"
-#include "pb/clustering.pb.h"
-#include "storage/ChunkManager.h"
-#include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/Types.h"
+#include "pb/clustering.pb.h"
+#include "knowhere/cluster/cluster_factory.h"
+#include "clustering/DatasetIterator.h"
 
 namespace milvus::clustering {
 
@@ -117,28 +107,12 @@ class KmeansClustering {
         const std::map<int64_t, int64_t>& num_rows,
         const int64_t dim,
         const int64_t trained_segments_num,
-        const int64_t num_clusters);
+        const int64_t num_clusters,
+        const std::map<std::string, int64_t>& file_sizes_map);
 
     template <typename T>
-    void
-    FetchDataFiles(uint8_t* buf,
-                   const int64_t expected_train_size,
-                   const int64_t expected_remote_file_size,
-                   const std::vector<std::string>& files,
-                   const int64_t dim,
-                   int64_t& offset);
-
-    // given all possible segments, sample data to buffer
-    template <typename T>
-    void
-    SampleTrainData(
-        const std::vector<int64_t>& segment_ids,
-        const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
-        const std::map<int64_t, int64_t>& segment_num_rows,
-        const int64_t expected_train_size,
-        const int64_t dim,
-        const bool random_sample,
-        uint8_t* buf);
+    size_t
+    FetchDataFiles(uint8_t* buf, const DatasetPart& part);
 
     // transform centroids result to PB format for future usage of golang side
     template <typename T>

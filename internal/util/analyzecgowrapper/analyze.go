@@ -6,20 +6,19 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package analyzecgowrapper
 
 /*
 #cgo pkg-config: milvus_core
 
-#include <stdlib.h>	// free
+#include <stdlib.h>
 #include "clustering/analyze_c.h"
 */
 import "C"
@@ -27,6 +26,7 @@ import "C"
 import (
 	"context"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -41,51 +41,120 @@ type CodecAnalyze interface {
 	GetResult(size int) (string, int64, []string, []int64, error)
 }
 
+// CgoAnalyze wraps the C pointer
+type CgoAnalyze struct {
+	mu         sync.Mutex
+	analyzePtr C.CAnalyze
+}
+
+var (
+	analyzeQueue chan analyzeRequest
+	once         sync.Once
+)
+
+type analyzeRequest struct {
+	info   *clusteringpb.AnalyzeInfo
+	ctx    context.Context
+	result chan analyzeResult
+}
+
+type analyzeResult struct {
+	analyze *CgoAnalyze
+	err     error
+}
+
+// Analyze serializes calls to C.Analyze on a dedicated OS thread
 func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecAnalyze, error) {
+	initAnalyzeWorker()
+
+	req := analyzeRequest{
+		info:   analyzeInfo,
+		ctx:    ctx,
+		result: make(chan analyzeResult, 1),
+	}
+
+	// send request to the worker
+	analyzeQueue <- req
+
+	select {
+	case res := <-req.result:
+		return res.analyze, res.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// initAnalyzeWorker initializes the analysis worker once
+func initAnalyzeWorker() {
+	once.Do(func() {
+		analyzeQueue = make(chan analyzeRequest, 1) // buffer 1 sufficient for single-task concurrency
+
+		go func() {
+			// lock this goroutine to a single OS thread
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+
+			for req := range analyzeQueue {
+				res := runAnalyze(req.ctx, req.info)
+				req.result <- res
+			}
+		}()
+	})
+}
+
+// runAnalyze performs the actual C.Analyze call
+func runAnalyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) analyzeResult {
 	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal analyzeInfo failed",
 			mlog.FieldBuildID(analyzeInfo.GetBuildID()),
 			mlog.Err(err))
-		return nil, err
+		return analyzeResult{err: err}
 	}
+
 	var analyzePtr C.CAnalyze
-	status := C.Analyze(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])), (C.uint64_t)(len(analyzeInfoBlob)))
+	status := C.Analyze(
+		&analyzePtr,
+		(*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])),
+		(C.uint64_t)(len(analyzeInfoBlob)),
+	)
+
 	if err := HandleCStatus(&status, "failed to analyze task"); err != nil {
-		return nil, err
+		return analyzeResult{err: err}
 	}
 
 	analyze := &CgoAnalyze{
 		analyzePtr: analyzePtr,
-		close:      false,
 	}
-
 	runtime.SetFinalizer(analyze, func(ca *CgoAnalyze) {
-		if ca != nil && !ca.close {
-			mlog.Error(ctx, "there is leakage in analyze object, please check.")
+		ca.mu.Lock()
+		leaked := ca.analyzePtr != nil
+		ca.mu.Unlock()
+
+		if leaked {
+			mlog.Error(ctx, "CgoAnalyze object leaked, please check.")
 		}
 	})
 
-	return analyze, nil
-}
-
-type CgoAnalyze struct {
-	analyzePtr C.CAnalyze
-	close      bool
+	return analyzeResult{analyze: analyze}
 }
 
 func (ca *CgoAnalyze) Delete() error {
-	if ca.close {
+	ca.mu.Lock()
+	ptr := ca.analyzePtr
+	if ptr == nil {
+		ca.mu.Unlock()
 		return nil
 	}
-	var status C.CStatus
-	if ca.analyzePtr != nil {
-		status = C.DeleteAnalyze(ca.analyzePtr)
-	}
-	ca.close = true
+	ca.analyzePtr = nil
+	ca.mu.Unlock()
+
+	status := C.DeleteAnalyze(ptr)
+	runtime.SetFinalizer(ca, nil)
 	return HandleCStatus(&status, "failed to delete analyze")
 }
 
+// GetResult extracts results from the C.Analyze object
 func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, error) {
 	cOffsetMappingFilesPath := make([]unsafe.Pointer, size)
 	cOffsetMappingFilesSize := make([]C.int64_t, size)
@@ -99,9 +168,10 @@ func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, err
 		unsafe.Pointer(&cOffsetMappingFilesPath[0]),
 		&cOffsetMappingFilesSize[0],
 	)
-	if err := HandleCStatus(&status, "failed to delete analyze"); err != nil {
+	if err := HandleCStatus(&status, "failed to get analyze result"); err != nil {
 		return "", 0, nil, nil, err
 	}
+
 	offsetMappingFilesPath := make([]string, size)
 	offsetMappingFilesSize := make([]int64, size)
 	centroidsFilePath := C.GoString(cCentroidsFilePath)

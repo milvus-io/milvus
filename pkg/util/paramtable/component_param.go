@@ -5279,6 +5279,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainBufferSize     ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxAssignBufferSize    ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxCentroidsPerSegment ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -6131,6 +6134,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxClusterSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxTrainBufferSize = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxTrainBufferSize",
+		Version:      "2.6.0",
+		DefaultValue: "5g",
+		Doc:          "maximum training buffer size in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxTrainBufferSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxAssignBufferSize = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxAssignBufferSize",
+		Version:      "2.6.0",
+		DefaultValue: "5g",
+		Doc:          "maximum assign buffer size in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxAssignBufferSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxCentroidsPerSegment = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxCentroidsPerSegment",
+		Version:      "2.6.0",
+		DefaultValue: "2",
+		Doc:          "The maximum centroids per segment, minimum 1 means no grouping",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxCentroidsPerSegment.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
@@ -7000,8 +7030,10 @@ type dataNodeConfig struct {
 	SlotCap ParamItem `refreshable:"true"`
 
 	// clustering compaction
-	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
-	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
+	ClusteringCompactionMemoryBufferRatio     ParamItem `refreshable:"true"`
+	ClusteringCompactionWorkerPoolSize        ParamItem `refreshable:"true"`
+	ClusteringCompactionFlushPoolSize         ParamItem `refreshable:"true"`
+	ClusteringCompactionUseAdditionalCentroid ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -7472,6 +7504,25 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
+
+	p.ClusteringCompactionFlushPoolSize = ParamItem{
+		Key:          "dataNode.clusteringCompaction.flushPoolSize",
+		Version:      "2.4.6",
+		Doc:          "worker pool size for one clustering compaction job.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionFlushPoolSize.Init(base.mgr)
+
+	p.ClusteringCompactionUseAdditionalCentroid = ParamItem{
+		Key:          "dataNode.clusteringCompaction.useAdditionalCentroid",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "use additional balancing iteration with additional centroid per centroid group",
+		Export:       true,
+	}
+	p.ClusteringCompactionUseAdditionalCentroid.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
 		Key:          "dataNode.bloomFilterApplyParallelFactor",
