@@ -1,18 +1,5 @@
-affinity:
-  nodeAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - preference:
-        matchExpressions:
-        - key: jenkins-e2e-amd
-          operator: In
-          values:
-          - "true"
-      weight: 100
-    - preference:
-        matchExpressions:
-        - key: node-role.kubernetes.io/e2e
-          operator: Exists
-      weight: 1
+nodeSelector:
+  jenkins-e2e-arm: "true"
 cluster:
   enabled: true
 woodpecker:
@@ -133,21 +120,8 @@ metrics:
     enabled: true
 # dependencies
 etcd:
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: jenkins-e2e-amd
-            operator: In
-            values:
-            - "true"
-        weight: 100
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
+  nodeSelector:
+    jenkins-e2e-arm: "true"
   metrics:
     enabled: true
     podMonitor:
@@ -161,29 +135,12 @@ etcd:
       cpu: "1"
       memory: 4Gi
   tolerations:
-  - effect: PreferNoSchedule
-    key: jenkins-milvus-ci-only
-    operator: Equal
-    value: "true"
   - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
+    key: jenkins-e2e-arm
     operator: Exists
 minio:
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: jenkins-e2e-amd
-            operator: In
-            values:
-            - "true"
-        weight: 100
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
+  nodeSelector:
+    jenkins-e2e-arm: "true"
   mode: standalone
   resources:
     requests:
@@ -193,12 +150,8 @@ minio:
       cpu: "1"
       memory: 4Gi
   tolerations:
-  - effect: PreferNoSchedule
-    key: jenkins-milvus-ci-only
-    operator: Equal
-    value: "true"
   - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
+    key: jenkins-e2e-arm
     operator: Exists
 kafka:
   enabled: false
@@ -210,3 +163,7 @@ image:
     pullPolicy: Always
     repository: harbor.milvus.io/milvus/milvus
     tag: nightly-20240821-ed4eaff
+tolerations:
+- effect: NoSchedule
+  key: jenkins-e2e-arm
+  operator: Exists
