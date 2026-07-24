@@ -224,7 +224,10 @@ func (s *DelegatorDataSuite) genTextCollection() {
 	})
 }
 
-func (s *DelegatorDataSuite) genCollectionWithFunction() {
+// putFunctionCollection advances the shared collection to a BM25-function schema
+// WITHOUT rebuilding the delegator, modeling a load racing ahead of the stream
+// DDL (schema advanced, function runtime not yet installed).
+func (s *DelegatorDataSuite) putFunctionCollection() {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 		Name:    "TestCollection",
 		Version: 1,
@@ -258,6 +261,10 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			OutputFieldIds: []int64{101},
 		}},
 	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
+}
+
+func (s *DelegatorDataSuite) genCollectionWithFunction() {
+	s.putFunctionCollection()
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
@@ -868,6 +875,10 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegmen
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRetry() {
+	// Schema already advanced (by a racing load) to include BM25, oracle not yet
+	// installed by the stream: the reopen must fail retriably BEFORE the worker
+	// commit. Without BM25 in the schema the guard must NOT fire (drop case).
+	s.putFunctionCollection()
 	worker1 := &cluster.MockWorker{}
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
 	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
