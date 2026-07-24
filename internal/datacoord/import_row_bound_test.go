@@ -134,3 +134,19 @@ func Test_assignPKRangesToFiles_zeroTotal(t *testing.T) {
 		nil, func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1)
 	assert.NoError(t, err)
 }
+
+func Test_minRowTextBytes_skipsNullableAndDefault(t *testing.T) {
+	// Nullable / defaulted scalars may be omitted from a JSON row (0 bytes), so they
+	// must NOT count toward the per-row lower bound. Only the required dim-2 vector does.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+			{FieldID: 102, Name: "n1", DataType: schemapb.DataType_Int64, Nullable: true},
+			{FieldID: 103, Name: "n2", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}}},
+		},
+	}
+	got, err := minRowTextBytes(schema)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), got) // was 4 before the fix (nullable+default counted)
+}
