@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -756,13 +757,29 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsWriterStats
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats() {
 	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     1,
+		EncryptionKey:    "unsafe-key",
+	}
+	s.task.plan.PluginContext = requestContext
 	for _, field := range s.task.plan.GetSchema().GetFields() {
 		if field.GetName() == "text" {
 			field.TypeParams = append(field.GetTypeParams(), &commonpb.KeyValuePair{Key: "enable_match", Value: "true"})
 		}
 	}
+	parseContext := func(got []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+		s.Equal(requestContext, got)
+		s.EqualValues(1, collectionID)
+		return pluginContext, nil
+	}
+	parsePatch := mockey.Mock(hookutil.GetCPluginContext).To(parseContext).Build()
+	defer parsePatch.UnPatch()
 
-	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(context.Context, *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	var captured *indexcgopb.BuildIndexInfo
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+		captured = info
 		return fakeTextIndex{}, nil
 	}).Build()
 	defer createIndexPatch.UnPatch()
@@ -780,6 +797,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 	s.NotNil(result)
 
 	segment := result.GetSegments()[0]
+	s.Require().NotNil(captured)
+	s.Equal(pluginContext, captured.GetStoragePluginContext())
 	s.Contains(segment.GetTextStatsLogs(), int64(101))
 	s.EqualValues(42, segment.GetTextStatsLogs()[101].GetLogSize())
 	s.Contains(segment.GetManifest(), "with-text-stats")
