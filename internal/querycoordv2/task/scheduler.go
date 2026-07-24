@@ -50,7 +50,6 @@ const (
 	TaskTypeMove
 	TaskTypeUpdate
 	TaskTypeStatsUpdate
-	TaskTypeDropIndex
 )
 
 var TaskTypeName = map[Type]string{
@@ -83,14 +82,6 @@ func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
 }
 
 func NewReplicaLeaderIndex(task *LeaderTask) replicaSegmentIndex {
-	return replicaSegmentIndex{
-		ReplicaID: task.ReplicaID(),
-		SegmentID: task.SegmentID(),
-		IsGrowing: false,
-	}
-}
-
-func NewReplicaDropIndex(task *DropIndexTask) replicaSegmentIndex {
 	return replicaSegmentIndex{
 		ReplicaID: task.ReplicaID(),
 		SegmentID: task.SegmentID(),
@@ -838,23 +829,6 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
-					mlog.Int64("oldID", old.ID()),
-					mlog.String("oldPriority", old.Priority().String()),
-					mlog.Int64("newID", task.ID()),
-					mlog.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
-		}
-	case *DropIndexTask:
-		index := NewReplicaDropIndex(task)
 		if old, ok := scheduler.segmentTasks.Get(index); ok {
 			if task.Priority() > old.Priority() {
 				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",

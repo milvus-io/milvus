@@ -26,7 +26,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -185,11 +184,4 @@ func (node *MockQueryNode) getAllSegments() []*querypb.SegmentVersionInfo {
 		}
 	}
 	return ret
-}
-
-func (node *MockQueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "success",
-	}, nil
 }
