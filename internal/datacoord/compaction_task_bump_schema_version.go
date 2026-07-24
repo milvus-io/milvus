@@ -111,7 +111,7 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
-		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
