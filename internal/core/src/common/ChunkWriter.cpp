@@ -36,42 +36,105 @@
 #include "storage/FileWriter.h"
 
 namespace milvus {
+namespace {
 
-std::pair<size_t, size_t>
-StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
-    // Single pass over Arrow: compute row count, absolute offsets, total
-    // size. write_to_target reuses offsets_ and walks Arrow just once more
-    // to emit the string bytes (2 arrow passes total instead of 4).
-    row_nums_ = 0;
+size_t
+CalculateBinaryLikeChunkSize(
+    const arrow::ArrayVector& array_vec,
+    bool nullable,
+    size_t& row_nums,
+    std::vector<uint32_t>& offsets,
+    std::vector<std::pair<const uint8_t*, size_t>>& payload_segments,
+    size_t padding_size,
+    const char* writer_name,
+    const char* chunk_name) {
+    row_nums = 0;
     for (const auto& data : array_vec) {
-        row_nums_ += data->length();
+        row_nums += data->length();
     }
 
-    const int offset_num = row_nums_ + 1;
-    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
+    const size_t offset_num = row_nums + 1;
+    const size_t null_bitmap_bytes = nullable ? (row_nums + 7) / 8 : 0;
     size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * offset_num;
 
-    offsets_.clear();
-    offsets_.reserve(offset_num);
+    offsets.clear();
+    offsets.reserve(offset_num);
+    payload_segments.clear();
+    payload_segments.reserve(array_vec.size());
+
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         AssertInfo(array != nullptr,
-                   "StringChunkWriter expects arrow::BinaryArray, got "
-                   "type id {}; upstream normalizer must coerce to BINARY",
+                   "{} expects arrow::BinaryArray, got type id {}; upstream "
+                   "normalizer must coerce to BINARY",
+                   writer_name,
                    data ? static_cast<int>(data->type_id()) : -1);
-        for (int i = 0; i < array->length(); i++) {
-            offsets_.push_back(static_cast<uint32_t>(cursor));
-            cursor += array->GetView(i).size();
-        }
-    }
-    // String chunk uses uint32 offsets on disk; reject oversize chunks loudly
-    // rather than silently wrapping.
-    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
-               "string chunk size {} exceeds uint32 offset limit",
-               cursor);
-    offsets_.push_back(static_cast<uint32_t>(cursor));
 
-    size_t size = cursor + MMAP_STRING_PADDING;
+        const auto length = array->length();
+        const auto payload_begin = array->value_offset(0);
+        const auto payload_end = array->value_offset(length);
+        AssertInfo(payload_end >= payload_begin,
+                   "{} got invalid Arrow binary offsets: begin {}, end {}",
+                   writer_name,
+                   payload_begin,
+                   payload_end);
+
+        for (int64_t i = 0; i < length; ++i) {
+            const auto relative_offset =
+                static_cast<size_t>(array->value_offset(i) - payload_begin);
+            const auto absolute_offset = cursor + relative_offset;
+            offsets.push_back(static_cast<uint32_t>(absolute_offset));
+        }
+
+        const auto payload_size =
+            static_cast<size_t>(payload_end - payload_begin);
+        if (payload_size > 0) {
+            payload_segments.emplace_back(
+                array->value_data()->data() + payload_begin, payload_size);
+        }
+        cursor += payload_size;
+    }
+
+    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
+               "{} chunk size {} exceeds uint32 offset limit",
+               chunk_name,
+               cursor);
+    offsets.push_back(static_cast<uint32_t>(cursor));
+
+    return cursor + padding_size;
+}
+
+void
+WriteBinaryLikePayload(
+    const std::vector<uint32_t>& offsets,
+    const std::vector<std::pair<const uint8_t*, size_t>>& payload_segments,
+    const std::shared_ptr<ChunkTarget>& target,
+    size_t padding_size) {
+    target->write(offsets.data(), offsets.size() * sizeof(uint32_t));
+
+    for (const auto& segment : payload_segments) {
+        target->write(segment.first, segment.second);
+    }
+
+    char padding[simdjson::SIMDJSON_PADDING] = {};
+    target->write(padding, padding_size);
+}
+
+}  // namespace
+
+std::pair<size_t, size_t>
+StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    // Single pass over Arrow: compute row count, absolute Milvus offsets, and
+    // contiguous Arrow payload segments. write_to_target emits each payload
+    // segment with one write instead of one write per row.
+    auto size = CalculateBinaryLikeChunkSize(array_vec,
+                                             nullable_,
+                                             row_nums_,
+                                             offsets_,
+                                             payload_segments_,
+                                             MMAP_STRING_PADDING,
+                                             "StringChunkWriter",
+                                             "string");
     return {size, row_nums_};
 }
 
@@ -89,61 +152,25 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         write_null_bit_maps(null_bitmaps, target);
     }
 
-    target->write(offsets_.data(), offsets_.size() * sizeof(uint32_t));
-
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        AssertInfo(array != nullptr,
-                   "StringChunkWriter expects arrow::BinaryArray, got "
-                   "type id {}; upstream normalizer must coerce to BINARY",
-                   data ? static_cast<int>(data->type_id()) : -1);
-        for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            target->write(str.data(), str.size());
-        }
-    }
-
-    char padding[MMAP_STRING_PADDING] = {};
-    target->write(padding, MMAP_STRING_PADDING);
-
+    WriteBinaryLikePayload(
+        offsets_, payload_segments_, target, MMAP_STRING_PADDING);
     offsets_.clear();
-    offsets_.shrink_to_fit();
+    payload_segments_.clear();
 }
 
 std::pair<size_t, size_t>
 JSONChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
-    // Single pass over Arrow: compute row count, absolute offsets, total
-    // size. No per-row simdjson::padded_string allocation — write_to_target
-    // copies bytes directly from the Arrow buffer and emits a single
-    // SIMDJSON_PADDING region at the tail.
-    row_nums_ = 0;
-    for (const auto& data : array_vec) {
-        row_nums_ += data->length();
-    }
-
-    const int offset_num = row_nums_ + 1;
-    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
-    size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * offset_num;
-
-    offsets_.clear();
-    offsets_.reserve(offset_num);
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        AssertInfo(array != nullptr,
-                   "JSONChunkWriter expects arrow::BinaryArray, got "
-                   "type id {}; upstream normalizer must coerce to BINARY",
-                   data ? static_cast<int>(data->type_id()) : -1);
-        for (int i = 0; i < array->length(); i++) {
-            offsets_.push_back(static_cast<uint32_t>(cursor));
-            cursor += array->GetView(i).size();
-        }
-    }
-    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
-               "json chunk size {} exceeds uint32 offset limit",
-               cursor);
-    offsets_.push_back(static_cast<uint32_t>(cursor));
-
-    size_t size = cursor + simdjson::SIMDJSON_PADDING;
+    // Single pass over Arrow: compute row count, absolute Milvus offsets, and
+    // contiguous Arrow payload segments. No per-row simdjson::padded_string
+    // allocation — write_to_target emits a single SIMDJSON padding region.
+    auto size = CalculateBinaryLikeChunkSize(array_vec,
+                                             nullable_,
+                                             row_nums_,
+                                             offsets_,
+                                             payload_segments_,
+                                             simdjson::SIMDJSON_PADDING,
+                                             "JSONChunkWriter",
+                                             "json");
     return {size, row_nums_};
 }
 
@@ -161,56 +188,23 @@ JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         write_null_bit_maps(null_bitmaps, target);
     }
 
-    target->write(offsets_.data(), offsets_.size() * sizeof(uint32_t));
-
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            target->write(str.data(), str.size());
-        }
-    }
-
-    char padding[simdjson::SIMDJSON_PADDING] = {};
-    target->write(padding, simdjson::SIMDJSON_PADDING);
-
+    WriteBinaryLikePayload(
+        offsets_, payload_segments_, target, simdjson::SIMDJSON_PADDING);
     offsets_.clear();
-    offsets_.shrink_to_fit();
+    payload_segments_.clear();
 }
 
 std::pair<size_t, size_t>
 GeometryChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
-    // Same pattern as String/JSON: single Arrow pass produces offsets_ and
-    // total size; write_to_target reuses offsets_ + walks Arrow once for
-    // the WKB bytes.
-    row_nums_ = 0;
-    for (const auto& data : array_vec) {
-        row_nums_ += data->length();
-    }
-
-    const int offset_num = row_nums_ + 1;
-    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
-    size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * offset_num;
-
-    offsets_.clear();
-    offsets_.reserve(offset_num);
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        AssertInfo(array != nullptr,
-                   "GeometryChunkWriter expects arrow::BinaryArray, got "
-                   "type id {}; upstream normalizer must coerce to BINARY",
-                   data ? static_cast<int>(data->type_id()) : -1);
-        for (int64_t i = 0; i < array->length(); ++i) {
-            offsets_.push_back(static_cast<uint32_t>(cursor));
-            cursor += array->GetView(i).size();
-        }
-    }
-    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
-               "geometry chunk size {} exceeds uint32 offset limit",
-               cursor);
-    offsets_.push_back(static_cast<uint32_t>(cursor));
-
-    size_t size = cursor + MMAP_GEOMETRY_PADDING;
+    // Same layout as String/JSON; only the tail padding size differs.
+    auto size = CalculateBinaryLikeChunkSize(array_vec,
+                                             nullable_,
+                                             row_nums_,
+                                             offsets_,
+                                             payload_segments_,
+                                             MMAP_GEOMETRY_PADDING,
+                                             "GeometryChunkWriter",
+                                             "geometry");
     return {size, row_nums_};
 }
 
@@ -229,25 +223,10 @@ GeometryChunkWriter::write_to_target(
         write_null_bit_maps(null_bitmaps, target);
     }
 
-    target->write(offsets_.data(), offsets_.size() * sizeof(uint32_t));
-
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        AssertInfo(array != nullptr,
-                   "GeometryChunkWriter expects arrow::BinaryArray, got "
-                   "type id {}; upstream normalizer must coerce to BINARY",
-                   data ? static_cast<int>(data->type_id()) : -1);
-        for (int64_t i = 0; i < array->length(); ++i) {
-            auto str = array->GetView(i);
-            target->write(str.data(), str.size());
-        }
-    }
-
-    char padding[MMAP_GEOMETRY_PADDING] = {};
-    target->write(padding, MMAP_GEOMETRY_PADDING);
-
+    WriteBinaryLikePayload(
+        offsets_, payload_segments_, target, MMAP_GEOMETRY_PADDING);
     offsets_.clear();
-    offsets_.shrink_to_fit();
+    payload_segments_.clear();
 }
 
 std::pair<size_t, size_t>
@@ -807,6 +786,9 @@ create_chunk_buffer(const FieldMeta& field_meta,
             file_path, mmap_populate, aligned_size, io_prio);
     }
     cw->write_to_target(array_vec, target);
+    // The writer is one-shot. Release its scratch buffers before a
+    // file-backed target populates the resulting mmap in release().
+    cw.reset();
     auto data = target->release();
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr;
     if (!file_path.empty()) {
@@ -916,6 +898,9 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
             char padding[ChunkTarget::ALIGNED_SIZE] = {};
             target->write(padding, padding_size);
         }
+        // Release each one-shot writer's scratch buffers before the combined
+        // file-backed mapping is populated in target->release().
+        cws[i].reset();
     }
 
     auto data = target->release();

@@ -232,9 +232,10 @@ class StringChunkWriter : public ChunkWriterBase {
  private:
     // Pre-computed absolute offsets (offsets_[i] = byte offset of row i from
     // chunk start, offsets_[row_nums_] = end offset). Populated in
-    // calculate_size, consumed in write_to_target to avoid a second pass over
-    // Arrow for sizing.
+    // calculate_size, consumed in write_to_target together with borrowed Arrow
+    // payload segments while the input array_vec is still alive.
     std::vector<uint32_t> offsets_;
+    std::vector<std::pair<const uint8_t*, size_t>> payload_segments_;
 };
 
 class JSONChunkWriter : public ChunkWriterBase {
@@ -253,6 +254,7 @@ class JSONChunkWriter : public ChunkWriterBase {
     // buffer is kept — we write Arrow bytes directly and emit a single
     // SIMDJSON_PADDING region at the tail.
     std::vector<uint32_t> offsets_;
+    std::vector<std::pair<const uint8_t*, size_t>> payload_segments_;
 };
 
 class GeometryChunkWriter : public ChunkWriterBase {
@@ -268,6 +270,7 @@ class GeometryChunkWriter : public ChunkWriterBase {
 
  private:
     std::vector<uint32_t> offsets_;
+    std::vector<std::pair<const uint8_t*, size_t>> payload_segments_;
 };
 
 class ArrayChunkWriter : public ChunkWriterBase {
