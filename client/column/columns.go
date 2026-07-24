@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -361,16 +360,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
 
 	case schemapb.DataType_UUID:
-		bytesData := fd.GetScalars().GetBytesData().GetData()
-		strings := make([]string, len(bytesData))
-		for i, b := range bytesData {
-			u, err := uuid.FromBytes(b)
-			if err != nil {
-				return nil, fmt.Errorf("invalid UUID bytes at index %d: %s", i, err)
-			}
-			strings[i] = u.String()
-		}
-		return parseScalarData(fd.GetFieldName(), strings, begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
+		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
 
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)

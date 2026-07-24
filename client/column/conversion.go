@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -101,18 +100,9 @@ func slice2Scalar[T any](values []T, elementType entity.FieldType) *schemapb.Sca
 		var strings []string
 		strings, ok = any(values).([]string)
 		if ok {
-			bytesData := make([][]byte, len(strings))
-			for i, s := range strings {
-				u, err := uuid.Parse(s)
-				if err != nil {
-					panic(fmt.Sprintf("invalid UUID at index %d: %s", i, err))
-				}
-				b, _ := u.MarshalBinary()
-				bytesData[i] = b
-			}
-			scalarField.Data = &schemapb.ScalarField_BytesData{
-				BytesData: &schemapb.BytesArray{
-					Data: bytesData,
+			scalarField.Data = &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: strings,
 				},
 			}
 		}
@@ -206,19 +196,8 @@ func values2Scalars[T any](values []T, fieldType entity.FieldType) *schemapb.Sca
 		var strVals []string
 		strVals, ok = any(values).([]string)
 		if ok {
-			bytesData := make([][]byte, len(strVals))
-			for i, s := range strVals {
-				u, err := uuid.Parse(s)
-				if err != nil {
-					panic(fmt.Sprintf("invalid UUID at index %d: %s", i, err))
-				}
-				b, _ := u.MarshalBinary()
-				bytesData[i] = b
-			}
-			scalars.Data = &schemapb.ScalarField_BytesData{
-				BytesData: &schemapb.BytesArray{
-					Data: bytesData,
-				},
+			scalars.Data = &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: strVals},
 			}
 		}
 	case entity.FieldTypeFloat:
