@@ -487,16 +487,6 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
-        auto num_threads = GetValueFromConfig<std::string>(
-            build_config, DISK_ANN_BUILD_THREAD_NUM);
-        AssertInfo(num_threads.has_value(),
-                   "param {} is empty",
-                   DISK_ANN_BUILD_THREAD_NUM);
-        build_config[DISK_ANN_THREADS_NUM] =
-            std::atoi(num_threads.value().c_str());
-    }
-
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     auto is_partition_key_isolation =
         GetValueFromConfig<bool>(build_config, "partition_key_isolation");
@@ -590,15 +580,6 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         return;
     }
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
-        auto num_threads = GetValueFromConfig<std::string>(
-            build_config, DISK_ANN_BUILD_THREAD_NUM);
-        AssertInfo(num_threads.has_value(),
-                   "param {} is empty",
-                   DISK_ANN_BUILD_THREAD_NUM);
-        build_config[DISK_ANN_THREADS_NUM] =
-            std::atoi(num_threads.value().c_str());
-    }
     if (!local_chunk_manager->Exist(local_data_path)) {
         local_chunk_manager->CreateFile(local_data_path);
     }
@@ -907,15 +888,6 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         // set base info
         load_config[DISK_ANN_PREPARE_WARM_UP] = false;
         load_config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;
-
-        // set threads number
-        auto num_threads = GetValueFromConfig<std::string>(
-            load_config, DISK_ANN_LOAD_THREAD_NUM);
-        AssertInfo(num_threads.has_value(),
-                   "param {} is empty",
-                   DISK_ANN_LOAD_THREAD_NUM);
-        load_config[DISK_ANN_THREADS_NUM] =
-            std::atoi(num_threads.value().c_str());
 
         // update search_beamwidth
         auto beamwidth = GetValueFromConfig<std::string>(

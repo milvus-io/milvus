@@ -110,10 +110,8 @@ constexpr const char* DISK_ANN_PQ_CODE_BUDGET = "pq_code_budget_gb";
 constexpr const char* DISK_ANN_BUILD_DRAM_BUDGET = "build_dram_budget_gb";
 constexpr const char* DISK_ANN_BUILD_THREAD_NUM = "num_build_thread";
 constexpr const char* DISK_ANN_PQ_DIMS = "disk_pq_dims";
-constexpr const char* DISK_ANN_THREADS_NUM = "num_threads";
 
 // DiskAnn prepare params
-constexpr const char* DISK_ANN_LOAD_THREAD_NUM = "num_load_thread";
 constexpr const char* DISK_ANN_SEARCH_CACHE_BUDGET = "search_cache_budget_gb";
 constexpr const char* DISK_ANN_PREPARE_WARM_UP = "warm_up";
 constexpr const char* DISK_ANN_PREPARE_USE_BFS_CACHE = "use_bfs_cache";
