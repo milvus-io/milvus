@@ -2055,13 +2055,11 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 	return clonedSegment, metricMutation
 }
 
-// batchSaveDropSegments saves drop segments info with channel removal flag
-// since the channel unwatching operation is not atomic here
-// ** the removal flag is always with last batch
-// ** the last batch must contains at least one segment
-//  1. when failure occurs between batches, failover mechanism will continue with the earliest  checkpoint of this channel
-//     since the flag is not marked so DataNode can re-consume the drop collection msg
-//  2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
+// batchSaveDropSegments saves drop segments info together with the channel
+// removal flag as a single composite catalog.Update call, so the dropped
+// segments and the channel tombstone commit atomically (or, when the op
+// count exceeds the txn size limit, via the caller-ordered chunked
+// fallback - see kv/txn.Commit for the exact atomicity contract).
 func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSegments map[int64]*SegmentInfo) error {
 	var modSegIDs []int64
 	for k := range modSegments {
@@ -2069,16 +2067,19 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 	}
 	mlog.Info(ctx, "meta update: batch save drop segments",
 		mlog.Int64s("drop segments", modSegIDs))
-	segments := make([]*datapb.SegmentInfo, 0)
+	actions := make([]metastore.UpdateAction, 0, len(modSegments)+1)
 	for _, seg := range modSegments {
-		segments = append(segments, seg.SegmentInfo)
+		if seg.GetState() != commonpb.SegmentState_Dropped {
+			return merr.WrapErrServiceInternalMsg(
+				"batchSaveDropSegments: segment %d is not in Dropped state, got %s",
+				seg.GetID(), seg.GetState())
+		}
+		actions = append(actions, metastore.UpdateSegment(seg.SegmentInfo))
 	}
-	err := m.catalog.SaveDroppedSegmentsInBatch(ctx, segments)
-	if err != nil {
-		return err
-	}
-
-	if err = m.catalog.MarkChannelDeleted(ctx, channel); err != nil {
+	// The channel tombstone is the visibility marker; it commits last (see
+	// MarkChannelDropped -> CommitSave), after the dropped segments.
+	actions = append(actions, metastore.MarkChannelDropped(channel))
+	if err := m.catalog.Update(ctx, actions...); err != nil {
 		return err
 	}
 
@@ -2599,18 +2600,26 @@ func (m *meta) completeMixCompactionMutation(
 		return info.SegmentInfo
 	})
 
-	binlogs := make([]metastore.BinlogsIncrement, 0)
+	// Add the compactTo segments before marking the compactFrom segments
+	// dropped, so a crash on the ordered-fallback path always leaves the new
+	// segments published before the old ones are retired (no data loss).
+	actions := make([]metastore.UpdateAction, 0, len(compactToInfos)+len(compactFromInfos))
 	for _, seg := range compactToInfos {
-		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
+		actions = append(actions, metastore.AddSegment(seg))
 	}
-
-	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
-	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactTo segments", mlog.Err(err))
-		return nil, nil, err
+	for _, seg := range compactFromInfos {
+		// AlterSegment retires the input using the legacy AlterSegments
+		// encoding (not the record-only UpdateSegment), so it stays
+		// byte-identical to the pre-composite path - including the
+		// handleDroppedSegment GC-compat binlog write that fires for a dropped
+		// segment lacking binlog-prefix KVs (the pre-split inline-binlog
+		// format). A modern compacted input is prefix-persisted so that write
+		// is a no-op, but AlterSegment preserves it rather than assuming the
+		// invariant.
+		actions = append(actions, metastore.AlterSegment(seg))
 	}
-	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactFrom segments", mlog.Err(err))
+	if err := m.catalog.Update(m.ctx, actions...); err != nil {
+		mlog.Warn(m.ctx, "fail to update compaction segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -3227,22 +3236,54 @@ func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.Partiti
 		return err
 	}
 
-	// first clean analyze task
-	if err = m.analyzeMeta.DropAnalyzeTask(ctx, info.GetAnalyzeTaskID()); err != nil {
-		mlog.Warn(ctx, "remove analyze task failed", mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), mlog.Err(err))
+	// Persist the analyze task removal, the current-partition-stats-version
+	// rollback (if the dropped version is the current one), and the
+	// partition-stats info removal as a single composite catalog write, with
+	// the partition-stats info removal landing last as the commit marker.
+	//
+	// Both meta locks are held across the WHOLE compute -> catalog.Update ->
+	// in-memory apply sequence, mirroring the single critical section the
+	// legacy partitionStatsMeta.DropPartitionStatsInfo held around its own
+	// catalog write. This is what keeps the rollback correct: without it, a
+	// concurrent clustering-compaction completion (SaveCurrentPartitionStats
+	// Version for the same coll/part/vchannel) could bump the current version
+	// between the rollback compute and its application, and the apply would
+	// clobber that newer version back to the stale rollback target. In-memory
+	// bookkeeping is only applied after the write succeeds, so a failed write
+	// never desyncs memory from disk.
+	m.analyzeMeta.Lock()
+	defer m.analyzeMeta.Unlock()
+	m.partitionStatsMeta.Lock()
+	defer m.partitionStatsMeta.Unlock()
+
+	rollbackVersion := m.partitionStatsMeta.getRollbackVersionLocked(info)
+
+	actions := []metastore.UpdateAction{metastore.DropAnalyzeTask(info.GetAnalyzeTaskID())}
+	if rollbackVersion != nil {
+		actions = append(actions, metastore.SavePartitionStatsVersion(
+			info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), *rollbackVersion))
+	}
+	actions = append(actions, metastore.DropPartitionStats(info))
+
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		mlog.Warn(ctx, "clean partition stats info failed",
+			mlog.Int64("collectionID", info.GetCollectionID()),
+			mlog.Int64("partitionID", info.GetPartitionID()),
+			mlog.String("vChannel", info.GetVChannel()),
+			mlog.Int64("planID", info.GetVersion()),
+			mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()),
+			mlog.Err(err))
 		return err
 	}
 
-	// finally, clean up the partition stats info, and make sure the analysis task is cleaned up
-	err = m.partitionStatsMeta.DropPartitionStatsInfo(ctx, info)
+	m.analyzeMeta.dropTaskFromMemoryLocked(info.GetAnalyzeTaskID())
+	m.partitionStatsMeta.applyDropLocked(info, rollbackVersion)
+
 	mlog.Debug(ctx, "drop partition stats meta",
 		mlog.Int64("collectionID", info.GetCollectionID()),
 		mlog.Int64("partitionID", info.GetPartitionID()),
 		mlog.String("vChannel", info.GetVChannel()),
 		mlog.Int64("planID", info.GetVersion()))
-	if err != nil {
-		return err
-	}
 	return nil
 }
 

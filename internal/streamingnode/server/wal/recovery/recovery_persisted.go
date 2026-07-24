@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -146,18 +147,19 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		}
 	}
 
-	// SaveVChannels saves the vchannels into the catalog.
-	if err := resource.Resource().StreamingNodeCatalog().SaveVChannels(ctx, channelInfo.Name, vchannels); err != nil {
-		return nil, errors.Wrap(err, "failed to save vchannels to catalog")
-	}
 	// Use the first timesync message as the initial checkpoint.
 	checkpoint := &streamingpb.WALCheckpoint{
 		MessageId:     untilMessage.LastConfirmedMessageID().IntoProto(),
 		TimeTick:      untilMessage.TimeTick(),
 		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
 	}
-	if err := resource.Resource().StreamingNodeCatalog().SaveConsumeCheckpoint(ctx, channelInfo.Name, checkpoint); err != nil {
-		return nil, errors.Wrap(err, "failed to save checkpoint to catalog")
+	// Save the vchannels and the initial checkpoint into the catalog in one
+	// compound operation.
+	if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, channelInfo.Name, &metastore.WALRecoverySnapshot{
+		VChannels:         vchannels,
+		ConsumeCheckpoint: checkpoint,
+	}); err != nil {
+		return nil, errors.Wrap(err, "failed to save recovery snapshot to catalog")
 	}
 	r.Logger().Info(ctx, "initialize checkpoint done",
 		mlog.Int("vchannels", len(vchannels)),

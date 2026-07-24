@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1397,7 +1398,7 @@ func TestShouldDropChannel(t *testing.T) {
 	})
 
 	t.Run("channel in remove flag", func(t *testing.T) {
-		err := svr.meta.catalog.MarkChannelDeleted(context.TODO(), "ch1")
+		err := svr.meta.catalog.Update(context.TODO(), metastore.MarkChannelDropped("ch1"))
 		require.NoError(t, err)
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
 	})

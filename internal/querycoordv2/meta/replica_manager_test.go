@@ -1190,3 +1190,107 @@ func TestReplicaManagerMoveReplicaPersistError(t *testing.T) {
 	assert.ErrorIs(t, err, saveErr)
 	assert.Equal(t, "rg1", mgr.Get(ctx, replica.GetID()).GetResourceGroup())
 }
+
+// TestReplicaManagerSpawnWithReplicaConfigCompoundUpdate proves
+// SpawnWithReplicaConfig persists the spawned replicas and releases the
+// redundant ones (those not present in the new config) via a single
+// catalog.Update call, and only updates in-memory state after that call
+// succeeds.
+func TestReplicaManagerSpawnWithReplicaConfigCompoundUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("fresh spawn issues one Update, memory after success", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		var captured []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				captured = actions
+				return nil
+			}).Once()
+		mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+
+		replicas, err := mgr.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+			CollectionID: 10,
+			Configs: []*messagespb.LoadReplicaConfig{
+				{ReplicaId: 1, ResourceGroupName: "rg1"},
+				{ReplicaId: 2, ResourceGroupName: "rg2"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, replicas, 2)
+
+		// One compound call carrying both replica saves, none redundant.
+		assert.Len(t, captured, 2)
+		for _, a := range captured {
+			assert.Equal(t, metastore.ActionUpdate, a.Type)
+			_, ok := a.Entry.(metastore.ReplicaEntry)
+			assert.True(t, ok)
+		}
+
+		assert.NotNil(t, mgr.Get(ctx, 1))
+		assert.NotNil(t, mgr.Get(ctx, 2))
+	})
+
+	t.Run("redundant replica released in the same Update call", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+		existing := newReplica(&querypb.Replica{ID: 100, CollectionID: 10, ResourceGroup: "rg-old"})
+		mgr.putReplicasInMemory(10, existing)
+
+		var captured []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				captured = actions
+				return nil
+			}).Once()
+
+		replicas, err := mgr.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+			CollectionID: 10,
+			Configs: []*messagespb.LoadReplicaConfig{
+				{ReplicaId: 1, ResourceGroupName: "rg1"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, replicas, 1)
+
+		var saveCount, releaseCount int
+		for _, a := range captured {
+			switch e := a.Entry.(type) {
+			case metastore.ReplicaEntry:
+				saveCount++
+				assert.Equal(t, metastore.ActionUpdate, a.Type)
+			case metastore.ReplicaKeyEntry:
+				releaseCount++
+				assert.Equal(t, metastore.ActionDelete, a.Type)
+				assert.Equal(t, int64(100), e.ReplicaID)
+			default:
+				t.Fatalf("unexpected entry type %T", a.Entry)
+			}
+		}
+		assert.Equal(t, 1, saveCount)
+		assert.Equal(t, 1, releaseCount)
+
+		assert.NotNil(t, mgr.Get(ctx, 1))
+		assert.Nil(t, mgr.Get(ctx, 100))
+	})
+
+	t.Run("Update failure leaves memory untouched", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		updateErr := errors.New("update failed")
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(updateErr).Once()
+		mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+
+		replicas, err := mgr.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+			CollectionID: 10,
+			Configs: []*messagespb.LoadReplicaConfig{
+				{ReplicaId: 1, ResourceGroupName: "rg1"},
+				{ReplicaId: 2, ResourceGroupName: "rg2"},
+			},
+		})
+		assert.ErrorIs(t, err, updateErr)
+		assert.Nil(t, replicas)
+		assert.Nil(t, mgr.Get(ctx, 1))
+		assert.Nil(t, mgr.Get(ctx, 2))
+		assert.Empty(t, mgr.GetByCollection(ctx, 10))
+	})
+}

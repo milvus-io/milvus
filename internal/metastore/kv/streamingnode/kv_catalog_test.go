@@ -14,10 +14,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// newTestEtcdCatalog builds a streamingnode catalog backed by a real etcd KV
+// under a uuid-scoped root, for round-trip tests that persist and read back.
+func newTestEtcdCatalog(t *testing.T, name string) metastore.StreamingNodeCataLog {
+	t.Helper()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	return NewCataLog(etcdkv.NewEtcdKV(etcdCli, name+"-"+uuid.New().String()+"/meta"))
+}
 
 func TestCatalogConsumeCheckpoint(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
@@ -54,41 +63,46 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestCatalogSegmentAssignments round-trips segment assignments through the
+// compound SaveRecoverySnapshot: GROWING segments are persisted and listed
+// back, and a FLUSHED segment is removed from meta while untouched segments
+// (absent from the delta) are left in place.
 func TestCatalogSegmentAssignments(t *testing.T) {
-	kv := mocks.NewMetaKv(t)
-	k := "p1"
-	v := streamingpb.SegmentAssignmentMeta{}
-	vs, err := proto.Marshal(&v)
-	assert.NoError(t, err)
-
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
-	catalog := NewCataLog(kv)
+	catalog := newTestEtcdCatalog(t, "testCatalogSegmentAssignments")
 	ctx := context.Background()
-	metas, err := catalog.ListSegmentAssignment(ctx, "p1")
-	assert.Len(t, metas, 1)
+
+	segments, err := catalog.ListSegmentAssignment(ctx, "p1")
+	assert.Len(t, segments, 0)
 	assert.NoError(t, err)
 
-	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
-
-	err = catalog.SaveSegmentAssignments(ctx, "p1", map[int64]*streamingpb.SegmentAssignmentMeta{
-		1: {
-			SegmentId: 1,
-			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-		},
-		2: {
-			SegmentId: 2,
-			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+	err = catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
+			2: {SegmentId: 2, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
 		},
 	})
 	assert.NoError(t, err)
+
+	segments, err = catalog.ListSegmentAssignment(ctx, "p1")
+	assert.Len(t, segments, 2)
+	assert.NoError(t, err)
+
+	// A FLUSHED segment is removed; segment 2 is not in the delta, so it stays.
+	err = catalog.SaveRecoverySnapshot(ctx, "p1", &metastore.WALRecoverySnapshot{
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED},
+		},
+	})
+	assert.NoError(t, err)
+
+	segments, err = catalog.ListSegmentAssignment(ctx, "p1")
+	assert.Len(t, segments, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), segments[0].GetSegmentId())
 }
 
 func TestCatalogVChannel(t *testing.T) {
-	etcdCli, _ := kvfactory.GetEtcdAndPath()
-	rootPath := "testCatalogVChannel-" + uuid.New().String() + "/meta"
-	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	catalog := NewCataLog(kv)
+	catalog := newTestEtcdCatalog(t, "testCatalogVChannel")
 	ctx := context.Background()
 
 	channel1 := "p1"
@@ -155,7 +169,7 @@ func TestCatalogVChannel(t *testing.T) {
 		},
 	}
 
-	err = catalog.SaveVChannels(ctx, channel1, vchannelMetas)
+	err = catalog.SaveRecoverySnapshot(ctx, channel1, &metastore.WALRecoverySnapshot{VChannels: vchannelMetas})
 	assert.NoError(t, err)
 
 	vchannels, err = catalog.ListVChannel(ctx, channel1)
@@ -181,7 +195,7 @@ func TestCatalogVChannel(t *testing.T) {
 
 	vchannelMetas["vchannel-1"].CollectionInfo.Schemas[1].State = streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
 	vchannelMetas["vchannel-2"].State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
-	err = catalog.SaveVChannels(ctx, channel1, vchannelMetas)
+	err = catalog.SaveRecoverySnapshot(ctx, channel1, &metastore.WALRecoverySnapshot{VChannels: vchannelMetas})
 	assert.NoError(t, err)
 
 	vchannels, err = catalog.ListVChannel(ctx, channel1)
@@ -201,7 +215,7 @@ func TestCatalogVChannel(t *testing.T) {
 func TestCatalogSalvageCheckpoint(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("save_and_get_success", func(t *testing.T) {
+	t.Run("get_success", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
@@ -210,10 +224,6 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 			Pchannel:  "source-cluster-rootcoord-dml_0",
 		}
 		cpBytes, err := proto.Marshal(cp)
-		assert.NoError(t, err)
-
-		kv.EXPECT().Save(mock.Anything, mock.Anything, string(cpBytes)).Return(nil)
-		err = catalog.SaveSalvageCheckpoint(ctx, "p1", cp)
 		assert.NoError(t, err)
 
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
@@ -226,15 +236,6 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 		assert.Len(t, checkpoints, 1)
 		assert.Equal(t, "source-cluster", checkpoints[0].ClusterId)
 		assert.Equal(t, "source-cluster-rootcoord-dml_0", checkpoints[0].Pchannel)
-	})
-
-	t.Run("save_error", func(t *testing.T) {
-		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
-
-		kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("etcd error"))
-		err := catalog.SaveSalvageCheckpoint(ctx, "p1", &commonpb.ReplicateCheckpoint{ClusterId: "c1"})
-		assert.Error(t, err)
 	})
 
 	t.Run("get_load_error", func(t *testing.T) {
@@ -289,6 +290,64 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, checkpoints, 2)
 	})
+}
+
+// TestCatalogSaveRecoverySnapshotRoundTrip persists a full recovery snapshot -
+// segment assignments, vchannels, salvage checkpoint and the consume
+// checkpoint (the commit marker) - in one compound write, then reads every
+// part back through its own accessor. This is the end-to-end replacement for
+// the removed per-category SaveSegmentAssignments / SaveVChannels /
+// SaveSalvageCheckpoint writers.
+func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
+	catalog := newTestEtcdCatalog(t, "testCatalogSnapshot")
+	ctx := context.Background()
+	pchannel := "p1"
+
+	err := catalog.SaveRecoverySnapshot(ctx, pchannel, &metastore.WALRecoverySnapshot{
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
+		},
+		VChannels: map[string]*streamingpb.VChannelMeta{
+			"vchannel-1": {
+				Vchannel: "vchannel-1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+					CollectionId: 100,
+					Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+						{
+							Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
+							CheckpointTimeTick: 1,
+							State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						},
+					},
+				},
+			},
+		},
+		SalvageCheckpoint: &commonpb.ReplicateCheckpoint{ClusterId: "cluster-a", Pchannel: "p1-rootcoord-dml_0"},
+		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 42},
+	})
+	assert.NoError(t, err)
+
+	segments, err := catalog.ListSegmentAssignment(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 1)
+	assert.Equal(t, int64(1), segments[0].GetSegmentId())
+
+	vchannels, err := catalog.ListVChannel(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.Len(t, vchannels, 1)
+	assert.Equal(t, "vchannel-1", vchannels[0].GetVchannel())
+	assert.Len(t, vchannels[0].GetCollectionInfo().GetSchemas(), 1)
+
+	salvage, err := catalog.GetSalvageCheckpoint(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.Len(t, salvage, 1)
+	assert.Equal(t, "cluster-a", salvage[0].GetClusterId())
+
+	checkpoint, err := catalog.GetConsumeCheckpoint(ctx, pchannel)
+	assert.NoError(t, err)
+	assert.NotNil(t, checkpoint)
+	assert.Equal(t, uint64(42), checkpoint.GetTimeTick())
 }
 
 func TestBuildPrefixAndKey(t *testing.T) {

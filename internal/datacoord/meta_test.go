@@ -1063,6 +1063,145 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 }
 
+func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpdate() {
+	mockChMgr := mocks.NewChunkManager(suite.T())
+
+	latestSegments := NewSegmentsInfo()
+	latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 100,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+		NumOfRows:    2,
+	}})
+	latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           2,
+		CollectionID: 100,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		Level:        datapb.SegmentLevel_L1,
+		Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+		NumOfRows:    2,
+	}})
+
+	compactToSeg := &datapb.CompactionSegment{
+		SegmentID:           3,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+		NumOfRows:           4,
+	}
+	result := &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{compactToSeg},
+	}
+	task := &datapb.CompactionTask{
+		InputSegments: []UniqueID{1, 2},
+		Type:          datapb.CompactionType_MixCompaction,
+		Schema:        &schemapb.CollectionSchema{Version: 1},
+	}
+
+	// catalog has no AlterSegments expectation: if completeMixCompactionMutation
+	// still called AlterSegments directly (the old two-call path), mockery
+	// would fail the test with an unexpected-call panic.
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	var gotActions []metastore.UpdateAction
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, actions ...metastore.UpdateAction) error {
+			gotActions = actions
+			return nil
+		}).Once()
+
+	m := &meta{
+		catalog:      catalog,
+		segments:     latestSegments,
+		chunkManager: mockChMgr,
+	}
+
+	_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+	suite.NoError(err)
+
+	// One AddSegment for the compactTo segment, then one UpdateSegment per
+	// compactFrom segment (2). catalog.Update called exactly once (.Once()).
+	suite.Require().Len(gotActions, 3, "expected one add + two update actions")
+
+	// The compactTo add comes first, so it is published before the compactFrom
+	// segments are retired in the fallback (chunked) ordering.
+	compactToEntry, ok := gotActions[0].Entry.(metastore.SegmentEntry)
+	suite.Require().True(ok)
+	suite.Equal(metastore.ActionAdd, gotActions[0].Type)
+	suite.EqualValues(3, compactToEntry.Segment.GetID())
+
+	var compactFromIDs []int64
+	for _, a := range gotActions[1:] {
+		se, ok := a.Entry.(metastore.SegmentEntry)
+		suite.Require().True(ok)
+		suite.Equal(metastore.ActionUpdate, a.Type)
+		compactFromIDs = append(compactFromIDs, se.Segment.GetID())
+	}
+	suite.ElementsMatch([]int64{1, 2}, compactFromIDs)
+}
+
+func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
+	modSegments := map[int64]*SegmentInfo{
+		1: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Dropped,
+		}},
+		2: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           2,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Dropped,
+		}},
+	}
+
+	// catalog has no SaveDroppedSegmentsInBatch/MarkChannelDeleted
+	// expectation: if batchSaveDropSegments still called those directly (the
+	// old two-call path), mockery would fail the test with an
+	// unexpected-call panic.
+	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	var gotActions []metastore.UpdateAction
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, actions ...metastore.UpdateAction) error {
+			gotActions = actions
+			return nil
+		}).Once()
+
+	m := &meta{
+		catalog:  catalog,
+		segments: NewSegmentsInfo(),
+	}
+
+	err := m.batchSaveDropSegments(context.TODO(), "ch-1", modSegments)
+	suite.NoError(err)
+
+	// One UpdateSegment per dropped segment (2), then the channel tombstone.
+	// catalog.Update called exactly once (.Once()).
+	suite.Require().Len(gotActions, 3, "expected two segment updates + one channel action")
+
+	// The channel tombstone is last (the visibility marker).
+	channelEntry, ok := gotActions[2].Entry.(metastore.ChannelEntry)
+	suite.Require().True(ok)
+	suite.Equal(metastore.ActionUpdate, gotActions[2].Type)
+	suite.Require().Equal("ch-1", channelEntry.Channel)
+
+	var droppedIDs []int64
+	for _, a := range gotActions[:2] {
+		se, ok := a.Entry.(metastore.SegmentEntry)
+		suite.Require().True(ok)
+		suite.Equal(metastore.ActionUpdate, a.Type)
+		droppedIDs = append(droppedIDs, se.Segment.GetID())
+	}
+	suite.ElementsMatch([]int64{1, 2}, droppedIDs)
+
+	// memory info updated
+	suite.NotNil(m.segments.GetSegment(1))
+	suite.NotNil(m.segments.GetSegment(2))
+}
+
 func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 	latestSegments := NewSegmentsInfo()
 	for segID, segment := range map[UniqueID]*SegmentInfo{
@@ -6289,4 +6428,232 @@ func TestUpdateBinlogsOperator_RefreshesStats(t *testing.T) {
 	assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
 	assert.EqualValues(t, 100, stats.GetTimestampFrom())
 	assert.EqualValues(t, 200, stats.GetTimestampTo())
+}
+
+// TestMeta_CleanPartitionStatsInfo proves CleanPartitionStatsInfo persists
+// the analyze task removal, the current-version rollback (when the dropped
+// version is the current one), and the partition-stats info removal as a
+// single composite catalog.Update - analyze task first, rollback second,
+// partition-stats info last - and only mutates the analyzeMeta/
+// partitionStatsMeta in-memory state after that write succeeds.
+func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
+	ctx := context.Background()
+	info := &datapb.PartitionStatsInfo{
+		CollectionID:  1,
+		PartitionID:   2,
+		VChannel:      "ch-1",
+		Version:       100,
+		AnalyzeTaskID: 55,
+		SegmentIDs:    []int64{1000},
+	}
+
+	newTestChunkManager := func(t *testing.T) *mocks.ChunkManager {
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil).Once()
+		return cm
+	}
+
+	t.Run("no rollback needed", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		var gotActions []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				gotActions = actions
+				return nil
+			}).Once()
+
+		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		psm := &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: emptyPartitionStatsVersion, // not current -> no rollback
+						infos:          map[int64]*datapb.PartitionStatsInfo{100: info},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.NoError(t, err)
+
+		require.Len(t, gotActions, 2)
+		assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
+		assert.Equal(t, metastore.AnalyzeTaskEntry{TaskID: 55}, gotActions[0].Entry)
+		assert.Equal(t, metastore.ActionDelete, gotActions[1].Type)
+		psEntry, ok := gotActions[1].Entry.(metastore.PartitionStatsEntry)
+		require.True(t, ok)
+		assert.Same(t, info, psEntry.Info)
+
+		// Memory updated after success.
+		assert.Nil(t, am.GetTask(55))
+		assert.Nil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+	})
+
+	t.Run("rolls back current version", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		var gotActions []metastore.UpdateAction
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
+				gotActions = actions
+				return nil
+			}).Once()
+
+		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		otherInfo := &datapb.PartitionStatsInfo{CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90}
+		psm := &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: 100, // info.Version is current -> rollback needed
+						infos: map[int64]*datapb.PartitionStatsInfo{
+							100: info,
+							90:  otherInfo,
+						},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.NoError(t, err)
+
+		require.Len(t, gotActions, 3)
+		assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
+		assert.Equal(t, metastore.AnalyzeTaskEntry{TaskID: 55}, gotActions[0].Entry)
+		assert.Equal(t, metastore.ActionUpdate, gotActions[1].Type)
+		assert.Equal(t, metastore.PartitionStatsVersionEntry{
+			CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90,
+		}, gotActions[1].Entry)
+		assert.Equal(t, metastore.ActionDelete, gotActions[2].Type)
+		psEntry, ok := gotActions[2].Entry.(metastore.PartitionStatsEntry)
+		require.True(t, ok)
+		assert.Same(t, info, psEntry.Info)
+
+		// Memory updated after success: rollback applied, dropped info gone.
+		assert.Equal(t, int64(90), psm.GetCurrentPartitionStatsVersion(1, 2, "ch-1"))
+		assert.Nil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 90))
+	})
+
+	t.Run("holds both meta locks across catalog write", func(t *testing.T) {
+		// The rollback compute, catalog write, and in-memory apply must run in
+		// one critical section, so a concurrent SaveCurrentPartitionStatsVersion
+		// cannot interleave between compute and apply and get clobbered. Assert
+		// both meta locks are held while catalog.Update runs: TryLock returns
+		// false only when the lock is already held.
+		catalog := mocks2.NewDataCoordCatalog(t)
+
+		var am *analyzeMeta
+		var psm *partitionStatsMeta
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ ...metastore.UpdateAction) error {
+				if psm.TryLock() {
+					psm.Unlock()
+					t.Error("partitionStatsMeta lock must be held during catalog.Update")
+				}
+				if am.TryLock() {
+					am.Unlock()
+					t.Error("analyzeMeta lock must be held during catalog.Update")
+				}
+				return nil
+			}).Once()
+
+		am = &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		otherInfo := &datapb.PartitionStatsInfo{CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90}
+		psm = &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: 100,
+						infos: map[int64]*datapb.PartitionStatsInfo{
+							100: info,
+							90:  otherInfo,
+						},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.NoError(t, err)
+		// Locks released after the call: both TryLock succeed now.
+		require.True(t, psm.TryLock())
+		psm.Unlock()
+		require.True(t, am.TryLock())
+		am.Unlock()
+	})
+
+	t.Run("catalog update failure leaves memory untouched", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("update failed")).Once()
+
+		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{
+			55: {TaskID: 55, CollectionID: 1},
+		}}
+		psm := &partitionStatsMeta{
+			ctx:     ctx,
+			catalog: catalog,
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				"ch-1": {
+					2: {
+						currentVersion: emptyPartitionStatsVersion,
+						infos:          map[int64]*datapb.PartitionStatsInfo{100: info},
+					},
+				},
+			},
+		}
+
+		m := &meta{
+			ctx:                ctx,
+			catalog:            catalog,
+			chunkManager:       newTestChunkManager(t),
+			analyzeMeta:        am,
+			partitionStatsMeta: psm,
+		}
+
+		err := m.CleanPartitionStatsInfo(ctx, info)
+		require.Error(t, err)
+
+		// A failed composite write must not desync memory from disk.
+		assert.NotNil(t, am.GetTask(55))
+		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
+	})
 }

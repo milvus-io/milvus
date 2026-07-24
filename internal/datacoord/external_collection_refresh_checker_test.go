@@ -482,8 +482,6 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(nil).Build()
-		defer mockDropJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
@@ -513,10 +511,6 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockDropTask := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(nil).Build()
-		defer mockDropTask.UnPatch()
-		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(nil).Build()
-		defer mockDropJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
@@ -815,7 +809,7 @@ func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
 	retention := Params.DataCoordCfg.ExternalCollectionJobRetention.GetAsDuration(time.Second)
 	oldEndTime := time.Now().Add(-retention - time.Hour).UnixMilli()
 
-	catalog := &stubCatalog{}
+	catalog := &stubCatalog{updateErr: errors.New("drop failed")}
 	jobs := []*datapb.ExternalCollectionRefreshJob{
 		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, EndTime: oldEndTime},
 	}
@@ -824,10 +818,6 @@ func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
 	defer mockListJobs.UnPatch()
 	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
-
-	// Mock drop to fail
-	mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(errors.New("drop failed")).Build()
-	defer mockDropJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})

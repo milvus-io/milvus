@@ -5,6 +5,7 @@ package mocks
 import (
 	context "context"
 
+	metastore "github.com/milvus-io/milvus/internal/metastore"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -973,6 +974,67 @@ func (_c *QueryCoordCatalog_SaveResourceGroup_Call) Return(_a0 error) *QueryCoor
 }
 
 func (_c *QueryCoordCatalog_SaveResourceGroup_Call) RunAndReturn(run func(context.Context, ...*querypb.ResourceGroup) error) *QueryCoordCatalog_SaveResourceGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Update provides a mock function with given fields: ctx, actions
+func (_m *QueryCoordCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	_va := make([]interface{}, len(actions))
+	for _i := range actions {
+		_va[_i] = actions[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...metastore.UpdateAction) error); ok {
+		r0 = rf(ctx, actions...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// QueryCoordCatalog_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
+type QueryCoordCatalog_Update_Call struct {
+	*mock.Call
+}
+
+// Update is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actions ...metastore.UpdateAction
+func (_e *QueryCoordCatalog_Expecter) Update(ctx interface{}, actions ...interface{}) *QueryCoordCatalog_Update_Call {
+	return &QueryCoordCatalog_Update_Call{Call: _e.mock.On("Update",
+		append([]interface{}{ctx}, actions...)...)}
+}
+
+func (_c *QueryCoordCatalog_Update_Call) Run(run func(ctx context.Context, actions ...metastore.UpdateAction)) *QueryCoordCatalog_Update_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]metastore.UpdateAction, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(metastore.UpdateAction)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *QueryCoordCatalog_Update_Call) Return(_a0 error) *QueryCoordCatalog_Update_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *QueryCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, ...metastore.UpdateAction) error) *QueryCoordCatalog_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }
