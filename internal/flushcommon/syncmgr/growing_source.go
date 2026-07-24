@@ -81,10 +81,9 @@ type GrowingFlushResult struct {
 	TimestampFrom uint64
 	TimestampTo   uint64
 	// FlushedFieldIDs is the authoritative set of columns the flush actually
-	// wrote. It may be a subset of the flush schema: non-materialized
-	// function-output columns are skipped (backfilled later by bump-schema
-	// compaction). All binlog meta must be derived from this set, never from
-	// the schema.
+	// wrote. It must match the planned flush layout; a mismatch means the
+	// growing-source/layout invariant was broken and metadata must not be
+	// persisted.
 	FlushedFieldIDs        []int64
 	ColumnGroupMemorySizes map[int64]int64
 	FieldNullCounts        map[int64]int64
@@ -93,13 +92,6 @@ type GrowingFlushResult struct {
 
 type GrowingFlushSource interface {
 	CurrentOffset() int64
-	// MaterializedFieldIDs returns the field ids with materialized columns in
-	// the source segment. The flush layout must be trimmed to this set; a
-	// non-materialized column is legally absent (a dropped field or a
-	// function output backfilled by bump-schema compaction). A live segment
-	// always has materialized columns, so an empty set is an error, not a
-	// no-op.
-	MaterializedFieldIDs(ctx context.Context) ([]int64, error)
 	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
 	FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error)
 	Release()
@@ -640,16 +632,22 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		return merr.WrapErrServiceInternalMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
 			segment.FlushedRows(), t.targetOffset, t.segmentID)
 	}
-	columnGroups, err := t.getColumnGroups(segment)
-	if err != nil {
-		return err
+	if expectedRows == 0 && t.batchRows != 0 {
+		return merr.WrapErrDataIntegrityMsg("growing source zero-row sync has non-zero batch rows, segmentID=%d flushedRows=%d targetOffset=%d batchRows=%d",
+			t.segmentID, segment.FlushedRows(), t.targetOffset, t.batchRows)
 	}
-	// Unification point: from here on the intended layout and the layout the
-	// flush actually writes are one. Every consumer below (writer config,
-	// binlog meta, metacache current split) sees the same trimmed groups.
-	columnGroups, err = t.trimColumnGroupsToMaterialized(ctx, columnGroups)
-	if err != nil {
-		return err
+	var columnGroups []storagecommon.ColumnGroup
+	if expectedRows > 0 {
+		columnGroups, err = t.getColumnGroups(segment)
+		if err != nil {
+			return err
+		}
+		if hasCommittedGrowingSourceLayout(segment) {
+			log.Info(ctx, "use committed growing flush layout",
+				mlog.Int64("segmentID", t.segmentID),
+				mlog.String("manifestPath", segment.ManifestPath()),
+				mlog.Stringers("columnGroups", columnGroups))
+		}
 	}
 	if t.committedManifestPath != "" {
 		t.manifestPath = t.committedManifestPath
@@ -692,6 +690,9 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if result.NumRows != expectedRows {
 			return merr.WrapErrDataIntegrityMsg("growing source flush row count mismatch, expected=%d actual=%d flushedRows=%d targetOffset=%d segmentID=%d",
 				expectedRows, result.NumRows, segment.FlushedRows(), t.targetOffset, t.segmentID)
+		}
+		if err := validateGrowingSourceFlushedFields(columnGroups, result.FlushedFieldIDs); err != nil {
+			return err
 		}
 		t.manifestPath = result.ManifestPath
 		if len(result.BM25Stats) > 0 {
@@ -756,92 +757,11 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 func (t *GrowingSourceSyncTask) getColumnGroups(segment *metacache.SegmentInfo) ([]storagecommon.ColumnGroup, error) {
 	return resolveColumnGroups(segment, t.schema, t.segmentID, func() map[int64]storagecommon.ColumnStats {
 		return map[int64]storagecommon.ColumnStats{}
-	}), nil
-}
-
-// filterColumnGroupFields keeps only the fields keep() accepts, trimming the
-// parallel Columns array in lockstep so downstream consumers that map over
-// Columns (e.g. SchemaBasedPattern) never see a dropped field. Groups left
-// empty are removed. The skipped field ids are returned for logging.
-func filterColumnGroupFields(columnGroups []storagecommon.ColumnGroup, keep func(fieldID int64) bool) ([]storagecommon.ColumnGroup, []int64) {
-	skipped := make([]int64, 0)
-	trimmed := make([]storagecommon.ColumnGroup, 0, len(columnGroups))
-	for _, columnGroup := range columnGroups {
-		fields := make([]int64, 0, len(columnGroup.Fields))
-		columns := make([]int, 0, len(columnGroup.Columns))
-		for i, fieldID := range columnGroup.Fields {
-			if !keep(fieldID) {
-				skipped = append(skipped, fieldID)
-				continue
-			}
-			fields = append(fields, fieldID)
-			if i < len(columnGroup.Columns) {
-				columns = append(columns, columnGroup.Columns[i])
-			}
-		}
-		if len(fields) == 0 {
-			continue
-		}
-		columnGroup.Fields = fields
-		columnGroup.Columns = columns
-		trimmed = append(trimmed, columnGroup)
-	}
-	return trimmed, skipped
-}
-
-// trimColumnGroupsToMaterialized trims the flush layout to the columns the
-// source segment has actually materialized (plus system fields, which live
-// outside the insert record). A non-materialized column is legally absent —
-// a dropped field or a function output backfilled later by bump-schema
-// compaction; real schema/data inconsistency is segcore's concern and the
-// flush verifies it internally. A group left empty is dropped entirely. On a
-// committed-flush ack retry the source is gone; the committed binlogs are
-// the persisted truth and the layout is trimmed to them instead.
-func (t *GrowingSourceSyncTask) trimColumnGroupsToMaterialized(ctx context.Context, columnGroups []storagecommon.ColumnGroup) ([]storagecommon.ColumnGroup, error) {
-	if t.schema == nil || len(columnGroups) == 0 {
-		return columnGroups, nil
-	}
-	if t.source == nil {
-		if len(t.committedInsertBinlogs) == 0 {
-			return columnGroups, nil
-		}
-		// The committed binlogs are keyed by column group id; the flushed
-		// field ids live in ChildFields.
-		committed := typeutil.NewSet[int64]()
-		for _, fieldBinlog := range t.committedInsertBinlogs {
-			committed.Insert(fieldBinlog.GetChildFields()...)
-		}
-		trimmed, skipped := filterColumnGroupFields(columnGroups, func(fieldID int64) bool {
-			return committed.Contain(fieldID)
-		})
-		if len(skipped) > 0 {
-			mlog.Info(ctx, "trim growing flush layout to committed binlogs on ack retry",
-				mlog.Int64("segmentID", t.segmentID),
-				mlog.Int64s("fieldIDs", skipped))
-		}
-		return trimmed, nil
-	}
-	materialized, err := t.source.MaterializedFieldIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// A live growing segment materializes its creation-schema columns in the
-	// InsertRecord ctor, so an empty set has no legal meaning — refuse it
-	// instead of writing a layout that may disagree with the data.
-	if len(materialized) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg(
-			"growing flush source reported empty materialized field ids for segment %d", t.segmentID)
-	}
-	materializedSet := typeutil.NewSet(materialized...)
-	trimmed, skipped := filterColumnGroupFields(columnGroups, func(fieldID int64) bool {
-		return materializedSet.Contain(fieldID) || common.IsSystemField(fieldID)
 	})
-	if len(skipped) > 0 {
-		mlog.Info(ctx, "exclude non-materialized columns from growing flush layout",
-			mlog.Int64("segmentID", t.segmentID),
-			mlog.Int64s("fieldIDs", skipped))
-	}
-	return trimmed, nil
+}
+
+func hasCommittedGrowingSourceLayout(segment *metacache.SegmentInfo) bool {
+	return segment != nil && segment.ManifestPath() != "" && len(segment.GetCurrentSplit()) > 0
 }
 
 func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.ColumnGroup) (string, error) {
@@ -1082,6 +1002,9 @@ func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, r
 	if result == nil || result.NumRows <= 0 || len(columnGroups) == 0 {
 		return nil, nil
 	}
+	if err := validateGrowingSourceFlushedFields(columnGroups, result.FlushedFieldIDs); err != nil {
+		return nil, err
+	}
 	if len(logIDs) != len(columnGroups) {
 		return nil, merr.WrapErrDataIntegrityMsg("growing source insert summary log id count mismatch, logIDs=%d columnGroups=%d",
 			len(logIDs), len(columnGroups))
@@ -1089,16 +1012,6 @@ func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, r
 	logIDByGroup := make(map[int64]int64, len(columnGroups))
 	for i, columnGroup := range columnGroups {
 		logIDByGroup[columnGroup.GroupID] = logIDs[i]
-	}
-	// result.FlushedFieldIDs is the authoritative set of columns actually
-	// written; the flush skips legally-absent columns (dropped fields,
-	// non-materialized function outputs), so the binlog meta must be trimmed
-	// to it. A group left empty is dropped.
-	if len(result.FlushedFieldIDs) > 0 {
-		flushedSet := typeutil.NewSet(result.FlushedFieldIDs...)
-		columnGroups, _ = filterColumnGroupFields(columnGroups, func(fieldID int64) bool {
-			return flushedSet.Contain(fieldID)
-		})
 	}
 	for _, columnGroup := range columnGroups {
 		if _, ok := result.ColumnGroupMemorySizes[columnGroup.GroupID]; !ok {
@@ -1127,6 +1040,39 @@ func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, r
 		nil,
 		fieldNullCounts,
 	), nil
+}
+
+func validateGrowingSourceFlushedFields(columnGroups []storagecommon.ColumnGroup, flushedFieldIDs []int64) error {
+	planned := typeutil.NewSet[int64]()
+	for _, columnGroup := range columnGroups {
+		planned.Insert(columnGroup.Fields...)
+	}
+	flushed := typeutil.NewSet(flushedFieldIDs...)
+
+	missing := make([]int64, 0)
+	for _, fieldID := range planned.Collect() {
+		if !flushed.Contain(fieldID) {
+			missing = append(missing, fieldID)
+		}
+	}
+	extra := make([]int64, 0)
+	for _, fieldID := range flushed.Collect() {
+		if !planned.Contain(fieldID) {
+			extra = append(extra, fieldID)
+		}
+	}
+	if len(missing) == 0 && len(extra) == 0 {
+		return nil
+	}
+	sort.Slice(missing, func(i, j int) bool { return missing[i] < missing[j] })
+	sort.Slice(extra, func(i, j int) bool { return extra[i] < extra[j] })
+	plannedFields := planned.Collect()
+	sort.Slice(plannedFields, func(i, j int) bool { return plannedFields[i] < plannedFields[j] })
+	flushedFields := flushed.Collect()
+	sort.Slice(flushedFields, func(i, j int) bool { return flushedFields[i] < flushedFields[j] })
+	return merr.WrapErrDataIntegrityMsg(
+		"growing source flushed fields do not match planned layout, planned=%v flushed=%v missing=%v unexpected=%v",
+		plannedFields, flushedFields, missing, extra)
 }
 
 func growingSourceFlushedSizeFromResult(result *GrowingFlushResult) int64 {
