@@ -578,11 +578,13 @@ func TestFunctionRunnerManagerReleaseRemovesNotReadyEntry(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	started := make(chan struct{})
 	releaseBuild := make(chan struct{})
-	var once sync.Once
 	buildDone := make(chan struct{})
+	var startedOnce, buildDoneOnce sync.Once
 	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
-		defer close(buildDone)
-		once.Do(func() {
+		// Signal the first build only: the patched builder is global, so a
+		// second invocation would close an already-closed channel.
+		defer buildDoneOnce.Do(func() { close(buildDone) })
+		startedOnce.Do(func() {
 			close(started)
 		})
 		<-releaseBuild
