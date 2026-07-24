@@ -37,6 +37,8 @@ enum ArithOpType {
   BitAnd = 7;
   BitOr = 8;
   BitXor = 9;
+  Shl = 10;
+  Shr = 11;
 };
 
 enum VectorType {

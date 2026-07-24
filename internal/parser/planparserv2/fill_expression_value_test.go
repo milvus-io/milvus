@@ -411,6 +411,14 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			{`(Int64Field & 4) == {target}`, map[string]*schemapb.TemplateValue{
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(4)),
 			}},
+			// shift operators with placeholder operand / value
+			{`(Int64Field << {shift}) == {target}`, map[string]*schemapb.TemplateValue{
+				"shift":  generateTemplateValue(schemapb.DataType_Int64, int64(2)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(8)),
+			}},
+			{`(Int64Field >> {shift}) >= 1`, map[string]*schemapb.TemplateValue{
+				"shift": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -471,6 +479,22 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			// behind a placeholder (the integer-only check still applies).
 			{`(FloatField & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
 				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			}},
+			// the same holds for shifts on a float field
+			{`(FloatField << {shift}) == {target}`, map[string]*schemapb.TemplateValue{
+				"shift":  generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			}},
+			// a templated shift amount is range-checked at fill time: a value of
+			// 64 (or negative) is undefined behavior in the executor and must be
+			// rejected, since the plan-time [0, 64) guard is skipped for templates.
+			{`(Int64Field << {shift}) == {target}`, map[string]*schemapb.TemplateValue{
+				"shift":  generateTemplateValue(schemapb.DataType_Int64, int64(64)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			}},
+			{`(Int64Field >> {shift}) == {target}`, map[string]*schemapb.TemplateValue{
+				"shift":  generateTemplateValue(schemapb.DataType_Int64, int64(-1)),
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
 			}},
 		}

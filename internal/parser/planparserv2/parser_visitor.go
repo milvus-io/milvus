@@ -1572,6 +1572,12 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 				return err
 			}
 			return n
+		case parser.PlanParserBNOT:
+			n, err := BitNot(childValue)
+			if err != nil {
+				return err
+			}
+			return n
 		default:
 			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
@@ -1609,6 +1615,46 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 				IsTemplate: childExpr.expr.GetIsTemplate(),
 			},
 			dataType: schemapb.DataType_Bool,
+		}
+	case parser.PlanParserBNOT:
+		// Rewrite ~x into (x ^ -1): identical in two's complement, and it reuses
+		// the BitXor execution path (scalar / JSON / array-element) with no new
+		// executor support. Nested arithmetic (e.g. (~x) & 3) is unsupported,
+		// consistent with the other bitwise / arithmetic operators.
+		if childExpr.expr.GetIsTemplate() {
+			return merr.WrapErrParameterInvalidMsg("bitnot cannot be applied on placeholder: %s", ctx.GetText())
+		}
+		minusOne := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ValueExpr{
+					ValueExpr: &planpb.ValueExpr{Value: NewInt(-1)},
+				},
+			},
+			dataType:      schemapb.DataType_Int64,
+			nodeDependent: true,
+		}
+		if err := canArithmetic(childExpr.dataType, getArrayElementType(childExpr), minusOne.dataType, getArrayElementType(minusOne), false); err != nil {
+			return merr.WrapErrParameterInvalidMsg("'bitnot' %s", err.Error())
+		}
+		if err := checkValidModArith(planpb.ArithOpType_BitXor, childExpr.dataType, getArrayElementType(childExpr), minusOne.dataType, getArrayElementType(minusOne)); err != nil {
+			return err
+		}
+		dataType, err := calcDataType(childExpr, minusOne, false)
+		if err != nil {
+			return err
+		}
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_BinaryArithExpr{
+					BinaryArithExpr: &planpb.BinaryArithExpr{
+						Left:  childExpr.expr,
+						Right: minusOne.expr,
+						Op:    planpb.ArithOpType_BitXor,
+					},
+				},
+			},
+			dataType:      dataType,
+			nodeDependent: true,
 		}
 	default:
 		return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
@@ -1831,6 +1877,18 @@ func (v *ParserVisitor) visitBitwiseBinaryOp(leftCtx, rightCtx parser.IExprConte
 				return err
 			}
 			return n
+		case parser.PlanParserSHL:
+			n, err := ShiftLeft(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserSHR:
+			n, err := ShiftRight(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
 		default:
 			return merr.WrapErrParameterInvalidMsg("unexpected bitwise op: %s", text)
 		}
@@ -1915,9 +1973,11 @@ func (v *ParserVisitor) VisitPower(ctx *parser.PowerContext) interface{} {
 	return merr.WrapErrParameterInvalidMsg("power can only apply on constants: %s", ctx.GetText())
 }
 
-// VisitShift unsupported.
+// VisitShift translates a shift expression (<< / >>) to an arithmetic plan.
+// Shifts share the binary bitwise machinery; the concrete operator is carried
+// by ctx.GetOp() since both live under the same grammar rule.
 func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("shift is not supported: %s", ctx.GetText())
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), ctx.GetOp().GetTokenType(), ctx.GetText())
 }
 
 // VisitBitOr translates bitwise OR expression to arithmetic plan.

@@ -1007,6 +1007,74 @@ class BitsetBase {
             } else {
                 // unimplemented
             }
+        } else if (a_op == ArithOpType::Shl) {
+            if (cmp_op == CompareOpType::EQ) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shl,
+                                            CompareOpType::EQ>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::GE) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shl,
+                                            CompareOpType::GE>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::GT) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shl,
+                                            CompareOpType::GT>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::LE) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shl,
+                                            CompareOpType::LE>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::LT) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shl,
+                                            CompareOpType::LT>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::NE) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shl,
+                                            CompareOpType::NE>(
+                    src, right_operand, value, size);
+            } else {
+                // unimplemented
+            }
+        } else if (a_op == ArithOpType::Shr) {
+            if (cmp_op == CompareOpType::EQ) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shr,
+                                            CompareOpType::EQ>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::GE) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shr,
+                                            CompareOpType::GE>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::GT) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shr,
+                                            CompareOpType::GT>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::LE) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shr,
+                                            CompareOpType::LE>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::LT) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shr,
+                                            CompareOpType::LT>(
+                    src, right_operand, value, size);
+            } else if (cmp_op == CompareOpType::NE) {
+                this->inplace_arith_compare<T,
+                                            ArithOpType::Shr,
+                                            CompareOpType::NE>(
+                    src, right_operand, value, size);
+            } else {
+                // unimplemented
+            }
         } else {
             // unimplemented
         }

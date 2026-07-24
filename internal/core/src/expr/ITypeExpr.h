@@ -992,6 +992,12 @@ struct fmt::formatter<milvus::proto::plan::ArithOpType>
             case ArithOpType::BitXor:
                 name = "BitXor";
                 break;
+            case ArithOpType::Shl:
+                name = "Shl";
+                break;
+            case ArithOpType::Shr:
+                name = "Shr";
+                break;
             case ArithOpType::ArithOpType_INT_MIN_SENTINEL_DO_NOT_USE_:
                 name = "ArithOpType_INT_MIN_SENTINEL_DO_NOT_USE_";
                 break;

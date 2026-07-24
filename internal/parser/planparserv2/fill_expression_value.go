@@ -269,6 +269,16 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			}
 		}
 
+		// Validate the shift amount for shift operations. A templated amount
+		// skips the plan-time [0, 64) guard in combineBinaryArithExpr (its value
+		// is unknown at parse time), so it must be re-checked here once filled.
+		// A negative or >= 64 amount is undefined behavior in the C++ executor.
+		if expr.ArithOp == planpb.ArithOpType_Shl || expr.ArithOp == planpb.ArithOpType_Shr {
+			if !IsInteger(castedOperand) || castedOperand.GetInt64Val() < 0 || castedOperand.GetInt64Val() >= 64 {
+				return merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", castedOperand.String())
+			}
+		}
+
 		expr.RightOperand = castedOperand
 	}
 
