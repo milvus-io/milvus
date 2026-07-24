@@ -25,6 +25,31 @@
 #include "index/skipindex_stats/SkipIndexStats.h"
 
 namespace milvus {
+
+// Lazily re-readable source of one field's per-chunk statistics, so the skip
+// metrics built from them stay evictable: an evicted cell is rebuilt by asking
+// the source again, exactly like the column-backed translator below rebuilds
+// from ChunkedColumnInterface::GetChunk. The implementation (see segcore) reads
+// the parquet footer and MUST keep whatever owns the returned Statistics alive
+// for the duration of the call -- Arrow's BYTE_ARRAY min/max are string_views
+// into the file metadata, so a Statistics that outlives its reader dangles.
+// SkipIndexStatsBuilder::Build deep-copies, so the built metrics are safe to
+// hand out afterwards.
+class ChunkStatsSource {
+ public:
+    virtual ~ChunkStatsSource() = default;
+
+    // Number of chunks this source can describe; must equal the column's
+    // num_chunks() for the positional cell mapping to be correct.
+    virtual int64_t
+    num_chunks() const = 0;
+
+    // Statistics of `chunk_id`, or nullptr when this chunk carries none
+    // (the builder degrades such a chunk to NoneFieldChunkMetrics).
+    virtual std::shared_ptr<parquet::Statistics>
+    GetChunkStatistics(int64_t chunk_id) = 0;
+};
+
 class FieldChunkMetricsTranslatorFromStatistics
     : public cachinglayer::Translator<index::FieldChunkMetrics> {
  public:
@@ -32,22 +57,22 @@ class FieldChunkMetricsTranslatorFromStatistics
         int64_t segment_id,
         FieldId field_id,
         milvus::DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics)
+        std::shared_ptr<ChunkStatsSource> stats_source)
         : key_(fmt::format("skip_seg_{}_f_{}", segment_id, field_id.get())),
           data_type_(data_type),
+          stats_source_(std::move(stats_source)),
           meta_(cachinglayer::StorageType::MEMORY,
                 milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
                 milvus::cachinglayer::CellDataType::OTHER,
                 CacheWarmupPolicy::CacheWarmupPolicy_Disable,
                 false) {
-        for (auto& statistic : statistics) {
-            cells_.emplace_back(builder_.Build(data_type_, statistic));
-        }
+        AssertInfo(stats_source_ != nullptr,
+                   "skip index stats source must not be null");
     }
 
     size_t
     num_cells() const override {
-        return cells_.size();
+        return static_cast<size_t>(stats_source_->num_chunks());
     }
 
     milvus::cachinglayer::cid_t
@@ -77,7 +102,14 @@ class FieldChunkMetricsTranslatorFromStatistics
             cells;
         cells.reserve(cids.size());
         for (auto cid : cids) {
-            cells.emplace_back(cid, cells_[cid]->Clone());
+            // Re-read this chunk's footer statistics and rebuild. Nothing is
+            // retained between calls, so an evicted cell costs one (small,
+            // usually cached) footer lookup to restore -- the same shape as the
+            // column-backed translator below, which re-reads its chunk.
+            cells.emplace_back(
+                cid,
+                builder_.Build(data_type_,
+                               stats_source_->GetChunkStatistics(cid)));
         }
         return cells;
     }
@@ -97,8 +129,8 @@ class FieldChunkMetricsTranslatorFromStatistics
     std::string key_;
     milvus::DataType data_type_;
     index::SkipIndexStatsBuilder builder_;
+    std::shared_ptr<ChunkStatsSource> stats_source_;
     cachinglayer::Meta meta_;
-    std::vector<std::unique_ptr<index::FieldChunkMetrics>> cells_;
 };
 
 class FieldChunkMetricsTranslator
@@ -193,6 +225,10 @@ class SkipIndex {
         return cloned;
     }
 
+    // Drop a field's skip metrics. Callers erase before (re)installing so a
+    // replaced column -- e.g. ComputeDiffBinlogs remapping a storage v2 grouped
+    // column to a v1 per-field binlog -- cannot keep being pruned by the
+    // previous load's slot when the new one installs nothing.
     void
     Erase(FieldId field_id) {
         std::unique_lock lck(mutex_);
@@ -471,15 +507,25 @@ class SkipIndex {
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
     }
 
+    // Install a lazily re-readable statistics source (storage v2: the parquet
+    // footer). Cells are built on demand and stay evictable/rebuildable, just
+    // like the column-backed LoadSkip above -- nothing is retained eagerly, and
+    // the source keeps its reader alive across each Build so the BYTE_ARRAY
+    // min/max views never dangle.
+    //
+    // CONTRACT: cells are POSITIONAL -- cell i describes chunk i -- so
+    // `stats_source->num_chunks()` MUST equal the installed column's
+    // num_chunks(); a mismatch would prune the wrong chunks (dropped rows).
+    // Callers verify this before installing (see the num_chunks() check in
+    // ChunkedSegmentSealedImpl::load_field_data_common).
     void
-    LoadSkipFromStatistics(
-        int64_t segment_id,
-        milvus::FieldId field_id,
-        milvus::DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+    LoadSkipFromStatsSource(int64_t segment_id,
+                            milvus::FieldId field_id,
+                            milvus::DataType data_type,
+                            std::shared_ptr<ChunkStatsSource> stats_source) {
         auto translator =
             std::make_unique<FieldChunkMetricsTranslatorFromStatistics>(
-                segment_id, field_id, data_type, statistics);
+                segment_id, field_id, data_type, std::move(stats_source));
         auto cache_slot = cachinglayer::Manager::GetInstance()
                               .CreateCacheSlot<index::FieldChunkMetrics>(
                                   std::move(translator));

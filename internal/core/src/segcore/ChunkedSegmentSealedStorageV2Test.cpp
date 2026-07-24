@@ -23,6 +23,9 @@
 #include <arrow/type_fwd.h>
 #include <gtest/gtest.h>
 #include <parquet/properties.h>
+#include <parquet/schema.h>
+#include <parquet/statistics.h>
+#include <parquet/types.h>
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
@@ -39,6 +42,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
@@ -1449,4 +1453,379 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
         ASSERT_EQ(pk_result->scalars().long_data().data(0), 0);
         ASSERT_EQ(pk_result->scalars().long_data().data(1), 42);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PR #51441 skip-index regression tests (storage v2). Two dimensions:
+//  1. Correctness: real queries return the exact count -- a mis-aligned cell,
+//     a use-after-free VARCHAR bound, or a wrong metric would drop rows.
+//  2. Skip effect: with the flag ON the footer skip index actually prunes
+//     lower cells; with it OFF (default) storage-v2 scalar columns get none.
+// ─────────────────────────────────────────────────────────────────────────
+namespace {
+// The VARCHAR payload of row `i`: a monotonic 8-digit prefix so per-row-group
+// min/max discriminate, plus fixed padding so each value is 2048 bytes (bloats
+// row groups). Monotonic in the same order as `val`, so row i has val == i and
+// payload == SkipMeasurePayloadAt(i).
+std::string
+SkipMeasurePayloadAt(int64_t i) {
+    // Fixed-width zero padding keeps lexicographic order == numeric order, so
+    // per-row-group min/max bound a contiguous range of rows.
+    auto digits = std::to_string(i);
+    auto prefix = digits.size() >= 8
+                      ? digits
+                      : std::string(8 - digits.size(), '0') + digits;
+    return prefix + std::string(2040, 'x');
+}
+
+// val(INT64 monotonic 0..N-1) + payload(bloated VARCHAR -> many row groups)
+// + ts share one column group; pk sits alone. Writes two parquet files under
+// `root`; returns the row count. `writer_mem` tunes row groups per file.
+int64_t
+WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
+                          FieldId pk_fid,
+                          const std::string& root,
+                          int64_t writer_mem) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+    EXPECT_TRUE(fs->CreateDir(root + "/0").ok());
+    EXPECT_TRUE(fs->CreateDir(root + "/" + std::to_string(pk_fid.get())).ok());
+    std::vector<std::string> paths = {
+        root + "/0/10000.parquet",
+        root + "/" + std::to_string(pk_fid.get()) + "/10001.parquet"};
+    std::vector<std::vector<int>> column_groups = {{0, 2, 3}, {1}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        schema->ConvertToArrowSchema(),
+        storage_config,
+        column_groups,
+        writer_mem,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
+
+    constexpr int64_t rows_per_batch = 10000;
+    constexpr int64_t batch_count = 4;
+    const int64_t N = rows_per_batch * batch_count;  // val 0..39999
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    for (int64_t batch = 0; batch < batch_count; ++batch) {
+        const int64_t start = batch * rows_per_batch;
+        std::vector<std::shared_ptr<arrow::Array>> arrays;
+        for (int i = 0; i < arrow_schema->fields().size(); ++i) {
+            if (arrow_schema->fields()[i]->type()->id() == arrow::Type::INT64) {
+                std::vector<int64_t> values(rows_per_batch);
+                std::iota(values.begin(), values.end(), start);  // monotonic
+                arrow::Int64Builder builder;
+                EXPECT_TRUE(
+                    builder.AppendValues(values.data(), rows_per_batch).ok());
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else {
+                // Monotonic 8-digit prefix + fixed padding: bloats the row
+                // group (many row groups -> many cells) AND gives the VARCHAR
+                // column per-row-group min/max that actually discriminate, so
+                // the same data exercises string pruning. Length is constant,
+                // so the row-group/cell layout matches the numeric-only case.
+                arrow::StringBuilder builder;
+                std::vector<std::string> values;
+                values.reserve(rows_per_batch);
+                for (int64_t r = 0; r < rows_per_batch; ++r) {
+                    values.push_back(SkipMeasurePayloadAt(start + r));
+                }
+                EXPECT_TRUE(builder.AppendValues(values).ok());
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            }
+        }
+        auto rb =
+            arrow::RecordBatch::Make(arrow_schema, rows_per_batch, arrays);
+        EXPECT_TRUE(writer->Write(rb).ok());
+    }
+    EXPECT_TRUE(writer->Close().ok());
+    return N;
+}
+
+std::shared_ptr<Schema>
+MakeSkipMeasureSchema(FieldId& val_fid,
+                      FieldId& pk_fid,
+                      FieldId* payload_fid = nullptr) {
+    auto schema = std::make_shared<Schema>();
+    val_fid = schema->AddDebugField("val", DataType::INT64, false);
+    pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto pl_fid = schema->AddDebugField("payload", DataType::VARCHAR, false);
+    if (payload_fid != nullptr) {
+        *payload_fid = pl_fid;
+    }
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+    return schema;
+}
+
+SegmentSealedUPtr
+LoadSkipMeasureV2Segment(const std::shared_ptr<Schema>& schema,
+                         FieldId pk_fid,
+                         int64_t N,
+                         const std::string& root) {
+    LoadFieldDataInfo load_info;
+    load_info.storage_version = 2;
+    load_info.field_infos.emplace(
+        int64_t(0),
+        FieldBinlogInfo{int64_t(0),
+                        N,
+                        std::vector<int64_t>(N),
+                        std::vector<int64_t>(N * 4),
+                        false,
+                        "",
+                        std::vector<std::string>({root + "/0/10000.parquet"})});
+    load_info.field_infos.emplace(
+        pk_fid.get(),
+        FieldBinlogInfo{pk_fid.get(),
+                        N,
+                        std::vector<int64_t>(N),
+                        std::vector<int64_t>(N * 4),
+                        false,
+                        "",
+                        std::vector<std::string>({root + "/" +
+                                                  std::to_string(pk_fid.get()) +
+                                                  "/10001.parquet"})});
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->AddFieldDataInfoForSealed(load_info);
+    for (auto& [id, info] : load_info.field_infos) {
+        LoadFieldDataInfo one;
+        one.storage_version = 2;
+        one.field_infos.emplace(id, info);
+        segment->LoadFieldData(one);
+    }
+    return segment;
+}
+}  // namespace
+
+// Correctness: run real UnaryRange filters end-to-end and compare against the
+// exact expected counts. A materialization that dropped rows (mis-alignment,
+// VARCHAR use-after-free, wrong metric) would make a count too low.
+TEST(SkipIndexPr51441, StorageV2SkipQueryResultsCorrect) {
+    // Large target: without the force many row groups pack into few cells;
+    // with the flag ON the force makes 1 rg/cell and many cells.
+    StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_query_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 4 * 1024 * 1024);
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    const int64_t num_cells = segment->num_chunk_data(val_fid);
+
+    auto run_count = [&](proto::plan::OpType op, int64_t threshold) -> int64_t {
+        proto::plan::GenericValue value;
+        value.set_int64_val(threshold);
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(val_fid, milvus::DataType::INT64), op, value);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final =
+            query::ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+        return static_cast<int64_t>(final.count());
+    };
+    // val holds 0..N-1: #>T = N-1-T, #<T = T, #==T = 1.
+    for (int64_t T :
+         {int64_t(5000), int64_t(20000), int64_t(30000), int64_t(37777)}) {
+        EXPECT_EQ(run_count(proto::plan::OpType::GreaterThan, T), N - 1 - T)
+            << "val > " << T << " (cells=" << num_cells << ")";
+        EXPECT_EQ(run_count(proto::plan::OpType::LessThan, T), T)
+            << "val < " << T;
+        EXPECT_EQ(run_count(proto::plan::OpType::Equal, T), int64_t(1))
+            << "val == " << T;
+    }
+    EXPECT_GT(num_cells, 1) << "force 1 rg/cell should yield many cells";
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// Skip effect: flag ON prunes lower cells (but never a cell holding a match);
+// flag OFF (default) prunes nothing (storage-v2 scalar columns get no index).
+TEST(SkipIndexPr51441, StorageV2CellPruneByFlag) {
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_prune_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+    const int64_t threshold = N - 10000;  // 30000; only the top batch matches
+
+    auto build_and_count = [&](bool flag) -> std::pair<int64_t, int64_t> {
+        SetDefaultEnableParquetStatsSkipIndex(flag);
+        auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+        const int64_t cells = segment->num_chunk_data(val_fid);
+        auto skip = segment->GetSkipIndex();
+        int64_t skipped = 0;
+        for (int64_t c = 0; c < cells; ++c) {
+            if (skip->CanSkipUnaryRange<int64_t>(
+                    val_fid, c, OpType::GreaterThan, threshold)) {
+                ++skipped;
+            }
+        }
+        return {skipped, cells};
+    };
+    auto [skipped_on, cells_on] = build_and_count(true);
+    auto [skipped_off, cells_off] = build_and_count(false);
+    SetDefaultEnableParquetStatsSkipIndex(false);
+
+    ASSERT_GT(cells_on, 1) << "need multiple cells to measure pruning";
+    EXPECT_GT(skipped_on, 0);
+    EXPECT_LT(skipped_on, cells_on);  // never prune a cell that holds a match
+    EXPECT_EQ(skipped_off, 0);
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// Sealed VARCHAR `IN` pruning. Before this PR the scan path never consulted the
+// skip index for string columns (the IN list is owned std::string but the scan
+// template is std::string_view, and GetElementValues<string_view> extracts
+// nothing from it), so IN never pruned while the prefetch did -- the scan just
+// fetched the cell back. Both sides now decide via CanSkipInQuery<std::string>.
+// Asserts BOTH that pruning happens and that results are unchanged by it.
+TEST(SkipIndexPr51441, StorageV2VarcharInPruneAndResultsCorrect) {
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, payload_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
+    const std::string root = "skip_pr51441_varchar_in_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    // Two payloads that both live in the last batch, so every cell whose max
+    // sorts below them is prunable. Row i has payload SkipMeasurePayloadAt(i).
+    const std::vector<std::string> wanted = {SkipMeasurePayloadAt(N - 5000),
+                                             SkipMeasurePayloadAt(N - 3000)};
+
+    auto run_in_count = [&](SegmentSealed* segment) -> int64_t {
+        std::vector<proto::plan::GenericValue> vals;
+        for (const auto& w : wanted) {
+            proto::plan::GenericValue v;
+            v.set_string_val(w);
+            vals.push_back(v);
+        }
+        auto expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(payload_fid, milvus::DataType::VARCHAR), vals);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = query::ExecuteQueryExpr(plan, segment, N, MAX_TIMESTAMP);
+        return static_cast<int64_t>(final.count());
+    };
+
+    // Flag ON: the string skip index must actually prune, and the query must
+    // still return exactly the two matching rows.
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    {
+        auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+        const int64_t cells = segment->num_chunk_data(payload_fid);
+        auto skip = segment->GetSkipIndex();
+        int64_t pruned = 0;
+        for (int64_t c = 0; c < cells; ++c) {
+            if (skip->CanSkipInQuery<std::string>(payload_fid, c, wanted)) {
+                ++pruned;
+            }
+        }
+        ASSERT_GT(cells, 1) << "need multiple cells to measure IN pruning";
+        EXPECT_GT(pruned, 0)
+            << "VARCHAR IN must prune (regression: inert skip)";
+        // Never prune every cell -- the matching rows live in one of them.
+        EXPECT_LT(pruned, cells);
+        EXPECT_EQ(run_in_count(segment.get()), int64_t(wanted.size()))
+            << "pruning must not drop matching rows";
+    }
+    // Flag OFF (default): no chunk skip index, same answer.
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    {
+        auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+        EXPECT_EQ(run_in_count(segment.get()), int64_t(wanted.size()))
+            << "flag off must return the same rows";
+    }
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// Direct coverage of the SkipIndex statistics-source contract that the storage
+// v2 loader relies on: cells are POSITIONAL (cell i describes chunk i), they
+// are rebuilt from the source on every (re)load so an evicted cell restores
+// itself, a chunk id past the end degrades to "cannot skip" (never a false
+// negative), and Erase drops the field so a replaced column is not pruned with
+// the previous load's slot.
+namespace {
+// Test source: two chunks with disjoint int64 ranges, counting how many times
+// it is asked so we can prove cells really are rebuilt from it (not retained).
+class FakeChunkStatsSource : public milvus::ChunkStatsSource {
+ public:
+    int64_t
+    num_chunks() const override {
+        return 2;
+    }
+
+    std::shared_ptr<parquet::Statistics>
+    GetChunkStatistics(int64_t chunk_id) override {
+        ++calls_;
+        auto node = parquet::schema::PrimitiveNode::Make(
+            "c", parquet::Repetition::OPTIONAL, parquet::Type::INT64);
+        auto descr = std::make_shared<parquet::ColumnDescriptor>(node, 1, 0);
+        descrs_.push_back(descr);
+        auto stats = std::static_pointer_cast<parquet::Int64Statistics>(
+            parquet::Statistics::Make(descr.get(),
+                                      arrow::default_memory_pool()));
+        // chunk 0 spans [0,10]; chunk 1 spans [100,110]
+        int64_t lo = chunk_id == 0 ? 0 : 100;
+        int64_t hi = chunk_id == 0 ? 10 : 110;
+        stats->Update(&lo, 1, 0);
+        stats->Update(&hi, 1, 0);
+        return stats;
+    }
+
+    int
+    calls() const {
+        return calls_;
+    }
+
+ private:
+    int calls_{0};
+    std::vector<std::shared_ptr<parquet::ColumnDescriptor>> descrs_;
+};
+}  // namespace
+
+TEST(SkipIndexPr51441, StatsSourcePositionalRebuildAndErase) {
+    milvus::SkipIndex skip;
+    const FieldId fid(101);
+    auto source = std::make_shared<FakeChunkStatsSource>();
+    skip.LoadSkipFromStatsSource(
+        /*segment_id=*/1, fid, DataType::INT64, source);
+
+    // Positional: 105 cannot be in chunk 0, but can be in chunk 1.
+    EXPECT_TRUE(
+        skip.CanSkipUnaryRange<int64_t>(fid, 0, OpType::Equal, int64_t(105)));
+    EXPECT_FALSE(
+        skip.CanSkipUnaryRange<int64_t>(fid, 1, OpType::Equal, int64_t(105)));
+    // Cells came from the source, i.e. they are rebuildable rather than
+    // retained -- this is what lets the cache evict and restore them.
+    EXPECT_GT(source->calls(), 0);
+
+    // A field that was never installed never skips.
+    EXPECT_FALSE(skip.CanSkipUnaryRange<int64_t>(
+        FieldId(999), 0, OpType::Equal, int64_t(105)));
+
+    // Erase drops the slot: nothing prunes afterwards.
+    skip.Erase(fid);
+    EXPECT_FALSE(
+        skip.CanSkipUnaryRange<int64_t>(fid, 0, OpType::Equal, int64_t(105)));
 }
