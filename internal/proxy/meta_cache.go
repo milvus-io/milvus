@@ -506,11 +506,11 @@ func (m *MetaCache) lockFillWrite(operation string) func() {
 }
 
 func observeMetaCacheInvalidation(operation string) func() {
+	observer := metrics.ProxyMetaCacheInvalidationLatency.
+		WithLabelValues(paramtable.GetStringNodeID(), operation)
 	started := time.Now()
 	return func() {
-		metrics.ProxyMetaCacheInvalidationLatency.
-			WithLabelValues(paramtable.GetStringNodeID(), operation).
-			Observe(float64(time.Since(started).Microseconds()) / 1000.0)
+		observer.Observe(float64(time.Since(started).Microseconds()) / 1000.0)
 	}
 }
 
