@@ -54,40 +54,6 @@ func (_c *MockShardClientManager_Close_Call) RunAndReturn(run func()) *MockShard
 	return _c
 }
 
-// DeprecateShardCache provides a mock function with given fields: database, collectionName
-func (_m *MockShardClientManager) DeprecateShardCache(database string, collectionName string) {
-	_m.Called(database, collectionName)
-}
-
-// MockShardClientManager_DeprecateShardCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeprecateShardCache'
-type MockShardClientManager_DeprecateShardCache_Call struct {
-	*mock.Call
-}
-
-// DeprecateShardCache is a helper method to define mock.On call
-//   - database string
-//   - collectionName string
-func (_e *MockShardClientManager_Expecter) DeprecateShardCache(database interface{}, collectionName interface{}) *MockShardClientManager_DeprecateShardCache_Call {
-	return &MockShardClientManager_DeprecateShardCache_Call{Call: _e.mock.On("DeprecateShardCache", database, collectionName)}
-}
-
-func (_c *MockShardClientManager_DeprecateShardCache_Call) Run(run func(database string, collectionName string)) *MockShardClientManager_DeprecateShardCache_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *MockShardClientManager_DeprecateShardCache_Call) Return() *MockShardClientManager_DeprecateShardCache_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardClientManager_DeprecateShardCache_Call) RunAndReturn(run func(string, string)) *MockShardClientManager_DeprecateShardCache_Call {
-	_c.Run(run)
-	return _c
-}
-
 // GetClient provides a mock function with given fields: ctx, nodeInfo
 func (_m *MockShardClientManager) GetClient(ctx context.Context, nodeInfo NodeInfo) (types.QueryNodeClient, error) {
 	ret := _m.Called(ctx, nodeInfo)
