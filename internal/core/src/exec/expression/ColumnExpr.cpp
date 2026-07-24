@@ -99,6 +99,15 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         valid_res.set();
 
         int64_t processed_rows = 0;
+        // Keep the chunk's data accessor (which pins the chunk) across
+        // iterations and rebuild only when the chunk id changes, avoiding a
+        // per-row chunk pin + accessor construction. Safe on both sealed
+        // (CellAccessor keeps the chunk resident) and growing (data and the
+        // chunked validity storage have stable per-chunk buffers). The pinned
+        // index view is chunk-independent, so it is resolved once.
+        const auto pinned_index = PinnedIndexForRawLookup();
+        int64_t cached_chunk_id = -1;
+        segcore::ChunkDataAccessor cda;
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
             auto [chunk_id,
@@ -117,11 +126,14 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                     return {0, offset};
                 }
             }();
-            auto cda = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->GetColumn().data_type_,
-                expr_->GetColumn().field_id_,
-                chunk_id,
-                PinnedIndexForRawLookup());
+            if (chunk_id != cached_chunk_id) {
+                cda = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->GetColumn().data_type_,
+                    expr_->GetColumn().field_id_,
+                    chunk_id,
+                    pinned_index);
+                cached_chunk_id = chunk_id;
+            }
             auto chunk_data_by_offset = cda(chunk_offset);
             if (!chunk_data_by_offset.has_value()) {
                 valid_res[processed_rows] = false;

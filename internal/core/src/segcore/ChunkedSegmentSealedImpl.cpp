@@ -277,6 +277,21 @@ ChunkedSegmentSealedImpl::ReadTimestamp(
     if (timestamps != nullptr && !timestamps->empty()) {
         return (*timestamps)[offset];
     }
+    // Fallback: read one row straight from the timestamp column. On current
+    // master this is effectively unreachable in production — every load path
+    // that publishes the timestamp column also publishes a fully-pinned
+    // zero-copy TimestampData (init_storage_v2_timestamp_index /
+    // init_storage_v1_timestamp_index) in the same atomic runtime snapshot,
+    // so the short-circuit above always hits; only tests and degenerate
+    // states reach here.
+    //
+    // NOTE for anyone making this path live (e.g. an evictable timestamp
+    // column for tiered storage): this access pattern pins a cell and
+    // resolves the chunk PER CALL. Do not drive it from a per-row loop
+    // (mask_with_timestamps grey-zone scan, search_batch_pks) — introduce a
+    // batched ReadTimestamps(offsets, count) that pins all involved chunks
+    // once and dedups resolution per distinct chunk (see ForEachResolvedRow
+    // in mmap/ChunkedColumnGroup.h for the shape).
     auto column = get_column(runtime, TimestampFieldID);
     AssertInfo(column != nullptr, "timestamp data is not ready");
     const auto chunk_pos = column->GetChunkIDByOffset(offset);
@@ -4853,9 +4868,15 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                "field {} must be ready when doing bulk_subscript",
                field_id.get());
     if (column->IsNullable()) {
-        for (auto i = 0; i < count; i++) {
-            valid_map.set(i, column->IsValid(op_ctx, seg_offsets[i]));
-        }
+        // Batched validity: pin all involved chunks once and dedup chunk
+        // resolution, instead of column->IsValid() per row (which pins a cell
+        // and resolves a chunk on every call). BulkIsValid preserves row order,
+        // invoking the callback with the original row index.
+        column->BulkIsValid(
+            op_ctx,
+            [&valid_map](bool valid, size_t i) { valid_map.set(i, valid); },
+            seg_offsets,
+            count);
     } else {
         valid_map.set();
     }
