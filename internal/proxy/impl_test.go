@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -59,6 +60,63 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestProxySearchInconsistentRequeryRetriesOnce(t *testing.T) {
+	paramtable.Init()
+	mockey.PatchConvey("TestProxySearchInconsistentRequeryRetriesOnce", t, func() {
+		var calls atomic.Int32
+		node := &Proxy{}
+		mockey.Mock((*Proxy).search).To(func(
+			_ *Proxy,
+			_ context.Context,
+			_ *milvuspb.SearchRequest,
+			_ bool,
+			_ bool,
+		) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			calls.Add(1)
+			return &milvuspb.SearchResults{
+				Status: merr.Status(merr.WrapErrInconsistentRequery("mock inconsistent requery")),
+			}, false, false, false, nil
+		}).Build()
+
+		resp, err := node.Search(context.Background(), &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+		})
+
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrInconsistentRequery)
+		require.Equal(t, int32(2), calls.Load())
+	})
+}
+
+func TestProxyHybridSearchInconsistentRequeryRetriesOnce(t *testing.T) {
+	paramtable.Init()
+	mockey.PatchConvey("TestProxyHybridSearchInconsistentRequeryRetriesOnce", t, func() {
+		var calls atomic.Int32
+		node := &Proxy{}
+		mockey.Mock((*Proxy).hybridSearch).To(func(
+			_ *Proxy,
+			_ context.Context,
+			_ *milvuspb.HybridSearchRequest,
+			_ bool,
+		) (*milvuspb.SearchResults, bool, bool, error) {
+			calls.Add(1)
+			return &milvuspb.SearchResults{
+				Status: merr.Status(merr.WrapErrInconsistentRequery("mock inconsistent requery")),
+			}, false, false, nil
+		}).Build()
+
+		resp, err := node.HybridSearch(context.Background(), &milvuspb.HybridSearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+		})
+
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrInconsistentRequery)
+		require.Equal(t, int32(2), calls.Load())
+	})
+}
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	paramtable.Init()
