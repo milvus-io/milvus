@@ -59,6 +59,8 @@ class ManifestGroupTranslator
      * @param column_group_index Index of the column group within the segment
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
+     * @param projected_columns Physical column names projected by chunk_reader
+     * @param full_projection Whether projected_columns covers the whole group
      * @param use_mmap Whether to use memory mapping for data loading
      * @param mmap_populate Whether to populate data into memory mapping
      * @param mmap_dir_path Directory path for memory mapping
@@ -71,6 +73,8 @@ class ManifestGroupTranslator
         int64_t column_group_index,
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const std::vector<std::string>& projected_columns,
+        bool full_projection,
         bool use_mmap,
         bool mmap_populate,
         const std::string& mmap_dir_path,
