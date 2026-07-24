@@ -607,6 +607,9 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 			if !field.IsPrimaryKey {
 				return merr.WrapErrParameterInvalidMsg("only primary field can speficy AutoID with true, field name = %s", field.Name)
 			}
+			if field.DataType == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("autoID is not supported for UUID primary key, use Int64 instead")
+			}
 		}
 	}
 	for _, structArrayField := range coll.StructArrayFields {
