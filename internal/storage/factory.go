@@ -17,6 +17,13 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return NewChunkManagerFactory("local", objectstorage.RootPath(params.LocalStorageCfg.Path.GetValue()))
 	}
+	if params.CommonCfg.StorageType.GetValue() == "hdfs" {
+		return NewChunkManagerFactory("hdfs",
+			objectstorage.RootPath(params.HdfsCfg.RootPath.GetValue()),
+			objectstorage.HDFSAddress(params.HdfsCfg.Address.GetValue()),
+			objectstorage.HDFSUser(params.HdfsCfg.User.GetValue()),
+		)
+	}
 	return NewChunkManagerFactory(params.CommonCfg.StorageType.GetValue(),
 		objectstorage.RootPath(params.MinioCfg.RootPath.GetValue()),
 		objectstorage.Address(params.MinioCfg.Address.GetValue()),
@@ -53,6 +60,8 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 		return NewLocalChunkManager(objectstorage.RootPath(f.config.RootPath)), nil
 	case "remote", "minio", "opendal":
 		return NewRemoteChunkManager(ctx, f.config)
+	case "hdfs":
+		return NewHDFSChunkManager(ctx, f.config.HDFSAddress, f.config.HDFSUser, f.config.RootPath)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("no chunk manager implemented with engine: " + engine)
 	}
