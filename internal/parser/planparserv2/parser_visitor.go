@@ -751,6 +751,12 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 	}
 }
 
+func isTermExprTargetSupported(dataType schemapb.DataType) bool {
+	return typeutil.IsPrimitiveType(dataType) ||
+		typeutil.IsJSONType(dataType) ||
+		typeutil.IsArrayType(dataType)
+}
+
 // VisitTerm translates expr to term plan.
 func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	child := ctx.Expr(0).Accept(v)
@@ -771,6 +777,9 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	dataType := columnInfo.GetDataType()
 	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
 		dataType = columnInfo.GetElementType()
+	}
+	if !isTermExprTargetSupported(dataType) {
+		return merr.WrapErrParameterInvalidMsg("term expression is not supported for data type %s", dataType.String())
 	}
 
 	term := ctx.Expr(1).Accept(v)
