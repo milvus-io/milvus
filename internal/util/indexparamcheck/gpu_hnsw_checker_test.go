@@ -165,17 +165,17 @@ func Test_gpuHnswChecker_CheckTrain(t *testing.T) {
 		{p1, true},
 		{p2, true},
 		{p3, true},
-		{p4, false}, // HAMMING not supported for float vectors
-		{p5, false}, // JACCARD not supported for float vectors
-		{p6, false}, // SUBSTRUCTURE not supported
-		{p7, false}, // SUPERSTRUCTURE not supported
-		{p8, true},   // 384-d COSINE
-		{p9, true},   // non-power-of-two 2*M (staging padded)
-		{p10, false}, // M too large: padded staging exceeds GPU block size
-		{pMaxM, true},     // M == gpuHnswMaxM (512): exactly fits one block
-		{pOverMaxM, false}, // M == gpuHnswMaxM+1 (513): out of GPU range
-		{mOmitted, true},   // M optional: omitted => knowhere default
-		{efOmitted, true},  // efConstruction optional: omitted => knowhere default
+		{p4, false},         // HAMMING not supported for float vectors
+		{p5, false},         // JACCARD not supported for float vectors
+		{p6, false},         // SUBSTRUCTURE not supported
+		{p7, false},         // SUPERSTRUCTURE not supported
+		{p8, true},          // 384-d COSINE
+		{p9, true},          // non-power-of-two 2*M (staging padded)
+		{p10, false},        // M too large: padded staging exceeds GPU block size
+		{pMaxM, true},       // M == gpuHnswMaxM (512): exactly fits one block
+		{pOverMaxM, false},  // M == gpuHnswMaxM+1 (513): out of GPU range
+		{mOmitted, true},    // M optional: omitted => knowhere default
+		{efOmitted, true},   // efConstruction optional: omitted => knowhere default
 		{bothOmitted, true}, // both optional: omitted => knowhere defaults
 	}
 
