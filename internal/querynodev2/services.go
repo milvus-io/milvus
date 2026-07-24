@@ -536,8 +536,21 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	// A reopen carries a possibly version-ahead schema and must reserve an APPLIED
+	// segcore version for the reopened segments WITHOUT advancing the served
+	// collection schema. This worker leg runs on the same shared *Collection as a
+	// co-located delegator and executes BEFORE the delegator's own
+	// syncCollectionIndexMeta relay, so advancing served here would pre-empt the
+	// stream UpdateSchema and skip the derived-state rebuild — the #50989/#51062
+	// load-wins race. Mirror the delegator relay; all other scopes advance served.
+	var err error
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		err = node.manager.Collection.ReserveAppliedSchemaForReopen(req.GetCollectionID(), req.GetSchema(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	} else {
+		err = node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	}
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
 		return merr.Status(err), nil

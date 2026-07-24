@@ -213,6 +213,55 @@ func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *sch
 	return _c
 }
 
+// ReserveAppliedSchemaForReopen provides a mock function with given fields: collectionID, schema, meta, loadMeta
+func (_m *MockCollectionManager) ReserveAppliedSchemaForReopen(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
+	ret := _m.Called(collectionID, schema, meta, loadMeta)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReserveAppliedSchemaForReopen")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error); ok {
+		r0 = rf(collectionID, schema, meta, loadMeta)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_ReserveAppliedSchemaForReopen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReserveAppliedSchemaForReopen'
+type MockCollectionManager_ReserveAppliedSchemaForReopen_Call struct {
+	*mock.Call
+}
+
+// ReserveAppliedSchemaForReopen is a helper method to define mock.On call
+//   - collectionID int64
+//   - schema *schemapb.CollectionSchema
+//   - meta *segcorepb.CollectionIndexMeta
+//   - loadMeta *querypb.LoadMetaInfo
+func (_e *MockCollectionManager_Expecter) ReserveAppliedSchemaForReopen(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_ReserveAppliedSchemaForReopen_Call {
+	return &MockCollectionManager_ReserveAppliedSchemaForReopen_Call{Call: _e.mock.On("ReserveAppliedSchemaForReopen", collectionID, schema, meta, loadMeta)}
+}
+
+func (_c *MockCollectionManager_ReserveAppliedSchemaForReopen_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_ReserveAppliedSchemaForReopen_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_ReserveAppliedSchemaForReopen_Call) Return(_a0 error) *MockCollectionManager_ReserveAppliedSchemaForReopen_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_ReserveAppliedSchemaForReopen_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error) *MockCollectionManager_ReserveAppliedSchemaForReopen_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Ref provides a mock function with given fields: collectionID, count
 func (_m *MockCollectionManager) Ref(collectionID int64, count uint32) bool {
 	ret := _m.Called(collectionID, count)
