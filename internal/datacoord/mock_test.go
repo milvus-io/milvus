@@ -1033,6 +1033,10 @@ func (s *mockMixCoord) DropSegmentsByTime(ctx context.Context, collectionID int6
 	panic("implement me")
 }
 
+func (s *mockMixCoord) WaitForChannelCheckpoint(ctx context.Context, flushTsList map[string]uint64) error {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	panic("implement me")
 }

@@ -84,17 +84,18 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 		return err
 	}
 
+	header := &message.AlterCollectionMessageHeader{
+		DbId:             coll.DBID,
+		CollectionId:     coll.CollectionID,
+		UpdateMask:       updateMask,
+		CacheExpirations: cacheExpirations,
+	}
 	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&message.AlterCollectionMessageHeader{
-			DbId:             coll.DBID,
-			CollectionId:     coll.CollectionID,
-			UpdateMask:       updateMask,
-			CacheExpirations: cacheExpirations,
-		}).
+		WithHeader(header).
 		WithBody(&message.AlterCollectionMessageBody{
 			Updates: updates,
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

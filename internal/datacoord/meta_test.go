@@ -4982,6 +4982,97 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("WatchChannelCheckpointReturnsWhenChannelMissing", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- meta.WatchChannelCheckpoint(context.Background(), mockVChannel, pos.Timestamp)
+		}()
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("watching a missing channel checkpoint should return")
+		}
+	})
+
+	t.Run("WatchChannelCheckpointWakesOnSingleCheckpointUpdate", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- meta.WatchChannelCheckpoint(context.Background(), mockVChannel, pos.Timestamp)
+		}()
+
+		err = meta.UpdateChannelCheckpoint(context.Background(), mockVChannel, pos)
+		require.NoError(t, err)
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("watching channel checkpoint should wake after single checkpoint update")
+		}
+	})
+
+	t.Run("WatchChannelCheckpointWakesOnDropChannelCheckpoint", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		err = meta.UpdateChannelCheckpoint(context.Background(), mockVChannel, &msgpb.MsgPosition{
+			ChannelName: mockVChannel,
+			MsgID:       []byte{1},
+			Timestamp:   pos.Timestamp - 1,
+		})
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- meta.WatchChannelCheckpoint(context.Background(), mockVChannel, pos.Timestamp)
+		}()
+
+		err = meta.DropChannelCheckpoint(mockVChannel)
+		require.NoError(t, err)
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("watching channel checkpoint should wake after checkpoint drop")
+		}
+	})
+
+	t.Run("WatchChannelCheckpointWakesOnMarkChannelCheckpointDropped", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		err = meta.UpdateChannelCheckpoint(context.Background(), mockVChannel, &msgpb.MsgPosition{
+			ChannelName: mockVChannel,
+			MsgID:       []byte{1},
+			Timestamp:   pos.Timestamp - 1,
+		})
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- meta.WatchChannelCheckpoint(context.Background(), mockVChannel, pos.Timestamp)
+		}()
+
+		err = meta.MarkChannelCheckpointDropped(context.Background(), mockVChannel)
+		require.NoError(t, err)
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("watching channel checkpoint should wake after checkpoint marked dropped")
+		}
+	})
+
 	t.Run("TruncateChannelByTime", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
