@@ -82,7 +82,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
 #include "storage/MmapChunkManager.h"
-#include "segcore/TextColumnCache.h"
+#include "segcore/TextLobReader.h"
 
 namespace milvus::segcore {
 
@@ -348,7 +348,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             FieldId,
             std::unordered_map<std::string, index::CacheIndexBasePtr>>
             ngram_indexings;
-        std::unordered_map<FieldId, std::string> text_lob_paths;
+        std::unordered_map<FieldId, std::shared_ptr<SharedTextLobReader>>
+            text_lob_readers;
+        std::unordered_map<
+            FieldId,
+            std::shared_ptr<const milvus::exec::SimpleGeometryCache>>
+            geometry_caches;
         std::unordered_map<FieldId, TextIndexVariant> text_indexes;
         std::vector<JsonIndex> json_indices;
         std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
@@ -429,6 +434,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<const SkipIndex>
     GetSkipIndexSnapshot() const;
 
+    std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const override;
+
     int64_t
     get_deleted_count() const override;
 
@@ -440,7 +448,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    : 0;
     }
 
-    const Schema&
+    SchemaPtr
     get_schema() const override;
 
     void
@@ -697,7 +705,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::vector<int64_t>& result_mapping,
         int64_t size,
         const std::vector<std::string>* dynamic_field_names = nullptr,
-        const std::string* text_lob_path = nullptr);
+        std::shared_ptr<SharedTextLobReader> text_lob_reader = nullptr);
 
     // Calls reader_->take() with timing. Returns the table on success,
     // or nullptr on failure (logs a warning). Checks op_ctx for cancellation
@@ -724,10 +732,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   "sealed segment does not support get_timestamps()");
     }
 
-    // Load Geometry cache for a field
-    void
-    LoadGeometryCache(FieldId field_id,
-                      const std::shared_ptr<ChunkedColumnInterface>& column);
+    // Build an immutable Geometry cache for one published field column.
+    std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+    BuildGeometryCache(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column) const;
 
  private:
     void
@@ -1251,7 +1260,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     bulk_subscript_text_impl(
         milvus::OpContext* op_ctx,
-        FieldId field_id,
+        const std::shared_ptr<SharedTextLobReader>& text_lob_reader,
         const ChunkedColumnInterface* column,
         const int64_t* seg_offsets,
         int64_t count,
@@ -1959,14 +1968,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                        bool is_replace = false);
 
     void
-    InitTextLobPaths(const std::string& manifest_path,
-                     const SchemaPtr& schema_snapshot,
-                     RuntimeResourceState* runtime);
-
-    void
-    InitTextLobPaths(const std::string& manifest_path,
-                     const SchemaPtr& schema_snapshot,
-                     StagedStateCommitter& committer);
+    InitTextLobReaders(const SegmentLoadInfo& segment_load_info,
+                       const SchemaPtr& schema_snapshot,
+                       StagedStateCommitter& committer);
 
     void
     SynthesizeExternalSystemFields(const SegmentLoadInfo& segment_load_info,
@@ -2405,6 +2409,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
+    TestLoadFieldData(const LoadFieldDataInfo& info, bool is_replace) {
+        LoadFieldData(info, nullptr, is_replace);
+    }
+
+    void
+    TestInitTextLobReaders(const SegmentLoadInfo& segment_load_info,
+                           const SchemaPtr& schema_snapshot,
+                           RuntimeResourceState* runtime,
+                           PublishedSegmentState* staged_state) {
+        StagedStateCommitter committer(*this, runtime, staged_state);
+        InitTextLobReaders(segment_load_info, schema_snapshot, committer);
+    }
+
+    void
     TestLoadIndex(LoadIndexInfo& info,
                   bool is_replace,
                   const SchemaPtr& schema_snapshot,
@@ -2583,7 +2601,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
         auto runtime = CloneRuntimeResourceState(current->runtime);
-        runtime->text_lob_paths[field_id] = std::move(lob_base_path);
+        runtime->text_lob_readers[field_id] =
+            GetGlobalTextLobReaderRegistry().AcquireHandle(lob_base_path);
         next->runtime = ToConstRuntimeState(std::move(runtime));
         PublishStateOnline(std::move(next));
     }

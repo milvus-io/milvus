@@ -99,13 +99,13 @@ ExprSet::Eval(int32_t begin,
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
     auto segment = query_context->get_segment();
-    auto& schema = segment->get_schema();
-    if (!schema.get_ttl_field_id().has_value()) {
+    auto schema = segment->get_schema();
+    if (!schema->get_ttl_field_id().has_value()) {
         return nullptr;
     }
 
-    auto ttl_field_id = schema.get_ttl_field_id().value();
-    auto& ttl_field_meta = schema[ttl_field_id];
+    auto ttl_field_id = schema->get_ttl_field_id().value();
+    auto& ttl_field_meta = (*schema)[ttl_field_id];
 
     // Use entity_ttl_physical_time_us (already converted to physical microseconds in Go layer)
     // instead of query_timestamp (MVCC time) to ensure correct expiration judgment
@@ -494,7 +494,7 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         return;
     }
     auto schema = segment->get_schema();
-    auto namespace_field_id = schema.get_namespace_field_id();
+    auto namespace_field_id = schema->get_namespace_field_id();
     std::vector<size_t> reorder;
     std::vector<size_t> numeric_expr;
     std::vector<size_t> indexed_expr;

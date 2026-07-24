@@ -11,34 +11,43 @@
 
 #pragma once
 
-#include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
-#include "common/Types.h"
 #include "geos_c.h"
-#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
 
-// Helper function to create cache key from segment_id and field_id
-inline std::string
-MakeCacheKey(int64_t segment_id, FieldId field_id) {
-    return std::to_string(segment_id) + "_" + std::to_string(field_id.get());
-}
-
 // Vector-based Geometry cache that maintains original field data order
 class SimpleGeometryCache {
  public:
+    SimpleGeometryCache() : ctx_(GEOS_init_r()) {
+        AssertInfo(ctx_ != nullptr, "Failed to initialize GEOS context");
+    }
+
+    ~SimpleGeometryCache() {
+        // Geometry instances must be destroyed before their GEOS context.
+        geometries_.clear();
+        GEOS_finish_r(ctx_);
+    }
+
+    SimpleGeometryCache(const SimpleGeometryCache&) = delete;
+    SimpleGeometryCache&
+    operator=(const SimpleGeometryCache&) = delete;
+
+    void
+    Reserve(size_t size) {
+        std::lock_guard<std::shared_mutex> lock(mutex_);
+        geometries_.reserve(size);
+    }
+
     // Append WKB data during field loading
     void
-    AppendData(GEOSContextHandle_t ctx, const char* wkb_data, size_t size) {
+    AppendData(const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);
 
         if (size == 0 || wkb_data == nullptr) {
@@ -47,7 +56,7 @@ class SimpleGeometryCache {
         } else {
             try {
                 // Create geometry with cache's context
-                geometries_.emplace_back(ctx, wkb_data, size);
+                geometries_.emplace_back(ctx_, wkb_data, size);
             } catch (const std::exception& e) {
                 ThrowInfo(UnexpectedError,
                           "Failed to construct geometry from WKB data: {}",
@@ -56,7 +65,32 @@ class SimpleGeometryCache {
         }
     }
 
-    // Get shared lock for batch operations (RAII)
+    // Set WKB data at its segment-level row offset. Growing inserts can be
+    // acknowledged out of order, so cache layout must follow reserved offsets
+    // instead of callback completion order.
+    void
+    SetData(size_t offset, const char* wkb_data, size_t size) {
+        std::lock_guard<std::shared_mutex> lock(mutex_);
+        if (geometries_.size() <= offset) {
+            geometries_.resize(offset + 1);
+        }
+        if (size == 0 || wkb_data == nullptr) {
+            geometries_[offset] = Geometry();
+            return;
+        }
+        try {
+            geometries_[offset] = Geometry(ctx_, wkb_data, size);
+        } catch (const std::exception& e) {
+            ThrowInfo(UnexpectedError,
+                      "Failed to construct geometry from WKB data: {}",
+                      e.what());
+        }
+    }
+
+    // Hold a shared lock while evaluating cached Geometry objects so their
+    // addresses remain stable. GEOS operations themselves must use the
+    // calling query thread's context rather than the cache construction
+    // context, allowing concurrent readers.
     std::shared_lock<std::shared_mutex>
     AcquireReadLock() const {
         return std::shared_lock<std::shared_mutex>(mutex_);
@@ -76,13 +110,6 @@ class SimpleGeometryCache {
         return geometry.IsValid() ? &geometry : nullptr;
     }
 
-    // Get Geometry by offset (thread-safe read for filtering)
-    const Geometry*
-    GetByOffset(size_t offset) const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return GetByOffsetUnsafe(offset);
-    }
-
     // Get total number of loaded geometries
     size_t
     Size() const {
@@ -98,99 +125,12 @@ class SimpleGeometryCache {
     }
 
  private:
-    mutable std::shared_mutex mutex_;   // For read/write operations
-    std::vector<Geometry> geometries_;  // Direct storage of Geometry objects
-};
-
-// Global cache instance per segment+field
-class SimpleGeometryCacheManager {
- public:
-    static SimpleGeometryCacheManager&
-    Instance() {
-        static SimpleGeometryCacheManager instance;
-        return instance;
-    }
-
-    SimpleGeometryCacheManager() = default;
-
-    SimpleGeometryCache&
-    GetOrCreateCache(int64_t segment_id, FieldId field_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto key = MakeCacheKey(segment_id, field_id);
-        auto it = caches_.find(key);
-        if (it != caches_.end()) {
-            return *(it->second);
-        }
-
-        auto cache = std::make_unique<SimpleGeometryCache>();
-        auto* cache_ptr = cache.get();
-        caches_.emplace(key, std::move(cache));
-        return *cache_ptr;
-    }
-
-    SimpleGeometryCache*
-    GetCache(int64_t segment_id, FieldId field_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto key = MakeCacheKey(segment_id, field_id);
-        auto it = caches_.find(key);
-        if (it != caches_.end()) {
-            return it->second.get();
-        }
-        return nullptr;
-    }
-
-    void
-    RemoveCache(GEOSContextHandle_t ctx, int64_t segment_id, FieldId field_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto key = MakeCacheKey(segment_id, field_id);
-        caches_.erase(key);
-    }
-
-    // Remove all caches for a segment (useful when segment is destroyed)
-    void
-    RemoveSegmentCaches(GEOSContextHandle_t ctx, int64_t segment_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto segment_prefix = std::to_string(segment_id) + "_";
-        auto it = caches_.begin();
-        while (it != caches_.end()) {
-            if (it->first.substr(0, segment_prefix.length()) ==
-                segment_prefix) {
-                it = caches_.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-
-    // Get cache statistics for monitoring
-    struct CacheStats {
-        size_t total_caches = 0;
-        size_t loaded_caches = 0;
-        size_t total_geometries = 0;
-    };
-
-    CacheStats
-    GetStats() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        CacheStats stats;
-        stats.total_caches = caches_.size();
-        for (const auto& [key, cache] : caches_) {
-            if (cache->IsLoaded()) {
-                stats.loaded_caches++;
-                stats.total_geometries += cache->Size();
-            }
-        }
-        return stats;
-    }
-
- private:
-    SimpleGeometryCacheManager(const SimpleGeometryCacheManager&) = delete;
-    SimpleGeometryCacheManager&
-    operator=(const SimpleGeometryCacheManager&) = delete;
-
-    mutable std::mutex mutex_;
-    std::unordered_map<std::string, std::unique_ptr<SimpleGeometryCache>>
-        caches_;
+    // The cache owns the GEOS context used by every cached Geometry. This
+    // lets a shared cache safely outlive the segment/runtime that published
+    // it.
+    GEOSContextHandle_t ctx_;
+    mutable std::shared_mutex mutex_;  // For read/write operations
+    std::vector<Geometry> geometries_;
 };
 
 }  // namespace exec

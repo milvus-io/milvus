@@ -74,6 +74,25 @@ FreeErrorStatus(CStatus& status) {
     }
 }
 
+std::string
+SerializeFlushSchema(const SchemaPtr& schema) {
+    auto schema_proto = schema->ToProto();
+    auto add_system_field = [&](FieldId field_id, const char* name) {
+        for (const auto& field : schema_proto.fields()) {
+            if (field.fieldid() == field_id.get()) {
+                return;
+            }
+        }
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(field_id.get());
+        field->set_name(name);
+        field->set_data_type(milvus::proto::schema::DataType::Int64);
+    };
+    add_system_field(RowFieldID, "RowID");
+    add_system_field(TimestampFieldID, "Timestamp");
+    return schema_proto.SerializeAsString();
+}
+
 CStorageConfig
 get_azure_storage_config() {
     auto endpoint = "core.windows.net";
@@ -241,10 +260,6 @@ TEST_F(StorageTest, AzureErrorClassification) {
 }
 
 TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
-#ifndef BUILD_VORTEX_BRIDGE
-    GTEST_SKIP() << "Vortex support is not enabled";
-#endif
-
     std::string test_dir =
         "/tmp/text_manifest_reader_" +
         std::to_string(
@@ -260,6 +275,7 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto text_fid = schema->AddDebugField("text", DataType::TEXT, true);
     schema->set_primary_field_id(pk_fid);
+    auto flush_schema_blob = SerializeFlushSchema(schema);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     ASSERT_NE(segment, nullptr);
@@ -299,6 +315,8 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
     config.text_field_ids = text_field_ids;
     config.text_lob_paths = text_lob_paths;
     config.num_text_columns = 1;
+    config.schema_blob = flush_schema_blob.data();
+    config.schema_length = static_cast<int64_t>(flush_schema_blob.size());
 
     CFlushResult result{};
     auto status =
@@ -342,6 +360,150 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
               texts[2]);
 
     FreeFlushResult(&result);
+    cleanup();
+}
+
+TEST_F(StorageTest, FlushRecoveredGrowingTextDecodesRemoteAndLocalRefs) {
+    std::string test_dir =
+        "/tmp/text_recovered_growing_flush_" +
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_dir);
+    auto cleanup = [&]() {
+        if (std::filesystem::exists(test_dir)) {
+            std::filesystem::remove_all(test_dir);
+        }
+    };
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugField("text", DataType::TEXT, true);
+    schema->set_primary_field_id(pk_fid);
+    auto flush_schema_blob = SerializeFlushSchema(schema);
+
+    auto insert_batch = [&](SegmentGrowing* segment,
+                            int64_t row_id_begin,
+                            const std::vector<int64_t>& pks,
+                            const std::vector<std::string>& texts) {
+        ASSERT_EQ(pks.size(), texts.size());
+        auto count = static_cast<int64_t>(pks.size());
+        std::vector<int64_t> row_ids(count);
+        std::vector<Timestamp> timestamps(count);
+        for (int64_t i = 0; i < count; ++i) {
+            row_ids[i] = row_id_begin + i;
+            timestamps[i] = 100 + row_id_begin + i;
+        }
+
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        insert_data->set_num_rows(count);
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, count, (*schema)[pk_fid])
+                .release());
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(
+                texts.data(), nullptr, count, (*schema)[text_fid])
+                .release());
+
+        auto offset = segment->PreInsert(count);
+        segment->Insert(offset,
+                        count,
+                        row_ids.data(),
+                        timestamps.data(),
+                        insert_data.get());
+    };
+
+    std::string text_lob_path = test_dir + "/collection/partition/lobs/" +
+                                std::to_string(text_fid.get());
+    auto flush = [&](SegmentGrowing* segment,
+                     int64_t row_count,
+                     const std::string& segment_path,
+                     CFlushResult* result) {
+        int64_t text_field_ids[] = {text_fid.get()};
+        const char* text_lob_paths[] = {text_lob_path.c_str()};
+        CFlushConfig config{};
+        config.segment_path = segment_path.c_str();
+        config.read_version = -1;
+        config.retry_limit = 3;
+        config.text_field_ids = text_field_ids;
+        config.text_lob_paths = text_lob_paths;
+        config.num_text_columns = 1;
+        config.text_inline_threshold = 32;
+        config.schema_blob = flush_schema_blob.data();
+        config.schema_length = static_cast<int64_t>(flush_schema_blob.size());
+        return FlushGrowingSegmentData(segment, 0, row_count, &config, result);
+    };
+
+    std::vector<std::string> recovered_values = {
+        "remote inline value",
+        std::string(70 * 1024, 'r') + " remote-tail-token"};
+    auto original = CreateGrowingSegment(schema, empty_index_meta);
+    insert_batch(original.get(), 0, {100, 101}, recovered_values);
+
+    std::string original_segment_path =
+        test_dir + "/collection/partition/segment_original";
+    CFlushResult original_result{};
+    auto status = flush(original.get(),
+                        recovered_values.size(),
+                        original_segment_path,
+                        &original_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    std::string original_manifest =
+        "{\"base_path\":\"" + original_segment_path +
+        "\",\"ver\":" + std::to_string(original_result.committed_version) + "}";
+
+    auto recovered = CreateGrowingSegment(schema, empty_index_meta);
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(2);
+    load_info.set_num_of_rows(recovered_values.size());
+    load_info.set_manifest_path(original_manifest);
+    recovered->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(recovered->Load(trace_ctx, nullptr));
+
+    std::vector<std::string> local_values = {
+        "local inline value",
+        std::string(70 * 1024, 'l') + " local-tail-token"};
+    insert_batch(
+        recovered.get(), recovered_values.size(), {102, 103}, local_values);
+
+    std::vector<int64_t> offsets = {0, 1, 2, 3};
+    auto logical = recovered->bulk_subscript(
+        nullptr, text_fid, offsets.data(), offsets.size());
+    std::vector<std::string> expected = recovered_values;
+    expected.insert(expected.end(), local_values.begin(), local_values.end());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(logical->scalars().string_data().data(i), expected[i]);
+    }
+
+    std::string recovered_segment_path =
+        test_dir + "/collection/partition/segment_recovered";
+    CFlushResult recovered_result{};
+    status = flush(recovered.get(),
+                   expected.size(),
+                   recovered_segment_path,
+                   &recovered_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+    auto field_meta = gen_field_meta(
+        1, 2, 3, text_fid.get(), DataType::TEXT, DataType::NONE, true);
+    std::string recovered_manifest =
+        "{\"base_path\":\"" + recovered_segment_path +
+        "\",\"ver\":" + std::to_string(recovered_result.committed_version) +
+        "}";
+    auto text_datas = GetTextFieldDatasFromManifest(
+        recovered_manifest, properties, field_meta);
+    ASSERT_EQ(text_datas.size(), 1);
+    ASSERT_EQ(text_datas[0]->get_num_rows(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        ASSERT_TRUE(text_datas[0]->is_valid(i));
+        EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(i)),
+                  expected[i]);
+    }
+
+    FreeFlushResult(&original_result);
+    FreeFlushResult(&recovered_result);
     cleanup();
 }
 

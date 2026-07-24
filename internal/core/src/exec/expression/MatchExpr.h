@@ -41,6 +41,10 @@ class PhyMatchFilterExpr : public Expr {
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           expr_(expr),
           segment_(segment),
+          // Capture the segment's schema once at construction so every Eval
+          // batch of this query resolves fields against the same generation,
+          // matching SegmentExpr::CaptureSchemaSnapshot().
+          schema_snapshot_(segment->get_schema()),
           active_count_(active_count),
           batch_size_(batch_size) {
         size_per_chunk_ = segment_->size_per_chunk();
@@ -93,6 +97,7 @@ class PhyMatchFilterExpr : public Expr {
  private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
+    SchemaPtr schema_snapshot_;
     int64_t active_count_;
     int64_t current_pos_{0};
     int64_t batch_size_;

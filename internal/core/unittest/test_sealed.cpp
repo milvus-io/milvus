@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -42,6 +43,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
 #include "common/LoadInfo.h"
 #include "common/PrometheusClient.h"
@@ -78,6 +80,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/TextLobReader.h"
 #include "segcore/Types.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
@@ -89,6 +92,7 @@
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -100,6 +104,17 @@ using namespace milvus::segcore;
 using milvus::segcore::LoadIndexInfo;
 
 namespace {
+
+void
+AddStorageV3SystemFields(const SchemaPtr& schema) {
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+}
 
 bool
 GetFieldBit(const BitsetType& bitset, FieldId field_id) {
@@ -4409,6 +4424,405 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
 }
 
 TEST(SealedSegmentCowState,
+     DerivedFieldResourcesFollowRuntimeSnapshotLifetime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto geometry = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    auto text = schema->AddDebugField("text", DataType::TEXT);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto first_geometry_cache =
+        std::make_shared<milvus::exec::SimpleGeometryCache>();
+    auto first_text_reader = GetGlobalTextLobReaderRegistry().AcquireHandle(
+        "/tmp/sealed-runtime-text-reader-v1");
+    auto first_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    first_runtime->geometry_caches[geometry] = first_geometry_cache;
+    first_runtime->text_lob_readers[text] = first_text_reader;
+    sealed->TestPublishRuntimeResourceState(std::move(first_runtime));
+
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(old_state->runtime->geometry_caches.at(geometry),
+              first_geometry_cache);
+    ASSERT_EQ(old_state->runtime->text_lob_readers.at(text), first_text_reader);
+
+    auto replacement_geometry_cache =
+        std::make_shared<milvus::exec::SimpleGeometryCache>();
+    auto replacement_text_reader =
+        GetGlobalTextLobReaderRegistry().AcquireHandle(
+            "/tmp/sealed-runtime-text-reader-v2");
+    auto replacement_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    replacement_runtime->geometry_caches[geometry] = replacement_geometry_cache;
+    replacement_runtime->text_lob_readers[text] = replacement_text_reader;
+    sealed->TestPublishRuntimeResourceState(std::move(replacement_runtime));
+
+    auto replacement_state = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(replacement_state->runtime->geometry_caches.at(geometry),
+              replacement_geometry_cache);
+    EXPECT_EQ(replacement_state->runtime->text_lob_readers.at(text),
+              replacement_text_reader);
+    EXPECT_EQ(old_state->runtime->geometry_caches.at(geometry),
+              first_geometry_cache);
+    EXPECT_EQ(old_state->runtime->text_lob_readers.at(text), first_text_reader);
+
+    sealed->DropFieldData(geometry);
+    auto after_geometry_drop = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(after_geometry_drop->runtime->geometry_caches.count(geometry), 0);
+    EXPECT_EQ(old_state->runtime->geometry_caches.at(geometry),
+              first_geometry_cache);
+
+    sealed->DropFieldData(text);
+    auto after_text_drop = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(after_text_drop->runtime->text_lob_readers.count(text), 0);
+    EXPECT_EQ(old_state->runtime->text_lob_readers.at(text), first_text_reader);
+}
+
+TEST(SealedSegmentCowState,
+     GeometryCacheReplacementPublishesANewImmutableCache) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto geometry = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 4;
+    auto dataset = DataGen(schema, row_count);
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_geometry_cache(true);
+    auto segment = CreateSealedSegment(
+        schema, empty_index_meta, /*segment_id=*/71001, config);
+    LoadGeneratedDataIntoSegment(
+        dataset, segment.get(), /*with_mmap=*/false, {geometry.get()});
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto make_geometry_data = [&](const char* wkt) {
+        std::vector<std::string> values;
+        values.reserve(row_count);
+        auto ctx = GEOS_init_r();
+        for (int64_t i = 0; i < row_count; ++i) {
+            values.emplace_back(Geometry(ctx, wkt).to_wkb_string());
+        }
+        GEOS_finish_r(ctx);
+        auto field_data = storage::CreateFieldData(
+            storage::DataType::GEOMETRY, storage::DataType::NONE, false);
+        field_data->FillFieldData(values.data(), values.size());
+        return field_data;
+    };
+
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto first_load = PrepareSingleFieldInsertBinlog(
+        1, 1, 71001, geometry.get(), {make_geometry_data("POINT (0 0)")}, cm);
+    sealed->LoadFieldData(first_load);
+
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    auto old_cache = old_state->runtime->geometry_caches.at(geometry);
+    ASSERT_NE(old_cache, nullptr);
+    ASSERT_EQ(old_cache->Size(), row_count);
+    {
+        auto lock = old_cache->AcquireReadLock();
+        ASSERT_NE(old_cache->GetByOffsetUnsafe(0), nullptr);
+        EXPECT_EQ(old_cache->GetByOffsetUnsafe(0)->to_wkt_string().find("10"),
+                  std::string::npos);
+    }
+
+    auto replacement_load = PrepareSingleFieldInsertBinlog(
+        1, 1, 71002, geometry.get(), {make_geometry_data("POINT (10 10)")}, cm);
+    sealed->TestLoadFieldData(replacement_load, /*is_replace=*/true);
+
+    auto replacement_state = sealed->TestGetPublishedStateSnapshot();
+    auto replacement_cache =
+        replacement_state->runtime->geometry_caches.at(geometry);
+    ASSERT_NE(replacement_cache, nullptr);
+    EXPECT_NE(replacement_cache, old_cache);
+    EXPECT_EQ(replacement_cache->Size(), row_count);
+    EXPECT_EQ(old_cache->Size(), row_count);
+    {
+        auto lock = replacement_cache->AcquireReadLock();
+        ASSERT_NE(replacement_cache->GetByOffsetUnsafe(0), nullptr);
+        EXPECT_NE(replacement_cache->GetByOffsetUnsafe(0)->to_wkt_string().find(
+                      "10 10"),
+                  std::string::npos);
+    }
+    {
+        auto lock = old_cache->AcquireReadLock();
+        EXPECT_EQ(old_cache->GetByOffsetUnsafe(0)->to_wkt_string().find("10"),
+                  std::string::npos);
+    }
+
+    sealed->DropFieldData(geometry);
+    EXPECT_EQ(sealed->GetGeometryCache(geometry), nullptr);
+    EXPECT_EQ(old_cache->Size(), row_count);
+    EXPECT_EQ(replacement_cache->Size(), row_count);
+}
+
+TEST(SealedSegmentCowState, TextReadersAreSharedAcrossSegmentRuntimes) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto text = schema->AddDebugField("text", DataType::TEXT);
+    schema->set_primary_field_id(pk);
+    const std::string lob_base_path = "/tmp/shared-sealed-runtime-text-reader";
+
+    auto first_segment = CreateSealedSegment(schema);
+    auto second_segment = CreateSealedSegment(schema);
+    auto* first = dynamic_cast<ChunkedSegmentSealedImpl*>(first_segment.get());
+    auto* second =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(second_segment.get());
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+
+    first->SetTextLobPathForTesting(text, lob_base_path);
+    second->SetTextLobPathForTesting(text, lob_base_path);
+    auto first_state = first->TestGetPublishedStateSnapshot();
+    auto second_state = second->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(first_state->runtime->text_lob_readers.at(text),
+              second_state->runtime->text_lob_readers.at(text));
+
+    std::weak_ptr<SharedTextLobReader> weak =
+        first_state->runtime->text_lob_readers.at(text);
+    first_state.reset();
+    first_segment.reset();
+    EXPECT_FALSE(weak.expired());
+
+    second_state.reset();
+    second_segment.reset();
+    EXPECT_TRUE(weak.expired());
+
+    auto replacement =
+        GetGlobalTextLobReaderRegistry().AcquireHandle(lob_base_path);
+    EXPECT_NE(replacement, nullptr);
+}
+
+TEST(SealedSegmentCowState, SchemaOnlyTextFieldDoesNotOwnPartitionLobReader) {
+    auto stored_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(stored_schema);
+    auto stored_pk = stored_schema->AddDebugField("pk", DataType::INT64);
+    stored_schema->set_primary_field_id(stored_pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "sealed_schema_only_text_reader")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        stored_schema, 1, 2, 1, TestLocalPath, base_path);
+
+    auto query_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(query_schema);
+    auto query_pk = query_schema->AddDebugField("pk", DataType::INT64);
+    auto text =
+        query_schema->AddDebugField("text", DataType::TEXT, /*nullable=*/true);
+    query_schema->set_primary_field_id(query_pk);
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(71003);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows());
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment = CreateSealedSegment(
+        query_schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto loaded = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(loaded->runtime, nullptr);
+    EXPECT_EQ(loaded->runtime->text_lob_readers.count(text), 0);
+
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&op_ctx, load_info));
+    auto reopened = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(reopened->runtime, nullptr);
+    EXPECT_EQ(reopened->runtime->text_lob_readers.count(text), 0);
+
+    // Regression: the schema-only TEXT column stores plain strings (all
+    // NULL here) and must stay readable without a LOB reader instead of
+    // asserting "TEXT field has no LOB reader".
+    auto total_rows = test_data.TotalRows();
+    std::vector<int64_t> offsets(total_rows);
+    for (int64_t i = 0; i < total_rows; ++i) {
+        offsets[i] = i;
+    }
+    std::unique_ptr<milvus::DataArray> arr;
+    ASSERT_NO_THROW(arr = sealed->bulk_subscript(
+                        &op_ctx, text, offsets.data(), total_rows));
+    ASSERT_NE(arr, nullptr);
+    ASSERT_EQ(arr->valid_data_size(), total_rows);
+    for (int64_t i = 0; i < total_rows; ++i) {
+        EXPECT_FALSE(arr->valid_data(i));
+    }
+
+    std::filesystem::remove_all(base_path);
+}
+
+// Regression: an enable_match TEXT field added by schema change has no
+// manifest column and therefore no LOB reader; text-index creation during
+// Load/Reopen must index the plain (all NULL) backfilled column instead of
+// asserting on the missing reader and failing the whole segment load.
+TEST(SealedSegmentCowState,
+     SchemaOnlyTextFieldBuildsMatchIndexWithoutLobReader) {
+    auto stored_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(stored_schema);
+    auto stored_pk = stored_schema->AddDebugField("pk", DataType::INT64);
+    stored_schema->set_primary_field_id(stored_pk);
+
+    auto base_path =
+        (std::filesystem::path(TestLocalPath) / "sealed_schema_only_text_match")
+            .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        stored_schema, 1, 2, 1, TestLocalPath, base_path);
+
+    auto query_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(query_schema);
+    auto query_pk = query_schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text = query_schema->AddDebugVarcharField(FieldName("text"),
+                                                   DataType::TEXT,
+                                                   /*max_length=*/65535,
+                                                   /*nullable=*/true,
+                                                   /*enable_match=*/true,
+                                                   /*enable_analyzer=*/true,
+                                                   analyzer_params,
+                                                   std::nullopt);
+    query_schema->set_primary_field_id(query_pk);
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(71005);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows());
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment = CreateSealedSegment(
+        query_schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot->runtime, nullptr);
+    EXPECT_EQ(snapshot->runtime->text_lob_readers.count(text), 0);
+
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&op_ctx, load_info));
+
+    auto pw = sealed->GetTextIndex(&op_ctx, text);
+    auto* index = pw.get();
+    ASSERT_NE(index, nullptr);
+    // All rows are NULL for the backfilled field: nothing matches.
+    EXPECT_EQ(index->MatchQuery("anything", 1).count(), 0);
+
+    std::filesystem::remove_all(base_path);
+}
+
+TEST(SealedSegmentCowState, ExternalTextFieldDoesNotOwnPartitionLobReader) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/external-text");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+    pk_field->set_external_field("pk_col");
+
+    auto* text_field = schema_proto.add_fields();
+    text_field->set_fieldid(101);
+    text_field->set_name("text");
+    text_field->set_data_type(milvus::proto::schema::DataType::Text);
+    text_field->set_nullable(true);
+    text_field->set_external_field("text_col");
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    auto text = FieldId(101);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_info_proto;
+    load_info_proto.set_collectionid(1);
+    load_info_proto.set_partitionid(2);
+    load_info_proto.set_segmentid(71004);
+    load_info_proto.set_storageversion(STORAGE_V3);
+    load_info_proto.set_manifest_path(
+        R"({"base_path":"/tmp/external-text/1/2/71004"})");
+    SegmentLoadInfo load_info(load_info_proto, schema);
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns.emplace_back("text_col");
+    column_groups->emplace_back(std::move(column_group));
+    load_info.SetColumnGroupsForTesting(std::move(column_groups));
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->fields[text] = nullptr;
+    runtime->text_lob_readers[text] =
+        GetGlobalTextLobReaderRegistry().AcquireHandle(
+            "/tmp/stale-external-text-reader");
+    std::weak_ptr<SharedTextLobReader> stale_reader =
+        runtime->text_lob_readers.at(text);
+
+    ChunkedSegmentSealedImpl::PublishedSegmentState staged;
+    staged.schema = schema;
+    staged.load_info = std::make_shared<const SegmentLoadInfo>(load_info);
+    staged.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+
+    ASSERT_NO_THROW(sealed->TestInitTextLobReaders(
+        load_info, schema, runtime.get(), &staged));
+    EXPECT_EQ(runtime->text_lob_readers.count(text), 0);
+    EXPECT_TRUE(stale_reader.expired());
+}
+
+TEST(SealedSegmentCowState, MalformedTextManifestPathIsDataFormatBroken) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto text = schema->AddDebugField("text", DataType::TEXT);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_info_proto;
+    load_info_proto.set_storageversion(STORAGE_V3);
+    load_info_proto.set_manifest_path("{malformed-json");
+    SegmentLoadInfo load_info(load_info_proto, schema);
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns.emplace_back(std::to_string(text.get()));
+    column_groups->emplace_back(std::move(column_group));
+    load_info.SetColumnGroupsForTesting(std::move(column_groups));
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->fields[text] = nullptr;
+    ChunkedSegmentSealedImpl::PublishedSegmentState staged;
+    staged.schema = schema;
+    staged.load_info = std::make_shared<const SegmentLoadInfo>(load_info);
+    staged.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+
+    try {
+        sealed->TestInitTextLobReaders(
+            load_info, schema, runtime.get(), &staged);
+        FAIL() << "expected malformed manifest path error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+    }
+}
+
+TEST(SealedSegmentCowState,
      DropFieldDataPreservesAvgSizeForSchemaRetainedField) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -5277,7 +5691,14 @@ TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
 
     auto after = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(after, nullptr);
-    EXPECT_EQ(after->runtime, nullptr);
+    // The publish boundary (ClonePublishedState) normalizes a cleared runtime
+    // to a fresh empty RuntimeResourceState rather than nullptr; what clearing
+    // guarantees is that no derived resources survive into the new state.
+    ASSERT_NE(after->runtime, nullptr);
+    EXPECT_TRUE(after->runtime->fields.empty());
+    EXPECT_TRUE(after->runtime->scalar_indexings.empty());
+    EXPECT_TRUE(after->runtime->text_lob_readers.empty());
+    EXPECT_TRUE(after->runtime->geometry_caches.empty());
     EXPECT_FALSE(GetFieldBit(after->field_data_ready_bitset, payload));
 }
 

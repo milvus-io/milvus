@@ -18,6 +18,7 @@
 #include <folly/Try.h>
 #include <simdjson.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -133,7 +134,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/TextColumnCache.h"
+#include "segcore/TextLobReader.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
@@ -992,7 +993,8 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
     state->vec_binlog_config = current->vec_binlog_config;
     state->ngram_fields = current->ngram_fields;
     state->ngram_indexings = current->ngram_indexings;
-    state->text_lob_paths = current->text_lob_paths;
+    state->text_lob_readers = current->text_lob_readers;
+    state->geometry_caches = current->geometry_caches;
     state->text_indexes = current->text_indexes;
     state->json_indices = current->json_indices;
     state->json_stats = current->json_stats;
@@ -1393,7 +1395,8 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     runtime->vec_binlog_config = current.vec_binlog_config;
     runtime->ngram_fields = current.ngram_fields;
     runtime->ngram_indexings = current.ngram_indexings;
-    runtime->text_lob_paths = current.text_lob_paths;
+    runtime->text_lob_readers = current.text_lob_readers;
+    runtime->geometry_caches = current.geometry_caches;
     runtime->text_indexes = current.text_indexes;
     runtime->json_indices = current.json_indices;
     runtime->json_stats = current.json_stats;
@@ -1960,7 +1963,10 @@ ChunkedSegmentSealedImpl::PublishState(
         return;
     }
     AssertInfo(publish_lease.valid(), "online publication requires a lease");
-    std::atomic_store(&published_state_, state);
+    auto next = ClonePublishedState(state);
+    std::atomic_store(
+        &published_state_,
+        std::const_pointer_cast<const PublishedSegmentState>(std::move(next)));
     publish_lease.MarkPublished();
 }
 
@@ -3566,15 +3572,25 @@ ChunkedSegmentSealedImpl::GetSkipIndexSnapshot() const {
     return runtime->skip_index;
 }
 
+std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+ChunkedSegmentSealedImpl::GetGeometryCache(FieldId field_id) const {
+    auto runtime = CaptureRuntimeResourceState();
+    if (runtime == nullptr) {
+        return nullptr;
+    }
+    auto it = runtime->geometry_caches.find(field_id);
+    return it != runtime->geometry_caches.end() ? it->second : nullptr;
+}
+
 int64_t
 ChunkedSegmentSealedImpl::get_deleted_count() const {
     std::shared_lock lck(mutex_);
     return deleted_record_.size();
 }
 
-const Schema&
+SchemaPtr
 ChunkedSegmentSealedImpl::get_schema() const {
-    return *CapturePublishedState()->schema;
+    return CapturePublishedState()->schema;
 }
 
 void
@@ -4005,6 +4021,21 @@ ChunkedSegmentSealedImpl::DropFieldData(
     if (runtime != nullptr) {
         runtime->fields.erase(field_id);
         runtime->array_offsets_map.erase(field_id);
+        // An R-Tree is only a coarse index (HasRawData() is false). Exact GIS
+        // refinement still needs the derived Geometry cache after the raw
+        // column is retired. Keep it while the logical field and its scalar
+        // index remain published; schema removal or dropping the last index
+        // retires it below.
+        const bool geometry_cache_still_needed =
+            schema_has_field &&
+            schema_snapshot->operator[](field_id).get_data_type() ==
+                DataType::GEOMETRY &&
+            runtime->scalar_indexings.find(field_id) !=
+                runtime->scalar_indexings.end();
+        if (!geometry_cache_still_needed) {
+            runtime->geometry_caches.erase(field_id);
+        }
+        runtime->text_lob_readers.erase(field_id);
         runtime->mmap_field_ids.erase(field_id);
         // Average size describes the retrievable field value, not the
         // resident raw column. Keep it when an index with raw data remains
@@ -4019,6 +4050,16 @@ ChunkedSegmentSealedImpl::DropFieldData(
         auto next_runtime = CloneRuntimeResourceState(snapshot->runtime);
         next_runtime->fields.erase(field_id);
         next_runtime->array_offsets_map.erase(field_id);
+        const bool geometry_cache_still_needed =
+            schema_has_field &&
+            schema_snapshot->operator[](field_id).get_data_type() ==
+                DataType::GEOMETRY &&
+            next_runtime->scalar_indexings.find(field_id) !=
+                next_runtime->scalar_indexings.end();
+        if (!geometry_cache_still_needed) {
+            next_runtime->geometry_caches.erase(field_id);
+        }
+        next_runtime->text_lob_readers.erase(field_id);
         next_runtime->mmap_field_ids.erase(field_id);
         // See the staged-runtime branch above: only schema removal retires
         // field-level size metadata.
@@ -4053,10 +4094,16 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
     if (runtime != nullptr) {
         cancel_and_erase_scalar_index(runtime->scalar_indexings, field_id);
         runtime->ngram_fields.erase(field_id);
+        if (runtime->fields.find(field_id) == runtime->fields.end()) {
+            runtime->geometry_caches.erase(field_id);
+        }
     } else {
         auto next_runtime = CloneMutableRuntimeResourceState();
         cancel_and_erase_scalar_index(next_runtime->scalar_indexings, field_id);
         next_runtime->ngram_fields.erase(field_id);
+        if (next_runtime->fields.find(field_id) == next_runtime->fields.end()) {
+            next_runtime->geometry_caches.erase(field_id);
+        }
         DropVectorIndexing(*next_runtime, field_id);
         next_runtime->vec_binlog_config.erase(field_id);
         PublishIndexDroppedLocked(
@@ -4789,10 +4836,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
-    // Clean up geometry cache for all fields in this segment
-    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
-
     if (ctx_) {
         GEOS_finish_r(ctx_);
         ctx_ = nullptr;
@@ -5121,7 +5164,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
 
 static std::vector<std::string>
 ReadTextLobBatch(
-    const std::string& lob_base_path,
+    const std::shared_ptr<SharedTextLobReader>& text_lob_reader,
     const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
     if (encoded_refs.empty()) {
         return {};
@@ -5131,28 +5174,21 @@ ReadTextLobBatch(
                           .GetProperties();
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
-    auto& cache = GetGlobalTextColumnCache();
-    return cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
+    return text_lob_reader->ReadBatch(fs, *properties, encoded_refs);
 }
 
 void
 ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     milvus::OpContext* op_ctx,
-    FieldId field_id,
+    const std::shared_ptr<SharedTextLobReader>& text_lob_reader,
     const ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
-    auto snapshot = CapturePublishedState();
-    auto runtime = snapshot->runtime != nullptr ? snapshot->runtime
-                                                : BuildRuntimeResourceState();
-    auto it = runtime->text_lob_paths.find(field_id);
-    AssertInfo(it != runtime->text_lob_paths.end(),
-               "TEXT field {} has no LOB path. TEXT type requires StorageV3 "
+    AssertInfo(text_lob_reader != nullptr,
+               "TEXT field has no LOB reader. TEXT type requires StorageV3 "
                "with manifest. segment_id={}",
-               field_id.get(),
                id_);
-    const auto& lob_base_path = it->second;
 
     std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
     std::vector<int64_t> valid_indices;
@@ -5177,7 +5213,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
         return;
     }
 
-    auto texts = ReadTextLobBatch(lob_base_path, encoded_refs);
+    auto texts = ReadTextLobBatch(text_lob_reader, encoded_refs);
     for (size_t i = 0; i < valid_indices.size() && i < texts.size(); i++) {
         *dst->Mutable(valid_indices[i]) = std::move(texts[i]);
     }
@@ -5332,16 +5368,16 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                               id_,
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
-            if (field_meta.get_data_type() == DataType::TEXT) {
-                const auto* path_map = &target_runtime->text_lob_paths;
-                auto it = path_map->find(field_id);
-                AssertInfo(it != path_map->end(),
-                           "TEXT field {} has no LOB path. TEXT type "
-                           "requires StorageV3 with manifest. segment_id={}",
-                           field_id.get(),
-                           id_);
-
-                const auto& lob_base_path = it->second;
+            // A TEXT column needs LOB decoding only when it was loaded from
+            // a manifest column group and therefore has a registered reader.
+            // Schema-only / default-filled TEXT columns store plain strings
+            // and are indexed like any other string column below.
+            auto text_lob_it =
+                field_meta.get_data_type() == DataType::TEXT
+                    ? target_runtime->text_lob_readers.find(field_id)
+                    : target_runtime->text_lob_readers.end();
+            if (text_lob_it != target_runtime->text_lob_readers.end()) {
+                auto text_lob_reader = text_lob_it->second;
 
                 struct TextIndexEntry {
                     size_t offset;
@@ -5355,7 +5391,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     if (entries.empty()) {
                         return;
                     }
-                    auto texts = ReadTextLobBatch(lob_base_path, encoded_refs);
+                    auto texts =
+                        ReadTextLobBatch(text_lob_reader, encoded_refs);
                     AssertInfo(texts.size() == encoded_refs.size(),
                                "TEXT field {} LOB batch read returned {} "
                                "texts for {} refs. segment_id={}",
@@ -5834,23 +5871,33 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::TEXT: {
-            // TEXT type is only supported in StorageV3 with LOB files.
+            // A TEXT column carries LOB references only when it was loaded
+            // from a manifest column group, in which case InitTextLobReaders
+            // registered a reader in the runtime state. Schema-only /
+            // default-filled TEXT columns (e.g. a field added via schema
+            // change) store plain strings and are read like VARCHAR.
             auto runtime = snapshot->runtime != nullptr
                                ? snapshot->runtime
                                : BuildRuntimeResourceState();
-            auto it = runtime->text_lob_paths.find(field_id);
-            AssertInfo(it != runtime->text_lob_paths.end(),
-                       "TEXT field {} has no LOB path. TEXT type requires "
-                       "StorageV3 with manifest. segment_id={}",
-                       field_id.get(),
-                       id_);
-            bulk_subscript_text_impl(
-                op_ctx,
-                field_id,
-                column.get(),
-                seg_offsets,
-                count,
-                ret->mutable_scalars()->mutable_string_data()->mutable_data());
+            auto it = runtime->text_lob_readers.find(field_id);
+            if (it != runtime->text_lob_readers.end()) {
+                bulk_subscript_text_impl(op_ctx,
+                                         it->second,
+                                         column.get(),
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_string_data()
+                                             ->mutable_data());
+            } else {
+                bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                     column.get(),
+                                                     seg_offsets,
+                                                     count,
+                                                     ret->mutable_scalars()
+                                                         ->mutable_string_data()
+                                                         ->mutable_data());
+            }
             break;
         }
 
@@ -6968,10 +7015,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     generate_interim_index(field_id, num_rows, column, op_ctx, committer);
 
+    std::shared_ptr<const milvus::exec::SimpleGeometryCache> geometry_cache;
     if (!SystemProperty::Instance().IsSystem(field_id) &&
         data_type == DataType::GEOMETRY &&
         segcore_config_.get_enable_geometry_cache()) {
-        LoadGeometryCache(field_id, column);
+        geometry_cache = BuildGeometryCache(field_id, column);
     }
 
     auto& field_meta = schema_snapshot->operator[](field_id);
@@ -7027,6 +7075,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             if (is_primary_field) {
                 target_runtime.pk_index_slot = pk_index_slot;
                 target_runtime.virtual_pk2offset.reset();
+            }
+
+            if (geometry_cache != nullptr) {
+                target_runtime.geometry_caches.insert_or_assign(field_id,
+                                                                geometry_cache);
+            } else if (is_replace) {
+                target_runtime.geometry_caches.erase(field_id);
             }
 
             if (is_replace) {
@@ -7269,8 +7324,7 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (segment_load_info.HasManifestPath()) {
-        InitTextLobPaths(
-            segment_load_info.GetManifestPath(), schema_snapshot, committer);
+        InitTextLobReaders(segment_load_info, schema_snapshot, committer);
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
@@ -7421,6 +7475,22 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
     }
     committer.Commit(
         [&](RuntimeResourceState& runtime, PublishedSegmentState&) {
+            for (auto it = runtime.text_lob_readers.begin();
+                 it != runtime.text_lob_readers.end();) {
+                if (!field_exists_in_schema(schema_snapshot, it->first)) {
+                    it = runtime.text_lob_readers.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (auto it = runtime.geometry_caches.begin();
+                 it != runtime.geometry_caches.end();) {
+                if (!field_exists_in_schema(schema_snapshot, it->first)) {
+                    it = runtime.geometry_caches.erase(it);
+                } else {
+                    ++it;
+                }
+            }
             for (auto it = runtime.text_indexes.begin();
                  it != runtime.text_indexes.end();) {
                 if (!field_exists_in_schema(schema_snapshot, it->first)) {
@@ -7871,14 +7941,14 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
     });
 }
 
-void
-ChunkedSegmentSealedImpl::LoadGeometryCache(
-    FieldId field_id, const std::shared_ptr<ChunkedColumnInterface>& column) {
+std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+ChunkedSegmentSealedImpl::BuildGeometryCache(
+    FieldId field_id,
+    const std::shared_ptr<ChunkedColumnInterface>& column) const {
     try {
-        // Get geometry cache for this segment+field
-        auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance()
-                .GetOrCreateCache(get_segment_id(), field_id);
+        auto geometry_cache =
+            std::make_shared<milvus::exec::SimpleGeometryCache>();
+        geometry_cache->Reserve(column->NumRows());
 
         // Iterate through all chunks and collect WKB data
         auto num_chunks = column->num_chunks();
@@ -7892,11 +7962,11 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
                 if (valid_data.empty() || valid_data[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data.data(), wkb_data.size());
+                    geometry_cache->AppendData(wkb_data.data(),
+                                               wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendData(nullptr, 0);
                 }
             }
         }
@@ -7907,7 +7977,8 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
             "{} geometries",
             get_segment_id(),
             field_id.get(),
-            geometry_cache.Size());
+            geometry_cache->Size());
+        return geometry_cache;
 
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
@@ -7973,94 +8044,92 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
 }
 
 void
-ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
-                                           const SchemaPtr& schema_snapshot,
-                                           RuntimeResourceState* runtime) {
-    AssertInfo(runtime != nullptr,
-               "runtime must not be null when initializing TEXT LOB paths for "
-               "segment {}",
-               id_);
-
+ChunkedSegmentSealedImpl::InitTextLobReaders(
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot,
+    StagedStateCommitter& committer) {
+    std::unordered_set<FieldId> manifest_text_fields;
     std::vector<FieldId> text_field_ids;
-    for (auto& [field_id, field_meta] : schema_snapshot->get_fields()) {
-        if (field_meta.get_data_type() == DataType::TEXT) {
-            text_field_ids.push_back(field_id);
+    auto column_groups = segment_load_info.GetColumnGroups();
+    // External TEXT columns contain ordinary Arrow strings. Only internal V3
+    // TEXT columns contain encoded partition-level LOB references.
+    if (!schema_snapshot->is_external_collection() &&
+        column_groups != nullptr) {
+        for (const auto& column_group : *column_groups) {
+            if (column_group == nullptr) {
+                continue;
+            }
+            for (const auto& column : column_group->columns) {
+                auto field_id = schema_snapshot->ResolveColumnFieldId(column);
+                if (!schema_snapshot->has_field(field_id) ||
+                    schema_snapshot->operator[](field_id).get_data_type() !=
+                        DataType::TEXT ||
+                    !manifest_text_fields.insert(field_id).second) {
+                    continue;
+                }
+                text_field_ids.push_back(field_id);
+            }
         }
     }
 
-    if (text_field_ids.empty()) {
-        return;
-    }
-
-    std::string segment_base_path;
-    try {
-        nlohmann::json j = nlohmann::json::parse(manifest_path);
-        segment_base_path = j.at("base_path").get<std::string>();
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to parse manifest path for TEXT columns: {}",
-                  e.what());
-    }
-
-    // segment_base_path format: {root}/{collectionID}/{partitionID}/{segmentID}
-    // lob_base_path format: {root}/{collectionID}/{partitionID}/lobs/{field_id}
-    std::filesystem::path segment_fs_path(segment_base_path);
-    std::filesystem::path partition_path = segment_fs_path.parent_path();
-
-    for (auto field_id : text_field_ids) {
-        std::filesystem::path lob_base_path =
-            partition_path / "lobs" / std::to_string(field_id.get());
-        runtime->text_lob_paths[field_id] = lob_base_path.string();
-        LOG_INFO("Initialized TEXT LOB path for segment {} field {}: {}",
-                 id_,
-                 field_id.get(),
-                 lob_base_path.string());
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
-                                           const SchemaPtr& schema_snapshot,
-                                           StagedStateCommitter& committer) {
-    std::vector<FieldId> text_field_ids;
-    for (auto& [field_id, field_meta] : schema_snapshot->get_fields()) {
-        if (field_meta.get_data_type() == DataType::TEXT) {
-            text_field_ids.push_back(field_id);
+    std::filesystem::path partition_path;
+    std::shared_ptr<arrow::fs::FileSystem> fs;
+    std::shared_ptr<milvus_storage::api::Properties> properties;
+    if (!text_field_ids.empty()) {
+        std::string segment_base_path;
+        try {
+            nlohmann::json j =
+                nlohmann::json::parse(segment_load_info.GetManifestPath());
+            segment_base_path = j.at("base_path").get<std::string>();
+        } catch (const std::exception& e) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Failed to parse manifest path for TEXT columns: {}",
+                      e.what());
         }
+
+        std::filesystem::path segment_fs_path(segment_base_path);
+        partition_path = segment_fs_path.parent_path();
+        fs = GetDefaultArrowFileSystem();
+        properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                         .GetProperties();
+        AssertInfo(properties != nullptr,
+                   "Loon FFI properties is not initialized for TEXT fields. "
+                   "segment_id={}",
+                   id_);
     }
 
-    if (text_field_ids.empty()) {
-        return;
-    }
-
-    std::string segment_base_path;
-    try {
-        nlohmann::json j = nlohmann::json::parse(manifest_path);
-        segment_base_path = j.at("base_path").get<std::string>();
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to parse manifest path for TEXT columns: {}",
-                  e.what());
-    }
-
-    std::filesystem::path segment_fs_path(segment_base_path);
-    std::filesystem::path partition_path = segment_fs_path.parent_path();
-    std::vector<std::pair<FieldId, std::string>> lob_paths;
-    lob_paths.reserve(text_field_ids.size());
-    for (auto field_id : text_field_ids) {
-        std::filesystem::path lob_base_path =
-            partition_path / "lobs" / std::to_string(field_id.get());
-        lob_paths.emplace_back(field_id, lob_base_path.string());
-    }
-
-    committer.Commit([&](RuntimeResourceState& runtime,
+    committer.Commit([this,
+                      text_field_ids = std::move(text_field_ids),
+                      manifest_text_fields = std::move(manifest_text_fields),
+                      partition_path = std::move(partition_path),
+                      fs = std::move(fs),
+                      properties = std::move(properties)](
+                         RuntimeResourceState& runtime,
                          PublishedSegmentState&) {
-        for (const auto& [field_id, lob_path] : lob_paths) {
-            runtime.text_lob_paths[field_id] = lob_path;
-            LOG_INFO("Initialized TEXT LOB path for segment {} field {}: {}",
+        for (auto it = runtime.text_lob_readers.begin();
+             it != runtime.text_lob_readers.end();) {
+            if (runtime.fields.find(it->first) == runtime.fields.end() ||
+                manifest_text_fields.find(it->first) ==
+                    manifest_text_fields.end()) {
+                it = runtime.text_lob_readers.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        for (auto field_id : text_field_ids) {
+            if (runtime.fields.find(field_id) == runtime.fields.end()) {
+                continue;
+            }
+            auto lob_base_path =
+                partition_path / "lobs" / std::to_string(field_id.get());
+            auto text_lob_reader = GetGlobalTextLobReaderRegistry().Acquire(
+                lob_base_path.string(), fs, *properties);
+            runtime.text_lob_readers[field_id] = text_lob_reader;
+            LOG_INFO("Initialized TEXT LOB reader for segment {} field {}: {}",
                      id_,
                      field_id.get(),
-                     lob_path);
+                     text_lob_reader->lob_base_path);
         }
     });
 }
@@ -8962,7 +9031,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
     const std::vector<int64_t>& result_mapping,
     int64_t size,
     const std::vector<std::string>* dynamic_field_names,
-    const std::string* text_lob_path) {
+    std::shared_ptr<SharedTextLobReader> text_lob_reader) {
     auto data_array = std::make_unique<DataArray>();
     data_array->set_type(
         static_cast<proto::schema::DataType>(field_meta.get_data_type()));
@@ -9028,7 +9097,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
         }
         case DataType::TEXT: {
             auto obj = data_array->mutable_scalars()->mutable_string_data();
-            if (text_lob_path != nullptr) {
+            if (text_lob_reader != nullptr) {
                 std::vector<milvus_storage::lob_column::EncodedRef>
                     encoded_refs;
                 encoded_refs.reserve(size);
@@ -9068,7 +9137,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                     return nullptr;
                 }
 
-                auto texts = ReadTextLobBatch(*text_lob_path, encoded_refs);
+                auto texts = ReadTextLobBatch(text_lob_reader, encoded_refs);
                 for (auto& text : texts) {
                     obj->add_data(std::move(text));
                 }
@@ -9561,31 +9630,31 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
                 *schema_snapshot, field_id, plan->target_dynamic_fields_)
                 ? &plan->target_dynamic_fields_
                 : nullptr;
-        const std::string* text_lob_path = nullptr;
+        std::shared_ptr<SharedTextLobReader> text_lob_reader;
         if (!is_external_collection &&
             field_meta.get_data_type() == DataType::TEXT) {
-            auto path_it = snapshot->runtime->text_lob_paths.find(field_id);
-            if (path_it == snapshot->runtime->text_lob_paths.end()) {
+            auto reader_it = snapshot->runtime->text_lob_readers.find(field_id);
+            if (reader_it == snapshot->runtime->text_lob_readers.end()) {
                 LogTakeFallback(
                     "retrieve",
                     id_,
                     size,
                     ctx.unique_offsets.size(),
                     take_field_ids.size(),
-                    fmt::format("missing TEXT LOB path for field {}",
+                    fmt::format("missing TEXT LOB reader for field {}",
                                 field_id.get()));
                 results->clear_fields_data();
                 results->clear_ids();
                 return false;
             }
-            text_lob_path = &path_it->second;
+            text_lob_reader = reader_it->second;
         }
         auto data_array = ArrowToDataArray(arr,
                                            field_meta,
                                            ctx.result_mapping,
                                            size,
                                            dynamic_field_names,
-                                           text_lob_path);
+                                           std::move(text_lob_reader));
         if (!data_array) {
             LOG_WARN(
                 "[TakeAPI] unsupported data type {} for field '{}', "
@@ -9771,30 +9840,30 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                 *schema_snapshot, field_id, plan->target_dynamic_fields_)
                 ? &plan->target_dynamic_fields_
                 : nullptr;
-        const std::string* text_lob_path = nullptr;
+        std::shared_ptr<SharedTextLobReader> text_lob_reader;
         if (!is_external_collection &&
             field_meta.get_data_type() == DataType::TEXT) {
-            auto path_it = snapshot->runtime->text_lob_paths.find(field_id);
-            if (path_it == snapshot->runtime->text_lob_paths.end()) {
+            auto reader_it = snapshot->runtime->text_lob_readers.find(field_id);
+            if (reader_it == snapshot->runtime->text_lob_readers.end()) {
                 LogTakeFallback(
                     "search",
                     id_,
                     size,
                     ctx.unique_offsets.size(),
                     take_field_ids.size(),
-                    fmt::format("missing TEXT LOB path for field {}",
+                    fmt::format("missing TEXT LOB reader for field {}",
                                 field_id.get()));
                 results.output_fields_data_.clear();
                 return false;
             }
-            text_lob_path = &path_it->second;
+            text_lob_reader = reader_it->second;
         }
         auto data_array = ArrowToDataArray(arr,
                                            field_meta,
                                            ctx.result_mapping,
                                            size,
                                            dynamic_field_names,
-                                           text_lob_path);
+                                           std::move(text_lob_reader));
         if (!data_array) {
             LOG_WARN(
                 "[TakeAPI] search: unsupported type {} for '{}', "
