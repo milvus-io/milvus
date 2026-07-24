@@ -2446,6 +2446,174 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
     ASSERT_EQ(retrieve_results->offset_size(), 0);
 }
 
+TEST_P(ElementFilterEmptyDocHit, FullModeAdvancesPastZeroElementBatches) {
+    struct BatchSizeGuard {
+        int64_t saved_batch_size;
+
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+        }
+    } guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(4);
+
+    bool with_sealed = GetParam();
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, true);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    constexpr size_t kRowCount = 9;
+    constexpr size_t kTargetRow = 8;
+    auto raw_data = DataGen(schema, kRowCount, 42, 0, 1, 1);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != int_array_fid.get()) {
+            continue;
+        }
+
+        auto* array_data = field_data->mutable_scalars()->mutable_array_data();
+        // Batch 1 contains NULL arrays with retained physical payloads.
+        for (size_t row = 0; row < 4; ++row) {
+            auto* values = array_data->mutable_data(row)
+                               ->mutable_int_data()
+                               ->mutable_data();
+            values->Clear();
+            values->Add(100 + row);
+        }
+        // Batch 2 contains valid but empty arrays.
+        for (size_t row = 4; row < kTargetRow; ++row) {
+            array_data->mutable_data(row)
+                ->mutable_int_data()
+                ->mutable_data()
+                ->Clear();
+        }
+        auto* target_values = array_data->mutable_data(kTargetRow)
+                                  ->mutable_int_data()
+                                  ->mutable_data();
+        target_values->Clear();
+        target_values->Add(7);
+        target_values->Add(9);
+
+        auto* valid_data = field_data->mutable_valid_data();
+        valid_data->Clear();
+        for (size_t row = 0; row < kTargetRow; ++row) {
+            valid_data->Add(row >= 4);
+        }
+        valid_data->Add(true);
+        break;
+    }
+
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(kRowCount);
+        growing->Insert(0,
+                        kRowCount,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    auto array_offsets = segment->GetArrayOffsets(int_array_fid);
+    ASSERT_NE(array_offsets, nullptr);
+    ASSERT_EQ(array_offsets->GetTotalElementCount(), 2);
+    for (size_t row = 0; row < kTargetRow; ++row) {
+        EXPECT_EQ(array_offsets->ElementIDRangeOfRow(row),
+                  std::make_pair(0, 0));
+    }
+    EXPECT_EQ(array_offsets->ElementIDRangeOfRow(kTargetRow),
+              std::make_pair(0, 2));
+
+    enum class PredicateMode {
+        Normal,
+        UnaryOverflow,
+        BinaryRangeOverflow,
+    };
+    auto run_retrieve = [&](PredicateMode mode) {
+        proto::plan::PlanNode plan_node;
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(100);
+
+        auto* element_filter =
+            query->mutable_predicates()->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+
+        auto* binary =
+            element_filter->mutable_element_expr()->mutable_binary_expr();
+        binary->set_op(mode == PredicateMode::BinaryRangeOverflow
+                           ? proto::plan::BinaryExpr::LogicalOr
+                           : proto::plan::BinaryExpr::LogicalAnd);
+        auto set_element_column = [&](proto::plan::ColumnInfo* column) {
+            column->set_field_id(int_array_fid.get());
+            column->set_data_type(proto::schema::DataType::Int32);
+            column->set_element_type(proto::schema::DataType::Int32);
+            column->set_is_element_level(true);
+        };
+        auto set_element_range = [&](proto::plan::Expr* expr,
+                                     proto::plan::OpType op,
+                                     int64_t value) {
+            auto* range = expr->mutable_unary_range_expr();
+            set_element_column(range->mutable_column_info());
+            range->set_op(op);
+            range->mutable_value()->set_int64_val(value);
+        };
+        if (mode == PredicateMode::BinaryRangeOverflow) {
+            auto* range = binary->mutable_left()->mutable_binary_range_expr();
+            set_element_column(range->mutable_column_info());
+            range->set_lower_inclusive(true);
+            range->set_upper_inclusive(true);
+            range->mutable_lower_value()->set_int64_val(2147483648LL);
+            range->mutable_upper_value()->set_int64_val(2147483649LL);
+        } else {
+            auto lower_bound =
+                mode == PredicateMode::UnaryOverflow ? -2147483649LL : 0LL;
+            set_element_range(binary->mutable_left(),
+                              proto::plan::OpType::GreaterEqual,
+                              lower_bound);
+        }
+        set_element_range(
+            binary->mutable_right(), proto::plan::OpType::Equal, 9);
+
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+
+        auto parser = ProtoParser(schema);
+        auto plan = parser.CreateRetrievePlan(plan_node);
+        return segment->Retrieve(nullptr,
+                                 plan.get(),
+                                 1L << 63,
+                                 INT64_MAX,
+                                 false,
+                                 folly::CancellationToken(),
+                                 0,
+                                 0);
+    };
+
+    auto assert_target_element = [&](const auto& retrieve_results) {
+        ASSERT_NE(retrieve_results, nullptr);
+        ASSERT_TRUE(retrieve_results->element_level());
+        ASSERT_EQ(retrieve_results->offset_size(), 1);
+        EXPECT_EQ(retrieve_results->offset(0), kTargetRow);
+        ASSERT_EQ(retrieve_results->element_indices(0).indices_size(), 1);
+        EXPECT_EQ(retrieve_results->element_indices(0).indices(0), 1);
+    };
+
+    std::unique_ptr<proto::segcore::RetrieveResults> retrieve_results;
+    for (auto mode : {PredicateMode::Normal,
+                      PredicateMode::UnaryOverflow,
+                      PredicateMode::BinaryRangeOverflow}) {
+        // The overflow fast paths must use element counts and the same
+        // row-batch cursor contract as normal visitors.
+        ASSERT_NO_THROW(retrieve_results = run_retrieve(mode));
+        assert_target_element(retrieve_results);
+    }
+}
+
 TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     auto schema = std::make_shared<Schema>();
     auto int_array_fid = schema->AddDebugArrayField(
