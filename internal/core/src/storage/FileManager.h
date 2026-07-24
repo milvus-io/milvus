@@ -29,12 +29,12 @@
 #include "common/type_c.h"
 #include "index/Meta.h"
 #include "filemanager/FileManager.h"
+#include "local/FileSystem.h"
+#include "local/LegacyLocalChunkFiles.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "storage/ChunkManager.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryWriter.h"
@@ -74,6 +74,18 @@ struct FileManagerContext {
           indexMeta(indexMeta),
           chunkManagerPtr(chunkManagerPtr),
           fs(std::move(fs)) {
+    }
+
+    FileManagerContext(const FieldDataMeta& fieldDataMeta,
+                       const IndexMeta& indexMeta,
+                       const ChunkManagerPtr& chunkManagerPtr,
+                       milvus_storage::ArrowFileSystemPtr fs,
+                       local::FileSystem local_files)
+        : fieldDataMeta(fieldDataMeta),
+          indexMeta(indexMeta),
+          chunkManagerPtr(chunkManagerPtr),
+          fs(std::move(fs)),
+          local_files(std::move(local_files)) {
     }
 
     bool
@@ -120,6 +132,7 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    std::optional<local::FileSystem> local_files;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
@@ -141,9 +154,13 @@ struct FileManagerContext {
 
 class FileManagerImpl : public milvus::FileManager {
  public:
-    explicit FileManagerImpl(const FieldDataMeta& field_mata,
-                             IndexMeta index_meta)
-        : field_meta_(field_mata), index_meta_(std::move(index_meta)) {
+    explicit FileManagerImpl(
+        const FieldDataMeta& field_mata,
+        IndexMeta index_meta,
+        std::optional<local::FileSystem> local_files = std::nullopt)
+        : field_meta_(field_mata),
+          index_meta_(std::move(index_meta)),
+          local_files_(std::move(local_files)) {
     }
 
  public:
@@ -274,7 +291,7 @@ class FileManagerImpl : public milvus::FileManager {
                     cipher_plugin,
                     plugin_context_->ez_id,
                     plugin_context_->collection_id,
-                    GetLocalTempDir());
+                    GetLocalFiles());
             }
         }
         return std::make_unique<IndexEntryDirectStreamWriter>(
@@ -348,14 +365,12 @@ class FileManagerImpl : public milvus::FileManager {
         return boost::filesystem::path(filepath).filename().string();
     }
 
-    std::string
-    GetLocalTempDir() const {
-        auto local_cm =
-            LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-        if (local_cm) {
-            return local_cm->GetRootPath();
+    const local::FileSystem&
+    GetLocalFiles() {
+        if (!local_files_.has_value()) {
+            local_files_.emplace(local::LegacyLocalChunkFiles());
         }
-        return "";
+        return *local_files_;
     }
 
     std::optional<StorageColumnMapping>
@@ -373,6 +388,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     // index meta
     IndexMeta index_meta_;
+    std::optional<local::FileSystem> local_files_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;

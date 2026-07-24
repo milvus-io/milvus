@@ -57,6 +57,7 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
+#include "local/FileSystem.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "pb/index_coord.pb.h"
@@ -1251,6 +1252,63 @@ TEST_F(DiskAnnFileManagerTest, LocalPathGenerationIsPerFileManager) {
     EXPECT_EQ(fm1->GetRemoteTextLogPrefix(), fm2->GetRemoteTextLogPrefix());
 }
 
+TEST_F(DiskAnnFileManagerTest, LocalPathsUseInjectedIndependentRoots) {
+    auto temp_root = std::filesystem::temp_directory_path() /
+                     "milvus_disk_file_manager_roots";
+    auto first_root = temp_root / "first";
+    auto second_root = temp_root / "second";
+    auto cleanup =
+        folly::makeGuard([&]() { std::filesystem::remove_all(temp_root); });
+
+    auto make_file_manager = [&](const std::filesystem::path& root) {
+        IndexMeta index_meta = {3,
+                                100,
+                                1000,
+                                1,
+                                "opt_fields",
+                                "field_name",
+                                DataType::VECTOR_FLOAT,
+                                1};
+        return std::make_shared<DiskFileManagerImpl>(
+            storage::FileManagerContext(kOptVecFieldDataMeta,
+                                        index_meta,
+                                        cm_,
+                                        fs_,
+                                        local::FileSystem::Open(root)));
+    };
+
+    auto first = make_file_manager(first_root);
+    auto second = make_file_manager(second_root);
+    auto canonical_first_root = std::filesystem::weakly_canonical(first_root);
+    auto canonical_second_root = std::filesystem::weakly_canonical(second_root);
+
+    const std::vector<std::pair<std::string, std::string>> first_paths = {
+        {first->GetLocalIndexObjectPrefix(), "index_files"},
+        {first->GetLocalTempIndexObjectPrefix(), "tmp/index_files"},
+        {first->GetLocalTextIndexPrefix(), "text_log"},
+        {first->GetLocalTempTextIndexPrefix(), "tmp/index_files"},
+        {first->GetLocalJsonStatsPrefix(), "json_stats"},
+        {first->GetLocalTempJsonStatsPrefix(), "tmp/json_stats"},
+        {first->GetLocalNgramIndexPrefix(), "ngram_log"},
+        {first->GetLocalTempNgramIndexPrefix(), "tmp/ngram_log"},
+        {first->GetLocalRawDataObjectPrefix(), "raw_datas"}};
+
+    for (const auto& [path, expected_parent] : first_paths) {
+        auto relative = std::filesystem::relative(
+            StripTrailingPathSeparators(path), canonical_first_root);
+        EXPECT_EQ(relative.parent_path(), expected_parent);
+    }
+
+    EXPECT_TRUE(StartsWith(first->GetLocalIndexObjectPrefix(),
+                           canonical_first_root.string()));
+    EXPECT_TRUE(StartsWith(second->GetLocalIndexObjectPrefix(),
+                           canonical_second_root.string()));
+    EXPECT_FALSE(StartsWith(first->GetLocalIndexObjectPrefix(),
+                            canonical_second_root.string()));
+    EXPECT_FALSE(StartsWith(second->GetLocalIndexObjectPrefix(),
+                            canonical_first_root.string()));
+}
+
 TEST_F(DiskAnnFileManagerTest, LocalPathGenerationUsesLeafFolderName) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -1323,14 +1381,22 @@ TEST_F(DiskAnnFileManagerTest,
         const std::vector<std::pair<std::string, std::string>> fm1_files = {
             {fm1->GetLocalIndexObjectPrefix() + "index_data",
              fm2->GetLocalIndexObjectPrefix() + "index_data"},
+            {fm1->GetLocalTempIndexObjectPrefix() + "temp_index_data",
+             fm2->GetLocalTempIndexObjectPrefix() + "temp_index_data"},
             {fm1->GetLocalTextIndexPrefix() + "text_log_data",
              fm2->GetLocalTextIndexPrefix() + "text_log_data"},
+            {fm1->GetLocalTempTextIndexPrefix() + "temp_text_log_data",
+             fm2->GetLocalTempTextIndexPrefix() + "temp_text_log_data"},
             {fm1->GetLocalJsonStatsSharedIndexPrefix() + "shared_index_data",
              fm2->GetLocalJsonStatsSharedIndexPrefix() + "shared_index_data"},
             {fm1->GetLocalJsonStatsPrefix() + "meta.json",
              fm2->GetLocalJsonStatsPrefix() + "meta.json"},
+            {fm1->GetLocalTempJsonStatsPrefix() + "temp_meta.json",
+             fm2->GetLocalTempJsonStatsPrefix() + "temp_meta.json"},
             {fm1->GetLocalNgramIndexPrefix() + "ngram_index_data",
              fm2->GetLocalNgramIndexPrefix() + "ngram_index_data"},
+            {fm1->GetLocalTempNgramIndexPrefix() + "temp_ngram_index_data",
+             fm2->GetLocalTempNgramIndexPrefix() + "temp_ngram_index_data"},
             {fm1->GetLocalRawDataObjectPrefix() + "raw_data",
              fm2->GetLocalRawDataObjectPrefix() + "raw_data"},
         };
@@ -1373,6 +1439,25 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
         EXPECT_TRUE(local_chunk_manager->Exist(local_index_file));
     }
 
+    EXPECT_FALSE(local_chunk_manager->Exist(local_index_file));
+}
+
+TEST_F(DiskAnnFileManagerTest,
+       FileManagerDestructionDefersCleanupUntilLeaseRelease) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
+    auto local_index_file = local_index_prefix + "index_data";
+    auto lease = file_manager->AcquireLocalDirWriteLease(local_index_prefix);
+
+    local_chunk_manager->CreateFile(local_index_file);
+    ASSERT_TRUE(local_chunk_manager->Exist(local_index_file));
+
+    file_manager.reset();
+    EXPECT_TRUE(local_chunk_manager->Exist(local_index_file));
+
+    lease = {};
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file));
 }
 

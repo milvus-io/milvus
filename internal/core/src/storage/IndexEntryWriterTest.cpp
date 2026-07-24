@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <future>
 #include <limits>
 #include <memory>
@@ -37,6 +38,7 @@
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
+#include "local/FileSystem.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/EntryStreamUtils.h"
@@ -968,6 +970,34 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), entry_size);  // ciphertext > plaintext
+}
+
+TEST_F(IndexEntryEncryptedV3Test, EncryptedStagingUsesInjectedRootAndCleansUp) {
+    const auto staging_root =
+        std::filesystem::temp_directory_path() / "milvus_encrypted_staging" /
+        testing::UnitTest::GetInstance()->current_test_info()->name();
+    std::filesystem::remove_all(staging_root);
+    auto cleanup =
+        folly::makeGuard([&]() { std::filesystem::remove_all(staging_root); });
+    auto local_files = milvus::local::FileSystem::Open(staging_root);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(
+            kV3FilePath + "_enc_injected_staging",
+            fs_,
+            mock_cipher_,
+            /*ez_id=*/1,
+            /*collection_id=*/100,
+            local_files,
+            kStreamSliceAlignment);
+        EXPECT_FALSE(std::filesystem::is_empty(staging_root));
+
+        auto data = GeneratePattern(1024);
+        writer.WriteEntry("entry", data.data(), data.size());
+        writer.Finish();
+    }
+
+    EXPECT_TRUE(std::filesystem::is_empty(staging_root));
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterRejectsUnalignedSliceSize) {
