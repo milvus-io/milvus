@@ -237,6 +237,7 @@ func (s *statsInspectorSuite) SetupTest() {
 	gs := task.NewMockGlobalScheduler(s.T())
 	gs.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	gs.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
+	gs.EXPECT().GetPendingTaskCount().Return(0).Maybe()
 	s.scheduler = gs
 
 	s.inspector = newStatsInspector(
@@ -316,6 +317,31 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	s.NoError(err) // Duplicate tasks are handled as success
 }
 
+func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
+	pendingTaskLimit := Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt()
+
+	s.Run("allow at limit", func() {
+		scheduler := task.NewMockGlobalScheduler(s.T())
+		scheduler.EXPECT().GetPendingTaskCount().Return(pendingTaskLimit).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+		s.inspector.scheduler = scheduler
+
+		err := s.inspector.SubmitStatsTask(20, 20, indexpb.StatsSubJob_TextIndexJob, true, nil)
+		s.NoError(err)
+		s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+	})
+
+	s.Run("skip over limit", func() {
+		scheduler := task.NewMockGlobalScheduler(s.T())
+		scheduler.EXPECT().GetPendingTaskCount().Return(pendingTaskLimit + 1).Once()
+		s.inspector.scheduler = scheduler
+
+		err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_TextIndexJob, true, nil)
+		s.NoError(err)
+		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_TextIndexJob))
+	})
+}
+
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 	segmentID := UniqueID(200)
 	s.putExternalSegment(segmentID, true, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/200", 1))
@@ -350,9 +376,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 	segmentID := UniqueID(201)
 	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/201", 1))
 
-	lastTrigger := time.Now().Add(-time.Hour).Unix()
-	_, triggered := s.inspector.triggerJSONKeyIndexStatsTask(lastTrigger, 0)
-	s.Equal(1, triggered)
+	s.inspector.triggerJSONKeyIndexStatsTask()
 
 	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 	s.NotNil(jsonTask)
@@ -383,9 +407,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 		s.Run(testCase.name, func() {
 			s.putExternalSegment(testCase.segmentID, false, testCase.storageVersion, testCase.manifestPath)
 
-			lastTrigger := time.Now().Add(-time.Hour).Unix()
-			_, triggered := s.inspector.triggerJSONKeyIndexStatsTask(lastTrigger, 0)
-			s.Equal(0, triggered)
+			s.inspector.triggerJSONKeyIndexStatsTask()
 
 			jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(testCase.segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 			s.Nil(jsonTask)

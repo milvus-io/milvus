@@ -45,8 +45,10 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
 
 	task = NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(2)
@@ -55,6 +57,7 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
 }

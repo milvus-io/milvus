@@ -129,8 +129,6 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 
-	lastJSONStatsLastTrigger := time.Now().Unix()
-	maxJSONStatsTaskCount := 0
 	for {
 		select {
 		case <-si.ctx.Done():
@@ -139,7 +137,7 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 		case <-ticker.C:
 			si.triggerTextStatsTask()
 			si.triggerBM25StatsTask()
-			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
+			si.triggerJSONKeyIndexStatsTask()
 		}
 	}
 }
@@ -240,7 +238,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 	}
 }
 
-func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
+func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil {
@@ -260,23 +258,14 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger 
 			}
 			return needDoJSONKeyIndex(seg, needTriggerFieldIDs, allowUnsorted)
 		}))
-		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
-			lastJSONStatsLastTrigger = time.Now().Unix()
-			maxJSONStatsTaskCount = 0
-		}
 		for _, segment := range segments {
-			if maxJSONStatsTaskCount >= Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() {
-				break
-			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true, nil); err != nil {
 				mlog.Warn(si.ctx, "create stats task with json key index for segment failed, wait for retry:",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
 				continue
 			}
-			maxJSONStatsTaskCount++
 		}
 	}
-	return lastJSONStatsLastTrigger, maxJSONStatsTaskCount
 }
 
 func (si *statsInspector) triggerBM25StatsTask() {
@@ -360,6 +349,16 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 				mlog.String("subJobType", subJobType.String()))
 			return nil
 		}
+	}
+	pendingTaskCount := si.scheduler.GetPendingTaskCount()
+	pendingTaskLimit := Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt()
+	if pendingTaskCount > pendingTaskLimit {
+		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
+			mlog.Int("pendingTaskCount", pendingTaskCount),
+			mlog.Int("pendingTaskLimit", pendingTaskLimit),
+			mlog.FieldSegmentID(originSegmentID),
+			mlog.String("subJobType", subJobType.String()))
+		return nil
 	}
 	taskID, err := si.allocator.AllocID(context.Background())
 	if err != nil {
