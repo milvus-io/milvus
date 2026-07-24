@@ -63,6 +63,10 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 }
 
 func Test_IndexEngineVersionManager_IndexStorePathVersionCapabilityFromSessionVersion(t *testing.T) {
+	// the collection-rooted layout is opt-in; this test covers the session-version half of the gate.
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
+
 	m := newIndexEngineVersionManager()
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
@@ -94,6 +98,36 @@ func Test_IndexEngineVersionManager_IndexStorePathVersionCapabilityFromSessionVe
 
 	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+}
+
+func Test_IndexEngineVersionManager_IndexStorePathVersionConfigGate(t *testing.T) {
+	key := Params.DataCoordCfg.IndexStorePathVersion.Key
+	defer paramtable.Get().Reset(key)
+
+	// a fully upgraded cluster, so only the config decides the layout
+	m := newIndexEngineVersionManager()
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {
+			Version:    common.Version,
+			SessionRaw: sessionutil.SessionRaw{ServerID: 1},
+		},
+	})
+
+	// default: legacy layout, so an upgrade never silently writes files an older binary cannot read
+	assert.Equal(t, "0", Params.DataCoordCfg.IndexStorePathVersion.GetValue())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// opted in
+	paramtable.Get().Save(key, "1")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// refreshable, and turning it back off is safe because the layout is recorded per SegmentIndex
+	paramtable.Get().Save(key, "0")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// a malformed value must fall back to the legacy layout, not to the opt-in one
+	paramtable.Get().Save(key, "not-a-number")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 }
 
 func Test_IndexEngineVersionManager_GetMergedScalarIndexVersion(t *testing.T) {
