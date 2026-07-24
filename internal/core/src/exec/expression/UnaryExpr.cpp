@@ -259,11 +259,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         result = ExecRangeVisitorImplForIndex<bool>();
                         break;
                     case proto::plan::GenericValue::ValCase::kInt64Val:
-                        if (!IsInt64SafeForJsonDoubleIndex(
-                                expr_->val_.int64_val())) {
-                            result =
-                                ExecRangeVisitorImplJsonPreciseNumeric(context);
-                        } else if (PinnedJsonIndexIsFlat()) {
+                        if (PinnedJsonIndexIsFlat()) {
                             result = ExecRangeVisitorImplForIndex<int64_t>();
                         } else {
                             proto::plan::GenericValue double_val;
@@ -724,86 +720,114 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // cache the result to suit the framework.
-    auto batch_res = ProcessIndexChunks<IndexInnerType>([this, &val, reverse](
-                                                            Index* _) {
-        boost::container::vector<IndexInnerType> elems;
-        for (auto const& element : val.array()) {
-            auto e = GetValueFromProto<IndexInnerType>(element);
-            if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                elems.push_back(e);
+    auto batch_res = ProcessIndexChunksWithRowLevel<IndexInnerType>(
+        [this, &val, reverse](Index* index_ptr) {
+            boost::container::vector<IndexInnerType> elems;
+            elems.reserve(val.array_size());
+            for (auto const& element : val.array()) {
+                auto e = GetValueFromProto<IndexInnerType>(element);
+                if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
+                    elems.push_back(e);
+                }
             }
-        }
 
-        // filtering by index, get candidates.
-        std::function<bool(milvus::proto::plan::Array& /*val*/,
-                           int64_t /*offset*/)>
-            is_same;
-
-        if (segment_->is_chunked()) {
-            is_same = [this, reverse](milvus::proto::plan::Array& val,
-                                      int64_t offset) -> bool {
-                auto [chunk_idx, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, offset);
-                auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                    op_ctx_, field_id_, chunk_idx);
-                auto chunk = pw.get();
-                return chunk.first[chunk_offset].is_same_array(val) ^ reverse;
-            };
-        } else {
-            auto size_per_chunk = segment_->size_per_chunk();
-            is_same = [this, size_per_chunk, reverse](
-                          milvus::proto::plan::Array& val,
-                          int64_t offset) -> bool {
-                auto chunk_idx = offset / size_per_chunk;
-                auto chunk_offset = offset % size_per_chunk;
-                auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                    op_ctx_, field_id_, chunk_idx);
-                auto chunk = pw.get();
-                auto array_view = chunk.data() + chunk_offset;
-                return array_view->is_same_array(val) ^ reverse;
-            };
-        }
-
-        // collect all candidates.
-        std::unordered_set<size_t> candidates;
-        std::unordered_set<size_t> tmp_candidates;
-        auto first_callback = [&candidates](size_t offset) -> void {
-            candidates.insert(offset);
-        };
-        auto callback = [&candidates, &tmp_candidates](size_t offset) -> void {
-            if (candidates.find(offset) != candidates.end()) {
-                tmp_candidates.insert(offset);
+            std::shared_ptr<const IArrayOffsets> array_offsets;
+            if (index_ptr->IsNestedIndex()) {
+                array_offsets = segment_->GetArrayOffsets(field_id_);
+                AssertInfo(array_offsets != nullptr,
+                           "array offsets are required for nested ARRAY index");
             }
-        };
-        auto execute_sub_batch =
-            [](Index* index_ptr,
-               const IndexInnerType& val,
-               const std::function<void(size_t /* offset */)>& callback) {
-                index_ptr->InApplyCallback(1, &val, callback);
+
+            auto to_row_offset = [&array_offsets](size_t offset) -> size_t {
+                if (array_offsets == nullptr) {
+                    return offset;
+                }
+                auto [row_id, _] = array_offsets->ElementIDToRowID(
+                    static_cast<int32_t>(offset));
+                return static_cast<size_t>(row_id);
             };
 
-        // run in-filter.
-        for (size_t idx = 0; idx < elems.size(); idx++) {
-            if (idx == 0) {
-                ProcessIndexChunksV2<IndexInnerType>(
-                    execute_sub_batch, elems[idx], first_callback);
+            // filtering by index, get candidates.
+            std::function<bool(milvus::proto::plan::Array& /*val*/,
+                               int64_t /*offset*/)>
+                is_same;
+
+            if (segment_->is_chunked()) {
+                is_same = [this, reverse](milvus::proto::plan::Array& val,
+                                          int64_t offset) -> bool {
+                    auto [chunk_idx, chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, offset);
+                    auto pw = segment_->template chunk_view<milvus::ArrayView>(
+                        op_ctx_, field_id_, chunk_idx);
+                    auto chunk = pw.get();
+                    return chunk.first[chunk_offset].is_same_array(val) ^
+                           reverse;
+                };
             } else {
-                ProcessIndexChunksV2<IndexInnerType>(
-                    execute_sub_batch, elems[idx], callback);
-                candidates = std::move(tmp_candidates);
+                auto size_per_chunk = segment_->size_per_chunk();
+                is_same = [this, size_per_chunk, reverse](
+                              milvus::proto::plan::Array& val,
+                              int64_t offset) -> bool {
+                    auto chunk_idx = offset / size_per_chunk;
+                    auto chunk_offset = offset % size_per_chunk;
+                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
+                        op_ctx_, field_id_, chunk_idx);
+                    auto chunk = pw.get();
+                    auto array_view = chunk.data() + chunk_offset;
+                    return array_view->is_same_array(val) ^ reverse;
+                };
             }
-            // the size of candidates is small enough.
-            if (candidates.size() * 100 < active_count_) {
-                break;
+
+            // collect all candidates.
+            std::unordered_set<size_t> candidates;
+            std::unordered_set<size_t> tmp_candidates;
+            auto first_callback =
+                [this, &candidates, &to_row_offset](size_t offset) -> void {
+                auto row_offset = to_row_offset(offset);
+                if (row_offset < static_cast<size_t>(active_count_)) {
+                    candidates.insert(row_offset);
+                }
+            };
+            auto callback = [this,
+                             &candidates,
+                             &tmp_candidates,
+                             &to_row_offset](size_t offset) -> void {
+                auto row_offset = to_row_offset(offset);
+                if (row_offset < static_cast<size_t>(active_count_) &&
+                    candidates.find(row_offset) != candidates.end()) {
+                    tmp_candidates.insert(row_offset);
+                }
+            };
+            // run in-filter.
+            for (size_t idx = 0; idx < elems.size(); idx++) {
+                if (idx == 0) {
+                    index_ptr->InApplyCallback(1, &elems[idx], first_callback);
+                } else {
+                    tmp_candidates.clear();
+                    index_ptr->InApplyCallback(1, &elems[idx], callback);
+                    candidates = std::move(tmp_candidates);
+                }
+                // the size of candidates is small enough.
+                if (candidates.size() * 100 < active_count_) {
+                    break;
+                }
             }
-        }
-        TargetBitmap res(active_count_);
-        // run post-filter. The filter will only be executed once in the framework.
-        for (const auto& candidate : candidates) {
-            res[candidate] = is_same(val, candidate);
-        }
-        return res;
-    });
+            TargetBitmap res(active_count_, reverse);
+            // run post-filter. The filter will only be executed once in the framework.
+            for (const auto& candidate : candidates) {
+                res[candidate] = is_same(val, candidate);
+            }
+            return res;
+        },
+        IndexValidityMode::Default);
+    if (reverse) {
+        auto column = std::dynamic_pointer_cast<ColumnVector>(batch_res);
+        AssertInfo(column != nullptr && column->IsBitmap(),
+                   "ARRAY index equality must return a bitmap column");
+        TargetBitmapView data(column->GetRawData(), column->size());
+        TargetBitmapView validity(column->GetValidRawData(), column->size());
+        data.inplace_and(validity, column->size());
+    }
     AssertInfo(batch_res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -2011,6 +2035,72 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    if (data_type == DataType::JSON &&
+        expr_->val_.val_case() ==
+            proto::plan::GenericValue::ValCase::kInt64Val &&
+        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val()) &&
+        expr_->op_type_ != proto::plan::OpType::Equal &&
+        expr_->op_type_ != proto::plan::OpType::NotEqual) {
+        exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+
+    if (data_type == DataType::ARRAY) {
+        const auto val_case = expr_->val_.val_case();
+        const auto& array = expr_->val_.array_val();
+        auto literal_matches_index_type = [&]() {
+            if (!array.same_type()) {
+                return false;
+            }
+
+            proto::plan::GenericValue::ValCase expected_case;
+            switch (expr_->column_.element_type_) {
+                case DataType::BOOL:
+                    expected_case =
+                        proto::plan::GenericValue::ValCase::kBoolVal;
+                    break;
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                case DataType::INT64:
+                    expected_case =
+                        proto::plan::GenericValue::ValCase::kInt64Val;
+                    break;
+                case DataType::FLOAT:
+                case DataType::DOUBLE:
+                    expected_case =
+                        proto::plan::GenericValue::ValCase::kFloatVal;
+                    break;
+                case DataType::VARCHAR:
+                case DataType::STRING:
+                    expected_case =
+                        proto::plan::GenericValue::ValCase::kStringVal;
+                    break;
+                default:
+                    return false;
+            }
+            return std::all_of(array.array().begin(),
+                               array.array().end(),
+                               [expected_case](const auto& element) {
+                                   return element.val_case() == expected_case;
+                               });
+        };
+        const auto can_use_array_index =
+            val_case == proto::plan::GenericValue::ValCase::kArrayVal &&
+            array.array_size() > 0 && literal_matches_index_type() &&
+            (expr_->op_type_ == proto::plan::OpType::Equal ||
+             expr_->op_type_ == proto::plan::OpType::NotEqual);
+        if (!can_use_array_index) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+    }
+
     SegmentExpr::DetermineExecPath();
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
@@ -2018,10 +2108,6 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
 
     // Refine: check if the index supports this specific operation/type.
     // May downgrade from ScalarIndex to RawData.
-    auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
-        data_type = expr_->column_.element_type_;
-    }
 
     bool can_use = false;
     switch (data_type) {
@@ -2053,7 +2139,17 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
                 SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
             break;
         case DataType::JSON: {
-            auto val_type = FromValCase(expr_->val_.val_case());
+            const auto val_case = expr_->val_.val_case();
+            if (val_case == proto::plan::GenericValue::ValCase::kInt64Val &&
+                !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
+                const auto is_equality =
+                    expr_->op_type_ == proto::plan::OpType::Equal ||
+                    expr_->op_type_ == proto::plan::OpType::NotEqual;
+                can_use = PinnedJsonIndexIsFlat() && is_equality;
+                break;
+            }
+
+            auto val_type = FromValCase(val_case);
             switch (val_type) {
                 case DataType::STRING:
                 case DataType::VARCHAR:
@@ -2069,7 +2165,11 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kArrayVal:
-                    can_use = CanUseIndexForArray<milvus::Array>();
+                    can_use =
+                        expr_->val_.array_val().array_size() > 0 &&
+                        (expr_->op_type_ == proto::plan::OpType::Equal ||
+                         expr_->op_type_ == proto::plan::OpType::NotEqual) &&
+                        CanUseIndexForArray<milvus::Array>();
                     break;
                 default:
                     can_use = false;

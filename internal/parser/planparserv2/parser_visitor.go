@@ -306,6 +306,31 @@ func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	return nil
 }
 
+// contextualizeEmptyArrayLiteral assigns the element type of a whole ARRAY
+// column to an inline empty array literal. Unlike a non-empty literal, [] has
+// no element from which the parser can infer a type. The field provides that
+// missing context for equality comparisons without relaxing comparisons on
+// ARRAY elements or JSON paths.
+func contextualizeEmptyArrayLiteral(literal, field *ExprWithType) {
+	if literal == nil || field == nil || literal.dataType != schemapb.DataType_Array {
+		return
+	}
+	valueExpr := literal.expr.GetValueExpr()
+	if valueExpr == nil || isTemplateExpr(valueExpr) {
+		return
+	}
+	array := valueExpr.GetValue().GetArrayVal()
+	if array == nil || len(array.GetArray()) != 0 || array.GetElementType() != schemapb.DataType_None {
+		return
+	}
+	columnInfo := toColumnInfo(field)
+	if columnInfo == nil || columnInfo.GetDataType() != schemapb.DataType_Array ||
+		len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel() {
+		return
+	}
+	array.ElementType = columnInfo.GetElementType()
+}
+
 // VisitAddSub translates expr to arithmetic plan.
 func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	var err error
@@ -496,6 +521,10 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		return err
 	}
 
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	contextualizeEmptyArrayLiteral(leftExpr, rightExpr)
+	contextualizeEmptyArrayLiteral(rightExpr, leftExpr)
+
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
@@ -516,8 +545,6 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		}
 		return ret
 	}
-
-	leftExpr, rightExpr := getExpr(left), getExpr(right)
 
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
 	if err != nil {
@@ -1117,6 +1144,12 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 	}
 }
 
+func isTermExprTargetSupported(dataType schemapb.DataType) bool {
+	return typeutil.IsPrimitiveType(dataType) ||
+		typeutil.IsJSONType(dataType) ||
+		typeutil.IsArrayType(dataType)
+}
+
 // VisitTerm translates expr to term plan.
 func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	child := ctx.Expr(0).Accept(v)
@@ -1140,6 +1173,9 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	// 2. Array with element level flag (e.g., $[intField] IN [1, 2] in MATCH_ALL/ElementFilter)
 	if typeutil.IsArrayType(dataType) && (len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
 		dataType = columnInfo.GetElementType()
+	}
+	if !isTermExprTargetSupported(dataType) {
+		return merr.WrapErrParameterInvalidMsg("term expression is not supported for data type %s", dataType.String())
 	}
 
 	term := ctx.Expr(1).Accept(v)
@@ -1417,14 +1453,8 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserLE
 	upperInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserLE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !lowerInclusive || !upperInclusive {
-			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
-		} else {
-			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
+		if err := validateBinaryRangeBounds(lowerValue, upperValue, lowerInclusive, upperInclusive); err != nil {
+			return err
 		}
 	}
 
@@ -1504,14 +1534,8 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserGE
 	upperInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserGE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !lowerInclusive || !upperInclusive {
-			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
-		} else {
-			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
+		if err := validateBinaryRangeBounds(lowerValue, upperValue, lowerInclusive, upperInclusive); err != nil {
+			return err
 		}
 	}
 
