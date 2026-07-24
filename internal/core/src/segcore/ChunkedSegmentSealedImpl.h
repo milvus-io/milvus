@@ -472,11 +472,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                int64_t count) const override;
 
     std::unique_ptr<DataArray>
-    get_emb_list(milvus::OpContext* op_ctx,
-                 FieldId field_id,
-                 const FieldMeta& field_meta,
-                 const int64_t* seg_offsets,
-                 int64_t count) const;
+    get_vector_from_snapshot(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* ids,
+        int64_t count,
+        const std::shared_ptr<const PublishedSegmentState>& snapshot) const;
+
+    std::unique_ptr<DataArray>
+    get_emb_list(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const FieldMeta& field_meta,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::shared_ptr<const PublishedSegmentState>& snapshot) const;
 
     bool
     is_nullable(FieldId field_id) const override {
@@ -1255,7 +1265,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const ChunkedColumnInterface* column,
         const int64_t* seg_offsets,
         int64_t count,
-        google::protobuf::RepeatedPtrField<std::string>* dst) const;
+        google::protobuf::RepeatedPtrField<std::string>* dst,
+        const std::shared_ptr<const RuntimeResourceState>& runtime) const;
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id,
@@ -1264,11 +1275,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     const void* valid_data = nullptr) const;
 
     std::unique_ptr<DataArray>
-    get_raw_data(milvus::OpContext* op_ctx,
-                 FieldId field_id,
-                 const FieldMeta& field_meta,
-                 const int64_t* seg_offsets,
-                 int64_t count) const;
+    fill_with_empty(const FieldMeta& field_meta,
+                    int64_t count,
+                    int64_t valid_count = 0,
+                    const void* valid_data = nullptr) const;
+
+    std::unique_ptr<DataArray>
+    get_raw_data(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const FieldMeta& field_meta,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::shared_ptr<const RuntimeResourceState>& runtime) const;
 
     struct ValidResult {
         int64_t valid_count = 0;
@@ -1288,11 +1307,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                        const int64_t* seg_offsets,
                                        int64_t count) const;
 
-    void
-    update_row_count(RuntimeResourceState& runtime, int64_t row_count) {
+    static void
+    SetRuntimeRowCount(RuntimeResourceState& runtime, int64_t row_count) {
         runtime.row_count = row_count;
-        deleted_record_.set_sealed_row_count(row_count);
     }
+
+    void
+    InitializeDeletedRecordRowCount(int64_t row_count);
 
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
@@ -1364,13 +1385,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         StagedStateCommitter* committer = nullptr);
 
     bool
-    IsIndexRefineEnabledLocked(
+    IsIndexRefineEnabledFromRuntime(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         const std::shared_ptr<const RuntimeResourceState>& runtime) const;
 
     void
-    prefetch_chunks_locked(milvus::OpContext* op_ctx, FieldId field_id) const;
+    PrefetchChunksFromRuntime(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const std::shared_ptr<const RuntimeResourceState>& runtime) const;
 
     void
     fill_empty_field(const FieldMeta& field_meta,
@@ -1864,7 +1888,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids);
 
-    void
+    index::CacheIndexBasePtr
     DropIndex(const FieldId field_id,
               const SchemaPtr& schema_snapshot,
               RuntimeResourceState* runtime = nullptr,
@@ -2058,28 +2082,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               milvus::OpContext* op_ctx,
                               StagedStateCommitter& committer);
 
-    class ScopedTextIndexBuildGuard {
-     public:
-        ScopedTextIndexBuildGuard(ChunkedSegmentSealedImpl& segment,
-                                  FieldId field_id)
-            : segment_(segment), field_id_(field_id) {
-        }
-
-        void
-        Register();
-
-        void
-        Commit();
-
-        ~ScopedTextIndexBuildGuard();
-
-     private:
-        ChunkedSegmentSealedImpl& segment_;
-        FieldId field_id_;
-        bool registered_{false};
-        bool committed_{false};
-    };
-
     TextIndexVariant
     BuildTextIndexFromFiles(
         milvus::OpContext* op_ctx,
@@ -2213,6 +2215,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // deleted pks
     mutable DeletedRecord<true> deleted_record_;
+    // Initialized once during segment bootstrap while reopen_mutex_ is held.
+    // Online reopen/load paths may verify the value but must never resize the
+    // live delete bitmap.
+    int64_t deleted_record_row_count_{-1};
 
     LoadFieldDataInfo field_data_info_;
 
@@ -2225,8 +2231,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Serializes all published_state_ writers so reopen/load/runtime-marker
     // copy-on-write publications never interleave. Does NOT block readers —
     // reader paths access published_state_ via atomic_load.
-    // Lock order: reopen_mutex_ → mutex_ (outer → inner) only. Never inverse,
-    // and reader paths that take mutex_ must not take reopen_mutex_.
+    // Lock order: reopen_mutex_ → mutex_ (outer → inner) only. The common
+    // SegmentInternalInterface Search/Retrieve entrypoints still take the
+    // inherited mutex_; separating Growing and Sealed synchronization belongs
+    // to a follow-up change. Until then, never acquire reopen_mutex_ while
+    // holding mutex_.
     std::mutex reopen_mutex_;
 
     // Cross-thread request leases block online publication while a sealed
@@ -2235,12 +2244,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     int64_t id_;
-    // commit_ts_ remains the writer-side source of truth for load-time data
-    // preparation; published readers consume the value through
-    // PublishedSegmentState.
-    uint64_t commit_ts_{0};
-
-    std::unordered_set<FieldId> pending_text_index_fields_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;
@@ -2617,17 +2620,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             ClearFieldBitsForAbsentLoadInfo(state);
             SetSystemFieldReadyInState(state, state.load_info.get());
         });
-    }
-
-    bool
-    TestHasPendingTextIndex(FieldId field_id) const {
-        return pending_text_index_fields_.count(field_id) > 0;
-    }
-
-    void
-    TestRegisterPendingTextIndex(FieldId field_id) {
-        ScopedTextIndexBuildGuard guard(*this, field_id);
-        guard.Register();
     }
 
     void

@@ -4153,6 +4153,62 @@ TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     EXPECT_TRUE(sealed->HasFieldData(new_field));
 }
 
+TEST(SealedSegmentReopen, RejectsRowCountChangeBeforePublication) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    constexpr int64_t row_count = 4;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(kSegmentID);
+    current_proto.set_partitionid(kPartitionID);
+    current_proto.set_collectionid(kCollectionID);
+    current_proto.set_num_of_rows(row_count);
+    sealed->SetLoadInfo(current_proto);
+    LoadGeneratedDataIntoSegment(dataset, sealed);
+
+    auto before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(before, nullptr);
+    ASSERT_NE(before->runtime, nullptr);
+    EXPECT_EQ(before->load_info->GetNumOfRows(), row_count);
+    EXPECT_EQ(before->runtime->row_count, row_count);
+
+    auto reopen_proto = current_proto;
+    reopen_proto.set_num_of_rows(row_count + 1);
+    milvus::OpContext op_ctx;
+    try {
+        sealed->Reopen(&op_ctx, reopen_proto);
+        FAIL() << "row-count-changing reopen should fail";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_NE(std::string(err.what())
+                      .find("online reopen cannot change row count"),
+                  std::string::npos);
+    }
+
+    auto after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(after, before);
+    EXPECT_EQ(after->load_info->GetNumOfRows(), row_count);
+    EXPECT_EQ(after->runtime->row_count, row_count);
+
+    auto pks = dataset.get_col<int64_t>(pk_id);
+    auto delete_ids = std::make_unique<IdArray>();
+    delete_ids->mutable_int_id()->add_data(pks.back());
+    Timestamp delete_ts = 1000000;
+    auto status = sealed->Delete(1, delete_ids.get(), &delete_ts);
+    ASSERT_TRUE(status.ok());
+
+    BitsetType bitset(row_count, false);
+    auto bitset_view = BitsetTypeView(bitset);
+    segment->mask_with_delete(bitset_view, row_count, delete_ts + 1);
+    EXPECT_EQ(bitset.count(), 1);
+}
+
 TEST(SealedSegmentReopen, DropFieldReopenPublishesSchemaAndLoadInfoTogether) {
     auto old_schema = std::make_shared<Schema>();
     auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
@@ -4186,7 +4242,7 @@ TEST(SealedSegmentReopen, DropFieldReopenPublishesSchemaAndLoadInfoTogether) {
     EXPECT_FALSE(sealed->FieldAccessible(dropped_id));
 }
 
-TEST(SealedSegmentReopen, TextIndexCancellationGuardDoesNotLeakPendingState) {
+TEST(SealedSegmentReopen, CancelledTextIndexBuildDoesNotPublishAndCanRetry) {
     std::map<std::string, std::string> analyzer_params;
     auto schema = std::make_shared<Schema>();
     auto pk_id = schema->AddDebugField("pk", DataType::INT64);
@@ -4200,19 +4256,79 @@ TEST(SealedSegmentReopen, TextIndexCancellationGuardDoesNotLeakPendingState) {
                                                  std::nullopt);
     schema->set_primary_field_id(pk_id);
 
-    auto segment = CreateSealedSegment(schema);
+    auto dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    EXPECT_FALSE(sealed->TestHasPendingTextIndex(text_fid));
-    EXPECT_FALSE(
-        sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+    auto before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(before->runtime->text_indexes.count(text_fid), 0);
+    ASSERT_FALSE(before->load_info->HasTextIndexCreated(text_fid));
 
-    sealed->TestRegisterPendingTextIndex(text_fid);
+    folly::CancellationSource source;
+    source.requestCancellation();
+    milvus::OpContext cancelled(source.getToken());
+    EXPECT_THROW(sealed->CreateTextIndex(text_fid, &cancelled), SegcoreError);
 
-    EXPECT_FALSE(sealed->TestHasPendingTextIndex(text_fid));
-    EXPECT_FALSE(
-        sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+    auto after_cancel = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(after_cancel, before);
+    EXPECT_EQ(after_cancel->runtime->text_indexes.count(text_fid), 0);
+    EXPECT_FALSE(after_cancel->load_info->HasTextIndexCreated(text_fid));
+
+    EXPECT_NO_THROW(sealed->CreateTextIndex(text_fid));
+    auto after_retry = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_NE(after_retry, before);
+    EXPECT_EQ(after_retry->runtime->text_indexes.count(text_fid), 1);
+    EXPECT_TRUE(after_retry->load_info->HasTextIndexCreated(text_fid));
+}
+
+TEST(SealedSegmentReopen, RejectsRawBuiltToPrebuiltTextIndexBeforePublication) {
+    std::map<std::string, std::string> analyzer_params;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugVarcharField(FieldName("text_field"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/false,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    schema->set_primary_field_id(pk_id);
+
+    auto dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->CreateTextIndex(text_fid);
+
+    auto before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(before->runtime->text_indexes.count(text_fid), 1);
+    ASSERT_TRUE(before->load_info->HasTextIndexCreated(text_fid));
+
+    auto reopen_proto = before->load_info->GetProto();
+    auto& text_stats = (*reopen_proto.mutable_textstatslogs())[text_fid.get()];
+    text_stats.set_fieldid(text_fid.get());
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.add_files("/must/not/be/read/text-index");
+
+    milvus::OpContext op_ctx;
+    try {
+        sealed->Reopen(&op_ctx, reopen_proto);
+        FAIL() << "raw-built to pre-built text index reopen should fail";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_NE(std::string(err.what()).find("raw-built to pre-built"),
+                  std::string::npos);
+        EXPECT_NE(std::string(err.what()).find("full segment replacement"),
+                  std::string::npos);
+    }
+
+    auto after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(after, before);
+    EXPECT_EQ(after->runtime->text_indexes.count(text_fid), 1);
+    EXPECT_TRUE(after->load_info->HasTextIndexCreated(text_fid));
 }
 
 TEST(SealedSegmentReopen, RuntimeTextIndexMarkerPublishesToLoadInfoSnapshot) {
@@ -5060,7 +5176,8 @@ TEST(SealedSegmentCowState,
               published_cache_index);
 }
 
-TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
+TEST(SealedSegmentCowState,
+     StagedScalarIndexRetiresPublishedWarmupOnlyAfterPublish) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto payload = schema->AddDebugField("payload", DataType::INT64);
@@ -5071,73 +5188,114 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    LoadIndexInfo first_index;
-    first_index.field_id = payload.get();
-    first_index.field_type = DataType::INT64;
-    first_index.index_params["index_type"] = "STL_SORT";
     auto payload_data = dataset.get_col<int64_t>(payload);
-    auto first_impl = GenScalarIndexing<int64_t>(dataset.raw_->num_rows(),
-                                                 payload_data.data());
-    first_index.index_params = GenIndexParams(first_impl.get());
-    first_index.cache_index =
-        CreateTestCacheIndex("first", std::move(first_impl));
-    auto first_cache_index = first_index.cache_index;
-    sealed->LoadIndex(first_index);
+    auto create_index = [&] {
+        return GenScalarIndexing<int64_t>(dataset.raw_->num_rows(),
+                                          payload_data.data());
+    };
 
-    auto before = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_NE(before, nullptr);
-    ASSERT_NE(before->runtime, nullptr);
-    ASSERT_TRUE(before->runtime->scalar_indexings.count(payload) > 0);
-    auto published_before_replace =
-        before->runtime->scalar_indexings.at(payload);
-    ASSERT_EQ(published_before_replace, first_cache_index);
+    auto warmup_limit = cachinglayer::ResourceUsage{1024 * 1024, 0};
+    auto warmup_dlist = std::make_shared<cachinglayer::internal::DList>(
+        false,
+        warmup_limit,
+        warmup_limit,
+        warmup_limit,
+        cachinglayer::EvictionConfig{});
+    folly::CancellationToken published_warmup_token;
+    std::promise<void> warmup_started;
+    auto warmup_started_future = warmup_started.get_future();
+    auto published_impl = create_index();
+    auto published_index_params = GenIndexParams(published_impl.get());
+    auto published_cache_index =
+        CreateCancellationObservingCacheIndex("published-scalar",
+                                              std::move(published_impl),
+                                              &published_warmup_token,
+                                              &warmup_started,
+                                              warmup_dlist.get());
+    auto warmup_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    published_cache_index->Warmup(nullptr, warmup_pool);
+    ASSERT_EQ(warmup_started_future.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    ASSERT_FALSE(published_warmup_token.isCancellationRequested());
 
-    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
-    ASSERT_TRUE(runtime->scalar_indexings.count(payload) > 0);
-    auto stale_runtime_index = runtime->scalar_indexings.at(payload);
-    ASSERT_EQ(stale_runtime_index, first_cache_index);
+    LoadIndexInfo published_index;
+    published_index.field_id = payload.get();
+    published_index.field_type = DataType::INT64;
+    published_index.index_params = std::move(published_index_params);
+    published_index.cache_index = published_cache_index;
+    published_index.load_resource_request =
+        LoadResourceRequest{0, 0, 0, 0, true};
+    sealed->LoadIndex(published_index);
 
-    LoadIndexInfo replacement_index;
-    replacement_index.field_id = payload.get();
-    replacement_index.field_type = DataType::INT64;
-    replacement_index.index_params["index_type"] = "STL_SORT";
-    auto replacement_impl = GenScalarIndexing<int64_t>(dataset.raw_->num_rows(),
-                                                       payload_data.data());
-    replacement_index.index_params = GenIndexParams(replacement_impl.get());
-    replacement_index.cache_index =
-        CreateTestCacheIndex("replacement", std::move(replacement_impl));
-    auto replacement_cache_index = replacement_index.cache_index;
+    auto stage_replacement = [&](bool fail_before_publish) {
+        auto current = sealed->TestGetPublishedStateSnapshot();
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        auto staged = sealed->TestBuildNextPublishedState(
+            current,
+            {current->schema,
+             current->load_info,
+             sealed->TestFreezeRuntimeResourceState(runtime),
+             current->commit_ts});
 
-    sealed->TestLoadIndex(replacement_index, true, runtime.get());
+        auto replacement_impl = create_index();
+        LoadIndexInfo replacement;
+        replacement.field_id = payload.get();
+        replacement.field_type = DataType::INT64;
+        replacement.index_params = GenIndexParams(replacement_impl.get());
+        replacement.cache_index = CreateTestCacheIndex(
+            fail_before_publish ? "rolled-back-scalar" : "replacement-scalar",
+            std::move(replacement_impl));
+        auto replacement_cache_index = replacement.cache_index;
+        replacement.load_resource_request =
+            LoadResourceRequest{0, 0, 0, 0, true};
 
-    ASSERT_TRUE(runtime->scalar_indexings.count(payload) > 0);
-    EXPECT_EQ(runtime->scalar_indexings.size(), 1);
-    auto updated_runtime_index = runtime->scalar_indexings.at(payload);
-    EXPECT_EQ(updated_runtime_index, replacement_cache_index);
-    EXPECT_NE(updated_runtime_index, stale_runtime_index);
+        ChunkedSegmentSealedImpl::StateDelta final_delta;
+        final_delta.schema = current->schema;
+        final_delta.load_info = current->load_info;
+        final_delta.commit_ts = current->commit_ts;
 
-    auto staged_only = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_NE(staged_only, nullptr);
-    ASSERT_NE(staged_only->runtime, nullptr);
-    ASSERT_TRUE(staged_only->runtime->scalar_indexings.count(payload) > 0);
-    EXPECT_EQ(staged_only->runtime->scalar_indexings.at(payload),
-              first_cache_index);
+        auto stage_and_publish = [&] {
+            sealed->TestStageLoadIndexThenPublish(
+                replacement,
+                true,
+                current->schema,
+                runtime,
+                staged.get(),
+                current,
+                final_delta,
+                [&] {
+                    auto published = sealed->TestGetPublishedStateSnapshot();
+                    ASSERT_EQ(published->runtime->scalar_indexings.at(payload),
+                              published_cache_index);
+                    ASSERT_EQ(runtime->scalar_indexings.at(payload),
+                              replacement_cache_index);
+                    EXPECT_FALSE(
+                        published_warmup_token.isCancellationRequested());
+                    if (fail_before_publish) {
+                        throw std::runtime_error("abort staged publish");
+                    }
+                });
+        };
 
-    ChunkedSegmentSealedImpl::StateDelta delta;
-    delta.schema = staged_only->schema;
-    delta.load_info = staged_only->load_info;
-    delta.runtime = sealed->TestFreezeRuntimeResourceState(std::move(runtime));
-    delta.commit_ts = staged_only->commit_ts;
+        if (fail_before_publish) {
+            EXPECT_THROW(stage_and_publish(), std::runtime_error);
+        } else {
+            EXPECT_NO_THROW(stage_and_publish());
+        }
+        return replacement_cache_index;
+    };
 
-    auto next = sealed->TestBuildNextPublishedState(staged_only, delta);
-    ASSERT_NE(next, nullptr);
-    ASSERT_NE(next->runtime, nullptr);
-    EXPECT_EQ(next->runtime->scalar_indexings.size(), 1);
-    ASSERT_TRUE(next->runtime->scalar_indexings.count(payload) > 0);
-    auto published_runtime_index = next->runtime->scalar_indexings.at(payload);
-    EXPECT_EQ(published_runtime_index, replacement_cache_index);
-    EXPECT_NE(published_runtime_index, stale_runtime_index);
-    EXPECT_EQ(next->runtime->ngram_fields.count(payload), 0);
+    stage_replacement(true);
+    EXPECT_FALSE(published_warmup_token.isCancellationRequested());
+    auto after_rollback = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(after_rollback->runtime->scalar_indexings.at(payload),
+              published_cache_index);
+
+    auto replacement_cache_index = stage_replacement(false);
+    EXPECT_TRUE(published_warmup_token.isCancellationRequested());
+    auto after_publish = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(after_publish->runtime->scalar_indexings.at(payload),
+              replacement_cache_index);
 }
 
 TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {

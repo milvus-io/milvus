@@ -429,7 +429,7 @@ class DeletedRecord {
     std::shared_ptr<SortedDeleteList> deleted_lists_;
     // max timestamp of deleted records which replayed in load process
     Timestamp max_load_timestamp_{0};
-    int32_t sealed_row_count_;
+    int32_t sealed_row_count_{0};
     // used to remove duplicated deleted records for fast access
     BitsetType deleted_mask_;
 
