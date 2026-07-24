@@ -1052,3 +1052,40 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
 }
+
+func Test_appendSystemFieldsDataWithCursor(t *testing.T) {
+	const count = 10
+	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64}
+	vecField := &schemapb.FieldSchema{
+		FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField, vecField}}
+	task := &ImportTask{
+		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema},
+		allocator: allocator.NewLocalAllocator(0, 1), // must NOT be used on the cursor path
+	}
+
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
+	cur := &pkCursor{begin: 7000, end: 7100, next: 7000}
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, cur)
+	assert.NoError(t, err)
+
+	pks := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData).Data
+	assert.Equal(t, int64(7000), pks[0])
+	assert.Equal(t, int64(7000+count-1), pks[count-1])
+	// RowID mirrors the PK deterministically.
+	rowIDs := insertData.Data[common.RowIDField].(*storage.Int64FieldData).Data
+	assert.Equal(t, pks, rowIDs)
+	// cursor advanced by rowNum.
+	assert.Equal(t, int64(7000+count), cur.next)
+
+	// Overflow: a range smaller than the batch fails loudly (no silent divergence).
+	insertData2, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+	small := &pkCursor{begin: 0, end: 5, next: 0}
+	err = appendSystemFieldsDataWithCursor(task, insertData2, count, small)
+	assert.Error(t, err)
+}
