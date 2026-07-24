@@ -392,6 +392,15 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, util.MetaStoreTypeEtcd, Params.MetaStoreType.GetValue())
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
+		assert.Equal(t, 64, Params.MaxEtcdTxnNum.GetAsInt())
+
+		for _, value := range []string{"0", "-1", "invalid"} {
+			assert.NoError(t, bt.Save(Params.MaxEtcdTxnNum.Key, value))
+			assert.Equal(t, 64, Params.MaxEtcdTxnNum.GetAsInt())
+		}
+		assert.NoError(t, bt.Save(Params.MaxEtcdTxnNum.Key, "2"))
+		assert.Equal(t, 2, Params.MaxEtcdTxnNum.GetAsInt())
+		assert.NoError(t, bt.Reset(Params.MaxEtcdTxnNum.Key))
 	})
 
 	t.Run("test profile config", func(t *testing.T) {

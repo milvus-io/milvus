@@ -63,7 +63,7 @@ type ReplicaManagerInterface interface {
 	// Node management
 	RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error
 	RemoveNode(ctx context.Context, collectionID typeutil.UniqueID, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error
-	RemoveSQNode(ctx context.Context, collectionID typeutil.UniqueID, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error
+	RemoveSQNodesInCollections(ctx context.Context, removals []SQNodeRemoval) error
 
 	// Metadata access
 	GetResourceGroupByCollection(ctx context.Context, collection typeutil.UniqueID) typeutil.Set[string]
@@ -90,6 +90,12 @@ type ReplicaManager struct {
 
 	idAllocator func() (int64, error)
 	catalog     metastore.QueryCoordCatalog
+}
+
+type SQNodeRemoval struct {
+	CollectionID int64
+	ReplicaID    int64
+	Nodes        []int64
 }
 
 func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.QueryCoordCatalog) *ReplicaManager {
@@ -536,7 +542,8 @@ func (m *ReplicaManager) getSrcReplicasAndCheckIfTransferable(collectionID typeu
 				len(srcReplicas),
 				collectionID,
 				srcRGName,
-				replicaNum))
+				replicaNum),
+		)
 		return nil, err
 	}
 	return srcReplicas, nil
@@ -814,19 +821,66 @@ func (m *ReplicaManager) RemoveNode(ctx context.Context, collectionID typeutil.U
 	return m.put(ctx, collectionID, mutableReplica.IntoReplica())
 }
 
-// RemoveSQNode removes the sq node from the given replica.
-func (m *ReplicaManager) RemoveSQNode(ctx context.Context, collectionID typeutil.UniqueID, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error {
-	m.collLock.Lock(collectionID)
-	defer m.collLock.Unlock(collectionID)
-
-	replica, ok := m.flatReplicas.Get(replicaID)
-	if !ok || replica.GetCollectionID() != collectionID {
-		return merr.WrapErrReplicaNotFound(replicaID)
+// RemoveSQNodesInCollections applies one removal batch and expects at most one removal per replica.
+func (m *ReplicaManager) RemoveSQNodesInCollections(ctx context.Context, removals []SQNodeRemoval) error {
+	if len(removals) == 0 {
+		return nil
 	}
 
-	mutableReplica := replica.CopyForWrite()
-	mutableReplica.RemoveSQNode(nodes...) // ro -> unused
-	return m.put(ctx, collectionID, mutableReplica.IntoReplica())
+	collectionSet := typeutil.NewUniqueSet()
+	for _, removal := range removals {
+		collectionSet.Insert(removal.CollectionID)
+	}
+	lockedCollections := collectionSet.Collect()
+	sort.Slice(lockedCollections, func(i, j int) bool {
+		return lockedCollections[i] < lockedCollections[j]
+	})
+	for _, collectionID := range lockedCollections {
+		m.collLock.Lock(collectionID)
+	}
+	defer func() {
+		for i := len(lockedCollections) - 1; i >= 0; i-- {
+			m.collLock.Unlock(lockedCollections[i])
+		}
+	}()
+
+	modifiedByCollection := make(map[int64][]*Replica)
+	replicaPBs := make([]*querypb.Replica, 0, len(removals))
+	for _, removal := range removals {
+		replica, ok := m.flatReplicas.Get(removal.ReplicaID)
+		if !ok || replica.GetCollectionID() != removal.CollectionID {
+			// The removal may be stale after the observer collected it.
+			continue
+		}
+
+		removeNodes := make([]int64, 0, len(removal.Nodes))
+		for _, node := range removal.Nodes {
+			if replica.ContainROSQNode(node) {
+				removeNodes = append(removeNodes, node)
+			}
+		}
+		if len(removeNodes) == 0 {
+			continue
+		}
+
+		mutableReplica := replica.CopyForWrite()
+		mutableReplica.RemoveSQNode(removeNodes...)
+		modifiedReplica := mutableReplica.IntoReplica()
+		modifiedByCollection[removal.CollectionID] = append(modifiedByCollection[removal.CollectionID], modifiedReplica)
+		replicaPBs = append(replicaPBs, modifiedReplica.replicaPB)
+	}
+
+	if len(replicaPBs) == 0 {
+		return nil
+	}
+	if err := m.catalog.SaveReplica(ctx, replicaPBs...); err != nil {
+		return err
+	}
+
+	for collectionID, modifiedReplicas := range modifiedByCollection {
+		m.putReplicasInMemory(collectionID, modifiedReplicas...)
+	}
+	return nil
 }
 
 func (m *ReplicaManager) GetResourceGroupByCollection(ctx context.Context, collection typeutil.UniqueID) typeutil.Set[string] {
@@ -873,7 +927,7 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 	return string(ret)
 }
 
-// RecoverSQNodesInCollection recovers all sq nodes in collection with latest node list.
+// RecoverSQNodesInCollections recovers all sq nodes in each collection with latest node list.
 // Promise a node will be only assigned to one replica in same collection at same time.
 // 1. Move the rw nodes to ro nodes if current replica use too much sqn.
 // 2. Add new incoming nodes into the replica if they are not ro node of other replicas in same collection.
@@ -881,16 +935,67 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 // When sqnNodesByRG covers all resource groups of replicas in the collection, streaming nodes will be assigned
 // by resource group isolation (each replica only gets streaming nodes from its own resource group).
 // Otherwise, all streaming nodes will be pooled together and assigned fairly across all replicas (fallback mode).
-func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodesByRG map[string]typeutil.UniqueSet) error {
-	m.collLock.Lock(collectionID)
-	defer m.collLock.Unlock(collectionID)
-
-	replicas, ok := m.coll2Replicas.Get(collectionID)
-	if !ok {
-		return merr.WrapErrCollectionNotLoaded(collectionID)
+func (m *ReplicaManager) RecoverSQNodesInCollections(
+	ctx context.Context,
+	collectionIDs []int64,
+	sqnNodesByRG map[string]typeutil.UniqueSet,
+) error {
+	if len(collectionIDs) == 0 {
+		return nil
 	}
 
-	// Build helpers based on whether we can use resource group isolation.
+	lockedCollections := lo.Uniq(collectionIDs)
+	sort.Slice(lockedCollections, func(i, j int) bool {
+		return lockedCollections[i] < lockedCollections[j]
+	})
+	for _, collectionID := range lockedCollections {
+		m.collLock.Lock(collectionID)
+	}
+	defer func() {
+		for i := len(lockedCollections) - 1; i >= 0; i-- {
+			m.collLock.Unlock(lockedCollections[i])
+		}
+	}()
+
+	modifiedByCollection := make(map[int64][]*Replica)
+	replicaPBs := make([]*querypb.Replica, 0, len(lockedCollections))
+	for _, collectionID := range lockedCollections {
+		replicas, ok := m.coll2Replicas.Get(collectionID)
+		if !ok {
+			continue
+		}
+
+		modifiedReplicas := m.recoverSQNodesInCollectionLocked(ctx, collectionID, replicas, sqnNodesByRG)
+		if len(modifiedReplicas) == 0 {
+			continue
+		}
+		modifiedByCollection[collectionID] = modifiedReplicas
+		for _, replica := range modifiedReplicas {
+			replicaPBs = append(replicaPBs, replica.replicaPB)
+		}
+	}
+
+	if len(replicaPBs) == 0 {
+		return nil
+	}
+	if err := m.catalog.SaveReplica(ctx, replicaPBs...); err != nil {
+		return err
+	}
+
+	for collectionID, modifiedReplicas := range modifiedByCollection {
+		m.putReplicasInMemory(collectionID, modifiedReplicas...)
+	}
+	return nil
+}
+
+// recoverSQNodesInCollectionLocked computes streaming query node assignment changes.
+// Caller must hold collLock for the collection.
+func (m *ReplicaManager) recoverSQNodesInCollectionLocked(
+	ctx context.Context,
+	collectionID int64,
+	replicas []*Replica,
+	sqnNodesByRG map[string]typeutil.UniqueSet,
+) []*Replica {
 	helpers := m.buildSQNodeAssignmentHelpers(replicas, sqnNodesByRG)
 
 	modifiedReplicas := make([]*Replica, 0)
@@ -919,7 +1024,7 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
 	}
-	return m.put(ctx, collectionID, modifiedReplicas...)
+	return modifiedReplicas
 }
 
 // buildSQNodeAssignmentHelpers builds assignment helpers for streaming query node recovery.
