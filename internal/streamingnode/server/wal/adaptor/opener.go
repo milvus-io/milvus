@@ -80,38 +80,6 @@ type openerAdaptorImpl struct {
 	interceptorBuilders []interceptors.InterceptorBuilder
 }
 
-type walOpenResources struct {
-	once            sync.Once
-	released        bool
-	roWAL           *roWALAdaptorImpl
-	param           *interceptors.InterceptorBuildParam
-	recoveryStorage recovery.RecoveryStorage
-	flusher         *flusherimpl.WALFlusherImpl
-}
-
-func (r *walOpenResources) Close() {
-	if r.released {
-		return
-	}
-	r.once.Do(func() {
-		if r.flusher != nil {
-			r.flusher.Close()
-		} else if r.recoveryStorage != nil {
-			r.recoveryStorage.Close()
-		}
-		if r.param != nil {
-			r.param.Clear()
-		}
-		if r.roWAL != nil {
-			r.roWAL.Close()
-		}
-	})
-}
-
-func (r *walOpenResources) Release() {
-	r.released = true
-}
-
 // Open opens a wal instance for the channel.
 func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.WAL, error) {
 	if !o.lifetime.Add(typeutil.LifetimeStateWorking) {
