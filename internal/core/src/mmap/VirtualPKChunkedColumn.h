@@ -274,6 +274,15 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         return truncated_segment_id_;
     }
 
+ protected:
+    std::optional<DataType>
+    GetDefaultScanDataType() const override {
+        // The system-injected __virtual_pk__ field is always INT64. External
+        // collections with a user-defined VARCHAR primary key load that field
+        // through the regular string column implementation instead.
+        return DataType::INT64;
+    }
+
  private:
     // Compute virtual PK from an offset using the pre-shifted segment ID.
     // Centralizes the inlined formula so all call sites stay consistent.

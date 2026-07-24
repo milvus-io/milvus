@@ -175,6 +175,31 @@ TEST_F(VirtualPKChunkedColumnTest, BulkPrimitiveValueAt) {
     }
 }
 
+TEST_F(VirtualPKChunkedColumnTest,
+       Int64VirtualPrimaryKeyUsesFixedWidthScanCursor) {
+    constexpr int64_t segment_id = 200;
+    constexpr int64_t num_rows = 5;
+    VirtualPKChunkedColumn column(segment_id, num_rows);
+
+    auto cursor = column.Scan(
+        nullptr, ChunkedColumnInterface::ScanOptions::ForData(1, num_rows - 1));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(&batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, num_rows - 1);
+    EXPECT_EQ(batch.values.encoding,
+              ChunkedColumnInterface::ValueEncoding::FixedWidth);
+    EXPECT_EQ(batch.values.kind,
+              ChunkedColumnInterface::ScanValueKind::FixedWidth);
+    const auto* values = batch.values.data_as<int64_t>();
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_EQ(values[i], GetVirtualPK(segment_id, i + 1));
+    }
+    EXPECT_FALSE(cursor->Next(&batch));
+}
+
 TEST_F(VirtualPKChunkedColumnTest, BulkValueAt) {
     int64_t segment_id = 300;
     int64_t num_rows = 50;

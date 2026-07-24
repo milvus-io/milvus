@@ -769,6 +769,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
  private:
+    std::optional<DataType>
+    GetDefaultScanDataType() const override {
+        return data_type_;
+    }
+
     // Resolve, for each requested offset, the chunk that owns it and invoke
     // fn(chunk, offset_in_chunk, i), preserving the original row order.
     //
