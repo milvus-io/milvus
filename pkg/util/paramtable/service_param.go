@@ -698,6 +698,8 @@ type WoodpeckerConfig struct {
 	// client
 	AppendQueueSize         ParamItem `refreshable:"true"`
 	AppendMaxRetries        ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries   ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes     ParamItem `refreshable:"false"`
 	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
 	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
 	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
@@ -740,7 +742,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.meta.prefix",
 		Version:      "2.6.0",
 		DefaultValue: "woodpecker",
-		Doc:          "The Prefix of the metadata provider. default is woodpecker.",
+		Doc:          "The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.",
 		Export:       true,
 	}
 	p.MetaPrefix.Init(base.mgr)
@@ -762,6 +764,24 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AppendMaxRetries.Init(base.mgr)
+
+	p.AppendMaxBatchEntries = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchEntries",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.",
+		Export:       true,
+	}
+	p.AppendMaxBatchEntries.Init(base.mgr)
+
+	p.AppendMaxBatchBytes = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
+		Version:      "2.6.0",
+		DefaultValue: "2000000",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
+		Export:       true,
+	}
+	p.AppendMaxBatchBytes.Init(base.mgr)
 
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
