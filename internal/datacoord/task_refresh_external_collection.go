@@ -637,18 +637,9 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 
 	mlog.Info(context.TODO(), "collected current segments", mlog.Int("segmentCount", len(currentSegments)))
 
-	// A collection-wide task needs the aggregate ID capacity that the previous
-	// file-range tasks would have received independently.
+	// Use one bounded allocation for the collection-wide task. Multiplying the
+	// range by the former task count can exceed RootCoord's uint32 batch limit.
 	preAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
-	if t.GetTaskId() == t.GetJobId() {
-		filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
-		fileCount := t.GetFileIndexEnd() - t.GetFileIndexBegin()
-		virtualTaskCount := int64(1)
-		if fileCount > 0 {
-			virtualTaskCount = 1 + (fileCount-1)/filesPerTask
-		}
-		preAllocCount *= virtualTaskCount
-	}
 
 	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
 	if err != nil {
