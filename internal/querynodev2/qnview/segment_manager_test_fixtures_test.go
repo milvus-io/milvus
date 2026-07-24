@@ -371,15 +371,22 @@ func (l *fakePhysicalLoader) Release(_ context.Context, segmentIDs []int64) erro
 	return l.releaseErr
 }
 
-func newTestQueryViewSegmentLoadScheduler(
-	t *testing.T,
-	_ QueryViewLoadMetadataProvider,
-	loader PhysicalSegmentLoader,
-	estimators ...SegmentResourceEstimator,
-) *QueryViewSegmentLoadScheduler {
+func newTestNodeScheduler(t *testing.T) nodescheduler.Scheduler {
 	nodeScheduler := nodescheduler.New(4)
 	t.Cleanup(nodeScheduler.Close)
-	return newQueryViewSegmentLoadScheduler(nodeScheduler, loader, estimators...)
+	return nodeScheduler
+}
+
+func submitTestSegmentLoadTask(t *testing.T, loader PhysicalSegmentLoader, task SegmentLoadTask, estimators ...SegmentResourceEstimator) nodescheduler.TaskHandle {
+	var estimator SegmentResourceEstimator
+	if len(estimators) > 0 {
+		estimator = estimators[0]
+	}
+	return newTestNodeScheduler(t).Submit(newSegmentLoadTask(loader, estimator, task))
+}
+
+func submitTestSegmentUpdateTask(t *testing.T, loader PhysicalSegmentLoader, task SegmentUpdateTask) nodescheduler.TaskHandle {
+	return newTestNodeScheduler(t).Submit(newSegmentUpdateTask(loader, task))
 }
 
 type fakeResourceReservation struct {
@@ -408,17 +415,21 @@ func (e *fakeSegmentResourceEstimator) Reserve(_ context.Context, info *querypb.
 	return reservation, nil
 }
 
-type fakeSegmentLoadScheduler struct {
-	tasks   []SegmentLoadTask
-	updates []SegmentUpdateTask
+type fakeNodeScheduler struct {
+	tasks   []*SegmentLoadTask
+	updates []*SegmentUpdateTask
 }
 
-func (s *fakeSegmentLoadScheduler) Submit(task SegmentLoadTask) {
-	s.tasks = append(s.tasks, task)
-}
-
-func (s *fakeSegmentLoadScheduler) Update(task SegmentUpdateTask) {
-	s.updates = append(s.updates, task)
+func (s *fakeNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	switch task := task.(type) {
+	case schedulerTaskFunc:
+		_ = task.Execute(context.Background())
+	case *SegmentLoadTask:
+		s.tasks = append(s.tasks, task)
+	case *SegmentUpdateTask:
+		s.updates = append(s.updates, task)
+	}
+	return noopNodeTaskHandle{}
 }
 
 func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
@@ -428,14 +439,21 @@ func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegm
 	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, collections...)
 }
 
-func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler SegmentLoadScheduler, watchers ...SegmentLoadInfoWatcher) *ViewScopedPhysicalSegmentManager {
+func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler nodescheduler.Scheduler, watchers ...SegmentLoadInfoWatcher) *ViewScopedPhysicalSegmentManager {
 	t.Helper()
-	nodeScheduler := nodescheduler.New(4)
-	t.Cleanup(nodeScheduler.Close)
 	if len(watchers) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(nodeScheduler, scheduler, watchers[0])
+		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(scheduler, &fakePhysicalLoader{}, watchers[0])
 	}
-	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, scheduler)
+	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, &fakePhysicalLoader{})
+}
+
+func newTestViewScopedPhysicalSegmentManagerWithLoader(t *testing.T, loader PhysicalSegmentLoader, watchers ...SegmentLoadInfoWatcher) *ViewScopedPhysicalSegmentManager {
+	t.Helper()
+	nodeScheduler := newTestNodeScheduler(t)
+	if len(watchers) > 0 {
+		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(nodeScheduler, loader, watchers[0])
+	}
+	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, loader)
 }
 
 type fakeSegmentLoadInfoWatcher struct {

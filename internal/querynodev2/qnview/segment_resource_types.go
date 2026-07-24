@@ -170,11 +170,6 @@ type PhysicalSegmentLoader interface {
 	Update(ctx context.Context, segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
 }
 
-type SegmentLoadScheduler interface {
-	Submit(task SegmentLoadTask)
-	Update(task SegmentUpdateTask)
-}
-
 type SegmentResourceEstimator interface {
 	Reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error)
 }
@@ -184,8 +179,10 @@ type ResourceReservation interface {
 }
 
 type SegmentLoadTask struct {
+	loader    PhysicalSegmentLoader
+	estimator SegmentResourceEstimator
+
 	Context                     context.Context
-	Meta                        *viewpb.QueryViewMeta
 	SegmentID                   int64
 	Collection                  CollectionRuntime
 	TransformStartAfterTimeTick uint64
@@ -197,6 +194,8 @@ type SegmentLoadTask struct {
 }
 
 type SegmentUpdateTask struct {
+	loader PhysicalSegmentLoader
+
 	Context    context.Context
 	Segment    TransformSegment
 	Collection CollectionRuntime

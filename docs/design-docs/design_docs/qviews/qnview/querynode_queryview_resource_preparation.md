@@ -42,9 +42,10 @@ The QueryNode entry point wires the resource managers as:
 QueryNode.NewQueryViewSegmentManager
   -> QueryViewSegmentReadinessManager
        -> ViewScopedPhysicalSegmentManager
-            -> QueryViewSegmentLoadScheduler
-                 -> QueryViewLoadMetadataProvider.GetQueryViewSegmentLoadInfo
-                 -> PhysicalSegmentLoader.Load
+            -> NodeScheduler.Submit(SegmentLoadTask / SegmentUpdateTask)
+                 -> CollectionRuntimeGuard.UpdateIndexMeta
+                 -> SegmentResourceEstimator.Reserve
+                 -> PhysicalSegmentLoader.Load / Update
        -> TransformLogBuffer
        -> QueryViewCollectionRuntimeManager
 ```
@@ -54,9 +55,10 @@ QueryNode.NewQueryViewSegmentManager
 | `QNQueryViewHandler` | Applies incoming QueryViews, owns per-shard QueryNode state machines, and calls `SegmentManager.Acquire` or `SegmentManager.Release`. |
 | `QNQueryViewStateMachine` | Tracks local `Preparing`, `Ready`, `Unrecoverable`, `Dropping`, and `Dropped` states. Deduplicates incremental ready segment reports. |
 | `QueryViewSegmentReadinessManager` | Pins TransformLog and collection runtime, tracks transform-level view/segment refs, registers loaded segments, waits catch-up, and reports segment readiness. |
-| `ViewScopedPhysicalSegmentManager` | Tracks physical segment refs by QueryView, submits missing segment loads, validates late callbacks, and waits for in-flight load callbacks during release. |
-| `QueryViewSegmentLoadScheduler` | Fetches DataCoord-packed segment load info, updates collection index meta, reserves resources, and invokes the physical loader. |
-| `QueryViewLoadMetadataProvider` | Provides `DescribeCollection` and `GetQueryViewSegmentLoadInfo` through MixCoord/QueryCoord. |
+| `ViewScopedPhysicalSegmentManager` | Tracks physical segment refs by QueryView, builds executable load/update tasks from watched snapshots, submits them to NodeScheduler, validates late callbacks, and waits for in-flight load callbacks during release. |
+| `SegmentLoadTask` / `SegmentUpdateTask` | Encapsulate index-meta refresh, resource reservation, physical load/update, callback, cancellation, and retry behavior required by NodeScheduler. |
+| `SegmentLoadInfoWatcher` | Maintains segment subscriptions and delivers complete, revisioned load-info snapshots from QueryCoord. |
+| `QueryViewLoadMetadataProvider` | Provides collection-level `DescribeCollection` and versioned `GetQueryViewLoadInfo` through MixCoord/QueryCoord. |
 | `QueryViewCollectionRuntimeManager` | Pins local collection runtime using collection schema/load metadata and exposes index meta update for segment load. |
 | `TransformLogBuffer` | Pins the view-level transform range and registers loaded sealed segments for catch-up. |
 
@@ -81,9 +83,10 @@ Incoming QueryView(Preparing)
                  -> report empty OnReady if this QN has no assigned segments
                  -> ViewScopedPhysicalSegmentManager.Acquire for missing segments
                       -> record physical refs
+                      -> subscribe SegmentLoadInfoWatcher for each referenced segment
                       -> if segment is missing:
-                           -> QueryViewSegmentLoadScheduler
-                                -> QueryViewLoadMetadataProvider.GetQueryViewSegmentLoadInfo
+                           -> wait for a complete SegmentLoadInfoSnapshot
+                           -> NodeScheduler.Submit(SegmentLoadTask)
                                 -> CollectionRuntimeGuard.UpdateIndexMeta
                                 -> SegmentResourceEstimator.Reserve
                                 -> PhysicalSegmentLoader.Load
@@ -103,8 +106,9 @@ Important ordering rules:
    preparation through `SegmentManager.Acquire`.
 2. TransformLog guard and collection runtime are acquired before physical
    segment loading is submitted.
-3. Collection runtime acquisition uses `DescribeCollection`; segment loading
-   later uses `GetQueryViewSegmentLoadInfo`.
+3. Collection runtime acquisition uses `DescribeCollection` and
+   `GetQueryViewLoadInfo`; segment loading consumes complete snapshots delivered
+   by `SegmentLoadInfoWatcher`.
 4. Physical load completion is not QueryView readiness. A segment becomes
    QueryView-ready only after TransformLog registration and catch-up.
 5. QueryNode may report incremental `Preparing` progress before it reaches
@@ -142,74 +146,29 @@ Callback liveness contract:
 
 ## 6. Collection Runtime and Segment Metadata Boundary
 
-`qnview.QueryViewLoadMetadataProvider` deliberately exposes separate collection-level and
-segment-level APIs:
+`qnview.QueryViewLoadMetadataProvider` exposes only collection-level metadata:
 
 ```go
 type QueryViewLoadMetadataProvider interface {
     DescribeCollection(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
-    GetQueryViewSegmentLoadInfo(ctx context.Context, collectionID int64, segmentIDs ...int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)
+    GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version QueryViewLoadInfoVersion) (QueryViewLoadInfo, error)
 }
 ```
 
-Collection runtime acquisition uses `DescribeCollection` to get schema,
-database name, required fields, and schema barrier timestamp. QueryNode pins the
-local collection runtime through `collectionManager.PutOrRef` before any segment
-load task is submitted.
+Collection runtime acquisition resolves the QueryView's load-info version, then
+pins the local collection runtime through `collectionManager.PutOrRef` before
+any segment load task is submitted.
 
-Segment loading uses `GetQueryViewSegmentLoadInfo`, defined on QueryCoord proto:
+Segment metadata has a separate streaming boundary. `SegmentLoadInfoWatcher`
+subscribes by `(collectionID, segmentID, revision)` and receives complete
+`SegmentLoadInfoSnapshot` values containing packed `SegmentLoadInfo`, index
+definitions, and a revision. The physical manager stores the latest snapshot,
+starts a missing-segment load only after a complete snapshot is available, and
+coalesces newer snapshots while an update task is already running.
 
-```proto
-message GetQueryViewSegmentLoadInfoRequest {
-    common.MsgBase base = 1;
-    int64 collectionID = 2;
-    repeated int64 segmentIDs = 3;
-}
-
-message GetQueryViewSegmentLoadInfoResponse {
-    common.Status status = 1;
-    repeated SegmentLoadInfo infos = 2;
-    repeated index.IndexInfo index_info_list = 3;
-}
-```
-
-There is intentionally no `load_priority` request field. Load priority is not a
-caller-controlled dimension for QueryView resource preparation. DataCoord packs
-the returned `SegmentLoadInfo` for QueryView loading.
-
-The production call path is:
-
-```text
-QueryNode lazyQueryViewLoadMetadataProvider
-  -> MixCoord client
-  -> QueryCoord.GetQueryViewSegmentLoadInfo
-       -> health check
-       -> mixCoord.GetQueryViewSegmentLoadInfo
-            -> DataCoord.GetQueryViewSegmentLoadInfo
-```
-
-QueryCoord and DataCoord are colocated in the coordinator process, so the
-MixCoord hop calls the DataCoord server directly inside the process instead of
-adding a coordinator-to-coordinator gRPC round trip.
-
-DataCoord owns the segment-level packing:
-
-1. validate health, collection ID, and requested segment IDs;
-2. return empty success for an empty segment list;
-3. fetch collection-level index definitions once;
-4. fetch segment index metadata for requested segment IDs;
-5. validate each segment belongs to the requested collection;
-6. recalculate row count when needed;
-7. pack `querypb.SegmentLoadInfo` with binlogs, deltalogs, stats logs,
-   manifest path, index info, storage version, data version, commit timestamp,
-   and other physical-loader inputs;
-8. return collection index info so QueryNode can update local collection index
-   meta before loading.
-
-The RPC supports multiple segment IDs. The current scheduler still submits one
-load task per segment, so it usually calls the RPC with a single segment ID. A
-future scheduler can batch this call without changing the ownership boundary:
-DataCoord remains the single owner of the complete segment-level load snapshot.
+This boundary keeps task execution self-contained: a load/update task never
+performs a metadata lookup. It operates only on the immutable snapshot captured
+when the task was created.
 
 ## 7. Physical Load Stage
 
@@ -231,15 +190,22 @@ Acquire behavior:
 
 Load task behavior:
 
-1. call `GetQueryViewSegmentLoadInfo(collectionID, segmentID)`;
-2. require exactly one returned `SegmentLoadInfo` for the current per-segment
-   task;
-3. update local collection index meta with the returned index definitions;
-4. reserve resources through the optional estimator;
-5. call `PhysicalSegmentLoader.Load`;
-6. wrap the segment with `TransformStartAfterTimeTick` if the QueryView meta has
+1. require a complete watched `SegmentLoadInfoSnapshot`;
+2. update local collection index meta with the snapshot's index definitions;
+3. reserve resources through the optional estimator;
+4. call `PhysicalSegmentLoader.Load` with the snapshot's packed load info;
+5. wrap the segment with `TransformStartAfterTimeTick` if the QueryView meta has
    a delete-apply start timetick;
-7. report the loaded segment back to the physical manager.
+6. report the loaded segment back to the physical manager.
+
+Update task behavior:
+
+1. classify the revision change into the required physical update actions;
+2. refresh collection index meta from the new snapshot;
+3. call `PhysicalSegmentLoader.Update`;
+4. return `nodescheduler.ErrDelay` for non-cancellation failures so the same
+   task is retried;
+5. report the applied revision after success.
 
 On physical load completion, the physical manager validates that the segment is
 still referenced before keeping it. If no QueryView still references the
@@ -297,10 +263,11 @@ Release order:
 7. `OnDropped` drives the local state machine to `Dropped`.
 8. QueryNode reports `Dropped` and removes the local view entry.
 
-`QueryViewSegmentLoadScheduler.Cancel` is currently best-effort and no-op.
-Release correctness therefore depends on context cancellation, ref validation,
-and waiting for in-flight callbacks, not on synchronous object-storage load
-termination.
+Task cancellation is asynchronous. Load release correctness depends on context
+cancellation, ref validation, and waiting for in-flight callbacks rather than
+synchronous object-storage termination. The physical segment state retains the
+active update `TaskHandle` and cancels it when the last QueryView reference is
+removed or the segment is reset, preventing stale `ErrDelay` retries.
 
 ## 10. Failure Semantics
 
@@ -308,8 +275,7 @@ termination.
 |---|---|
 | TransformLog guard acquire fails | The view is reported `Unrecoverable`. |
 | Collection runtime acquire fails | The view is reported `Unrecoverable`; the TransformLog guard is released. |
-| Segment metadata RPC fails | The affected segment load fails and waiting views are reported `Unrecoverable`. |
-| RPC returns zero or multiple load infos for one segment task | The segment load is treated as unrecoverable for waiting views. |
+| A watched snapshot is missing packed load info | The segment load is treated as unrecoverable for waiting views. |
 | Collection index meta update fails | The segment load is treated as unrecoverable. |
 | Resource reservation fails | The segment load is treated as unrecoverable. |
 | Physical loader fails | The segment load is treated as unrecoverable. |
@@ -335,10 +301,10 @@ replacement view.
 7. TransformLog registration and live segment release happen in
    `QueryViewSegmentReadinessManager`, so transform consumption is detached
    before the segment is released.
-8. QueryNode does not assemble `SegmentLoadInfo` from partial metadata APIs.
-   DataCoord owns the complete segment-level load snapshot.
+8. QueryNode does not assemble `SegmentLoadInfo` from partial metadata APIs;
+   tasks consume complete watched snapshots.
 9. Collection runtime metadata and segment load metadata intentionally use
-    separate APIs: `DescribeCollection` for collection runtime and
-    `GetQueryViewSegmentLoadInfo` for segment load.
+   separate paths: versioned metadata APIs for collection runtime and the
+   segment load-info watch stream for physical tasks.
 10. QueryNode has no `Up` or `Down` local state; it keeps Ready resources until
     `Dropped` is pushed.
