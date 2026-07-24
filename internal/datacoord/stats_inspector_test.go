@@ -301,20 +301,11 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrSegmentNotFound), "Error should be ErrSegmentNotFound")
 
-	s.mt.statsTaskMeta.tasks.Insert(1001, &indexpb.StatsTask{
-		TaskID:     1001,
-		SegmentID:  10,
-		SubJobType: indexpb.StatsSubJob_Sort,
-	})
-	s.mt.statsTaskMeta.segmentID2Tasks.Insert("10-Sort", &indexpb.StatsTask{
-		TaskID:     1001,
-		SegmentID:  10,
-		SubJobType: indexpb.StatsSubJob_Sort,
-	})
-
-	// Simulate duplicate task error
+	// Duplicate tasks are skipped before checking the scheduler or allocating a task ID.
+	s.inspector.scheduler = task.NewMockGlobalScheduler(s.T())
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
 	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true, nil)
-	s.NoError(err) // Duplicate tasks are handled as success
+	s.NoError(err)
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {

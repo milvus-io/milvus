@@ -350,6 +350,13 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			return nil
 		}
 	}
+	if si.mt.statsTaskMeta.HasStatsTask(originSegmentID, subJobType) {
+		mlog.RatedInfo(si.ctx, rate.Limit(10), "stats task already exists",
+			mlog.FieldCollectionID(originSegment.GetCollectionID()),
+			mlog.FieldSegmentID(originSegmentID),
+			mlog.String("subJobType", subJobType.String()))
+		return nil
+	}
 	pendingTaskCount := si.scheduler.GetPendingTaskCount()
 	pendingTaskLimit := Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt()
 	if pendingTaskCount > pendingTaskLimit {
