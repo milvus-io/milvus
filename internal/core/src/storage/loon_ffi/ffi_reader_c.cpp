@@ -21,6 +21,7 @@
 #include "PluginInterface.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "milvus-storage/column_groups.h"
@@ -135,9 +136,8 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
 
         *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -182,9 +182,8 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
 
         *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -212,9 +211,8 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
                    status.ToString());
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -230,7 +228,6 @@ CloseFFIReader(CFFIPackedReader c_packed_reader) {
         AssertInfo(reader, "cannot close nullptr ffi reader");
         delete reader;
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

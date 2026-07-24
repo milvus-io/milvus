@@ -62,8 +62,12 @@ bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
     SCOPE_CGO_CALL_METRIC();
 
-    return knowhere::UseDiskLoad(index_type, index_engine_version) ||
-           strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
+    try {
+        return knowhere::UseDiskLoad(index_type, index_engine_version) ||
+               strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
+    }
+    CGO_CATCH_AND_LOG("IsLoadWithDisk")
+    return false;
 }
 
 CStatus
@@ -110,53 +114,70 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         // start loading. Keep that admission path metadata-only: exact scalar
         // V3 directory inspection belongs to SealedIndexTranslator, where the
         // result is used for the actual MCL loading reservation.
-        return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-            field_type,
-            element_type,
-            load_index_info->index_engine_version,
-            load_index_info->index_size,
-            index_params,
-            load_index_info->enable_mmap,
-            load_index_info->num_rows,
-            load_index_info->dim);
-    } catch (std::exception& e) {
-        ThrowInfo(milvus::UnexpectedError,
-                  fmt::format("failed to estimate index load resource, "
-                              "encounter exception : {}",
-                              e.what()));
-        return LoadResourceRequest{0, 0, 0, 0, false};
+        LoadResourceRequest request =
+            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                field_type,
+                element_type,
+                load_index_info->index_engine_version,
+                load_index_info->index_size,
+                index_params,
+                load_index_info->enable_mmap,
+                load_index_info->num_rows,
+                load_index_info->dim);
+        return request;
     }
+    // ThrowInfo here would rethrow straight through cgo (this function has no
+    // CStatus channel) and terminate the process; log loudly and fall back to
+    // a zero estimate instead.
+    CGO_CATCH_AND_LOG("EstimateLoadIndexResource")
+    return LoadResourceRequest{0, 0, 0, 0, false};
 }
 
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,
                                      int64_t millisecond_timeout) {
-    return milvus::cachinglayer::Manager::GetInstance()
-        .ReserveLoadingResourceWithTimeout(
-            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                                size.disk_bytes),
-            std::chrono::milliseconds(millisecond_timeout));
+    // Failure direction is safe: false means "reservation failed" and the Go
+    // caller backs off, whereas an escaping exception would cross the C ABI
+    // and terminate the process.
+    try {
+        return milvus::cachinglayer::Manager::GetInstance()
+            .ReserveLoadingResourceWithTimeout(
+                milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                    size.disk_bytes),
+                std::chrono::milliseconds(millisecond_timeout));
+    }
+    CGO_CATCH_AND_LOG("TryReserveLoadingResourceWithTimeout")
+    return false;
 }
 
 void
 ReleaseLoadingResource(CResourceUsage size) {
-    milvus::cachinglayer::Manager::GetInstance().ReleaseLoadingResource(
-        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                            size.disk_bytes));
+    try {
+        milvus::cachinglayer::Manager::GetInstance().ReleaseLoadingResource(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes));
+    }
+    CGO_CATCH_AND_LOG("ReleaseLoadingResource")
 }
 
 void
 ChargeLoadedResource(CResourceUsage size) {
-    milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                            size.disk_bytes));
+    try {
+        milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes));
+    }
+    CGO_CATCH_AND_LOG("ChargeLoadedResource")
 }
 
 void
 RefundLoadedResource(CResourceUsage size) {
-    milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
-        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                            size.disk_bytes));
+    try {
+        milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes));
+    }
+    CGO_CATCH_AND_LOG("RefundLoadedResource")
 }
 
 CStatus

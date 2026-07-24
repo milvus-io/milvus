@@ -26,6 +26,7 @@
 #include "arrow/c/abi.h"
 #include "arrow/record_batch.h"
 #include "arrow/result.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/extend_status.h"
@@ -122,9 +123,8 @@ NewPackedReaderWithStorageConfig(char** paths,
             milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -166,9 +166,8 @@ NewPackedReaderWithProperties(char** paths,
             milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -201,9 +200,8 @@ NewPackedReader(char** paths,
             milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -240,9 +238,8 @@ ReadNext(CPackedReader c_packed_reader,
             return milvus::SuccessCStatus();
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -256,7 +253,6 @@ CloseReader(CPackedReader c_packed_reader) {
         packed_reader->Close();
         delete packed_reader;
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

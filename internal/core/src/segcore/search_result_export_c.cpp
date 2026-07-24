@@ -1090,9 +1090,8 @@ ExportSearchResultAsArrowRecordBatch(CSearchResult c_search_result,
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1190,11 +1189,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             out_result,
             "failed to allocate memory for proto serialization",
             "failed to serialize SearchResultData proto");
-    } catch (folly::FutureCancellation& e) {
-        return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1331,9 +1327,8 @@ FillFieldsOrderedAsArrowRecordBatch(CSearchResult* search_results,
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -1405,11 +1400,8 @@ PrepareSearchResultsForExportImpl(
             *all_search_count = helper.GetAllSearchCount();
         }
         return milvus::SuccessCStatus();
-    } catch (folly::FutureCancellation& e) {
-        return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus

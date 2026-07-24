@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -154,9 +155,8 @@ NewSegment(CCollection collection,
 
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -182,9 +182,8 @@ NewSegmentWithLoadInfo(CCollection collection,
         segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 milvus::SchemaPtr
@@ -263,6 +262,20 @@ AsyncReopenSegment(CTraceContext c_trace,
             milvus::futures::PoolType::kLoad);
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (...) {
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [](folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncReopenSegment preflight failed: {}",
+                          "unknown exception");
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
     }
 }
 
@@ -307,9 +320,8 @@ SegmentLoad(CTraceContext c_trace,
         }
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CFuture*
@@ -559,6 +571,9 @@ CreateLeakedCRetrieveResultFromProto(
     } catch (std::exception& e) {
         delete[] buffer;
         throw;
+    } catch (...) {
+        delete[] buffer;
+        throw;
     }
 
     auto result = new CRetrieveResult();
@@ -752,9 +767,8 @@ Insert(CSegmentInterface c_segment,
                         timestamps,
                         insert_record_proto.get());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -765,9 +779,8 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         *offset = segment->PreInsert(size);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -785,9 +798,8 @@ Delete(CSegmentInterface c_segment,
     try {
         auto res = segment->Delete(size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
@@ -803,9 +815,8 @@ LoadFieldData(CSegmentInterface c_segment,
         auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
         segment->LoadFieldData(*load_info);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -826,9 +837,8 @@ LoadDeletedRecord(CSegmentInterface c_segment,
                                                deleted_record_info.row_count};
         segment_interface->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -843,9 +853,8 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropFieldData(milvus::FieldId(field_id));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -865,6 +874,9 @@ ExprResCacheEraseSegment(int64_t segment_id) {
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -2673,6 +2685,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 

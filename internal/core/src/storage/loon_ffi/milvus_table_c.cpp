@@ -856,6 +856,8 @@ loon_milvus_table_create_manifest_from_segment_manifests(
         RETURN_SUCCESS();
     } catch (const std::exception& e) {
         RETURN_EXCEPTION(e.what());
+    } catch (...) {
+        RETURN_EXCEPTION("unknown exception");
     }
 
     RETURN_UNREACHABLE();

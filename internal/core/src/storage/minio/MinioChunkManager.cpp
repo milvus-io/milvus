@@ -280,7 +280,10 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
         LOG_ERROR("{}", err_message);
         throw SegcoreError(e.get_error_code(), err_message);
     } catch (std::exception& e) {
-        throw e;
+        // Bare rethrow: `throw e;` would copy-construct a plain std::exception,
+        // slicing off any derived type (and its error code) before it reaches
+        // the cgo boundary.
+        throw;
     }
 };
 

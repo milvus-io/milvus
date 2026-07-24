@@ -27,6 +27,7 @@
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "arrow/type.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "fmt/core.h"
@@ -139,9 +140,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
                 std::move(writer));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -213,9 +213,8 @@ NewPackedWriter(struct ArrowSchema* schema,
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
                 std::move(writer));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -264,9 +263,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             return milvus::FailureCStatus(&error);
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -284,9 +282,8 @@ CloseWriter(CPackedWriter c_packed_writer) {
             return milvus::FailureCStatus(&error);
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -323,5 +320,9 @@ CloseAndTell(CPackedWriter c_packed_writer, int64_t* sizes, size_t num_groups) {
     } catch (std::exception& e) {
         delete packed_writer;
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        delete packed_writer;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }

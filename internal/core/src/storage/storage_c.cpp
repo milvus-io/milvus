@@ -54,9 +54,8 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
             *size = 0;
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -66,9 +65,8 @@ InitLocalChunkManagerSingleton(const char* c_path) {
         milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(path);
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -110,9 +108,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
             storage_config);
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -146,9 +143,8 @@ InitMmapManager(CMmapConfig c_mmap_config) {
             std::string(c_mmap_config.json_stats_mmap_path);
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -185,9 +181,8 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             c_disk_write_config.rate_limiter_config.middle_priority_ratio,
             c_disk_write_config.rate_limiter_config.low_priority_ratio);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -210,9 +205,8 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
             .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
                                   c_arrow_reader_config.range_size_limit_bytes);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -327,9 +321,8 @@ InitPluginLoader(const char* plugin_path) {
     try {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
