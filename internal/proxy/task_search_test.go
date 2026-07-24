@@ -3509,6 +3509,34 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		}
 	})
 
+	t.Run("parseSearchInfo nprobe validation", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			paramsValue string
+			expectError bool
+		}{
+			{"valid nprobe", `{"nprobe": 10}`, false},
+			{"nprobe zero", `{"nprobe": 0}`, true},
+			{"nprobe negative", `{"nprobe": -1}`, true},
+			{"nprobe zero as string", `{"nprobe": "0"}`, true},
+			{"missing nprobe", `{"metric_type": "L2"}`, false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				params := getValidSearchParams()
+				resetSearchParamsValue(params, ParamsKey, tt.paramsValue)
+				_, err := parseSearchInfo(params, nil, nil, false)
+				if tt.expectError {
+					assert.Error(t, err)
+					assert.Contains(t, err.Error(), nprobeKey)
+				} else {
+					assert.NoError(t, err)
+				}
+			})
+		}
+	})
+
 	t.Run("parseSearchInfo externalLimit", func(t *testing.T) {
 		var externalLimit int64 = 200
 		offsetParam := getValidSearchParams()

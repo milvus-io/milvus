@@ -58,6 +58,7 @@ const (
 	radiusKey          = "radius"
 	rangeFilterKey     = "range_filter"
 	iterativeFilterKey = "iterative_filter"
+	nprobeKey          = "nprobe"
 )
 
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
