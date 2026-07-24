@@ -238,6 +238,66 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		// Should be called twice: once for Init and once for Retry
 		assert.Equal(t, 2, scheduler.GetEnqueueCount())
 	})
+
+	t.Run("skip_when_owning_job_terminal", func(t *testing.T) {
+		// A stale-manifest reset can move a finished task back to Init after a
+		// concurrent timeout already failed the owning job. The inspector must not
+		// dispatch work for such a terminal job.
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 5, CollectionId: 100, State: indexpb.JobState_JobStateFailed},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 5, State: indexpb.JobState_JobStateInit},
+		}
+
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		scheduler := newStubScheduler()
+		alloc := &stubAllocator{}
+		closeChan := make(chan struct{})
+
+		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
+		inspector.inspect()
+
+		assert.Equal(t, 0, scheduler.GetEnqueueCount())
+	})
+
+	t.Run("enqueue_when_owning_job_active", func(t *testing.T) {
+		// The same task is dispatched normally while its owning job is non-terminal.
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 6, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 6, State: indexpb.JobState_JobStateInit},
+		}
+
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		scheduler := newStubScheduler()
+		alloc := &stubAllocator{}
+		closeChan := make(chan struct{})
+
+		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
+		inspector.inspect()
+
+		assert.Equal(t, 1, scheduler.GetEnqueueCount())
+	})
 }
 
 func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {

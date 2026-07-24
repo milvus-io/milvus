@@ -317,11 +317,17 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	updatedSegments := make([]*datapb.SegmentInfo, 0)
 	for _, task := range tasks {
 		if task.GetState() != indexpb.JobState_JobStateFinished {
-			return merr.WrapErrServiceInternalMsg("job %d has non-finished task %d in state %s",
+			// A non-finished task here means a task is mid-retry (reset to Init by
+			// a concurrent stale-manifest rebuild). This is not a failure: signal
+			// errExternalRefreshNotReady so UpdateJobStateWithPreApply leaves the
+			// job non-terminal and the retry-owning path drives it forward, rather
+			// than persisting a spurious Failed. Covers the race where a second
+			// aggregator entered pre-apply after the first reset a task.
+			return errors.Wrapf(errExternalRefreshNotReady, "job %d has task %d in state %s",
 				job.GetJobId(), task.GetTaskId(), task.GetState().String())
 		}
 		if !task.GetResultReady() {
-			return merr.WrapErrServiceInternalMsg("job %d has finished task %d without persisted refresh result; please retry refresh",
+			return errors.Wrapf(errExternalRefreshNotReady, "job %d has finished task %d without persisted refresh result",
 				job.GetJobId(), task.GetTaskId())
 		}
 		for _, segmentID := range task.GetKeptSegments() {

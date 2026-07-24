@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -121,7 +122,7 @@ func (s *stubCluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID in
 	}, nil
 }
 
-func (s *stubCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
+func (s *stubCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64, version int64) error {
 	return nil
 }
 
@@ -576,7 +577,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 				InsertChannel:  "by-dev-rootcoord-dml_0_v1",
 				State:          commonpb.SegmentState_Flushed,
 				NumOfRows:      500,
-				ManifestPath:   "old-manifest",
+				ManifestPath:   `{"base_path":"seg1","ver":1}`,
 				StorageVersion: 3,
 			},
 		})
@@ -589,7 +590,10 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 		updated := newTestExternalRefreshSegment(1, 100, 500)
-		updated.ManifestPath = "new-manifest"
+		updated.ManifestPath = `{"base_path":"seg1","ver":2}`
+		// Existing-segment patch must carry the current manifest as its base so the
+		// fail-closed adoption CAS accepts it.
+		updated.BaseManifest = `{"base_path":"seg1","ver":1}`
 		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			UpdatedSegments: []*datapb.SegmentInfo{updated},
 		}
@@ -599,7 +603,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		segment := mt.segments.GetSegment(1)
 		assert.NotNil(t, segment)
 		assert.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
-		assert.Equal(t, "new-manifest", segment.GetManifestPath())
+		assert.Equal(t, `{"base_path":"seg1","ver":2}`, segment.GetManifestPath())
 		assert.Equal(t, uint64(0), segment.GetDroppedAt())
 		assert.Len(t, catalog.alteredSegments, 1)
 		assert.Equal(t, int64(1), catalog.alteredSegments[0].GetID())
@@ -708,9 +712,10 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as failed
+		// A nil meta is internal/transient (not a data error), so the task is reset
+		// to Init for re-dispatch rather than failing the job.
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "meta is nil")
 	})
 
@@ -781,9 +786,10 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as failed
+		// An allocation failure is transient, so the task is reset to Init for
+		// re-dispatch rather than failing the job.
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "alloc batch failed")
 	})
 
@@ -815,10 +821,73 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as failed since collection is not in meta
+		// Collection gone is a permanent (data) error, so the task is failed.
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "collection 100 not found")
+		assert.Contains(t, metaTask.GetFailReason(), "collection")
+	})
+
+	t.Run("dispatch_carries_bumped_task_version_and_fences_prior_attempt", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:       1001,
+			JobId:        1,
+			CollectionId: 100,
+			// A prior attempt ran on node 7: the re-dispatch must drop the
+			// worker-side entry there before creating the new attempt.
+			NodeId:         7,
+			Version:        3,
+			State:          indexpb.JobState_JobStateInit,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   "iceberg",
+		}
+		assert.NoError(t, refreshMeta.AddTask(protoTask))
+
+		segments := NewSegmentsInfo()
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID:         100,
+			Schema:     &schemapb.CollectionSchema{Name: "test_coll"},
+			Partitions: []int64{10},
+		})
+		mt := &meta{segments: segments, collections: collections}
+
+		alloc := &stubAllocator{nextID: 99999}
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
+		cluster := &stubCluster{}
+
+		var droppedNode, droppedTask, droppedVersion int64
+		mockDrop := mockey.Mock((*stubCluster).DropRefreshExternalCollectionTask).To(
+			func(_ *stubCluster, nodeID, taskID, version int64) error {
+				droppedNode, droppedTask, droppedVersion = nodeID, taskID, version
+				return nil
+			}).Build()
+		defer mockDrop.UnPatch()
+
+		var sentReq *datapb.RefreshExternalCollectionTaskRequest
+		mockCreate := mockey.Mock((*stubCluster).CreateRefreshExternalCollectionTask).To(
+			func(_ *stubCluster, _ int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
+				sentReq = req
+				return nil
+			}).Build()
+		defer mockCreate.UnPatch()
+
+		task.CreateTaskOnWorker(8, cluster)
+
+		// Prior attempt on node 7 was fenced by a defensive drop carrying the
+		// prior attempt's version (3, before the dispatch bump).
+		assert.Equal(t, int64(7), droppedNode)
+		assert.Equal(t, int64(1001), droppedTask)
+		assert.Equal(t, int64(3), droppedVersion)
+		// The dispatch carries the bumped persisted version so the worker
+		// registers this attempt under it and drops older attempts' writes.
+		assert.NotNil(t, sentReq)
+		assert.Equal(t, refreshMeta.GetTask(1001).GetVersion(), sentReq.GetTaskVersion())
+		assert.Greater(t, sentReq.GetTaskVersion(), int64(3))
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetTask(1001).GetState())
 	})
 
 	t.Run("create_task_on_worker_failed", func(t *testing.T) {
@@ -860,9 +929,10 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as failed
+		// A dispatch RPC failure is transient, so the task is reset to Init for
+		// re-dispatch rather than failing the job.
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "create task failed")
 	})
 
@@ -1034,9 +1104,10 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		task.QueryTaskOnWorker(cluster)
 
-		// Task should be marked as failed
+		// A query RPC failure is transient: the task is dropped on the worker and
+		// reset to Init for re-dispatch, not failed.
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "query task failed")
 	})
 
@@ -1353,7 +1424,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		assert.Empty(t, metaTask.GetFailReason())
 	})
 
-	t.Run("task_state_retry_marks_failed", func(t *testing.T) {
+	t.Run("task_state_retry_redispatches", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
@@ -1385,7 +1456,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// JobStateRetry is the only state still considered unexpected.
+		// A worker-requested retry is honored: the task is dropped on the worker
+		// and reset to Init for re-dispatch, not failed.
 		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateRetry,
 		}, nil).Build()
@@ -1394,8 +1466,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		task.QueryTaskOnWorker(cluster)
 
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "unexpected state")
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "worker requested retry")
 	})
 }
 
@@ -1567,6 +1639,9 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
+	// Existing-segment patch must carry the current manifest as its base so the
+	// fail-closed adoption CAS accepts it.
+	patched.BaseManifest = oldSeg.GetManifestPath()
 	patched.SchemaVersion = 4
 	patched.Level = datapb.SegmentLevel_L0
 	patched.IsSorted = false
@@ -1599,6 +1674,96 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 	assert.Equal(t, `{"base_path":"old","ver":2}`, got.GetManifestPath())
 	assert.Equal(t, int32(4), got.GetSchemaVersion())
 	assert.ElementsMatch(t, []int64{100, 101, 102, 103}, got.GetBinlogs()[0].GetChildFields())
+}
+
+// TestApplyExternalCollectionSegmentUpdate_StalePatchAborts covers the adoption-time
+// optimistic-concurrency CAS for an EXISTING segment: it fails closed. A patch whose
+// base no longer matches the current manifest (a concurrent index commit advanced it)
+// or whose base is empty (a pre-CAS / rolling-upgrade worker that cannot prove it) is
+// NOT adopted — the whole apply aborts atomically with errExternalRefreshStaleManifest
+// (nothing mutated, concurrent commit preserved) and the checker rebuilds on the
+// current manifest. Only a base that equals the current manifest is patched.
+func TestApplyExternalCollectionSegmentUpdate_StalePatchAborts(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	partitionID := int64(1)
+	segmentID := int64(10)
+	currentManifest := `{"base_path":"old","ver":2}`
+	patchedManifest := `{"base_path":"old","ver":3}`
+
+	newMeta := func() *meta {
+		mt := &meta{
+			collections: newTestCollections(collectionID),
+			segments:    NewSegmentsInfo(),
+			catalog:     &stubCatalog{},
+		}
+		mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  "by-dev-rootcoord-dml_0_v1",
+			NumOfRows:      100,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: 3,
+			Level:          datapb.SegmentLevel_L1,
+			ManifestPath:   currentManifest,
+			SchemaVersion:  3,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs:     []*datapb.Binlog{{LogID: 10, EntriesNum: 100, MemorySize: 1000, LogSize: 1000}},
+			}},
+		}))
+		return mt
+	}
+	patchedSeg := func(base string) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  "by-dev-rootcoord-dml_0_v1",
+			NumOfRows:      100,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: 3,
+			ManifestPath:   patchedManifest,
+			BaseManifest:   base,
+			SchemaVersion:  4,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102, 103},
+				Binlogs:     []*datapb.Binlog{{LogID: 10, EntriesNum: 100, MemorySize: 1400, LogSize: 1400}},
+			}},
+		}
+	}
+
+	t.Run("stale_base_aborts", func(t *testing.T) {
+		mt := newMeta()
+		err := applyExternalCollectionSegmentUpdate(ctx, mt, collectionID, nil,
+			[]*datapb.SegmentInfo{patchedSeg(`{"base_path":"old","ver":1}`)})
+		assert.ErrorIs(t, err, errExternalRefreshStaleManifest)
+		// Nothing mutated: the segment keeps the concurrent commit's manifest.
+		got := mt.segments.GetSegment(segmentID)
+		assert.NotNil(t, got)
+		assert.Equal(t, currentManifest, got.GetManifestPath())
+		assert.NotEqual(t, commonpb.SegmentState_Dropped, got.GetState())
+	})
+	t.Run("matching_base_patched", func(t *testing.T) {
+		mt := newMeta()
+		err := applyExternalCollectionSegmentUpdate(ctx, mt, collectionID, nil,
+			[]*datapb.SegmentInfo{patchedSeg(currentManifest)})
+		assert.NoError(t, err)
+		assert.Equal(t, patchedManifest, mt.segments.GetSegment(segmentID).GetManifestPath())
+	})
+	t.Run("empty_base_aborts", func(t *testing.T) {
+		// Fail closed for an existing segment: an empty base (pre-CAS / rolling-upgrade
+		// worker) cannot prove it built on the current manifest, so it is rejected
+		// rather than blindly overwriting a possible concurrent commit.
+		mt := newMeta()
+		err := applyExternalCollectionSegmentUpdate(ctx, mt, collectionID, nil,
+			[]*datapb.SegmentInfo{patchedSeg("")})
+		assert.ErrorIs(t, err, errExternalRefreshStaleManifest)
+		assert.Equal(t, currentManifest, mt.segments.GetSegment(segmentID).GetManifestPath())
+	})
 }
 
 func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
@@ -1657,6 +1822,179 @@ func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
 	assert.Equal(t, newManifest, patched.GetManifestPath())
 	assert.Empty(t, patched.GetTextStatsLogs())
 	assert.Empty(t, patched.GetJsonKeyStats())
+}
+
+func TestIsRetryableRefreshFailure(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{"nil", nil, false},
+		{"permanent_marker", errExternalRefreshPermanent, false},
+		{"parameter_invalid", merr.WrapErrParameterInvalidMsg("bad request"), false},
+		{"parameter_missing", merr.WrapErrParameterMissingMsg("missing field"), false},
+		{"collection_not_found", merr.WrapErrCollectionNotFound(int64(1)), false},
+		{"data_integrity_permanent", merr.WrapErrDataIntegrityMsg("corrupt manifest"), false},
+		{"storage_permanent", merr.WrapErrStorageMsg("hard storage error"), false},
+		{"too_many_requests_retries", merr.WrapErrIoTooManyRequests("k", errors.New("throttled")), true},
+		{"untyped_transient_retries", errors.New("s3: connection reset by peer"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.retry, isRetryableRefreshFailure(c.err))
+		})
+	}
+}
+
+func TestExternalRefreshPatchIsNoop(t *testing.T) {
+	manifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 5)
+	fakeBinlogs := func(child []int64, mem int64) []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: child,
+			Binlogs:     []*datapb.Binlog{{LogID: 300, EntriesNum: 1000, MemorySize: mem, LogSize: mem}},
+		}}
+	}
+	base := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 300, ManifestPath: manifest, SchemaVersion: 3, StorageVersion: storage.StorageV3,
+		Binlogs: fakeBinlogs([]int64{100, 101}, 4096),
+	}}
+	same := func() *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID: 300, ManifestPath: manifest, SchemaVersion: 3, StorageVersion: storage.StorageV3,
+			Binlogs: fakeBinlogs([]int64{100, 101}, 4096),
+		}
+	}
+
+	assert.True(t, externalRefreshPatchIsNoop(base, same()), "identical patch must be a no-op")
+
+	t.Run("different_manifest", func(t *testing.T) {
+		in := same()
+		in.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/200/300", 6)
+		assert.False(t, externalRefreshPatchIsNoop(base, in))
+	})
+	t.Run("different_schema_version", func(t *testing.T) {
+		in := same()
+		in.SchemaVersion = 4
+		assert.False(t, externalRefreshPatchIsNoop(base, in))
+	})
+	t.Run("different_binlogs", func(t *testing.T) {
+		in := same()
+		in.Binlogs = fakeBinlogs([]int64{100, 101, 102}, 5000)
+		assert.False(t, externalRefreshPatchIsNoop(base, in))
+	})
+	t.Run("different_storage_version", func(t *testing.T) {
+		in := same()
+		in.StorageVersion = storage.StorageV3 + 1
+		assert.False(t, externalRefreshPatchIsNoop(base, in))
+	})
+	t.Run("zero_incoming_storage_version_ignored", func(t *testing.T) {
+		// applyExternalRefreshPatch never overwrites the storage version when the
+		// incoming one is zero, so a zero incoming version keeps the patch a no-op.
+		in := same()
+		in.StorageVersion = 0
+		assert.True(t, externalRefreshPatchIsNoop(base, in))
+	})
+}
+
+// TestApplyExternalCollectionSegmentUpdate_SameManifestReplay verifies that a
+// result whose manifest already equals the segment's current manifest is NOT
+// blindly skipped: only a *complete* no-op keeps the segment as-is, while a
+// same-manifest result carrying a bumped schema / refreshed binlogs still lands.
+func TestApplyExternalCollectionSegmentUpdate_SameManifestReplay(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	partitionID := int64(1)
+	segmentID := int64(10)
+	manifest := `{"base_path":"seg10","ver":5}`
+
+	newMeta := func() *meta {
+		mt := &meta{
+			collections: newTestCollections(collectionID),
+			segments:    NewSegmentsInfo(),
+			catalog:     &stubCatalog{},
+		}
+		mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  "by-dev-rootcoord-dml_0_v1",
+			NumOfRows:      100,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: 3,
+			Level:          datapb.SegmentLevel_L1,
+			ManifestPath:   manifest,
+			SchemaVersion:  3,
+			TextStatsLogs:  map[int64]*datapb.TextIndexStats{500: {FieldID: 500, BuildID: 7}},
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs:     []*datapb.Binlog{{LogID: 10, EntriesNum: 100, MemorySize: 1000, LogSize: 1000}},
+			}},
+		}))
+		return mt
+	}
+
+	t.Run("same_manifest_metadata_applied", func(t *testing.T) {
+		// The worker found the column already appended on the object store and
+		// returned the unchanged manifest, but still bumped the schema and rebuilt
+		// the fake binlogs for the new child field. The metadata must land.
+		mt := newMeta()
+		incoming := &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  "by-dev-rootcoord-dml_0_v1",
+			NumOfRows:      100,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: 3,
+			ManifestPath:   manifest,
+			BaseManifest:   manifest,
+			SchemaVersion:  4,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102, 103},
+				Binlogs:     []*datapb.Binlog{{LogID: 10, EntriesNum: 100, MemorySize: 1400, LogSize: 1400}},
+			}},
+		}
+		err := applyExternalCollectionSegmentUpdate(ctx, mt, collectionID, nil, []*datapb.SegmentInfo{incoming})
+		assert.NoError(t, err)
+		got := mt.segments.GetSegment(segmentID)
+		assert.Equal(t, manifest, got.GetManifestPath())
+		assert.Equal(t, int32(4), got.GetSchemaVersion())
+		assert.Equal(t, []int64{100, 101, 102, 103}, got.GetBinlogs()[0].GetChildFields())
+		// Applying the patch clears the now-stale text stats so they rebuild.
+		assert.Empty(t, got.GetTextStatsLogs())
+	})
+
+	t.Run("full_noop_preserves_stats", func(t *testing.T) {
+		// Identical manifest, schema, binlogs and storage version: keep the segment
+		// as-is and preserve its text stats (re-applying would clear them).
+		mt := newMeta()
+		incoming := &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  "by-dev-rootcoord-dml_0_v1",
+			NumOfRows:      100,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: 3,
+			ManifestPath:   manifest,
+			BaseManifest:   manifest,
+			SchemaVersion:  3,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs:     []*datapb.Binlog{{LogID: 10, EntriesNum: 100, MemorySize: 1000, LogSize: 1000}},
+			}},
+		}
+		err := applyExternalCollectionSegmentUpdate(ctx, mt, collectionID, nil, []*datapb.SegmentInfo{incoming})
+		assert.NoError(t, err)
+		got := mt.segments.GetSegment(segmentID)
+		assert.Equal(t, int32(3), got.GetSchemaVersion())
+		assert.Contains(t, got.GetTextStatsLogs(), int64(500))
+	})
 }
 
 func TestApplyExternalCollectionSegmentUpdate_RejectPatchRowCountChange(t *testing.T) {
@@ -2404,9 +2742,10 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker_TaskNotFoundAfterVersi
 
 	task.CreateTaskOnWorker(1, cluster)
 
-	// Task should be marked as failed
-	// Note: since GetTask is mocked to return nil, we check the in-memory state
-	assert.Equal(t, indexpb.JobState_JobStateFailed, task.GetState())
+	// A missing task after version update is a transient race, so the task is
+	// reset to Init for re-dispatch rather than failing.
+	// Note: since GetTask is mocked to return nil, we check the in-memory state.
+	assert.Equal(t, indexpb.JobState_JobStateInit, task.GetState())
 	assert.Contains(t, task.GetFailReason(), "not found after version update")
 }
 
