@@ -107,9 +107,12 @@ func NewSyncTask(ctx context.Context,
 	}
 
 	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
+	initialInterval := time.Duration(paramtable.Get().DataNodeCfg.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
+	maxInterval := time.Duration(paramtable.Get().DataNodeCfg.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
 	retryOpts := []retry.Option{
-		retry.Attempts(writeRetryAttempts), // default retry always
-		retry.MaxSleepTime(10 * time.Second),
+		retry.Attempts(writeRetryAttempts), // 0 = unlimited, preserved on purpose
+		retry.Sleep(initialInterval),
+		retry.MaxSleepTime(maxInterval),
 	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
