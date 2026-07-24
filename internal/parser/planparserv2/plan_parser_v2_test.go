@@ -3657,6 +3657,15 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_ALL(struct_array, MATCH_ANY(struct_array, $[sub_int] > 1))`,
 		`MATCH_ANY(struct_array, $[sub_int] > 1 && MATCH_ALL(struct_array, $[sub_str] == "1"))`,
 
+		// MATCH predicates must be evaluated at element level
+		`MATCH_ALL(struct_array, Int64Field > 0)`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1 && Int64Field > 0)`,
+		`MATCH_LEAST(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_MOST(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_EXACT(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_ALL(struct_array, $[sub_int] > Int64Field)`,
+		`MATCH_ALL(struct_array, true)`,
+
 		// $[field] syntax outside match context
 		`$[sub_int] > 1`,
 		`Int64Field > 0 && $[sub_int] > 1`,

@@ -1206,6 +1206,97 @@ func isValidStructSubField(tokenText string) bool {
 	return len(tokenText) >= 4 && tokenText[:2] == "$[" && tokenText[len(tokenText)-1] == ']'
 }
 
+func validateMatchColumnInfo(columnInfo *planpb.ColumnInfo) (bool, error) {
+	if columnInfo == nil {
+		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate column info is missing")
+	}
+	if !columnInfo.GetIsElementLevel() {
+		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate can only use element-level fields")
+	}
+	return true, nil
+}
+
+func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
+	if expr == nil {
+		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate is missing")
+	}
+
+	switch realExpr := expr.GetExpr().(type) {
+	case *planpb.Expr_ColumnExpr:
+		return validateMatchColumnInfo(realExpr.ColumnExpr.GetInfo())
+	case *planpb.Expr_TermExpr:
+		return validateMatchColumnInfo(realExpr.TermExpr.GetColumnInfo())
+	case *planpb.Expr_UnaryRangeExpr:
+		return validateMatchColumnInfo(realExpr.UnaryRangeExpr.GetColumnInfo())
+	case *planpb.Expr_BinaryRangeExpr:
+		return validateMatchColumnInfo(realExpr.BinaryRangeExpr.GetColumnInfo())
+	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
+		return validateMatchColumnInfo(realExpr.BinaryArithOpEvalRangeExpr.GetColumnInfo())
+	case *planpb.Expr_CompareExpr:
+		leftElementLevel, err := validateMatchColumnInfo(realExpr.CompareExpr.GetLeftColumnInfo())
+		if err != nil {
+			return false, err
+		}
+		rightElementLevel, err := validateMatchColumnInfo(realExpr.CompareExpr.GetRightColumnInfo())
+		if err != nil {
+			return false, err
+		}
+		return leftElementLevel || rightElementLevel, nil
+	case *planpb.Expr_JsonContainsExpr:
+		return validateMatchColumnInfo(realExpr.JsonContainsExpr.GetColumnInfo())
+	case *planpb.Expr_NullExpr:
+		return validateMatchColumnInfo(realExpr.NullExpr.GetColumnInfo())
+	case *planpb.Expr_ExistsExpr:
+		return validateMatchColumnInfo(realExpr.ExistsExpr.GetInfo())
+	case *planpb.Expr_GisfunctionFilterExpr:
+		return validateMatchColumnInfo(realExpr.GisfunctionFilterExpr.GetColumnInfo())
+	case *planpb.Expr_TimestamptzArithCompareExpr:
+		return validateMatchColumnInfo(realExpr.TimestamptzArithCompareExpr.GetTimestamptzColumn())
+	case *planpb.Expr_UnaryExpr:
+		return validateMatchPredicateElementLevel(realExpr.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		leftElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryExpr.GetLeft())
+		if err != nil {
+			return false, err
+		}
+		rightElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryExpr.GetRight())
+		if err != nil {
+			return false, err
+		}
+		return leftElementLevel || rightElementLevel, nil
+	case *planpb.Expr_BinaryArithExpr:
+		leftElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryArithExpr.GetLeft())
+		if err != nil {
+			return false, err
+		}
+		rightElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryArithExpr.GetRight())
+		if err != nil {
+			return false, err
+		}
+		return leftElementLevel || rightElementLevel, nil
+	case *planpb.Expr_CallExpr:
+		hasElementLevel := false
+		for _, param := range realExpr.CallExpr.GetFunctionParameters() {
+			paramElementLevel, err := validateMatchPredicateElementLevel(param)
+			if err != nil {
+				return false, err
+			}
+			hasElementLevel = hasElementLevel || paramElementLevel
+		}
+		return hasElementLevel, nil
+	case *planpb.Expr_ValueExpr, *planpb.Expr_AlwaysTrueExpr:
+		return false, nil
+	case *planpb.Expr_ElementFilterExpr:
+		return false, merr.WrapErrParameterInvalidMsg("element_filter is not supported inside MATCH predicate")
+	case *planpb.Expr_MatchExpr:
+		return false, merr.WrapErrParameterInvalidMsg("nested MATCH predicate is not supported")
+	case *planpb.Expr_RandomSampleExpr:
+		return false, merr.WrapErrParameterInvalidMsg("random sample is not supported inside MATCH predicate")
+	default:
+		return false, merr.WrapErrParameterInvalidMsg("unsupported MATCH predicate expression")
+	}
+}
+
 func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*planpb.ColumnInfo, error) {
 	if !isValidStructSubField(tokenText) {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid struct sub-field syntax: %s", tokenText)
@@ -3005,6 +3096,13 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	predicateExpr := getExpr(predicate)
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
+	}
+	if !isElementLevel {
+		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
 	}
 
 	// Build MatchExpr proto
