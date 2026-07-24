@@ -67,9 +67,13 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		ChannelNames:   vchannels,
 		Schema:         body.GetSchema(),
 		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
+			// so both clusters derive identical autoID primary keys.
 			return &internalpb.ImportFile{
-				Id:    file.GetId(),
-				Paths: file.GetPaths(),
+				Id:        file.GetId(),
+				Paths:     file.GetPaths(),
+				PkIdBegin: file.GetPkIdRange().GetBegin(),
+				PkIdEnd:   file.GetPkIdRange().GetEnd(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
