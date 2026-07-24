@@ -351,3 +351,229 @@ REGISTER_TYPED_TEST_CASE_P(ArrayInvertedIndexTest,
                            ArrayEqual);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(Naive, ArrayInvertedIndexTest, ElementType);
+
+namespace {
+
+class NullableInt64ArrayInvertedIndex
+    : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    void
+    SetNullOffsets(std::vector<size_t> offsets) {
+        null_offset_ = std::move(offsets);
+    }
+};
+
+proto::plan::GenericValue
+MakeInt64ArrayValue(const std::vector<int64_t>& values) {
+    proto::plan::GenericValue value;
+    auto* array = value.mutable_array_val();
+    array->set_element_type(proto::schema::DataType::Int64);
+    array->set_same_type(true);
+    for (auto element : values) {
+        array->add_array()->set_int64_val(element);
+    }
+    return value;
+}
+
+}  // namespace
+
+TEST(ArrayInvertedIndexRegression,
+     ArrayNotEqualUsesIndexCandidatesAsRowLevelPrefilter) {
+    const std::vector<std::vector<int64_t>> arrays = {
+        {1, 1, 2},     // equal
+        {},            // null
+        {1, 2},        // missing duplicate
+        {},            // null
+        {1, 1, 2, 3},  // extra element
+        {},            // null
+        {1, 2, 1},     // different order
+        {},            // null
+        {1, 1, 1, 2},  // different duplicate count
+        {},            // null
+        {1, 3},        // missing indexed element
+        {},            // null
+        {3, 4},        // no indexed element
+        {},            // null
+    };
+    const auto row_count = static_cast<int64_t>(arrays.size());
+    std::vector<bool> expected_validity(row_count);
+    std::vector<bool> expected_values(row_count);
+    const std::vector<int64_t> literal = {1, 1, 2};
+    for (int64_t row = 0; row < row_count; ++row) {
+        const bool valid = row % 2 == 0;
+        expected_validity[row] = valid;
+        expected_values[row] = valid && arrays[row] != literal;
+    }
+
+    milvus::test::ExprBatchSizeGuard batch_size_guard(4);
+    for (bool nested_index : {false, true}) {
+        auto schema = std::make_shared<Schema>();
+        schema->AddDebugField(
+            "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+        auto array_fid = schema->AddDebugArrayField(
+            nested_index ? "structA[array]" : "array", DataType::INT64, true);
+        schema->set_primary_field_id(pk_fid);
+
+        auto raw_data = DataGen(schema, row_count, 42, 0, 1, 3);
+        proto::schema::FieldData* array_field = nullptr;
+        for (auto& field : *raw_data.raw_->mutable_fields_data()) {
+            if (field.field_id() == array_fid.get()) {
+                array_field = &field;
+                break;
+            }
+        }
+        ASSERT_NE(array_field, nullptr);
+        auto* array_data = array_field->mutable_scalars()->mutable_array_data();
+        ASSERT_EQ(array_data->data_size(), row_count);
+        auto* valid_data = array_field->mutable_valid_data();
+        ASSERT_EQ(valid_data->size(), row_count);
+
+        std::vector<boost::container::vector<int64_t>> index_arrays;
+        index_arrays.reserve(row_count);
+        std::vector<size_t> null_offsets;
+        for (int64_t row = 0; row < row_count; ++row) {
+            const bool valid = expected_validity[row];
+            valid_data->at(row) = valid;
+
+            auto* values = array_data->mutable_data(row)
+                               ->mutable_long_data()
+                               ->mutable_data();
+            values->Clear();
+            values->Add(arrays[row].begin(), arrays[row].end());
+
+            if (valid) {
+                index_arrays.emplace_back(arrays[row].begin(),
+                                          arrays[row].end());
+            } else {
+                index_arrays.emplace_back();
+                null_offsets.push_back(row);
+            }
+        }
+
+        auto raw_segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+        auto indexed_segment =
+            CreateSealedWithFieldDataLoaded(schema, raw_data);
+        auto logical_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(
+                array_fid, DataType::ARRAY, DataType::INT64, {}, true),
+            proto::plan::OpType::NotEqual,
+            MakeInt64ArrayValue(literal),
+            std::vector<proto::plan::GenericValue>{});
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_expr);
+
+        auto raw_eval = milvus::test::EvalExprInBatches(
+            logical_expr, raw_segment.get(), row_count);
+        EXPECT_EQ(raw_eval.batch_sizes, (std::vector<int64_t>{4, 4, 4, 2}));
+        EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+            logical_expr, raw_segment.get(), row_count));
+
+        auto index = std::make_unique<NullableInt64ArrayInvertedIndex>();
+        Config config;
+        config["is_array"] = true;
+        if (nested_index) {
+            config["is_nested_index"] = true;
+        }
+        index->BuildWithRawDataForUT(row_count, index_arrays.data(), config);
+        index->SetNullOffsets(null_offsets);
+
+        LoadIndexInfo load_info{};
+        load_info.field_id = array_fid.get();
+        load_info.field_type = DataType::ARRAY;
+        load_info.element_type = DataType::INT64;
+        load_info.index_params = GenIndexParams(index.get());
+        load_info.cache_index =
+            CreateTestCacheIndex(nested_index ? "array_not_equal_nested"
+                                              : "array_not_equal_row_level",
+                                 std::move(index));
+        indexed_segment->LoadIndex(load_info);
+
+        EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+            logical_expr, indexed_segment.get(), row_count));
+        auto indexed_eval = milvus::test::EvalExprInBatches(
+            logical_expr, indexed_segment.get(), row_count);
+        EXPECT_EQ(indexed_eval.batch_sizes, (std::vector<int64_t>{4, 4, 4, 2}));
+
+        TargetBitmapView raw_values(raw_eval.result->GetRawData(), row_count);
+        TargetBitmapView raw_validity(raw_eval.result->GetValidRawData(),
+                                      row_count);
+        TargetBitmapView indexed_values(indexed_eval.result->GetRawData(),
+                                        row_count);
+        TargetBitmapView indexed_validity(
+            indexed_eval.result->GetValidRawData(), row_count);
+        for (int64_t row = 0; row < row_count; ++row) {
+            EXPECT_EQ(indexed_validity[row], expected_validity[row])
+                << "nested=" << nested_index << ", row=" << row;
+            EXPECT_EQ(indexed_validity[row], raw_validity[row])
+                << "nested=" << nested_index << ", row=" << row;
+            EXPECT_EQ(indexed_values[row], expected_values[row])
+                << "nested=" << nested_index << ", row=" << row;
+            EXPECT_EQ(indexed_values[row], raw_values[row])
+                << "nested=" << nested_index << ", row=" << row;
+        }
+
+        exec::OffsetVector offsets = {0, 1, 2, 4, 6, 8, 10, 12, 13};
+        auto raw_offset_result = milvus::test::gen_filter_res(
+            plan.get(), raw_segment.get(), row_count, MAX_TIMESTAMP, &offsets);
+        auto indexed_offset_result =
+            milvus::test::gen_filter_res(plan.get(),
+                                         indexed_segment.get(),
+                                         row_count,
+                                         MAX_TIMESTAMP,
+                                         &offsets);
+        TargetBitmapView raw_offset_values(raw_offset_result->GetRawData(),
+                                           offsets.size());
+        TargetBitmapView raw_offset_validity(
+            raw_offset_result->GetValidRawData(), offsets.size());
+        TargetBitmapView indexed_offset_values(
+            indexed_offset_result->GetRawData(), offsets.size());
+        TargetBitmapView indexed_offset_validity(
+            indexed_offset_result->GetValidRawData(), offsets.size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            const auto row = offsets[i];
+            EXPECT_EQ(indexed_offset_validity[i], expected_validity[row])
+                << "nested=" << nested_index << ", offset row=" << row;
+            EXPECT_EQ(indexed_offset_validity[i], raw_offset_validity[i])
+                << "nested=" << nested_index << ", offset row=" << row;
+            EXPECT_EQ(indexed_offset_values[i], expected_values[row])
+                << "nested=" << nested_index << ", offset row=" << row;
+            EXPECT_EQ(indexed_offset_values[i], raw_offset_values[i])
+                << "nested=" << nested_index << ", offset row=" << row;
+        }
+
+        auto mixed_literal = MakeInt64ArrayValue({1});
+        mixed_literal.mutable_array_val()->add_array()->set_float_val(1.5);
+        mixed_literal.mutable_array_val()->set_same_type(false);
+        auto mixed_not_equal = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(
+                array_fid, DataType::ARRAY, DataType::INT64, {}, true),
+            proto::plan::OpType::NotEqual,
+            std::move(mixed_literal),
+            std::vector<proto::plan::GenericValue>{});
+        EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+            mixed_not_equal, indexed_segment.get(), row_count));
+        auto raw_mixed = milvus::test::EvalExprInBatches(
+            mixed_not_equal, raw_segment.get(), row_count);
+        auto indexed_mixed = milvus::test::EvalExprInBatches(
+            mixed_not_equal, indexed_segment.get(), row_count);
+        TargetBitmapView raw_mixed_values(raw_mixed.result->GetRawData(),
+                                          row_count);
+        TargetBitmapView raw_mixed_validity(raw_mixed.result->GetValidRawData(),
+                                            row_count);
+        TargetBitmapView indexed_mixed_values(
+            indexed_mixed.result->GetRawData(), row_count);
+        TargetBitmapView indexed_mixed_validity(
+            indexed_mixed.result->GetValidRawData(), row_count);
+        for (int64_t row = 0; row < row_count; ++row) {
+            EXPECT_EQ(indexed_mixed_validity[row], expected_validity[row])
+                << "nested=" << nested_index << ", mixed row=" << row;
+            EXPECT_EQ(indexed_mixed_validity[row], raw_mixed_validity[row])
+                << "nested=" << nested_index << ", mixed row=" << row;
+            EXPECT_EQ(indexed_mixed_values[row], expected_validity[row])
+                << "nested=" << nested_index << ", mixed row=" << row;
+            EXPECT_EQ(indexed_mixed_values[row], raw_mixed_values[row])
+                << "nested=" << nested_index << ", mixed row=" << row;
+        }
+    }
+}
