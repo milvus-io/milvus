@@ -18,6 +18,7 @@ package shardclient
 
 import (
 	"math/rand"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -25,9 +26,20 @@ import (
 
 // shardLeaders wraps shard leader mapping for iteration.
 type shardLeaders struct {
-	idx          *atomic.Int64
-	collectionID int64
-	shardLeaders map[string][]NodeInfo
+	idx                *atomic.Int64
+	lastAccessUnixNano atomic.Int64
+	collectionID       int64
+	shardLeaders       map[string][]NodeInfo
+}
+
+func (sl *shardLeaders) touch(at time.Time) {
+	sl.lastAccessUnixNano.Store(at.UnixNano())
+}
+
+func (sl *shardLeaders) idleBefore(cutoff time.Time) bool {
+	lastAccess := sl.lastAccessUnixNano.Load()
+	// Zero is reserved for legacy/test entries that predate lifecycle tracking.
+	return lastAccess > 0 && lastAccess <= cutoff.UnixNano()
 }
 
 func (sl *shardLeaders) Get(channel string) []NodeInfo {

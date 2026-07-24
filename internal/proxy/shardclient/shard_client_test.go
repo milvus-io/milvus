@@ -44,6 +44,42 @@ func testShardLeaderCache(entries map[string]*shardLeaders) shardLeadersByCollec
 	return cache
 }
 
+func shardLeaderResponse(channel string, collectionID int64, address string) *querypb.GetShardLeadersResponse {
+	return &querypb.GetShardLeadersResponse{
+		Status: merr.Success(),
+		Shards: []*querypb.ShardLeadersList{{
+			ChannelName: channel,
+			NodeIds:     []int64{collectionID},
+			NodeAddrs:   []string{address},
+			Serviceable: []bool{true},
+		}},
+	}
+}
+
+func blockingShardLeaderRefresh(
+	t *testing.T,
+	channel string,
+	collectionID int64,
+) (types.MixCoordClient, <-chan struct{}, func(), *atomic.Int32) {
+	rpcStarted := make(chan struct{})
+	releaseRPC := make(chan struct{})
+	var releaseOnce sync.Once
+	coordCalls := atomic.NewInt32(0)
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ *querypb.GetShardLeadersRequest, _ ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			coordCalls.Inc()
+			close(rpcStarted)
+			<-releaseRPC
+			return shardLeaderResponse(channel, collectionID, "new:19530"), nil
+		}).Once()
+
+	release := func() {
+		releaseOnce.Do(func() { close(releaseRPC) })
+	}
+	return mixcoord, rpcStarted, release, coordCalls
+}
+
 func TestShardClientMgr(t *testing.T) {
 	ctx := context.Background()
 	nodeInfo := NodeInfo{
@@ -249,6 +285,177 @@ func TestShardCacheCoalescesConcurrentRefreshPerCollectionID(t *testing.T) {
 	close(releaseRPC)
 	wg.Wait()
 	assert.Equal(t, int32(1), coordCalls.Load())
+}
+
+func TestShardCacheLeaderCancellationDoesNotCancelSharedRefresh(t *testing.T) {
+	const (
+		database     = "test_db"
+		alias        = "test_alias"
+		channel      = "test_channel"
+		collectionID = int64(200)
+	)
+
+	mixcoord, rpcStarted, releaseRPC, coordCalls := blockingShardLeaderRefresh(t, channel, collectionID)
+
+	mgr := NewShardClientMgr(mixcoord)
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetShard(leaderCtx, true, database, alias, collectionID, channel)
+		leaderDone <- err
+	}()
+	<-rpcStarted
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		releaseRPC()
+	}()
+	started := time.Now()
+	cancelLeader()
+	leaderErr := <-leaderDone
+	assert.ErrorIs(t, leaderErr, context.Canceled)
+	assert.Less(t, time.Since(started), 200*time.Millisecond)
+
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetShard(context.Background(), true, database, alias, collectionID, channel)
+		waiterDone <- err
+	}()
+	releaseRPC()
+	assert.NoError(t, <-waiterDone)
+	assert.Equal(t, int32(1), coordCalls.Load())
+}
+
+func TestShardCacheWaiterHonorsOwnDeadline(t *testing.T) {
+	const (
+		database     = "test_db"
+		alias        = "test_alias"
+		channel      = "test_channel"
+		collectionID = int64(200)
+	)
+
+	mixcoord, rpcStarted, releaseRPC, coordCalls := blockingShardLeaderRefresh(t, channel, collectionID)
+
+	mgr := NewShardClientMgr(mixcoord)
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetShard(context.Background(), true, database, alias, collectionID, channel)
+		leaderDone <- err
+	}()
+	<-rpcStarted
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		releaseRPC()
+	}()
+	waiterCtx, cancelWaiter := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelWaiter()
+	started := time.Now()
+	_, waiterErr := mgr.GetShard(waiterCtx, true, database, alias, collectionID, channel)
+	assert.ErrorIs(t, waiterErr, context.DeadlineExceeded)
+	assert.Less(t, time.Since(started), 200*time.Millisecond)
+
+	releaseRPC()
+	assert.NoError(t, <-leaderDone)
+	assert.Equal(t, int32(1), coordCalls.Load())
+}
+
+func TestShardCacheSharedRefreshHasTimeout(t *testing.T) {
+	const (
+		database     = "test_db"
+		alias        = "test_alias"
+		channel      = "test_channel"
+		collectionID = int64(200)
+	)
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, _ *querypb.GetShardLeadersRequest, _ ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}).Once()
+
+	mgr := NewShardClientMgr(mixcoord)
+	mgr.shardCacheRefreshTimeout = 50 * time.Millisecond
+	started := time.Now()
+	_, err := mgr.GetShard(context.Background(), true, database, alias, collectionID, channel)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(started), 200*time.Millisecond)
+}
+
+func TestShardCacheBoundsHistoricalVersionsPerName(t *testing.T) {
+	const (
+		database = "test_db"
+		alias    = "test_alias"
+		channel  = "test_channel"
+	)
+
+	var coordCalls atomic.Int32
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, req *querypb.GetShardLeadersRequest, _ ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			coordCalls.Inc()
+			collectionID := req.GetCollectionID()
+			return shardLeaderResponse(channel, collectionID, fmt.Sprintf("node-%d:19530", collectionID)), nil
+		}).Maybe()
+
+	mgr := NewShardClientMgr(mixcoord)
+	totalVersions := defaultMaxShardCacheVersionsPerName + 2
+	for collectionID := int64(1); collectionID <= int64(totalVersions); collectionID++ {
+		_, err := mgr.GetShard(context.Background(), true, database, alias, collectionID, channel)
+		assert.NoError(t, err)
+	}
+
+	mgr.leaderMut.RLock()
+	versions := mgr.collLeader[database][alias]
+	assert.Len(t, versions, defaultMaxShardCacheVersionsPerName)
+	assert.NotContains(t, versions, int64(1))
+	assert.NotContains(t, versions, int64(2))
+	assert.Contains(t, versions, int64(totalVersions))
+	mgr.leaderMut.RUnlock()
+
+	locations := mgr.ListShardLocation()
+	assert.NotContains(t, locations, int64(1))
+	assert.NotContains(t, locations, int64(2))
+	assert.Contains(t, locations, int64(totalVersions))
+	assert.Equal(t, int32(totalVersions), coordCalls.Load())
+}
+
+func TestListShardLocationDropsIdleHistoricalVersions(t *testing.T) {
+	const (
+		database = "test_db"
+		alias    = "test_alias"
+	)
+
+	oldLeaders := &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: 100,
+		shardLeaders: map[string][]NodeInfo{"old-channel": {{NodeID: 1, Address: "old:19530", Serviceable: true}}},
+	}
+	newLeaders := &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: 200,
+		shardLeaders: map[string][]NodeInfo{"new-channel": {{NodeID: 2, Address: "new:19530", Serviceable: true}}},
+	}
+	now := time.Now()
+	oldLeaders.touch(now.Add(-2 * time.Minute))
+	newLeaders.touch(now)
+
+	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
+	mgr.shardCacheVersionTTL = time.Minute
+	mgr.collLeader[database] = shardLeadersByCollectionName{
+		alias: {100: oldLeaders, 200: newLeaders},
+	}
+
+	locations := mgr.ListShardLocation()
+	assert.NotContains(t, locations, int64(1), "idle historical leaders must not keep an old QueryNode client alive")
+	assert.Contains(t, locations, int64(2))
+
+	mgr.leaderMut.RLock()
+	versions := mgr.collLeader[database][alias]
+	assert.NotContains(t, versions, int64(100))
+	assert.Contains(t, versions, int64(200))
+	mgr.leaderMut.RUnlock()
 }
 
 func TestShardClient(t *testing.T) {
