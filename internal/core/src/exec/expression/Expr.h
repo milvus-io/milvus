@@ -750,58 +750,123 @@ class SegmentExpr : public Expr {
             if constexpr (std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
                           std::is_same_v<T, ArrayView>) {
-                for (size_t i = 0; i < input->size(); ++i) {
-                    int64_t offset = (*input)[i];
-                    auto [chunk_id, chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, offset);
-                    auto pw = segment_->get_views_by_offsets<T>(
-                        op_ctx_, field_id_, chunk_id, {int32_t(chunk_offset)});
-                    auto [data_vec, valid_data] = pw.get();
-                    if (!skip_func ||
-                        !skip_func(*skip_index, field_id_, chunk_id)) {
-                        evaluate_batch.template operator()<FilterType::random>(
-                            data_vec.data(),
-                            valid_data.data(),
-                            nullptr,
-                            1,
-                            res + processed_size,
-                            valid_res + processed_size,
-                            values...);
-                    } else {
-                        // Chunk skipped by SkipIndex: apply valid mask, then still drive the
-                        // callback on a null batch so cursor-tracking callbacks (which index
-                        // bitmap_input by batch position via their processed_cursor) stay
-                        // aligned — mirrors the ProcessDataChunksForMultipleChunk skip branch.
-                        if (!valid_data.empty() && !valid_data[0]) {
-                            res[processed_size] = valid_res[processed_size] =
-                                false;
+                // Group runs of consecutive offsets that fall in the same
+                // chunk and fetch their views with one get_views_by_offsets
+                // call per run (same shape as ProcessElementLevelByOffsets)
+                // instead of a per-row call that pins the chunk and heap-
+                // allocates a one-element view vector every row. Row order
+                // and per-row callback invocation are unchanged.
+                FixedVector<int32_t> batch_offsets;
+                size_t i = 0;
+                // Resolve each offset's chunk exactly once. The lookahead that
+                // ends a run is the same offset the next run starts on, so its
+                // resolution is carried across the outer iteration instead of
+                // being recomputed — otherwise every run boundary (i.e. every
+                // row when score-ordered offsets scatter one per chunk) pays a
+                // second get_chunk_by_offset.
+                int64_t chunk_id = 0;
+                int64_t chunk_offset = 0;
+                if (!input->empty()) {
+                    auto resolved =
+                        segment_->get_chunk_by_offset(field_id_, (*input)[0]);
+                    chunk_id = resolved.first;
+                    chunk_offset = resolved.second;
+                }
+                while (i < input->size()) {
+                    const int64_t run_chunk_id = chunk_id;
+                    batch_offsets.clear();
+                    batch_offsets.push_back(int32_t(chunk_offset));
+                    ++i;
+                    while (i < input->size()) {
+                        auto resolved = segment_->get_chunk_by_offset(
+                            field_id_, (*input)[i]);
+                        chunk_id = resolved.first;
+                        chunk_offset = resolved.second;
+                        if (chunk_id != run_chunk_id) {
+                            break;
                         }
-                        evaluate_batch.template operator()<FilterType::random>(
-                            nullptr,
-                            nullptr,
-                            nullptr,
-                            1,
-                            res + processed_size,
-                            valid_res + processed_size,
-                            values...);
+                        batch_offsets.push_back(int32_t(chunk_offset));
+                        ++i;
                     }
-                    processed_size++;
+                    auto pw = segment_->get_views_by_offsets<T>(
+                        op_ctx_, field_id_, run_chunk_id, batch_offsets);
+                    // Bind by reference: get() returns the pinned pair by
+                    // reference; copying it would duplicate the whole run's
+                    // view vector + validity vector on every run.
+                    const auto& [data_vec, valid_data] = pw.get();
+                    const bool skip =
+                        skip_func &&
+                        skip_func(*skip_index, field_id_, run_chunk_id);
+                    for (size_t j = 0; j < batch_offsets.size(); ++j) {
+                        if (!skip) {
+                            const bool* valid_ptr = valid_data.empty()
+                                                        ? nullptr
+                                                        : valid_data.data() + j;
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    data_vec.data() + j,
+                                    valid_ptr,
+                                    nullptr,
+                                    1,
+                                    res + processed_size,
+                                    valid_res + processed_size,
+                                    values...);
+                        } else {
+                            // Chunk skipped by SkipIndex: apply valid mask,
+                            // then still drive the callback on a null batch so
+                            // cursor-tracking callbacks (which index
+                            // bitmap_input by batch position via their
+                            // processed_cursor) stay aligned — mirrors the
+                            // ProcessDataChunksForMultipleChunk skip branch.
+                            if (!valid_data.empty() && !valid_data[j]) {
+                                res[processed_size] =
+                                    valid_res[processed_size] = false;
+                            }
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1,
+                                    res + processed_size,
+                                    valid_res + processed_size,
+                                    values...);
+                        }
+                        processed_size++;
+                    }
                 }
                 return input->size();
             }
+            // Consecutive offsets frequently fall in the same chunk; keep the
+            // pinned chunk across iterations and only re-pin/resolve when the
+            // chunk id actually changes, avoiding a per-row GroupChunk pin +
+            // shared_ptr lookup on storage v2.
+            int64_t cached_chunk_id = -1;
+            std::optional<PinWrapper<Span<T>>> pw;
+            const T* chunk_base = nullptr;
+            const bool* chunk_valid_base = nullptr;
+            bool cached_skip = false;
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, offset);
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const T* data = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
+                if (chunk_id != cached_chunk_id) {
+                    pw.emplace(
+                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
+                    auto chunk = pw->get();
+                    chunk_base = chunk.data();
+                    chunk_valid_base = chunk.valid_data();
+                    // SkipIndex is keyed by chunk alone; evaluate it once per
+                    // chunk instead of once per row.
+                    cached_skip = skip_func &&
+                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_chunk_id = chunk_id;
                 }
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
+                const T* data = chunk_base + chunk_offset;
+                const bool* valid_data = chunk_valid_base != nullptr
+                                             ? chunk_valid_base + chunk_offset
+                                             : nullptr;
+                if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data,
                         valid_data,
@@ -832,20 +897,36 @@ class SegmentExpr : public Expr {
             }
             return input->size();
         } else {
-            // growing segment
+            // growing segment. Validity lives in chunked, append-only storage
+            // (ThreadSafeValidData) whose per-chunk buffers never move, so —
+            // like the sealed branch — keep the chunk base across iterations
+            // and re-resolve only when the chunk id changes.
+            int64_t cached_chunk_id = -1;
+            std::optional<PinWrapper<Span<T>>> pw;
+            const T* chunk_base = nullptr;
+            const bool* chunk_valid_base = nullptr;
+            bool cached_skip = false;
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const T* data = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
+                if (chunk_id != cached_chunk_id) {
+                    pw.emplace(
+                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
+                    auto chunk = pw->get();
+                    chunk_base = chunk.data();
+                    chunk_valid_base = chunk.valid_data();
+                    // SkipIndex is keyed by chunk alone; evaluate it once per
+                    // chunk instead of once per row.
+                    cached_skip = skip_func &&
+                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_chunk_id = chunk_id;
                 }
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
+                const T* data = chunk_base + chunk_offset;
+                const bool* valid_data = chunk_valid_base != nullptr
+                                             ? chunk_valid_base + chunk_offset
+                                             : nullptr;
+                if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data,
                         valid_data,

@@ -44,6 +44,22 @@ class GroupChunk {
         return it->second;
     }
 
+    // Borrow the chunk for a field WITHOUT sharing ownership. The returned
+    // pointer is valid only while this GroupChunk stays pinned/resident (e.g.
+    // for the lifetime of the CellAccessor that pinned it). Bulk accessors use
+    // this on the hot path to avoid the per-row shared_ptr refcount bump that
+    // GetChunk() incurs — an atomic RMW on a shared control block that contends
+    // across concurrent search threads. For anything that must outlive the pin,
+    // use GetChunk() instead.
+    Chunk*
+    GetChunkRaw(FieldId field_id) const {
+        auto it = chunks_.find(field_id);
+        if (it == chunks_.end()) {
+            return nullptr;
+        }
+        return it->second.get();
+    }
+
     // Add a chunk for a specific field
     void
     AddChunk(FieldId field_id, std::shared_ptr<Chunk> chunk) {
