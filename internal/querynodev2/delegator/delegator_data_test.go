@@ -1244,17 +1244,21 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners() {
+func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	err := s.delegator.syncCollectionIndexMeta(ctx, &querypb.LoadSegmentsRequest{
+	s.Require().Nil(s.delegator.getIDFOracle())
+	err := s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
 		CollectionID:  s.collectionID,
 		Schema:        schema,
 		LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: 1},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
 	})
 	s.Require().NoError(err)
+	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
+	s.Equal(uint64(1), s.delegator.schemaBarrierTs)
+	s.Require().NotNil(s.delegator.getIDFOracle())
 
 	// The load path has already advanced the collection snapshot, so the DDL
 	// event is skipped as a no-op. The function runner key must still point at
@@ -1265,6 +1269,19 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	})
 	s.Require().NoError(err)
 	s.True(ok)
+}
+
+func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelegatorSchema() {
+	ctx := context.Background()
+	s.delegator.Start()
+	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Version = 1
+	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
+	s.manager.Collection.Unref(s.collectionID, 1)
+
+	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{CollectionID: s.collectionID}))
+	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
+	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
