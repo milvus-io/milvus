@@ -83,6 +83,51 @@ func (_c *MockGlobalScheduler_Enqueue_Call) RunAndReturn(run func(Task)) *MockGl
 	return _c
 }
 
+// GetPendingTaskCount provides a mock function with no fields
+func (_m *MockGlobalScheduler) GetPendingTaskCount() int {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingTaskCount")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockGlobalScheduler_GetPendingTaskCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingTaskCount'
+type MockGlobalScheduler_GetPendingTaskCount_Call struct {
+	*mock.Call
+}
+
+// GetPendingTaskCount is a helper method to define mock.On call
+func (_e *MockGlobalScheduler_Expecter) GetPendingTaskCount() *MockGlobalScheduler_GetPendingTaskCount_Call {
+	return &MockGlobalScheduler_GetPendingTaskCount_Call{Call: _e.mock.On("GetPendingTaskCount")}
+}
+
+func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) Run(run func()) *MockGlobalScheduler_GetPendingTaskCount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) Return(_a0 int) *MockGlobalScheduler_GetPendingTaskCount_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) RunAndReturn(run func() int) *MockGlobalScheduler_GetPendingTaskCount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Start provides a mock function with no fields
 func (_m *MockGlobalScheduler) Start() {
 	_m.Called()
