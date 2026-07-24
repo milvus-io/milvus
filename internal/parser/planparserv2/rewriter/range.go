@@ -69,6 +69,9 @@ func resolveJSONEffectiveType(v *planpb.GenericValue) (schemapb.DataType, bool) 
 	case *planpb.GenericValue_Int64Val:
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_FloatVal:
+		if math.IsNaN(v.GetFloatVal()) {
+			return schemapb.DataType_None, false
+		}
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_StringVal:
 		return schemapb.DataType_VarChar, true
@@ -94,7 +97,9 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		// For float columns, accept both float and int literal values
 		switch v.GetVal().(type) {
-		case *planpb.GenericValue_FloatVal, *planpb.GenericValue_Int64Val:
+		case *planpb.GenericValue_FloatVal:
+			return !math.IsNaN(v.GetFloatVal())
+		case *planpb.GenericValue_Int64Val:
 			return true
 		default:
 			return false
@@ -109,6 +114,27 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 	default:
 		return false
 	}
+}
+
+func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planpb.GenericValue) (schemapb.DataType, bool) {
+	effDt, ok := resolveEffectiveType(col)
+	if !ok {
+		return schemapb.DataType_None, false
+	}
+
+	if effDt != schemapb.DataType_JSON {
+		if !valueMatchesType(effDt, lower) || !valueMatchesType(effDt, upper) {
+			return schemapb.DataType_None, false
+		}
+		return effDt, true
+	}
+
+	lowerType, lowerOK := resolveJSONEffectiveType(lower)
+	upperType, upperOK := resolveJSONEffectiveType(upper)
+	if !lowerOK || !upperOK || lowerType != upperType {
+		return schemapb.DataType_None, false
+	}
+	return lowerType, true
 }
 
 func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
@@ -385,7 +411,8 @@ func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclus
 // int conversion. This mirrors segcore's JSON numeric comparison semantics.
 func compareInt64ToFloat64(lhs int64, rhs float64) int {
 	if math.IsNaN(rhs) {
-		// Preserve cmpGeneric's existing deterministic handling for NaN.
+		// Range optimizer entry points reject NaN before comparison. Keep this
+		// defensive return deterministic if a future caller misses that gate.
 		return 0
 	}
 	const (
@@ -508,19 +535,10 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				others = append(others, idx)
 				continue
 			}
-			effDt, ok := resolveEffectiveType(col)
+			effDt, ok := resolveBinaryRangeEffectiveType(col, bre.GetLowerValue(), bre.GetUpperValue())
 			if !ok {
 				others = append(others, idx)
 				continue
-			}
-			// For JSON, determine actual type from lower value
-			if effDt == schemapb.DataType_JSON {
-				var typeOk bool
-				effDt, typeOk = resolveJSONEffectiveType(bre.GetLowerValue())
-				if !typeOk {
-					others = append(others, idx)
-					continue
-				}
 			}
 			key := columnKey(col) + fmt.Sprintf("|%d", effDt)
 			g, exists := groups[key]
@@ -731,18 +749,10 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				others = append(others, idx)
 				continue
 			}
-			effDt, ok := resolveEffectiveType(col)
+			effDt, ok := resolveBinaryRangeEffectiveType(col, bre.GetLowerValue(), bre.GetUpperValue())
 			if !ok {
 				others = append(others, idx)
 				continue
-			}
-			if effDt == schemapb.DataType_JSON {
-				var typeOk bool
-				effDt, typeOk = resolveJSONEffectiveType(bre.GetLowerValue())
-				if !typeOk {
-					others = append(others, idx)
-					continue
-				}
 			}
 			key := columnKey(col) + fmt.Sprintf("|%d", effDt)
 			g, exists := groups[key]
