@@ -98,6 +98,9 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      targetVecIndexVersion: 10
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 3
       compaction:
         storageVersion:
           enabled: true
