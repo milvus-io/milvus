@@ -350,6 +350,12 @@ func (s *mixCoordImpl) Stop() error {
 	if err := s.rootcoordServer.Stop(); err != nil {
 		log.Error("Failed to stop rootCoord", zap.Error(err))
 	}
+
+	// MixCoord owns the shared session. Revoke it only after all child
+	// coordinators have stopped using it.
+	if s.session != nil {
+		s.session.Stop()
+	}
 	s.cancel()
 	return nil
 }
