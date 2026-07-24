@@ -108,6 +108,24 @@ class ThreadSafeValidData {
         return &chunks_[offset / size_per_chunk_][offset % size_per_chunk_];
     }
 
+    // Fill out[i] with the validity of offsets[i] for `count` offsets under a
+    // single lock acquisition. Out-of-range offsets yield false (not an
+    // assert), matching the tolerant semantics of offset-driven read paths.
+    void
+    bulk_is_valid(const int64_t* offsets, int64_t count, bool* out) const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = offsets[i];
+            out[i] = offset >= 0 && static_cast<size_t>(offset) < length_ &&
+                     chunks_[offset / spc][offset % spc];
+        }
+    }
+
+    // WARNING: materializes a flat copy of the WHOLE bitmap (O(segment rows))
+    // — avoid on hot paths. Prefer empty() for emptiness checks,
+    // is_valid()/bulk_is_valid() for point/batch lookups, or get_chunk_data()
+    // to borrow within a chunk.
     FixedVector<bool>
     get_data() const {
         std::shared_lock<std::shared_mutex> lck(mutex_);

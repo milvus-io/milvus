@@ -3185,9 +3185,15 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            auto valid_data_vec = vec_base->get_valid_data();
+            // Avoid vec_base->get_valid_data(): it materializes a flat copy of
+            // the WHOLE validity bitmap (O(segment rows)) while this path only
+            // needs `count` offsets (and, on the mapping-storage branch, only
+            // an emptiness check).
+            auto valid_data_ptr = insert_record_.is_valid_data_exist(field_id)
+                                      ? insert_record_.get_valid_data(field_id)
+                                      : nullptr;
             bool is_mapping_storage = vec_base->is_mapping_storage();
-            if (!valid_data_vec.empty()) {
+            if (valid_data_ptr != nullptr && !valid_data_ptr->empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);
 
                 if (is_mapping_storage) {
@@ -3198,14 +3204,8 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                         result.valid_offsets);
                 } else {
                     result.valid_offsets.reserve(count);
-                    for (int64_t i = 0; i < count; ++i) {
-                        auto offset = seg_offsets[i];
-                        bool is_valid = offset >= 0 &&
-                                        offset < static_cast<int64_t>(
-                                                     valid_data_vec.size()) &&
-                                        valid_data_vec[offset];
-                        result.valid_data[i] = is_valid;
-                    }
+                    valid_data_ptr->bulk_is_valid(
+                        seg_offsets, count, result.valid_data.get());
                 }
                 result.valid_count = result.valid_offsets.size();
             }
