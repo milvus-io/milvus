@@ -61,6 +61,7 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
@@ -990,6 +991,10 @@ RunGrowingConjunctSkipTest(bool with_rtree_index) {
     }
     GEOS_finish_r(ctx);
 
+    // SegcoreConfig members are process-global (inline static): the copy
+    // below does not isolate the interim-index toggle, so restore on scope
+    // exit instead of leaking it into every later growing-segment test.
+    ScopedSegcoreConfigRestore config_restore;
     auto config = SegcoreConfig::default_config();
     config.set_enable_interim_segment_index(with_rtree_index);
     auto seg = CreateGrowingSegment(schema, index_meta, 1, config);
