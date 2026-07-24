@@ -94,8 +94,17 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	creator func(string, []T) COL,
 	nullableCreator func(string, []T, []bool, ...ColumnOption[T]) (NCOL, error),
 ) (Column, error) {
-	if end < 0 {
+	// Clamp start/end into range, mirroring parseVectorArrayData, so an
+	// out-of-range slice (e.g. paging past the end of a scalar field) returns a
+	// clamped column instead of panicking.
+	if end < 0 || end > len(data) {
 		end = len(data)
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start > end {
+		start = end
 	}
 	data = data[start:end]
 	if len(validData) > 0 {
