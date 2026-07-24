@@ -3978,13 +3978,15 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_ArrayOfVector, subs[1].GetType())
 	assert.Len(t, subs[1].GetVectors().GetVectorArray().GetData(), 2)
 
-	extracted0, err := extractStructArrayRow(fd, 0, buildStructArrayTestSchema())
+	accessor, err := newStructArrayRowAccessor(fd, buildStructArrayTestSchema())
+	require.NoError(t, err)
+	extracted0, err := accessor.row(0)
 	require.NoError(t, err)
 	require.Len(t, extracted0, 2)
 	assert.EqualValues(t, int32(1), extracted0[0]["sub_int"])
 	assert.EqualValues(t, []float32{0.1, 0.2, 0.3, 0.4}, extracted0[0]["sub_vec"])
 
-	extracted1, err := extractStructArrayRow(fd, 1, buildStructArrayTestSchema())
+	extracted1, err := accessor.row(1)
 	require.NoError(t, err)
 	require.Len(t, extracted1, 1)
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
@@ -4041,6 +4043,82 @@ func TestAnyToColumnsStructArray(t *testing.T) {
 	assert.Len(t, vecData[1].GetFloatVector().GetData(), 4)
 }
 
+func TestAnyToColumnsNullableStructArray(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].Nullable = true
+	body := []byte(`{
+		"data": [
+			{
+				"id": 1,
+				"vec": [0.1, 0.2, 0.3, 0.4],
+				"my_struct": [{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}]
+			},
+			{
+				"id": 2,
+				"vec": [0.5, 0.6, 0.7, 0.8],
+				"my_struct": null
+			},
+			{
+				"id": 3,
+				"vec": [0.9, 1.0, 1.1, 1.2],
+				"my_struct": []
+			}
+		]
+	}`)
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, validData["my_struct"])
+
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+			break
+		}
+	}
+	require.NotNil(t, structFD)
+	subs := structFD.GetStructArrays().GetFields()
+	require.Len(t, subs, 2)
+	for _, sub := range subs {
+		assert.Equal(t, []bool{true, false, true}, sub.GetValidData())
+	}
+	assert.Len(t, subs[0].GetScalars().GetArrayData().GetData(), 2)
+	assert.Len(t, subs[1].GetVectors().GetVectorArray().GetData(), 2)
+}
+
+func TestAnyToColumnsNullableStructArrayAllNull(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].Nullable = true
+	body := []byte(`{
+		"data": [
+			{"id": 1, "vec": [0.1, 0.2, 0.3, 0.4], "my_struct": null},
+			{"id": 2, "vec": [0.5, 0.6, 0.7, 0.8]}
+		]
+	}`)
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+			break
+		}
+	}
+	require.NotNil(t, structFD)
+	subs := structFD.GetStructArrays().GetFields()
+	require.Len(t, subs, 2)
+	for _, sub := range subs {
+		assert.Equal(t, []bool{false, false}, sub.GetValidData())
+	}
+	assert.Empty(t, subs[0].GetScalars().GetArrayData().GetData())
+	assert.Empty(t, subs[1].GetVectors().GetVectorArray().GetData())
+}
+
 func TestBuildQueryRespStructArrayRoundTrip(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	body := []byte(`{
@@ -4079,6 +4157,72 @@ func TestBuildQueryRespStructArrayRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(blob, &decoded))
 	require.Len(t, decoded, 2)
 	assert.EqualValues(t, 10, decoded[0]["sub_int"])
+}
+
+func TestBuildQueryRespNullableStructArrayCompact(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	structSchema := schema.GetStructArrayFields()[0]
+	structSchema.Nullable = true
+	first, err := parseStructArrayRow(
+		`[{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}]`, structSchema)
+	require.NoError(t, err)
+	third, err := parseStructArrayRow(`[]`, structSchema)
+	require.NoError(t, err)
+	structFD, err := buildNullableStructArrayFieldData(
+		structSchema, []structArrayRow{first, third}, []bool{true, false, true})
+	require.NoError(t, err)
+
+	resp, err := buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
+	require.NoError(t, err)
+	require.Len(t, resp, 3)
+	assert.NotNil(t, resp[0]["my_struct"])
+	assert.Nil(t, resp[1]["my_struct"])
+	assert.Equal(t, []map[string]interface{}{}, resp[2]["my_struct"])
+}
+
+func TestBuildQueryRespNullableStructArrayDense(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	structSchema := schema.GetStructArrayFields()[0]
+	structSchema.Nullable = true
+	first, err := parseStructArrayRow(
+		`[{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}]`, structSchema)
+	require.NoError(t, err)
+	nullPlaceholder, err := parseStructArrayRow(`[]`, structSchema)
+	require.NoError(t, err)
+	third, err := parseStructArrayRow(
+		`[{"sub_int": 30, "sub_vec": [3.1, 3.2, 3.3, 3.4]}]`, structSchema)
+	require.NoError(t, err)
+	structFD, err := buildStructArrayFieldData(
+		structSchema, []structArrayRow{first, nullPlaceholder, third})
+	require.NoError(t, err)
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		sub.ValidData = []bool{true, false, true}
+	}
+
+	resp, err := buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
+	require.NoError(t, err)
+	require.Len(t, resp, 3)
+	assert.NotNil(t, resp[0]["my_struct"])
+	assert.Nil(t, resp[1]["my_struct"])
+	assert.NotNil(t, resp[2]["my_struct"])
+}
+
+func TestBuildQueryRespNullableStructArrayRejectsMismatchedValidData(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	structSchema := schema.GetStructArrayFields()[0]
+	row, err := parseStructArrayRow(
+		`[{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}]`, structSchema)
+	require.NoError(t, err)
+	structFD, err := buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	subs := structFD.GetStructArrays().GetFields()
+	require.Len(t, subs, 2)
+	subs[0].ValidData = []bool{true}
+	subs[1].ValidData = []bool{false}
+
+	_, err = buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent valid data")
 }
 
 func TestIsEmbeddingListData(t *testing.T) {
@@ -4391,12 +4535,14 @@ func TestStructArrayFieldDataErrorPaths(t *testing.T) {
 }
 
 func TestExtractStructArrayRowErrorPaths(t *testing.T) {
-	empty, err := extractStructArrayRow(&schemapb.FieldData{
+	accessor, err := newStructArrayRowAccessor(&schemapb.FieldData{
 		Type: schemapb.DataType_ArrayOfStruct,
 		Field: &schemapb.FieldData_StructArrays{
 			StructArrays: &schemapb.StructArrayField{},
 		},
-	}, 0, buildStructArrayTestSchema())
+	}, buildStructArrayTestSchema())
+	require.NoError(t, err)
+	empty, err := accessor.row(0)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 
@@ -4406,7 +4552,9 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 	fd, err := buildStructArrayFieldData(schema.GetStructArrayFields()[0], []structArrayRow{row})
 	require.NoError(t, err)
 
-	_, err = extractStructArrayRow(fd, 2, schema)
+	accessor, err = newStructArrayRowAccessor(fd, schema)
+	require.NoError(t, err)
+	_, err = accessor.row(2)
 	assert.Error(t, err)
 
 	mismatch := &schemapb.FieldData{
@@ -4440,13 +4588,17 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 			}},
 		},
 	}
-	_, err = extractStructArrayRow(mismatch, 0, schema)
+	accessor, err = newStructArrayRowAccessor(mismatch, schema)
+	require.NoError(t, err)
+	_, err = accessor.row(0)
 	assert.Error(t, err)
 
 	missingDimSchema := &schemapb.CollectionSchema{
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "my_struct"}},
 	}
-	_, err = extractStructArrayRow(mismatch, 0, missingDimSchema)
+	accessor, err = newStructArrayRowAccessor(mismatch, missingDimSchema)
+	require.NoError(t, err)
+	_, err = accessor.row(0)
 	assert.Error(t, err)
 
 	unsupported := &schemapb.FieldData{
@@ -4469,7 +4621,9 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 			}},
 		},
 	}
-	_, err = extractStructArrayRow(unsupported, 0, schema)
+	accessor, err = newStructArrayRowAccessor(unsupported, schema)
+	require.NoError(t, err)
+	_, err = accessor.row(0)
 	assert.Error(t, err)
 }
 
