@@ -106,12 +106,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  public:
     using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;
-    // Positional, deep-owning per-chunk skip metrics for one field (index i is
-    // chunk/cell i). Built once from the parquet footer while its reader is
-    // alive and installed via SkipIndex::LoadSkipMetrics; shared_ptr so one set
-    // can be published into several staged runtime snapshots of a load.
-    using SkipMetricsList =
-        std::vector<std::shared_ptr<const index::FieldChunkMetrics>>;
     explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
@@ -2146,7 +2140,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         RuntimeResourceState* runtime,
-        std::optional<SkipMetricsList> skip_metrics = {},
+        std::shared_ptr<ChunkStatsSource> stats_source = nullptr,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
@@ -2159,7 +2153,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         DataType data_type,
         bool enable_mmap,
         bool is_proxy_column,
-        std::optional<SkipMetricsList> skip_metrics = {},
+        std::shared_ptr<ChunkStatsSource> stats_source = nullptr,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
@@ -2683,21 +2677,12 @@ CreateSealedSegment(
         schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 
-// field_id -> positional per-chunk skip metrics distilled from the parquet
-// footer (built while the reader is alive, so the BYTE_ARRAY min/max views
-// never dangle). Empty unless the stats skip index is enabled for the field.
-using SkipMetricsByField =
-    std::map<int64_t, ChunkedSegmentSealedImpl::SkipMetricsList>;
-
 struct LoadedGroupChunkMetadata {
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-    SkipMetricsByField skip_metrics_by_field;
 };
 
 LoadedGroupChunkMetadata
-LoadGroupChunkMetadata(
-    const std::vector<std::string>& insert_files,
-    const std::vector<std::pair<FieldId, DataType>>& fields_for_stats,
-    const std::string& debug_key);
+LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
+                       const std::string& debug_key);
 
 }  // namespace milvus::segcore
