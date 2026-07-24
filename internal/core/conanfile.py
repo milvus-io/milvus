@@ -12,7 +12,7 @@ class MilvusConan(ConanFile):
         "rocksdb/6.29.5@milvus/dev#67b8ae76ad7be5f779082f67416f89bf",
         "onetbb/2021.9.0#f9d7a3aa294ac4a594a93f9b4c7f272d",
         "zstd/1.5.5#70dc5eb8ea16708fc946fbac884c507e",
-        "arrow/17.0.0@milvus/dev#f411aa733829a554644f281ccb2ae0a8",
+        "arrow/17.0.0@milvus/dev#fdcd2c841ebbb57a07fd19b01e43da05",
         "libevent/2.1.12#95065aaefcd58d3956d6dfbfc5631d97",
         "googleapis/cci.20221108#4553d68a2429cc0fff7d2bab4e5b3ea9",
         "gtest/1.13.0#2cf98fac7337eb73fc4ee839dbcd4468",
