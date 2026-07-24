@@ -42,8 +42,10 @@ def _minio_address(minio_host):
 
 
 def get_minio_config(minio_host=None, minio_bucket=None):
+    address = _minio_address(minio_host)
     return {
-        "address": _minio_address(minio_host),
+        "address": address,
+        "external_source_address": _minio_address(os.getenv("MILVUS_EXTERNAL_SOURCE_MINIO_HOST") or address),
         "access_key": "minioadmin",
         "secret_key": "minioadmin",
         "bucket": minio_bucket or cf.param_info.param_bucket_name or "milvus-bucket",
@@ -54,7 +56,7 @@ def get_minio_config(minio_host=None, minio_bucket=None):
 def build_external_source(cfg, key_prefix):
     """Build a full s3:// URL that Milvus's extfs resolver can use directly."""
     # Trailing slash matters: refresh lists objects under the prefix.
-    return f"s3://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
+    return f"s3://{cfg.get('external_source_address', cfg['address'])}/{cfg['bucket']}/{key_prefix}/"
 
 
 def _minio_endpoint_url(cfg):
