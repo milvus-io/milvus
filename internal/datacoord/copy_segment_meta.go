@@ -91,6 +91,7 @@ type CopySegmentMeta interface {
 	// Task operations
 	AddTask(ctx context.Context, task CopySegmentTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
+	UpdateTaskInStateIfJobActive(ctx context.Context, taskID int64, expectedState datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error)
 	GetTask(ctx context.Context, taskID int64) CopySegmentTask
 	GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
@@ -480,19 +481,48 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 	return len(m.getJobBy(filters...))
 }
 
+// isTerminalCopyJobState reports whether a copy segment job state is terminal.
+// Terminal states (Completed/Failed) are final: no transition out of them, and
+// no transition between them, is ever legitimate.
+func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
+	return state == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		state == datapb.CopySegmentJobState_CopySegmentJobFailed
+}
+
 // UpdateJobStateAndReleaseRef updates job state and unpins the source snapshot
 // if the job transitions to a terminal state (Completed/Failed).
 //
 // This ensures snapshot pins are released immediately when restore jobs finish,
 // while Job records are retained for audit purposes (3 hours).
 //
+// Terminal-state guard: the update is skipped when the *current* cached job is
+// already terminal. Every caller of this method drives a non-terminal job to
+// Completed/Failed, so a terminal job observed here always means a concurrent
+// path won the race and this caller is acting on a stale snapshot. Applying the
+// update anyway would rewrite the winner's outcome. The concrete case reported
+// in review: the checker loop processes one job snapshot through
+// checkCopyingJob (which may finishJob -> Completed) and then tryTimeoutJob in
+// the same round; the latter still sees the pre-loop Executing snapshot and,
+// once the deadline has elapsed, would flip the just-Completed job to Failed.
+// The check and the mutate share m.mu, so the decision cannot go stale.
+//
 // Locking strategy: the state-mutate section takes m.mu; the Unpin call (an etcd
 // roundtrip via snapshotMeta.SaveSnapshot) runs AFTER releasing m.mu to avoid
 // blocking all copy-segment job operations on an external write. Double-unpin is
-// prevented because only one caller observes the `!wasTerminal → isTerminal`
-// transition under m.mu; every subsequent caller sees wasTerminal=true.
+// prevented by the terminal-state guard above: the first caller flips the job to
+// a terminal state under m.mu, so every later caller returns at the guard and
+// never reaches the Unpin call. Past the guard prevJob is therefore always
+// non-terminal and wasTerminal is always false; the `!wasTerminal` term in
+// shouldUnpin is kept only as a local invariant assertion.
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
+	if current, ok := m.jobs[jobID]; ok && isTerminalCopyJobState(current.GetState()) {
+		currentState := current.GetState()
+		m.mu.Unlock()
+		mlog.Info(ctx, "copy segment job already in terminal state, skip state transition",
+			mlog.FieldJobID(jobID), mlog.String("currentState", currentState.String()))
+		return nil
+	}
 	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
 	if err != nil {
 		m.mu.Unlock()
@@ -506,10 +536,8 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 
 	previousState := prevJob.GetState()
 	newState := updatedJob.GetState()
-	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
-		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
-	wasTerminal := previousState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
-		previousState == datapb.CopySegmentJobState_CopySegmentJobFailed
+	isTerminal := isTerminalCopyJobState(newState)
+	wasTerminal := isTerminalCopyJobState(previousState)
 
 	shouldUnpin := isTerminal && !wasTerminal && updatedJob.GetPinId() > 0
 	pinID := updatedJob.GetPinId()
@@ -656,6 +684,44 @@ func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions 
 		task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
 	}
 	return nil
+}
+
+// UpdateTaskInStateIfJobActive applies the actions to a task only if the task is
+// currently in expectedState AND its parent job is still active (non-terminal),
+// with both checks and the update under the same write lock.
+//
+// Callers that act on a task snapshot taken before a slow operation (e.g. a
+// worker RPC) must use this instead of UpdateTask when the update would make the
+// task eligible for dispatch again: while the RPC was in flight another task may
+// have failed the parent job, and reviving this task to Pending would let the
+// scheduler issue an extra dispatch for a job that is already dead, before
+// checkFailedJob converges the task back to Failed.
+//
+// Returns (false, nil) when the task is missing, not in expectedState, or its
+// parent job is missing/terminal (the update is skipped), (true, nil) on success.
+func (m *copySegmentMeta) UpdateTaskInStateIfJobActive(ctx context.Context, taskID int64, expectedState datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	task := m.tasks.get(taskID)
+	if task == nil || task.GetState() != expectedState {
+		return false, nil
+	}
+	job, ok := m.jobs[task.GetJobId()]
+	if !ok || isTerminalCopyJobState(job.GetState()) {
+		return false, nil
+	}
+
+	updatedTask := task.Clone()
+	for _, action := range actions {
+		action(updatedTask)
+	}
+	if err := m.catalog.SaveCopySegmentTask(ctx, updatedTask.(*copySegmentTask).task.Load()); err != nil {
+		return false, err
+	}
+	// update memory task atomically
+	task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
+	return true, nil
 }
 
 // GetTask retrieves a task by ID from in-memory cache.
