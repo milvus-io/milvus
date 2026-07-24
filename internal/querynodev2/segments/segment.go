@@ -710,35 +710,6 @@ func (s *LocalSegment) HasFieldData(fieldID int64) bool {
 	return s.csegment.HasFieldData(fieldID)
 }
 
-func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
-		field := typeutil.GetField(s.collection.Schema(), indexInfo.IndexInfo.FieldID)
-		if typeutil.IsJSONType(field.GetDataType()) {
-			nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
-			if err != nil {
-				return err
-			}
-			err = s.csegment.DropJSONIndex(ctx, indexInfo.IndexInfo.FieldID, nestedPath)
-			if err != nil {
-				return err
-			}
-		} else {
-			err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
-			if err != nil {
-				return err
-			}
-		}
-
-		s.fieldIndexes.Remove(indexID)
-	}
-	return nil
-}
-
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {

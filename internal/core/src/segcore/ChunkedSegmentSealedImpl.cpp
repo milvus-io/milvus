@@ -4039,14 +4039,6 @@ ChunkedSegmentSealedImpl::DropFieldData(
 
 void
 ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
-                                    milvus::OpContext* op_ctx) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    auto snapshot = CapturePublishedState();
-    DropIndex(field_id, snapshot->schema, nullptr, op_ctx);
-}
-
-void
-ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
                                     const SchemaPtr& schema_snapshot,
                                     RuntimeResourceState* runtime,
                                     milvus::OpContext* op_ctx) {
@@ -4069,28 +4061,6 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
         next_runtime->vec_binlog_config.erase(field_id);
         PublishIndexDroppedLocked(
             field_id, ToConstRuntimeState(std::move(next_runtime)), op_ctx);
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::DropJSONIndex(const FieldId field_id,
-                                        const std::string& nested_path,
-                                        milvus::OpContext* op_ctx) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    auto next_runtime = CloneMutableRuntimeResourceState();
-    auto retired_indexings =
-        EraseJsonIndexesAtPath(*next_runtime, field_id, nested_path);
-    auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
-    MutatePublishedStateLocked(
-        [&](PublishedSegmentState& state) {
-            state.runtime = published_runtime;
-            SyncJsonNgramIndexState(state, *published_runtime, field_id);
-        },
-        op_ctx);
-    for (auto& indexing : retired_indexings) {
-        if (indexing != nullptr) {
-            indexing->CancelWarmup();
-        }
     }
 }
 

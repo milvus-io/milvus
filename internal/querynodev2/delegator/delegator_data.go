@@ -1466,16 +1466,6 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest, functionRu
 	return nil
 }
 
-func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
-	workers := sd.workerManager.GetAllWorkers()
-	for _, worker := range workers {
-		if err := worker.DropIndex(ctx, req); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
