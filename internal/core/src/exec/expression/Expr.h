@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -412,8 +413,11 @@ class SegmentExpr : public Expr {
                 if (segment_->HasFieldData(field_id_)) {
                     MoveCursorForData();
                 }
+            } else if (exec_path_ == ExprExecPath::JsonStats) {
+                current_data_global_pos_ += std::min(
+                    batch_size_, active_count_ - current_data_global_pos_);
             } else {
-                // RawData, PkIndex, TextIndex, JsonStats all use data cursor.
+                // RawData, PkIndex, and TextIndex use the data cursor.
                 MoveCursorForData();
             }
         }
@@ -502,6 +506,11 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
+        EnsureExecPathDetermined();
+        if (exec_path_ == ExprExecPath::JsonStats) {
+            return std::min(batch_size_,
+                            active_count_ - current_data_global_pos_);
+        }
         auto current_chunk =
             UseIndexCursor() ? current_index_chunk_ : current_data_chunk_;
         auto current_chunk_pos = UseIndexCursor() ? current_index_chunk_pos_
@@ -2262,6 +2271,28 @@ class SegmentExpr : public Expr {
                value < kFirstNonInjectiveInteger;
     }
 
+    static bool
+    JsonNumericBoundRequiresPreciseInt64Comparison(
+        const proto::plan::GenericValue& bound) {
+        if (bound.has_int64_val()) {
+            return !IsInt64SafeForJsonDoubleIndex(bound.int64_val());
+        }
+        if (!bound.has_float_val() || !std::isfinite(bound.float_val())) {
+            return false;
+        }
+
+        // A double bound in this interval can alias a neighboring int64 when
+        // JSON data or a path index converts the integer to double. Bounds
+        // outside the int64 domain cannot have that ambiguity.
+        constexpr double kFirstNonInjectiveInteger = 0x1p53;
+        constexpr double kInt64Magnitude = 0x1p63;
+        const auto value = bound.float_val();
+        return (value >= kFirstNonInjectiveInteger &&
+                value <= kInt64Magnitude) ||
+               (value <= -kFirstNonInjectiveInteger &&
+                value >= -kInt64Magnitude);
+    }
+
  public:
     bool
     CanUseNestedIndex() const override {
@@ -2415,6 +2446,30 @@ class SegmentExpr : public Expr {
         valid_result.append(
             *cached_valid_result_, current_data_global_pos_, real_batch_size);
         MoveCursor();
+        return std::make_shared<ColumnVector>(std::move(result),
+                                              std::move(valid_result));
+    }
+
+    VectorPtr
+    GatherCachedResultByOffsets(const TargetBitmap& cached_res,
+                                const TargetBitmap& cached_valid_res,
+                                const OffsetVector& offsets) const {
+        AssertInfo(cached_res.size() == cached_valid_res.size(),
+                   "cached result and validity sizes differ: {} vs {}",
+                   cached_res.size(),
+                   cached_valid_res.size());
+        TargetBitmap result(offsets.size(), false);
+        TargetBitmap valid_result(offsets.size(), false);
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            const auto offset = offsets[i];
+            AssertInfo(
+                offset >= 0 && static_cast<size_t>(offset) < cached_res.size(),
+                "offset {} is outside cached result size {}",
+                offset,
+                cached_res.size());
+            result[i] = cached_res[offset];
+            valid_result[i] = cached_valid_res[offset];
+        }
         return std::make_shared<ColumnVector>(std::move(result),
                                               std::move(valid_result));
     }

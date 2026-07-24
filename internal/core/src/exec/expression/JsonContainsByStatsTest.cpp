@@ -32,6 +32,7 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/BinaryRangeExpr.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
@@ -830,6 +831,182 @@ TEST(JsonStatsThreeValuedAuditTest,
     check(evaluate(between_expr),
           {false, true, false, false, false, false, false},
           numeric_valid);
+}
+
+TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+
+    const std::vector<std::string> json_raw_data = {
+        R"({"n": 1.0, "s": "alpha", "i": 9007199254740992, "u": 9223372036854775809})",
+        R"({"n": 2.0, "s": "beta", "i": 9007199254740993})",
+        R"({"n": 3.5, "s": "gamma", "i": 9007199254740994})",
+        R"({"n": "2", "s": 2, "i": "9007199254740993"})",
+        R"({"other": 0})",
+        R"({"n": null, "s": null, "i": null})",
+        R"({"n": 4.0, "s": "delta", "i": 1})",
+        R"({"n": 5.0, "s": "epsilon", "i": 2})",
+    };
+    const std::vector<uint8_t> valid_data{0b01111111};
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1203,
+                                          2203,
+                                          3203,
+                                          json_fid.get(),
+                                          5203,
+                                          1,
+                                          &valid_data);
+    EXPECT_FALSE(stats
+                     ->GetShreddingField(milvus::index::JsonPointer({"n"}),
+                                         JSONType::DOUBLE)
+                     .empty());
+    EXPECT_FALSE(stats
+                     ->GetShreddingField(milvus::index::JsonPointer({"s"}),
+                                         JSONType::STRING)
+                     .empty());
+    EXPECT_FALSE(stats
+                     ->GetShreddingField(milvus::index::JsonPointer({"i"}),
+                                         JSONType::INT64)
+                     .empty());
+
+    auto stats_segment = segcore::CreateSealedSegment(schema);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(stats_segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+    auto raw_segment = segcore::CreateSealedSegment(schema);
+
+    auto make_json_field = [&] {
+        auto field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(json_raw_data, valid_data));
+        return field;
+    };
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto stats_load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm);
+    stats_segment->LoadFieldData(stats_load_info);
+    stats_segment->DropFieldData(json_fid);
+    ASSERT_FALSE(stats_segment->HasFieldData(json_fid));
+    auto raw_load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm);
+    raw_segment->LoadFieldData(raw_load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr,
+                        const segcore::SegmentInternalInterface* segment,
+                        exec::OffsetVector* offsets = nullptr) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment, json_raw_data.size(), MAX_TIMESTAMP, offsets);
+    };
+    auto expect_same = [](const ColumnVectorPtr& raw,
+                          const ColumnVectorPtr& shredded) {
+        ASSERT_EQ(raw->size(), shredded->size());
+        TargetBitmapView raw_result(raw->GetRawData(), raw->size());
+        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
+        TargetBitmapView shredded_result(shredded->GetRawData(),
+                                         shredded->size());
+        TargetBitmapView shredded_valid(shredded->GetValidRawData(),
+                                        shredded->size());
+        for (size_t i = 0; i < raw->size(); ++i) {
+            EXPECT_EQ(shredded_valid[i], raw_valid[i]) << "row " << i;
+            EXPECT_EQ(shredded_result[i], raw_result[i]) << "row " << i;
+        }
+    };
+
+    proto::plan::GenericValue number_lower;
+    number_lower.set_int64_val(2);
+    proto::plan::GenericValue number_upper;
+    number_upper.set_float_val(4.0);
+    auto number_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
+        number_lower,
+        number_upper,
+        true,
+        true);
+    expect_same(evaluate(number_expr, raw_segment.get()),
+                evaluate(number_expr, stats_segment.get()));
+    exec::OffsetVector offsets = {7, 2, 4, 1, 3, 5, 6, 0, 2};
+    expect_same(evaluate(number_expr, raw_segment.get(), &offsets),
+                evaluate(number_expr, stats_segment.get(), &offsets));
+
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
+        proto::plan::OpType::GreaterEqual,
+        number_lower,
+        std::vector<proto::plan::GenericValue>());
+    {
+        milvus::test::ExprBatchSizeGuard batch_size_guard(3);
+        auto raw_batches = milvus::test::EvalExprInBatches(
+            unary_expr, raw_segment.get(), json_raw_data.size());
+        auto stats_batches = milvus::test::EvalExprInBatches(
+            unary_expr, stats_segment.get(), json_raw_data.size());
+        EXPECT_EQ(raw_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        EXPECT_EQ(stats_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        expect_same(raw_batches.result, stats_batches.result);
+    }
+
+    proto::plan::GenericValue string_lower;
+    string_lower.set_string_val("beta");
+    proto::plan::GenericValue string_upper;
+    string_upper.set_string_val("gamma");
+    auto string_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"s"}),
+        string_lower,
+        string_upper,
+        true,
+        false);
+    expect_same(evaluate(string_expr, raw_segment.get()),
+                evaluate(string_expr, stats_segment.get()));
+    expect_same(evaluate(string_expr, raw_segment.get(), &offsets),
+                evaluate(string_expr, stats_segment.get(), &offsets));
+
+    proto::plan::GenericValue precise_lower;
+    precise_lower.set_float_val(9007199254740992.0);
+    proto::plan::GenericValue precise_upper;
+    precise_upper.set_float_val(9007199254740994.0);
+    auto precise_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"i"}),
+        precise_lower,
+        precise_upper,
+        false,
+        false);
+    auto raw_precise = evaluate(precise_expr, raw_segment.get());
+    auto shredded_precise = evaluate(precise_expr, stats_segment.get());
+    expect_same(raw_precise, shredded_precise);
+    expect_same(evaluate(precise_expr, raw_segment.get(), &offsets),
+                evaluate(precise_expr, stats_segment.get(), &offsets));
+    TargetBitmapView precise_result(raw_precise->GetRawData(),
+                                    raw_precise->size());
+    TargetBitmapView precise_valid(raw_precise->GetValidRawData(),
+                                   raw_precise->size());
+    EXPECT_TRUE(precise_valid[1]);
+    EXPECT_TRUE(precise_result[1]);
+
+    proto::plan::GenericValue uint64_double;
+    uint64_double.set_float_val(9223372036854775808.0);
+    auto uint64_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"u"}),
+        uint64_double,
+        uint64_double,
+        true,
+        true);
+    auto raw_uint64 = evaluate(uint64_expr, raw_segment.get());
+    auto stats_uint64 = evaluate(uint64_expr, stats_segment.get());
+    expect_same(raw_uint64, stats_uint64);
+    expect_same(evaluate(uint64_expr, raw_segment.get(), &offsets),
+                evaluate(uint64_expr, stats_segment.get(), &offsets));
+    TargetBitmapView uint64_result(raw_uint64->GetRawData(),
+                                   raw_uint64->size());
+    TargetBitmapView uint64_valid(raw_uint64->GetValidRawData(),
+                                  raw_uint64->size());
+    EXPECT_TRUE(uint64_valid[0]);
+    EXPECT_TRUE(uint64_result[0]);
 }
 
 TEST(JsonStatsThreeValuedAuditTest,
