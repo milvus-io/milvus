@@ -1174,6 +1174,24 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
     // ARRAY type cannot use scalar index
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+
+    // A binary range needs both one-sided range operations. String indexes can
+    // decline individual operations through ShouldUseOp; FMINDEX declines all
+    // lexicographic ranges and must fall back before its Range() overload is
+    // reached.
+    if (data_type == DataType::VARCHAR) {
+        const auto lower_op = expr_->lower_inclusive_
+                                  ? proto::plan::OpType::GreaterEqual
+                                  : proto::plan::OpType::GreaterThan;
+        const auto upper_op = expr_->upper_inclusive_
+                                  ? proto::plan::OpType::LessEqual
+                                  : proto::plan::OpType::LessThan;
+        if (!SegmentExpr::CanUseIndexForOp<std::string>(lower_op) ||
+            !SegmentExpr::CanUseIndexForOp<std::string>(upper_op)) {
+            exec_path_ = ExprExecPath::RawData;
+        }
     }
 }
 

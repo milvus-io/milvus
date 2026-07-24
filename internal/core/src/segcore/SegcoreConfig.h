@@ -117,6 +117,24 @@ class SegcoreConfig {
         return build_ratio_;
     }
 
+    // FM-index count-first guard threshold (queryNode.fmindexCostRatio):
+    // accelerate a pattern through FMINDEX iff
+    // occ x sa_sample_rate < ratio x total_tokens. Default 0.001 is the
+    // conservative end of the measured enumeration/scan crossover — see
+    // FMIndex::ShouldUseOp.
+    void
+    set_fmindex_cost_ratio(float ratio) {
+        AssertInfo(ratio > 0.0f && ratio <= 1.0f,
+                   "fmindex cost ratio must be in (0, 1], got {}",
+                   ratio);
+        fmindex_cost_ratio_ = ratio;
+    }
+
+    float
+    get_fmindex_cost_ratio() const {
+        return fmindex_cost_ratio_;
+    }
+
     int64_t
     get_refine_ratio() const {
         return refine_ratio_;
@@ -243,6 +261,8 @@ class SegcoreConfig {
     inline static int64_t sub_dim_ = 2;
     inline static float refine_ratio_ = 3.0;
     inline static float build_ratio_ = 0.1;
+    // FM-index guard threshold; overridden from queryNode.fmindexCostRatio.
+    inline static float fmindex_cost_ratio_ = 0.001f;
     inline static std::string dense_index_type_ =
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     inline static knowhere::RefineType refine_type_ =

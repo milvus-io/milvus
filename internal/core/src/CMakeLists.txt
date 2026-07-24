@@ -162,6 +162,7 @@ set(LINK_TARGETS
     simdjson
     tantivy_binding
     knowhere
+    libsais
     milvus-storage
     ${OpenMP_CXX_FLAGS}
     ${CONAN_TARGETS}

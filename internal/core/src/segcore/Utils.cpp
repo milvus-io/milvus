@@ -1545,6 +1545,16 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         index_info.ngram_params = std::make_optional(ngram_params);
     }
 
+    if (index_info.index_type == milvus::index::FMINDEX_INDEX_TYPE) {
+        milvus::index::FMIndexParams fmindex_params{};
+        // Load-time query behavior must come from the persisted FM blob. In
+        // particular, sa_sample_rate is part of the blob format and is validated
+        // by LoadView/Deserialize; reparsing an external index param here creates
+        // a second source of truth and can fail an otherwise valid load on stale
+        // metadata. The constructor defaults are build-only placeholders.
+        index_info.fmindex_params = std::make_optional(fmindex_params);
+    }
+
     // init file manager
     milvus::storage::FieldDataMeta field_meta{load_index_info->collection_id,
                                               load_index_info->partition_id,

@@ -1660,6 +1660,108 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 	})
 }
 
+func Test_fmindex_parseIndexParams(t *testing.T) {
+	t.Run("valid fmindex index params without sample rate", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+					{Key: common.ParamsKey, Value: "{}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.Contains(t, cit.newIndexParams, &commonpb.KeyValuePair{
+			Key: common.IndexTypeKey, Value: "FMINDEX",
+		})
+	})
+
+	t.Run("valid fmindex index params with sample rate", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+					{Key: common.ParamsKey, Value: "{\"fm_sa_sample_rate\": \"32\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("fmindex on non varchar field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+					{Key: common.ParamsKey, Value: "{}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldInt", DataType: schemapb.DataType_Int64,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("fmindex on json field rejected", func(t *testing.T) {
+		// FMINDEX is VARCHAR-only in this release; JSON is a follow-up.
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+					{Key: common.ParamsKey, Value: "{}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldJSON", DataType: schemapb.DataType_JSON,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("fmindex non-integer sample rate", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+					{Key: common.ParamsKey, Value: "{\"fm_sa_sample_rate\": \"a\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("fmindex sample rate out of range", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+					{Key: common.ParamsKey, Value: "{\"fm_sa_sample_rate\": \"257\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+}
+
 func Test_wrapUserIndexParams(t *testing.T) {
 	params := wrapUserIndexParams("L2")
 	assert.Equal(t, 2, len(params))

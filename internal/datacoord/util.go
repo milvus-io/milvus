@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -411,9 +412,16 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
-func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
+func calculateIndexTaskSlot(fieldSize int64, indexType string) int64 {
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if !isVectorIndex {
+	// FMINDEX is a scalar index, but its suffix-array build peaks at about 9.7x
+	// the source VARCHAR bytes. Charge it through the existing heavy-index slot
+	// budget (the same configurable budget used by vector indexes) instead of the
+	// lightweight scalar budget. This limits concurrent builds without adding a
+	// new scheduler protocol or a hard memory-admission dependency.
+	isHeavyIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) ||
+		indexType == indexparamcheck.IndexFMINDEX
+	if !isHeavyIndex {
 		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
 	}
 	if fieldSize > 512*1024*1024 {

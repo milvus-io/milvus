@@ -894,6 +894,17 @@ func (sm *snapshotManager) RestoreIndexes(
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
+		// Check scalar index engine version for FMINDEX — restore broadcasts the
+		// same CreateIndex DDL directly, so it must apply the same gate
+		// Server.CreateIndex does (checkFMIndexEngineVersion), otherwise a
+		// snapshot could create an FMINDEX an old QueryNode cannot load.
+		if sm.indexEngineVersionManager != nil {
+			if err := checkFMIndexEngineVersion(index.IndexParams,
+				sm.indexEngineVersionManager.ResolveScalarIndexVersion()); err != nil {
+				return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
+			}
+		}
+
 		// Create a new broadcaster for each index
 		// (each broadcaster can only be used once due to resource key lock consumption)
 		b, err := startBroadcaster(ctx, collectionID, snapshotName)
