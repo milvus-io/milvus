@@ -728,6 +728,197 @@ TEST(Growing, FillNullableData) {
     }
 }
 
+TEST(Growing, OutOfOrderInsertKeepsNullableScalarValidityAligned) {
+    constexpr int64_t batch_size = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto nullable_value =
+        schema->AddDebugField("nullable_value", DataType::INT64, true);
+    schema->set_primary_field_id(pk);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(3);
+    config.set_enable_interim_segment_index(false);
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment, nullptr);
+
+    auto make_batch = [&](const std::array<int64_t, batch_size>& pks,
+                          const std::array<int64_t, batch_size>& values,
+                          const std::array<bool, batch_size>& valid_data) {
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        insert_data->set_num_rows(batch_size);
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, batch_size, (*schema)[pk])
+                .release());
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(values.data(),
+                                valid_data.data(),
+                                batch_size,
+                                (*schema)[nullable_value])
+                .release());
+        return insert_data;
+    };
+
+    const std::array<int64_t, batch_size> pks_a = {10, 11};
+    const std::array<int64_t, batch_size> pks_b = {20, 21};
+    const std::array<int64_t, batch_size> values_a = {100, 101};
+    const std::array<int64_t, batch_size> values_b = {200, 201};
+    const std::array<bool, batch_size> valid_a = {true, false};
+    const std::array<bool, batch_size> valid_b = {false, true};
+    auto batch_a = make_batch(pks_a, values_a, valid_a);
+    auto batch_b = make_batch(pks_b, values_b, valid_b);
+
+    const std::array<int64_t, batch_size> row_ids_a = {0, 1};
+    const std::array<int64_t, batch_size> row_ids_b = {2, 3};
+    const std::array<Timestamp, batch_size> timestamps_a = {100, 101};
+    const std::array<Timestamp, batch_size> timestamps_b = {102, 103};
+
+    auto offset_a = segment->PreInsert(batch_size);
+    auto offset_b = segment->PreInsert(batch_size);
+    ASSERT_EQ(offset_a, 0);
+    ASSERT_EQ(offset_b, batch_size);
+
+    ASSERT_NO_THROW(segment->Insert(offset_b,
+                                    batch_size,
+                                    row_ids_b.data(),
+                                    timestamps_b.data(),
+                                    batch_b.get()));
+    EXPECT_EQ(segment->get_row_count(), 0);
+
+    ASSERT_NO_THROW(segment->Insert(offset_a,
+                                    batch_size,
+                                    row_ids_a.data(),
+                                    timestamps_a.data(),
+                                    batch_a.get()));
+    ASSERT_EQ(segment->get_row_count(), 2 * batch_size);
+
+    const std::array<int64_t, 2 * batch_size> offsets = {0, 1, 2, 3};
+    auto result = segment->bulk_subscript(
+        nullptr, nullable_value, offsets.data(), offsets.size());
+    ASSERT_NE(result, nullptr);
+
+    const auto& actual_values = result->scalars().long_data().data();
+    ASSERT_EQ(actual_values.size(), 2 * batch_size);
+    ASSERT_EQ(result->valid_data_size(), 2 * batch_size);
+    const std::array<bool, 2 * batch_size> expected_validity = {
+        true, false, false, true};
+    for (size_t i = 0; i < expected_validity.size(); ++i) {
+        EXPECT_EQ(result->valid_data(i), expected_validity[i]);
+    }
+    EXPECT_EQ(actual_values[0], 100);
+    EXPECT_EQ(actual_values[3], 201);
+}
+
+TEST(Growing, OutOfOrderInsertKeepsNullableVectorMappingAligned) {
+    constexpr int64_t batch_size = 2;
+    constexpr int64_t dim = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto nullable_vector = schema->AddDebugField("nullable_vector",
+                                                 DataType::VECTOR_FLOAT,
+                                                 dim,
+                                                 knowhere::metric::L2,
+                                                 true);
+    schema->set_primary_field_id(pk);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(3);
+    config.set_enable_interim_segment_index(false);
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment, nullptr);
+
+    auto make_batch = [&](const std::array<int64_t, batch_size>& pks,
+                          const std::array<float, dim>& compact_vector,
+                          const std::array<bool, batch_size>& valid_data) {
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        insert_data->set_num_rows(batch_size);
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, batch_size, (*schema)[pk])
+                .release());
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateVectorDataArrayFrom(compact_vector.data(),
+                                      valid_data.data(),
+                                      batch_size,
+                                      1,
+                                      (*schema)[nullable_vector])
+                .release());
+        return insert_data;
+    };
+
+    const std::array<int64_t, batch_size> pks_a = {10, 11};
+    const std::array<int64_t, batch_size> pks_b = {20, 21};
+    const std::array<float, dim> vector_a = {1.0F, 2.0F};
+    const std::array<float, dim> vector_b = {3.0F, 4.0F};
+    const std::array<bool, batch_size> valid_a = {true, false};
+    const std::array<bool, batch_size> valid_b = {false, true};
+    auto batch_a = make_batch(pks_a, vector_a, valid_a);
+    auto batch_b = make_batch(pks_b, vector_b, valid_b);
+
+    const std::array<int64_t, batch_size> row_ids_a = {0, 1};
+    const std::array<int64_t, batch_size> row_ids_b = {2, 3};
+    const std::array<Timestamp, batch_size> timestamps_a = {100, 101};
+    const std::array<Timestamp, batch_size> timestamps_b = {102, 103};
+
+    auto offset_a = segment->PreInsert(batch_size);
+    auto offset_b = segment->PreInsert(batch_size);
+    ASSERT_EQ(offset_a, 0);
+    ASSERT_EQ(offset_b, batch_size);
+
+    ASSERT_NO_THROW(segment->Insert(offset_b,
+                                    batch_size,
+                                    row_ids_b.data(),
+                                    timestamps_b.data(),
+                                    batch_b.get()));
+    EXPECT_EQ(segment->get_row_count(), 0);
+
+    ASSERT_NO_THROW(segment->Insert(offset_a,
+                                    batch_size,
+                                    row_ids_a.data(),
+                                    timestamps_a.data(),
+                                    batch_a.get()));
+    ASSERT_EQ(segment->get_row_count(), 2 * batch_size);
+
+    const std::array<int64_t, 2 * batch_size> offsets = {0, 1, 2, 3};
+    auto result = segment->bulk_subscript(
+        nullptr, nullable_vector, offsets.data(), offsets.size());
+    ASSERT_NE(result, nullptr);
+
+    const std::array<bool, 2 * batch_size> expected_validity = {
+        true, false, false, true};
+    ASSERT_EQ(result->valid_data_size(), expected_validity.size());
+    for (size_t i = 0; i < expected_validity.size(); ++i) {
+        EXPECT_EQ(result->valid_data(i), expected_validity[i]);
+    }
+
+    const std::array<float, 2 * dim> expected_vectors = {
+        1.0F, 2.0F, 3.0F, 4.0F};
+    const auto& actual_vectors = result->vectors().float_vector().data();
+    ASSERT_EQ(actual_vectors.size(), expected_vectors.size());
+    for (size_t i = 0; i < expected_vectors.size(); ++i) {
+        EXPECT_FLOAT_EQ(actual_vectors[i], expected_vectors[i]);
+    }
+
+    auto vector_data =
+        segment->get_insert_record().get_data_base(nullable_vector);
+    ASSERT_TRUE(vector_data->is_mapping_storage());
+    EXPECT_EQ(vector_data->get_physical_offset(1), -1);
+    EXPECT_EQ(vector_data->get_physical_offset(2), -1);
+    auto physical_a = vector_data->get_physical_offset(0);
+    auto physical_b = vector_data->get_physical_offset(3);
+    EXPECT_GE(physical_a, 0);
+    EXPECT_GE(physical_b, 0);
+    EXPECT_NE(physical_a, physical_b);
+    EXPECT_EQ(vector_data->get_logical_offset(physical_a), 0);
+    EXPECT_EQ(vector_data->get_logical_offset(physical_b), 3);
+    EXPECT_EQ(vector_data->get_valid_count(), 2);
+}
+
 class GrowingNullableTest : public ::testing::TestWithParam<
                                 std::tuple</*data_type*/ DataType,
                                            /*metric_type*/ knowhere::MetricType,

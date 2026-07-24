@@ -711,6 +711,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         auto data_offset = field_id_to_offset[field_id];
         if (field_meta.is_nullable()) {
             insert_record_.get_valid_data(field_id)->set_data_raw(
+                reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
@@ -979,7 +980,8 @@ SegmentGrowingImpl::load_field_data_common(
     // Growing-source flush reads raw data from insert_record_. Keep it
     // populated even when an interim index can provide raw vector data.
     if (insert_record_.is_valid_data_exist(field_id)) {
-        insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
+        insert_record_.get_valid_data(field_id)->set_data_raw(reserved_offset,
+                                                              field_data);
     }
     insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
                                                          field_data);
@@ -3006,7 +3008,7 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(
-            total_row_num, data.get(), field_meta);
+            0, total_row_num, data.get(), field_meta);
     }
     insert_record_.get_data_base(field_id)->set_data_raw(
         0, total_row_num, data.get(), field_meta);
