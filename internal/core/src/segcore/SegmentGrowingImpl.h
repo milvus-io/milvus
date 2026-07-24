@@ -181,16 +181,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     FillAbsentFields();
 
  private:
-    // Build geometry cache for inserted data
+    // Build geometry cache for inserted data. reserved_offset is the batch's
+    // reserved absolute segment offset: cache rows are written at absolute
+    // offsets so a retried batch overwrites its own slots instead of
+    // re-appending (see SimpleGeometryCache::AppendDataAt).
     void
     BuildGeometryCacheForInsert(FieldId field_id,
                                 const DataArray* data_array,
+                                int64_t reserved_offset,
                                 int64_t num_rows);
 
-    // Build geometry cache for loaded field data
+    // Build geometry cache for loaded field data; reserved_offset as above.
     void
     BuildGeometryCacheForLoad(FieldId field_id,
-                              const std::vector<FieldDataPtr>& field_data);
+                              const std::vector<FieldDataPtr>& field_data,
+                              int64_t reserved_offset);
 
  public:
     const InsertRecord<false>&

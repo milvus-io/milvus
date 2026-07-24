@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <exception>
 #include <map>
+#include <new>
 #include <optional>
 #include <string>
 #include <utility>
@@ -660,7 +661,16 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                 // Create accessor for DataArray
                 auto accessor = [&geometry_array, &valid_data](
                                     int64_t i) -> std::pair<std::string, bool> {
-                    bool is_valid = valid_data.empty() || valid_data[i];
+                    // Guard valid_data[i] the same way the geometry payload is
+                    // guarded below: a nullable DataArray may carry a shorter
+                    // valid_data than the row count, so an unchecked index is
+                    // an out-of-bounds read. Classifying the out-of-span rows
+                    // as NULL (instead of throwing on the malformed producer
+                    // payload) is intentional leniency: it keeps a truncated
+                    // DataArray from failing the whole ingest, and the cache
+                    // side applies the identical rule so both verdicts agree.
+                    bool is_valid = valid_data.empty() ||
+                                    (i < valid_data.size() && valid_data[i]);
                     if (is_valid && i < geometry_array.data_size()) {
                         return {geometry_array.data(i), true};
                     }
@@ -750,6 +760,19 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
                         "Initialized R-Tree index for immediate incremental "
                         "building from {}",
                         log_source);
+                } catch (const SegcoreError&) {
+                    // Already typed -- rethrow as-is; re-wrapping would
+                    // collapse the code (same ordered handlers as the
+                    // AddGeometry loop below).
+                    throw;
+                } catch (const std::bad_alloc&) {
+                    // Wrapper allocation OOM on the first batch is the same
+                    // transient resource failure as on the AddGeometry path
+                    // -- keep it retriable.
+                    ThrowInfo(ErrorCode::MemAllocateFailed,
+                              "out of memory initializing R-Tree index from "
+                              "{}",
+                              log_source);
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "R-Tree index initialization error: {}",
@@ -762,12 +785,30 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
             for (int64_t i = 0; i < size; ++i) {
                 int64_t global_offset = reserved_offset + i;
 
-                // Use the accessor to get geometry data and validity
+                // Use the accessor to get geometry data and validity.
+                // is_valid MUST reach AddGeometry: it is the only signal that
+                // distinguishes a genuinely null row from a valid row with an
+                // empty payload (see RTreeIndex::AddGeometry).
                 auto [wkb_data, is_valid] = accessor(i);
 
                 try {
-                    rtree_index->AddGeometry(wkb_data, global_offset);
+                    rtree_index->AddGeometry(wkb_data, global_offset, is_valid);
                     added_count++;
+                } catch (const SegcoreError&) {
+                    // Already typed (e.g. a retriable MemAllocateFailed from a
+                    // transient GEOS allocation failure) -- rethrow as-is;
+                    // re-wrapping would collapse the code into a non-retriable
+                    // UnexpectedError.
+                    throw;
+                } catch (const std::bad_alloc&) {
+                    // Container/std allocation OOM (e.g. the R-Tree wrapper's
+                    // values_.push_back / rtree_.insert) is the same transient
+                    // resource failure as a GEOS allocation failure and must
+                    // stay retriable -- the generic handler below would
+                    // collapse it into a non-retriable UnexpectedError.
+                    ThrowInfo(ErrorCode::MemAllocateFailed,
+                              "out of memory adding geometry at offset {}",
+                              global_offset);
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "Failed to add geometry at offset {}: {}",

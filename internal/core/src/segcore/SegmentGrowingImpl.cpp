@@ -21,6 +21,7 @@
 #include <map>
 #include <filesystem>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -824,6 +825,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             BuildGeometryCacheForInsert(
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
+                reserved_offset,
                 num_rows);
         }
 
@@ -1215,7 +1217,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
             if (schema_->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
-                BuildGeometryCacheForLoad(field_id, field_data);
+                BuildGeometryCacheForLoad(
+                    field_id, field_data, reserved_offset);
             }
         }
     }
@@ -2859,7 +2862,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
             if (schema_->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
-                BuildGeometryCacheForLoad(field_id, field_data);
+                BuildGeometryCacheForLoad(
+                    field_id, field_data, reserved_offset);
             }
         }
     }
@@ -3067,10 +3071,20 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 void
 SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 const DataArray* data_array,
+                                                int64_t reserved_offset,
                                                 int64_t num_rows) {
+    // Rows are written at their reserved ABSOLUTE offsets
+    // (SimpleGeometryCache::AppendDataAt), matching how readers address the
+    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // works. This makes the write idempotent: a batch retried after a
+    // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
+    // overwrites its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset. It also
+    // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
+    // in-order Insert() batches.
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
@@ -3079,15 +3093,26 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
         const auto& valid_data = data_array->valid_data();
 
         for (int64_t i = 0; i < num_rows; ++i) {
-            if (valid_data.empty() ||
-                (i < valid_data.size() && valid_data[i])) {
+            // Mirror the index-side accessor (FieldIndexing.cpp
+            // AppendSegmentIndex): a nullable DataArray may carry fewer
+            // payload entries than num_rows, and protobuf's Get(i) only
+            // DCHECKs in release builds, so an unchecked data(i) is an
+            // out-of-bounds read. Rows beyond either bound are classified
+            // NULL here exactly as the accessor returns {"", false}, keeping
+            // the cache and the R-Tree index verdicts identical for the
+            // same input. This NULL classification is intentional leniency
+            // toward a malformed (truncated) producer payload -- tolerate it
+            // rather than fail the whole append.
+            bool is_valid =
+                valid_data.empty() || (i < valid_data.size() && valid_data[i]);
+            if (is_valid && i < geometry_data.data_size()) {
                 // Valid geometry data
                 const auto& wkb_data = geometry_data.data(i);
-                geometry_cache.AppendData(
-                    ctx_, wkb_data.data(), wkb_data.size());
+                geometry_cache->AppendDataAt(
+                    reserved_offset + i, wkb_data.data(), wkb_data.size());
             } else {
                 // Null/invalid geometry
-                geometry_cache.AppendData(ctx_, nullptr, 0);
+                geometry_cache->AppendDataAt(reserved_offset + i, nullptr, 0);
             }
         }
 
@@ -3099,6 +3124,21 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
             get_segment_id(),
             field_id.get());
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM (e.g. the cache's geometries_.resize)
+        // is the same transient resource failure as a GEOS allocation failure
+        // and must stay retriable -- the generic handler below would collapse
+        // it into a non-retriable UnexpectedError.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for growing segment "
+                  "{} field {} insert",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "
@@ -3111,27 +3151,32 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
 
 void
 SegmentGrowingImpl::BuildGeometryCacheForLoad(
-    FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
+    FieldId field_id,
+    const std::vector<FieldDataPtr>& field_data,
+    int64_t reserved_offset) {
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
-        // Process each field data chunk
+        // Process each field data chunk, writing rows at their reserved
+        // absolute offsets so a retried load overwrites in place (see
+        // BuildGeometryCacheForInsert).
+        int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
             auto num_rows = data->get_num_rows();
 
-            for (int64_t i = 0; i < num_rows; ++i) {
+            for (int64_t i = 0; i < num_rows; ++i, ++absolute_offset) {
                 if (data->is_valid(i)) {
                     // Valid geometry data
                     auto wkb_data =
                         static_cast<const std::string*>(data->RawValue(i));
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data->data(), wkb_data->size());
+                    geometry_cache->AppendDataAt(
+                        absolute_offset, wkb_data->data(), wkb_data->size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendDataAt(absolute_offset, nullptr, 0);
                 }
             }
         }
@@ -3149,6 +3194,18 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
             get_segment_id(),
             field_id.get());
 
+    } catch (const SegcoreError&) {
+        // Already typed -- rethrow as-is to keep the code (see the insert-path
+        // catch above).
+        throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM stays retriable (see the insert-path
+        // catch above).
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for growing segment "
+                  "{} field {} load",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "

@@ -19,6 +19,7 @@
 #include <shared_mutex>
 #include <string>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 #include "boost/geometry/core/cs.hpp"
@@ -125,7 +126,10 @@ class RTreeIndexWrapper {
      * @param maxX Output maximum X coordinate
      * @param maxY Output maximum Y coordinate
      */
-    void
+    // Returns false (leaving the outputs unspecified) when GEOS cannot compute
+    // an envelope, e.g. for an empty geometry. Callers must not use the box on
+    // a false return.
+    bool
     get_bounding_box(const GEOSGeometry* geom,
                      GEOSContextHandle_t ctx,
                      double& minX,
@@ -140,8 +144,22 @@ class RTreeIndexWrapper {
     using Value = std::pair<Box, int64_t>;  // (MBR, row_offset)
     using RTree = bgi::rtree<Value, bgi::rstar<16>>;
 
+    // Insert one (box, row_offset) entry with rtree_mutex_ already held.
+    // Idempotent per row_offset and all-or-nothing: a retried batch (the
+    // segcore caller translates a mid-batch bad_alloc into a retriable
+    // MemAllocateFailed and re-drives the whole batch) must not duplicate the
+    // rows that already committed -- Boost R-tree accepts duplicate values,
+    // and duplicates inflate count() past the segment row space.
+    void
+    insert_value_locked(const Box& box, int64_t row_offset);
+
     RTree rtree_{};
     std::vector<Value> values_;
+    // Offsets already committed via insert_value_locked (add_geometry path
+    // only; guarded by rtree_mutex_). bulk_load_from_field_data does not
+    // maintain it: that path stages into a local vector and publishes by swap,
+    // so a failed attempt leaves nothing behind to deduplicate against.
+    std::unordered_set<int64_t> written_offsets_;
     std::string index_path_;
     bool is_build_mode_;
 

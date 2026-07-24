@@ -13,11 +13,15 @@
 
 #include <folly/SharedMutex.h>
 #include <stdint.h>
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "common/EasyAssert.h"
@@ -80,12 +84,31 @@ class RTreeIndex : public ScalarIndex<T> {
 
     int64_t
     Count() override {
-        if (is_built_) {
-            return total_num_rows_;
+        // On a growing segment AddGeometry() mutates null_offset_ and publishes
+        // wrapper_ under mutex_, concurrently with searches calling Count(); take
+        // the shared lock and snapshot wrapper_ before dereferencing it.
+        std::shared_ptr<RTreeIndexWrapper> wrapper;
+        int64_t null_count = 0;
+        int64_t total_num_rows = 0;
+        {
+            std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            if (is_built_) {
+                return total_num_rows_;
+            }
+            wrapper = wrapper_;
+            null_count = static_cast<int64_t>(null_offset_.size());
+            total_num_rows = total_num_rows_;
         }
-        return wrapper_ ? wrapper_->count() +
-                              static_cast<int64_t>(null_offset_.size())
-                        : 0;
+        // Callers size row-addressed bitmaps by Count() (see Query()), so it
+        // must report the row space, not how many rows happen to be indexed.
+        // AddGeometry() is offset-addressed and keeps total_num_rows_ at
+        // max(row_offset) + 1, so with sparse or out-of-order offsets it
+        // outgrows wrapper->count() + nulls -- returning the smaller value
+        // would make Query() clip live candidates. Keep the max so neither
+        // counter can under-report.
+        auto indexed_count =
+            wrapper ? wrapper->count() + null_count : null_count;
+        return std::max(total_num_rows, indexed_count);
     }
 
     // BuildWithRawDataForUT should be only used in ut. Only string is supported.
@@ -98,9 +121,17 @@ class RTreeIndex : public ScalarIndex<T> {
     void
     BuildWithStrings(const std::vector<std::string>& geometries);
 
-    // Add single geometry incrementally (for growing segment)
+    // Add single geometry incrementally (for growing segment).
+    //
+    // `is_valid` is the row's nullability from the caller's valid_data and is
+    // the ONLY signal that classifies the row as NULL: a valid row whose WKB
+    // payload is empty or unparseable is indexed with a placeholder MBR (like
+    // the sealed bulk_load path, which also checks is_valid first), NOT pushed
+    // into null_offset_. Inferring nullness from wkb_data.empty() would make
+    // ST_ISNOTNULL / Count() disagree between growing and sealed for such a
+    // row. See PR #50951 review.
     void
-    AddGeometry(const std::string& wkb_data, int64_t row_offset);
+    AddGeometry(const std::string& wkb_data, int64_t row_offset, bool is_valid);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -162,12 +193,17 @@ class RTreeIndex : public ScalarIndex<T> {
         ScalarIndex<T>::ComputeByteSize();
         int64_t total = this->cached_byte_size_;
 
-        // null_offset_ vector
-        total += null_offset_.capacity() * sizeof(size_t);
+        std::shared_ptr<RTreeIndexWrapper> wrapper;
+        {
+            std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            // null_offset_ vector
+            total += null_offset_.capacity() * sizeof(size_t);
+            wrapper = wrapper_;
+        }
 
         // wrapper_ (RTreeIndexWrapper)
-        if (wrapper_) {
-            total += wrapper_->ByteSize();
+        if (wrapper) {
+            total += wrapper->ByteSize();
         }
 
         this->cached_byte_size_ = total;
@@ -216,5 +252,11 @@ class RTreeIndex : public ScalarIndex<T> {
     // Track null rows to support IsNull/IsNotNull just like other scalar indexes
     folly::SharedMutexWritePriority mutex_{};
     std::vector<size_t> null_offset_;
+    // Growing-path (AddGeometry) dedup companion for null_offset_, guarded by
+    // mutex_: a retried batch must not append the same null offset twice --
+    // duplicates inflate Count() past the segment row space. The sealed
+    // build/load paths populate null_offset_ directly (single-shot, no retry
+    // re-append) and do not maintain this set.
+    std::unordered_set<size_t> null_offset_dedup_;
 };
 }  // namespace milvus::index

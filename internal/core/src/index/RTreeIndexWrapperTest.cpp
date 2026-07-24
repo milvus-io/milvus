@@ -219,3 +219,106 @@ TEST_F(RTreeIndexWrapperTest, TestInvalidWKB) {
 
     wrapper.finish();
 }
+
+TEST_F(RTreeIndexWrapperTest, EmptyGeometryIsIndexedWithoutUndefinedMBR) {
+    std::string index_path = test_dir_ + "/test_empty_geometry";
+    milvus::index::RTreeIndexWrapper wrapper(index_path, true);
+
+    // An empty geometry has no envelope: GEOSGeom_get{X,Y}{Min,Max}_r fail and
+    // leave the coordinates uninitialized. The wrapper must not insert a
+    // garbage MBR; it indexes the row with a deterministic placeholder so the
+    // row count stays consistent with the segment.
+    std::string empty_wkb =
+        milvus::Geometry(ctx_, "POLYGON EMPTY").to_wkb_string();
+    ASSERT_FALSE(empty_wkb.empty());
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(empty_wkb.data()),
+                         empty_wkb.size(),
+                         0);
+
+    auto point_wkb = create_point_wkb(10.0, 10.0);
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(point_wkb.data()),
+                         point_wkb.size(),
+                         1);
+
+    // Both rows indexed (no row silently dropped).
+    EXPECT_EQ(wrapper.count(), 2);
+
+    // A query far from the placeholder/origin must only return the real point;
+    // the empty geometry must not spuriously match.
+    auto query_polygon_wkb = create_polygon_wkb(
+        {{9.0, 9.0}, {11.0, 9.0}, {11.0, 11.0}, {9.0, 11.0}, {9.0, 9.0}});
+    milvus::Geometry query_geom(
+        ctx_,
+        reinterpret_cast<const void*>(query_polygon_wkb.data()),
+        query_polygon_wkb.size());
+    std::vector<int64_t> candidates;
+    wrapper.query_candidates(
+        milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        query_geom.GetGeometry(),
+        ctx_,
+        candidates);
+    EXPECT_NE(std::find(candidates.begin(), candidates.end(), 1),
+              candidates.end());
+    EXPECT_EQ(std::find(candidates.begin(), candidates.end(), 0),
+              candidates.end());
+
+    wrapper.finish();
+}
+
+// Regression for PR #50951 review (round D0c953a6533): the segcore caller
+// translates a mid-batch bad_alloc into a retriable MemAllocateFailed and
+// re-drives the WHOLE batch, so add_geometry must be idempotent per row
+// offset -- Boost R-tree happily stores duplicate values, and duplicated
+// rows inflate count() past the segment row space (phantom IsNotNull
+// positions, oversized bitmaps). A re-driven offset must be a no-op, for
+// real geometries and placeholder (unparseable-WKB) rows alike.
+TEST_F(RTreeIndexWrapperTest, RetriedOffsetsAreNotDuplicated) {
+    std::string index_path = test_dir_ + "/test_index_idempotent";
+    milvus::index::RTreeIndexWrapper wrapper(index_path, true);
+
+    auto point_wkb = create_point_wkb(1.0, 1.0);
+    std::string corrupt_wkb = point_wkb;
+    corrupt_wkb.resize(corrupt_wkb.size() / 2);  // truncate -> placeholder row
+
+    // First attempt commits offsets 0 (real) and 1 (placeholder).
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(point_wkb.data()),
+                         point_wkb.size(),
+                         0);
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(corrupt_wkb.data()),
+                         corrupt_wkb.size(),
+                         1);
+    ASSERT_EQ(wrapper.count(), 2);
+
+    // The "retry" re-drives the batch from row 0 and then continues past the
+    // previously failed point. Offsets 0/1 must not duplicate; offset 2 lands.
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(point_wkb.data()),
+                         point_wkb.size(),
+                         0);
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(corrupt_wkb.data()),
+                         corrupt_wkb.size(),
+                         1);
+    auto point2_wkb = create_point_wkb(2.0, 2.0);
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(point2_wkb.data()),
+                         point2_wkb.size(),
+                         2);
+
+    // Exactly one entry per offset.
+    EXPECT_EQ(wrapper.count(), 3);
+
+    // And the retried real row is still queryable exactly once.
+    auto query_polygon_wkb = create_polygon_wkb(
+        {{0.5, 0.5}, {1.5, 0.5}, {1.5, 1.5}, {0.5, 1.5}, {0.5, 0.5}});
+    milvus::Geometry query_geom(
+        ctx_,
+        reinterpret_cast<const void*>(query_polygon_wkb.data()),
+        query_polygon_wkb.size());
+    std::vector<int64_t> candidates;
+    wrapper.query_candidates(
+        milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        query_geom.GetGeometry(),
+        ctx_,
+        candidates);
+    EXPECT_EQ(std::count(candidates.begin(), candidates.end(), 0), 1);
+
+    wrapper.finish();
+}

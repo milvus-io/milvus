@@ -13,10 +13,105 @@
 #include <geos_c.h>
 #include <memory>
 #include <cmath>
+#include <new>
 #include <string>
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 
 namespace milvus {
+
+/**
+ * Reduce a tri-state GEOS predicate result to bool, observably.
+ *
+ * The GEOS capi binary predicates (GEOSIntersects_r, GEOSPreparedContains_r,
+ * GEOSisValid_r, ...) return char 1 = true, 0 = false, 2 = an exception was
+ * caught inside GEOS's execute() guard (a topology error on data GEOS cannot
+ * evaluate, or an allocation failure swallowed the same way -- see the KNOWN
+ * LIMIT note on Geometry::TryParseFromWkb). A bare `== 1` silently maps 2 to
+ * "no match", turning an evaluation failure into an unlogged false negative.
+ * Mapping 2 to false is still the deliberate choice -- the filter paths'
+ * single-row-leniency contract says one bad row must not fail the whole
+ * query, matching how corrupt WKB is skipped -- but it must be visible, so
+ * the exception case is logged. See PR #50951 review.
+ */
+inline bool
+GeosPredicateIsTrue(char result, const char* op) {
+    if (result == 2) {
+        LOG_WARN(
+            "GEOS predicate {} raised an exception; treating the row as not "
+            "matching",
+            op);
+        return false;
+    }
+    return result == 1;
+}
+
+/**
+ * Create a GEOS context, translating allocation failure into a retriable
+ * system error.
+ *
+ * GEOS_init_r() allocates its context with a bare `new` (it is NOT wrapped in
+ * the capi execute() guard), so on OOM it throws std::bad_alloc and never
+ * returns nullptr. Without this translation the bad_alloc is not a
+ * SegcoreError, so it would bypass the `catch (const SegcoreError&)` rethrow
+ * guards on the index write paths and collapse into a non-retryable
+ * UnexpectedError at the cgo boundary -- inverting the transient-vs-permanent
+ * classification for what is a textbook transient failure. See PR #50951
+ * review.
+ */
+inline GEOSContextHandle_t
+InitGEOSContext(const char* purpose) {
+    try {
+        return GEOS_init_r();
+    } catch (const std::bad_alloc&) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory initializing GEOS context for {}",
+                  purpose);
+    }
+}
+
+/**
+ * RAII holder for a GEOS context and the reader/geometry commonly held with
+ * it. Any code path that can throw between GEOS_init_r and GEOS_finish_r --
+ * a std::bad_alloc from a container op (now translated to a retriable error
+ * and retried, so a leak repeats once per attempt and compounds the OOM), a
+ * throwing Geometry constructor, an AssertInfo -- must hold its resources
+ * here instead of relying on trailing cleanup calls. Destruction order
+ * matters: geometry and reader are destroyed while the context is still
+ * alive. See PR #50951 review.
+ */
+struct ScopedGeosResources {
+    GEOSContextHandle_t ctx{nullptr};
+    GEOSWKBReader* reader{nullptr};
+    GEOSGeometry* geom{nullptr};
+
+    explicit ScopedGeosResources(const char* purpose)
+        : ctx(InitGEOSContext(purpose)) {
+    }
+    ScopedGeosResources(const ScopedGeosResources&) = delete;
+    ScopedGeosResources&
+    operator=(const ScopedGeosResources&) = delete;
+
+    ~ScopedGeosResources() {
+        release_geom();
+        if (reader != nullptr) {
+            GEOSWKBReader_destroy_r(ctx, reader);
+            reader = nullptr;
+        }
+        if (ctx != nullptr) {
+            GEOS_finish_r(ctx);
+            ctx = nullptr;
+        }
+    }
+
+    void
+    release_geom() {
+        if (geom != nullptr) {
+            GEOSGeom_destroy_r(ctx, geom);
+            geom = nullptr;
+        }
+    }
+};
 
 /**
  * Get a thread-local GEOS context handle for thread-safe operations.
@@ -32,7 +127,7 @@ inline GEOSContextHandle_t
 GetThreadLocalGEOSContext() {
     thread_local struct ThreadLocalContext {
         GEOSContextHandle_t ctx;
-        ThreadLocalContext() : ctx(GEOS_init_r()) {
+        ThreadLocalContext() : ctx(InitGEOSContext("thread-local geometry")) {
         }
         ~ThreadLocalContext() {
             if (ctx) {
@@ -83,17 +178,86 @@ class Geometry {
         geometry_ = geom;
     }
 
-    // Copy assignment
+    // WKB parse into this instance that returns false ONLY for bad data
+    // (unparseable WKB), leaving this invalid (IsValid() == false), instead of
+    // the throwing WKB constructor's AssertInfo. Mirrors the geometry cache's
+    // GetByOffsetUnsafe() == nullptr contract so exact refinement can
+    // `continue` past a corrupt/placeholder row in every configuration
+    // (geometry cache on or off) rather than throwing and failing the whole
+    // query. See PR #50951 review.
+    //
+    // A transient resource failure (null context / reader allocation) is NOT
+    // bad data: collapsing it into `false` would silently filter out a
+    // perfectly valid row (a silent false negative). Those cases throw a
+    // retriable system error instead, matching RTreeIndexWrapper::add_geometry.
+    //
+    // KNOWN LIMIT: the transient/bad-data split above only covers failures we
+    // can observe BEFORE parsing. GEOS's capi execute() wrapper catches every
+    // exception thrown inside GEOSWKBReader_read_r -- including std::bad_alloc
+    // -- and returns nullptr, so a transient OOM DURING parsing is
+    // indistinguishable from unparseable WKB at this boundary (telling them
+    // apart would require installing a GEOS error handler and parsing message
+    // strings). Such a row is therefore classified as bad data with no retry:
+    // the cache stores an invalid entry, the filter paths evaluate it to
+    // false, and the index stamps a placeholder MBR. Accepted tradeoff:
+    // parse-time OOM is rare and the blast radius is a single row.
+    bool
+    TryParseFromWkb(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
+        if (ctx == nullptr) {
+            ThrowInfo(ErrorCode::MemAllocateFailed,
+                      "null GEOS context while parsing WKB");
+        }
+        if (geometry_ != nullptr) {
+            GEOSGeom_destroy_r(ctx_, geometry_);
+            geometry_ = nullptr;
+        }
+        ctx_ = ctx;
+        GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
+        if (reader == nullptr) {
+            ThrowInfo(ErrorCode::MemAllocateFailed,
+                      "failed to create GEOS WKB reader");
+        }
+        geometry_ = GEOSWKBReader_read_r(
+            ctx, reader, static_cast<const unsigned char*>(wkb), size);
+        GEOSWKBReader_destroy_r(ctx, reader);
+        return geometry_ != nullptr;
+    }
+
+    // Copy assignment (deep clone). Releases any geometry this instance
+    // already owns before taking a clone of `other`, so the two instances
+    // never share a raw GEOSGeometry* (which would double-free on
+    // destruction).
+    //
+    // CONSTRAINT: copying drives GEOS through the SOURCE instance's context
+    // (GEOSGeom_clone_r(other.ctx_, ...)) and the copy keeps that context.
+    // Therefore a cache-owned Geometry must never be copied from a query
+    // thread: (1) the cache's shared context is not thread-safe, so the clone
+    // call itself is a data race, and (2) a copy that outlives the cache's
+    // shared_ptr holds a dangling context. Query threads must use Clone(ctx)
+    // with their own (thread-local) context instead. Implicit copies cannot
+    // simply be deleted: generic container code (FieldDataImpl's std::copy_n)
+    // copies Geometry values on the single-threaded ingest path, which is the
+    // legitimate use these operators exist for.
     Geometry&
     operator=(const Geometry& other) {
         if (this != &other) {
-            geometry_ = other.geometry_;
+            if (geometry_ != nullptr) {
+                GEOSGeom_destroy_r(ctx_, geometry_);
+                geometry_ = nullptr;
+            }
             ctx_ = other.ctx_;
+            if (other.IsValid()) {
+                GEOSGeometry* cloned =
+                    GEOSGeom_clone_r(other.ctx_, other.geometry_);
+                AssertInfo(cloned != nullptr, "Failed to clone geometry");
+                geometry_ = cloned;
+            }
         }
         return *this;
     }
 
-    // Copy constructor with context (for cloning)
+    // Copy constructor (deep clone). Same CONSTRAINT as copy assignment above:
+    // never copy a cache-owned Geometry from a query thread; use Clone(ctx).
     Geometry(const Geometry& other) : ctx_(other.ctx_) {
         if (other.IsValid()) {
             GEOSGeometry* cloned =
@@ -103,6 +267,52 @@ class Geometry {
         } else {
             geometry_ = nullptr;
         }
+    }
+
+    // Explicit deep clone into the CALLER's context. All GEOS work runs
+    // through `ctx`, never through this instance's context, and the returned
+    // Geometry is bound to `ctx` -- this is the only safe way to duplicate a
+    // cache-owned Geometry from a query thread (hold the cache read lock and
+    // pass GetThreadLocalGEOSContext()), and the clone stays valid after the
+    // cache is gone.
+    //
+    // NOTE: no production caller today -- the filter paths borrow cached
+    // geometries under the read lock and never copy them, which is cheaper.
+    // This is not leftover dead code: it exists so that the next caller that
+    // does need a copy has a correct path, instead of reaching for the copy
+    // constructor above and silently cloning through the cache's shared
+    // context. Exercised by GeometryTest.
+    Geometry
+    Clone(GEOSContextHandle_t ctx) const {
+        Geometry cloned;
+        cloned.ctx_ = ctx;
+        if (IsValid()) {
+            GEOSGeometry* geom = GEOSGeom_clone_r(ctx, geometry_);
+            AssertInfo(geom != nullptr, "Failed to clone geometry");
+            cloned.geometry_ = geom;
+        }
+        return cloned;
+    }
+
+    // Move constructor (transfers ownership, no GEOS allocation). Being
+    // noexcept lets std::vector relocate by move instead of clone-then-destroy.
+    Geometry(Geometry&& other) noexcept
+        : geometry_(other.geometry_), ctx_(other.ctx_) {
+        other.geometry_ = nullptr;
+    }
+
+    // Move assignment (transfers ownership, releases any existing geometry).
+    Geometry&
+    operator=(Geometry&& other) noexcept {
+        if (this != &other) {
+            if (geometry_ != nullptr) {
+                GEOSGeom_destroy_r(ctx_, geometry_);
+            }
+            geometry_ = other.geometry_;
+            ctx_ = other.ctx_;
+            other.geometry_ = nullptr;
+        }
+        return *this;
     }
 
     bool
@@ -121,80 +331,130 @@ class Geometry {
         return geometry_;
     }
 
-    // Spatial relation operations using GEOS API
+    // Spatial relation operations using GEOS API.
+    //
+    // Each predicate has an overload that takes an explicit GEOS context. GEOS
+    // context handles are NOT thread-safe, and cache-owned Geometry instances
+    // share one context across concurrent queries, so callers on a shared
+    // (read-locked) cached geometry MUST pass their own per-thread context
+    // (see GetThreadLocalGEOSContext) instead of relying on the stored ctx_.
+    // The no-context overloads keep using the instance's own context and are
+    // only safe when this instance is not shared across threads.
     bool
     equals(const Geometry& other) const {
+        return equals(other, ctx_);
+    }
+
+    bool
+    equals(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSEquals_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSEquals_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "equals");
     }
 
     bool
     touches(const Geometry& other) const {
+        return touches(other, ctx_);
+    }
+
+    bool
+    touches(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSTouches_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSTouches_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "touches");
     }
 
     bool
     overlaps(const Geometry& other) const {
+        return overlaps(other, ctx_);
+    }
+
+    bool
+    overlaps(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSOverlaps_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSOverlaps_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "overlaps");
     }
 
     bool
     crosses(const Geometry& other) const {
+        return crosses(other, ctx_);
+    }
+
+    bool
+    crosses(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSCrosses_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSCrosses_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "crosses");
     }
 
     bool
     contains(const Geometry& other) const {
+        return contains(other, ctx_);
+    }
+
+    bool
+    contains(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSContains_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSContains_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "contains");
     }
 
     bool
     intersects(const Geometry& other) const {
+        return intersects(other, ctx_);
+    }
+
+    bool
+    intersects(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSIntersects_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSIntersects_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "intersects");
     }
 
     bool
     within(const Geometry& other) const {
+        return within(other, ctx_);
+    }
+
+    bool
+    within(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSWithin_r(ctx_, geometry_, other.geometry_);
-        return result == 1;
+        char result = GEOSWithin_r(ctx, geometry_, other.geometry_);
+        return GeosPredicateIsTrue(result, "within");
     }
 
     // Distance within check using GEOS distance calculation
     bool
     dwithin(const Geometry& other, double distance) const {
+        return dwithin(other, distance, ctx_);
+    }
+
+    bool
+    dwithin(const Geometry& other,
+            double distance,
+            GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
 
         // Get geometry types
-        int thisType = GEOSGeomTypeId_r(ctx_, geometry_);
-        int otherType = GEOSGeomTypeId_r(ctx_, other.geometry_);
+        int thisType = GEOSGeomTypeId_r(ctx, geometry_);
+        int otherType = GEOSGeomTypeId_r(ctx, other.geometry_);
 
         // Ensure other geometry is a point
         AssertInfo(otherType == GEOS_POINT, "other geometry is not a point");
@@ -202,10 +462,10 @@ class Geometry {
         // For point-to-point, use Haversine formula for accuracy
         if (thisType == GEOS_POINT) {
             double thisX, thisY, otherX, otherY;
-            if (GEOSGeomGetX_r(ctx_, geometry_, &thisX) == 1 &&
-                GEOSGeomGetY_r(ctx_, geometry_, &thisY) == 1 &&
-                GEOSGeomGetX_r(ctx_, other.geometry_, &otherX) == 1 &&
-                GEOSGeomGetY_r(ctx_, other.geometry_, &otherY) == 1) {
+            if (GEOSGeomGetX_r(ctx, geometry_, &thisX) == 1 &&
+                GEOSGeomGetY_r(ctx, geometry_, &thisY) == 1 &&
+                GEOSGeomGetX_r(ctx, other.geometry_, &otherX) == 1 &&
+                GEOSGeomGetY_r(ctx, other.geometry_, &otherY) == 1) {
                 double actual_distance =
                     haversine_distance_meters(thisY, thisX, otherY, otherX);
                 return actual_distance <= distance;
@@ -214,26 +474,39 @@ class Geometry {
 
         // For other geometry types, use GEOS distance (in degrees)
         double geos_distance;
-        if (GEOSDistance_r(ctx_, geometry_, other.geometry_, &geos_distance) ==
+        if (GEOSDistance_r(ctx, geometry_, other.geometry_, &geos_distance) ==
             1) {
             // Get query point coordinates for conversion reference
             double query_lat, query_lon;
-            if (GEOSGeomGetX_r(ctx_, other.geometry_, &query_lon) == 1 &&
-                GEOSGeomGetY_r(ctx_, other.geometry_, &query_lat) == 1) {
+            if (GEOSGeomGetX_r(ctx, other.geometry_, &query_lon) == 1 &&
+                GEOSGeomGetY_r(ctx, other.geometry_, &query_lat) == 1) {
                 double distance_in_meters =
                     degrees_to_meters_at_location(geos_distance, query_lat);
                 return distance_in_meters <= distance;
             }
         }
 
+        // Reached only when GEOS distance/coordinate extraction failed (those
+        // calls return 0 on an exception caught inside GEOS). Same deliberate
+        // exception->false mapping as GeosPredicateIsTrue: keep the row-level
+        // leniency, but make the failure visible.
+        LOG_WARN(
+            "GEOS distance/coordinate extraction failed in dwithin; treating "
+            "the row as not matching");
         return false;
     }
+
     bool
     is_valid() const {
+        return is_valid(ctx_);
+    }
+
+    bool
+    is_valid(GEOSContextHandle_t ctx) const {
         if (!IsValid()) {
             return false;
         }
-        return GEOSisValid_r(ctx_, geometry_) == 1;
+        return GeosPredicateIsTrue(GEOSisValid_r(ctx, geometry_), "is_valid");
     }
 
  private:

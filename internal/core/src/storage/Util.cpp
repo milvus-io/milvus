@@ -2740,8 +2740,14 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
 
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    AssertInfo(ctx != nullptr, "Failed to initialize GEOS context");
+    // Scoped GEOS context: InitGEOSContext throws a retriable
+    // MemAllocateFailed on OOM (GEOS_init_r never returns nullptr -- see the
+    // helper's comment), and the RAII guard releases the context on every
+    // exit -- the throwing Geometry(ctx, wkt) constructor on malformed WKT
+    // and the arrow-status AssertInfo calls below would otherwise skip a
+    // trailing GEOS_finish_r and leak one context per failure.
+    ScopedGeosResources geos("WKT to WKB conversion");
+    GEOSContextHandle_t ctx = geos.ctx;
 
     for (const auto& arr : arrays) {
         const auto tid = arr->type_id();
@@ -2786,7 +2792,6 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         result.push_back(wkb_array);
     }
 
-    GEOS_finish_r(ctx);
     return result;
 }
 
