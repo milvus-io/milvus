@@ -9,11 +9,7 @@ import string
 import time
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
-try:
-    from datetime import UTC
-except ImportError:
-    UTC = timezone.utc
+from datetime import UTC, datetime, timedelta, timezone
 from functools import singledispatch
 from pathlib import Path
 from zoneinfo import ZoneInfo

@@ -1,16 +1,15 @@
-import logging
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
 import pytest
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from idx_gpu_hnsw_sq import GPU_HNSW_SQ
+from pymilvus import DataType
 
 index_type = "GPU_HNSW_SQ"
 success = "success"
-pk_field_name = 'id'
-vector_field_name = 'vector'
+pk_field_name = "id"
+vector_field_name = "vector"
 dim = ct.default_dim
 default_nb = ct.default_nb
 default_build_params = {"M": 16, "efConstruction": 200, "sq_type": "SQ8"}
@@ -31,12 +30,7 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
         schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        all_rows = cf.gen_row_data_by_schema(
-            nb=default_nb,
-            schema=schema,
-            start=0,
-            random_pk=False
-        )
+        all_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=0, random_pk=False)
 
         self.insert(client, collection_name, all_rows)
         self.flush(client, collection_name)
@@ -44,15 +38,17 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
         # create index
         build_params = params.get("params", None)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=cf.get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR),
-                               index_type=index_type,
-                               params=build_params)
+        index_params.add_index(
+            field_name=vector_field_name,
+            metric_type=cf.get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR),
+            index_type=index_type,
+            params=build_params,
+        )
         # build index
         if params.get("expected", None) != success:
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res,
-                              check_items=params.get("expected"))
+            self.create_index(
+                client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=params.get("expected")
+            )
         else:
             self.create_index(client, collection_name, index_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
@@ -64,20 +60,26 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
             nq = 2
             search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
             if params.get("relaxed_limit"):
-                results = client.search(collection_name, search_vectors,
-                                        search_params=default_search_params,
-                                        limit=ct.default_limit)
+                results = client.search(
+                    collection_name, search_vectors, search_params=default_search_params, limit=ct.default_limit
+                )
                 for r in results:
                     assert len(r) > 0, f"expected > 0 results but got {len(r)}"
             else:
-                self.search(client, collection_name, search_vectors,
-                            search_params=default_search_params,
-                            limit=ct.default_limit,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"enable_milvus_client_api": True,
-                                         "nq": nq,
-                                         "limit": ct.default_limit,
-                                         "pk_name": pk_field_name})
+                self.search(
+                    client,
+                    collection_name,
+                    search_vectors,
+                    search_params=default_search_params,
+                    limit=ct.default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={
+                        "enable_milvus_client_api": True,
+                        "nq": nq,
+                        "limit": ct.default_limit,
+                        "pk_name": pk_field_name,
+                    },
+                )
 
             # verify the index params are persisted
             idx_info = client.describe_index(collection_name, vector_field_name)
@@ -103,12 +105,7 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
             schema.add_field(vector_field_name, datatype=vector_data_type, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        all_rows = cf.gen_row_data_by_schema(
-            nb=default_nb,
-            schema=schema,
-            start=0,
-            random_pk=False
-        )
+        all_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=0, random_pk=False)
 
         self.insert(client, collection_name, all_rows)
         self.flush(client, collection_name)
@@ -116,15 +113,17 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
         # create index
         index_params = self.prepare_index_params(client)[0]
         metric_type = cf.get_default_metric_for_vector_type(vector_data_type)
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=metric_type,
-                               index_type=index_type,
-                               params=default_build_params)
+        index_params.add_index(
+            field_name=vector_field_name, metric_type=metric_type, index_type=index_type, params=default_build_params
+        )
         if vector_data_type not in GPU_HNSW_SQ.supported_vector_types:
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res,
-                              check_items={"err_code": 999,
-                                           "err_msg": f"can't build with this index GPU_HNSW_SQ: invalid parameter"})
+            self.create_index(
+                client,
+                collection_name,
+                index_params,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 999, "err_msg": "can't build with this index GPU_HNSW_SQ: invalid parameter"},
+            )
 
         else:
             self.create_index(client, collection_name, index_params)
@@ -134,14 +133,20 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
             # search
             nq = 2
             search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=vector_data_type)
-            self.search(client, collection_name, search_vectors,
-                        search_params=default_search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": nq,
-                                     "limit": ct.default_limit,
-                                     "pk_name": pk_field_name})
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=default_search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": nq,
+                    "limit": ct.default_limit,
+                    "pk_name": pk_field_name,
+                },
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", GPU_HNSW_SQ.supported_metrics)
@@ -156,22 +161,16 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
         schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        all_rows = cf.gen_row_data_by_schema(
-            nb=default_nb,
-            schema=schema,
-            start=0,
-            random_pk=False
-        )
+        all_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=0, random_pk=False)
 
         self.insert(client, collection_name, all_rows)
         self.flush(client, collection_name)
 
         # create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=metric,
-                               index_type=index_type,
-                               params=default_build_params)
+        index_params.add_index(
+            field_name=vector_field_name, metric_type=metric, index_type=index_type, params=default_build_params
+        )
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
         # load collection
@@ -179,14 +178,20 @@ class TestGpuHnswSQBuildParams(TestMilvusClientV2Base):
         # search
         nq = 2
         search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        self.search(client, collection_name, search_vectors,
-                    search_params=default_search_params,
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": nq,
-                                 "limit": ct.default_limit,
-                                 "pk_name": pk_field_name})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params=default_search_params,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": nq,
+                "limit": ct.default_limit,
+                "pk_name": pk_field_name,
+            },
+        )
 
 
 class TestGpuHnswSQFilteredSearch(TestMilvusClientV2Base):
@@ -221,10 +226,9 @@ class TestGpuHnswSQFilteredSearch(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=metric,
-                               index_type=index_type,
-                               params=default_build_params)
+        index_params.add_index(
+            field_name=vector_field_name, metric_type=metric, index_type=index_type, params=default_build_params
+        )
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
         self.load_collection(client, collection_name)
@@ -239,33 +243,48 @@ class TestGpuHnswSQFilteredSearch(TestMilvusClientV2Base):
         surviving_ids = [i for i in range(delete_num, nb)]
         nq = 2
         search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        self.search(client, collection_name, search_vectors,
-                    search_params=default_search_params,
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": nq,
-                                 "limit": ct.default_limit,
-                                 "pk_name": pk_field_name})
-        res, _ = self.search(client, collection_name, search_vectors,
-                             search_params=default_search_params,
-                             limit=ct.default_limit)
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params=default_search_params,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": nq,
+                "limit": ct.default_limit,
+                "pk_name": pk_field_name,
+            },
+        )
+        res, _ = self.search(
+            client, collection_name, search_vectors, search_params=default_search_params, limit=ct.default_limit
+        )
         for hits in res:
             for hit in hits:
-                assert hit.get("id") not in deleted_pks, \
+                assert hit.get("id") not in deleted_pks, (
                     f"deleted id {hit.get('id')} returned by GPU_HNSW_SQ search after delete"
+                )
 
         # query the deleted range: must be empty; query the live range: must be present
         deleted_expr = f"{pk_field_name} < {delete_num}"
-        self.query(client, collection_name, filter=deleted_expr,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": [], "pk_name": pk_field_name})
-        live_res, _ = self.query(client, collection_name,
-                                 filter=f"{pk_field_name} >= {delete_num} and {pk_field_name} < {delete_num + 10}",
-                                 output_fields=[pk_field_name])
+        self.query(
+            client,
+            collection_name,
+            filter=deleted_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [], "pk_name": pk_field_name},
+        )
+        live_res, _ = self.query(
+            client,
+            collection_name,
+            filter=f"{pk_field_name} >= {delete_num} and {pk_field_name} < {delete_num + 10}",
+            output_fields=[pk_field_name],
+        )
         returned = sorted(r[pk_field_name] for r in live_res)
-        assert returned == surviving_ids[:10], \
+        assert returned == surviving_ids[:10], (
             f"live rows missing after delete: expected {surviving_ids[:10]}, got {returned}"
+        )
 
 
 @pytest.mark.xdist_group("TestGpuHnswSQSearchParams")
@@ -290,30 +309,33 @@ class TestGpuHnswSQSearchParams(TestMilvusClientV2Base):
         collection_schema = self.create_schema(client)[0]
         collection_schema.add_field(pk_field_name, DataType.INT64, is_primary=True, auto_id=False)
         collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
-        self.create_collection(client, self.collection_name, schema=collection_schema,
-                               enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
-        all_data = cf.gen_row_data_by_schema(
-            nb=default_nb,
+        self.create_collection(
+            client,
+            self.collection_name,
             schema=collection_schema,
-            start=0,
-            random_pk=False
+            enable_dynamic_field=self.enable_dynamic_field,
+            force_teardown=False,
         )
+        all_data = cf.gen_row_data_by_schema(nb=default_nb, schema=collection_schema, start=0, random_pk=False)
         self.insert(client, self.collection_name, data=all_data)
         self.primary_keys.extend([i for i in range(default_nb)])
 
         self.flush(client, self.collection_name)
         # Create GPU_HNSW_SQ index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=self.float_vector_field_name,
-                               metric_type="COSINE",
-                               index_type=index_type,
-                               params=default_build_params)
+        index_params.add_index(
+            field_name=self.float_vector_field_name,
+            metric_type="COSINE",
+            index_type=index_type,
+            params=default_build_params,
+        )
         self.create_index(client, self.collection_name, index_params=index_params)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.float_vector_field_name)
         self.load_collection(client, self.collection_name)
 
         def teardown():
             self.drop_collection(self._client(), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -328,17 +350,27 @@ class TestGpuHnswSQSearchParams(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(nq, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = params.get("params", None)
         if params.get("expected", None) != success:
-            self.search(client, collection_name, search_vectors,
-                        search_params=search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.err_res,
-                        check_items=params.get("expected"))
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.err_res,
+                check_items=params.get("expected"),
+            )
         else:
-            self.search(client, collection_name, search_vectors,
-                        search_params=search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": nq,
-                                     "limit": ct.default_limit,
-                                     "pk_name": pk_field_name})
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": nq,
+                    "limit": ct.default_limit,
+                    "pk_name": pk_field_name,
+                },
+            )

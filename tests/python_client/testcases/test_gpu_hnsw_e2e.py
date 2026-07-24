@@ -20,14 +20,15 @@ Usage:
     python test_gpu_hnsw_e2e.py --host <milvus_host> --port 19530
 """
 
-import time
 import logging
+import time
+
 import numpy as np
 import pytest
 from pymilvus import (
-    MilvusClient,
     DataType,
     LoadState,
+    MilvusClient,
 )
 
 log = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def brute_force_knn(vectors, queries, k, metric="COSINE"):
         # L2 distance — lower is better
         # Use broadcasting: (nq, 1, dim) - (1, n, dim) → (nq, n, dim)
         diffs = queries[:, None, :] - vectors[None, :, :]
-        dists = np.sum(diffs ** 2, axis=2)
+        dists = np.sum(diffs**2, axis=2)
         indices = np.argsort(dists, axis=1)[:, :k]
     elif metric == "IP":
         scores = queries @ vectors.T
@@ -212,8 +213,7 @@ class TestGpuHnswRecall:
         log.info(f"GPU_HNSW recall@{TOP_K} ({metric}): {recall:.4f}")
 
         assert recall >= RECALL_THRESHOLD, (
-            f"GPU_HNSW recall@{TOP_K} ({metric}) = {recall:.4f}, "
-            f"expected >= {RECALL_THRESHOLD}"
+            f"GPU_HNSW recall@{TOP_K} ({metric}) = {recall:.4f}, expected >= {RECALL_THRESHOLD}"
         )
 
 
@@ -285,10 +285,7 @@ class TestGpuHnswHotLoad:
         assert results[0][0]["id"] == 0, "Self-search should return the same vector"
 
         # HOT INSERT: insert while collection is loaded
-        hot_rows = [
-            {"id": initial_count + i, "vector": hot_vectors[i]}
-            for i in range(hot_insert_count)
-        ]
+        hot_rows = [{"id": initial_count + i, "vector": hot_vectors[i]} for i in range(hot_insert_count)]
         self.client.insert(self.collection_name, hot_rows)
         self.client.flush(self.collection_name)
 
@@ -323,16 +320,13 @@ class TestGpuHnswHotLoad:
             "Hot-loaded segment not searchable — override may not be applied on hot-load path"
         )
         assert results[0][0]["id"] == initial_count, (
-            f"Self-search on hot-inserted vector failed: expected id={initial_count}, "
-            f"got id={results[0][0]['id']}"
+            f"Self-search on hot-inserted vector failed: expected id={initial_count}, got id={results[0][0]['id']}"
         )
 
         # Verify recall on hot-inserted vectors
         num_hot_queries = 50
         hot_query_vectors = hot_vectors[:num_hot_queries]
-        ground_truth = brute_force_knn(
-            all_vectors, hot_query_vectors, TOP_K, "COSINE"
-        )
+        ground_truth = brute_force_knn(all_vectors, hot_query_vectors, TOP_K, "COSINE")
 
         results = self.client.search(
             collection_name=self.collection_name,
@@ -429,8 +423,7 @@ class TestGpuHnswRestart:
         # RELEASE + RELOAD (simulates querynode restart path)
         self.client.release_collection(self.collection_name)
         wait_until(
-            lambda: self.client.get_load_state(self.collection_name)["state"]
-            != LoadState.Loaded,
+            lambda: self.client.get_load_state(self.collection_name)["state"] != LoadState.Loaded,
             desc="collection to release",
         )
         self.client.load_collection(self.collection_name)
@@ -553,9 +546,7 @@ class TestGpuHnswVramExhaustion:
                     search_params={"metric_type": "COSINE", "params": {"ef": 64}},
                     limit=5,
                 )
-                assert len(results) > 0 and len(results[0]) > 0, (
-                    f"Collection {name} loaded but not searchable"
-                )
+                assert len(results) > 0 and len(results[0]) > 0, f"Collection {name} loaded but not searchable"
                 log.info(f"Collection {idx} loaded successfully ({vectors_per_collection} vectors, dim={large_dim})")
 
             except Exception as e:
@@ -593,10 +584,20 @@ class TestGpuHnswVramExhaustion:
             idx, msg = load_failures[0]
             log.info(f"VRAM exhaustion triggered at collection {idx}: {msg}")
             # Verify it's a recognizable error, not a generic crash
-            assert any(keyword in msg.lower() for keyword in [
-                "memory", "gpu", "resource", "insufficient", "oom",
-                "out of memory", "exceed", "limit", "capacity",
-            ]), (
+            assert any(
+                keyword in msg.lower()
+                for keyword in [
+                    "memory",
+                    "gpu",
+                    "resource",
+                    "insufficient",
+                    "oom",
+                    "out of memory",
+                    "exceed",
+                    "limit",
+                    "capacity",
+                ]
+            ), (
                 f"VRAM exhaustion error message is not descriptive: {msg}. "
                 f"Expected a memory-related error from checkSegmentGpuMemSize."
             )
@@ -791,9 +792,7 @@ class TestGpuHnswMixedMode:
                 search_params={"metric_type": "COSINE", "params": {"ef": EF_SEARCH}},
                 limit=TOP_K,
             )
-            assert len(r1) > 0 and len(r1[0]) > 0, (
-                f"Round {round_idx}: INT8/GPU search returned no results"
-            )
+            assert len(r1) > 0 and len(r1[0]) > 0, f"Round {round_idx}: INT8/GPU search returned no results"
 
             # Search Float32 (CPU)
             r2 = self.client.search(
@@ -803,9 +802,7 @@ class TestGpuHnswMixedMode:
                 search_params={"metric_type": "COSINE", "params": {"ef": EF_SEARCH}},
                 limit=TOP_K,
             )
-            assert len(r2) > 0 and len(r2[0]) > 0, (
-                f"Round {round_idx}: Float32/CPU search returned no results"
-            )
+            assert len(r2) > 0 and len(r2[0]) > 0, f"Round {round_idx}: Float32/CPU search returned no results"
 
             # Both collections have same data — top results should be similar
             ids_gpu = set(hit["id"] for hit in r1[0])
@@ -842,9 +839,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPU HNSW E2E Integration Tests")
     parser.add_argument("--host", default="localhost", help="Milvus host")
     parser.add_argument("--port", default="19530", help="Milvus port")
-    parser.add_argument("--test",
-                        choices=["recall", "hotload", "restart", "vram", "mixed", "all"],
-                        default="all", help="Which test to run")
+    parser.add_argument(
+        "--test",
+        choices=["recall", "hotload", "restart", "vram", "mixed", "all"],
+        default="all",
+        help="Which test to run",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
