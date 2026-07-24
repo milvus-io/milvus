@@ -654,14 +654,18 @@ func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *sc
 
 // new collection without segcore prepare
 // ONLY FOR TEST
-func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.CollectionSchema) *Collection {
+func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs ...uint64) *Collection {
 	coll := &Collection{
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
 		refCount:   atomic.NewUint32(0),
 	}
+	barrier := uint64(0)
+	if len(schemaBarrierTs) > 0 {
+		barrier = schemaBarrierTs[0]
+	}
 	logicalSchemaVersion := uint64(schema.GetVersion())
-	coll.setSchema(schema, logicalSchemaVersion, 0, initialSegcoreSchemaVersion(logicalSchemaVersion, 0))
+	coll.setSchema(schema, logicalSchemaVersion, barrier, initialSegcoreSchemaVersion(logicalSchemaVersion, barrier))
 	return coll
 }
 
