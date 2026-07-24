@@ -117,3 +117,34 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		assert.Equal(t, int64(100), bound)
 	})
 }
+
+func Test_assignPKRangesToFiles(t *testing.T) {
+	schema := schemaVec(768, 0) // minRowTextBytes == 768
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*10), nil) // bound 10 + 1 = 11
+	cm.EXPECT().Size(mock.Anything, "b.json").Return(int64(768*20), nil) // bound 20 + 1 = 21
+
+	files := []*internalpb.ImportFile{
+		{Paths: []string{"a.json"}},
+		{Paths: []string{"b.json"}},
+	}
+	// fake allocator hands out [1000, 1000+n)
+	alloc := func(n int64) (int64, int64, error) { return 1000, 1000 + n, nil }
+
+	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1 /*clusterID*/, int64(1)<<34)
+	assert.NoError(t, err)
+	// each file's range width equals its own bound
+	assert.Equal(t, int64(11), files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+	assert.Equal(t, int64(21), files[1].GetPkIdEnd()-files[1].GetPkIdBegin())
+	// files are contiguous, second begins where first ends
+	assert.Equal(t, files[0].GetPkIdEnd(), files[1].GetPkIdBegin())
+	// cluster bits are applied to the high bits
+	assert.NotZero(t, files[0].GetPkIdBegin())
+}
+
+func Test_assignPKRangesToFiles_zeroTotal(t *testing.T) {
+	// no files -> nothing to allocate, no allocator call
+	err := assignPKRangesToFiles(context.TODO(), mocks.NewChunkManager(t), schemaVec(8, 0),
+		nil, func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1, 0)
+	assert.NoError(t, err)
+}
