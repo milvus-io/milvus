@@ -25,10 +25,26 @@ class FileSystem;
 
 namespace milvus {
 
+enum class SparseVortexFileBacking {
+    Memory,
+    Mmap,
+    Disk,
+};
+
+struct SparseVortexFileSystemOptions {
+    SparseVortexFileBacking backing = SparseVortexFileBacking::Memory;
+    std::string file_path;
+    bool mmap_populate = false;
+};
+
 std::string
 MakeSparseVortexPath(std::string_view source_path);
 
 std::shared_ptr<arrow::fs::FileSystem>
 MakeSparseVortexFileSystem(std::string path);
+
+std::shared_ptr<arrow::fs::FileSystem>
+MakeSparseVortexFileSystem(std::string path,
+                           SparseVortexFileSystemOptions options);
 
 }  // namespace milvus
