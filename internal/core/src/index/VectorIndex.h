@@ -197,9 +197,11 @@ class VectorIndex : public IndexBase {
     }
 
     void
-    BuildValidData(const bool* valid_data, int64_t total_count) {
+    BuildValidData(const bool* valid_data,
+                   int64_t total_count,
+                   const milvus::OffsetMappingBuildOptions& options = {}) {
         auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
-        sealed_mapping->Build(valid_data, total_count);
+        sealed_mapping->Build(valid_data, total_count, options);
         offset_mapping_ = std::move(sealed_mapping);
     }
 
