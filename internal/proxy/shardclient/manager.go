@@ -259,7 +259,7 @@ func (m *shardClientMgrImpl) getShardLeaders(
 	}
 	refresh := m.acquireShardCacheRefresh(refreshKey)
 	key := fmt.Sprintf("%s/%s/%d/%t/%d", database, collectionName, collectionID, refreshKey.force, refresh.id)
-	resultCh := m.sfShardCache.DoChan(key, func() (*shardLeaders, error) {
+	resultCh := m.sfShardCache.DoChanRaw(key, func() (*shardLeaders, error) {
 		defer m.finishShardCacheRefresh(refreshKey, refresh)
 		if withCache {
 			if cached := m.loadCachedShardLeaders(database, collectionName, collectionID); cached != nil {
@@ -285,7 +285,7 @@ func (m *shardClientMgrImpl) getShardLeaders(
 
 	select {
 	case result := <-resultCh:
-		leaders, err, _ := conc.UnwrapSingleflightResult[*shardLeaders](result)
+		leaders, err, _ := conc.UnwrapSingleflightRawResult[*shardLeaders](result)
 		return leaders, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
