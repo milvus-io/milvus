@@ -90,6 +90,33 @@ func (s *SearchOptionSuite) TestBasic() {
 	s.Error(err)
 }
 
+func (s *SearchOptionSuite) TestTemplateArrayParams() {
+	req, err := NewSearchOption(
+		"template_array_params",
+		10,
+		[]entity.Vector{entity.FloatVector([]float32{0.1, 0.2})},
+	).
+		WithFilter("array_contains_any(tags, {generic_empty})").
+		WithTemplateParam("generic_empty", []any{}).
+		WithTemplateParam("nested", [][]int64{{1, 2}, {3, 4}}).
+		WithTemplateParam("nested_empty", [][]int64{{}}).
+		Request()
+	s.Require().NoError(err)
+
+	genericEmpty := req.GetExprTemplateValues()["generic_empty"].GetArrayVal()
+	s.Require().NotNil(genericEmpty)
+	s.Nil(genericEmpty.GetData())
+
+	nested := req.GetExprTemplateValues()["nested"].GetArrayVal().GetArrayData().GetData()
+	s.Require().Len(nested, 2)
+	s.Equal([]int64{1, 2}, nested[0].GetLongData().GetData())
+	s.Equal([]int64{3, 4}, nested[1].GetLongData().GetData())
+
+	nestedEmpty := req.GetExprTemplateValues()["nested_empty"].GetArrayVal().GetArrayData().GetData()
+	s.Require().Len(nestedEmpty, 1)
+	s.Nil(nestedEmpty[0].GetData())
+}
+
 func (s *SearchOptionSuite) TestWithNamespace() {
 	collName := "namespace_read_option"
 	namespace := "tenant_a"
@@ -457,13 +484,44 @@ func TestAny2TmplValue(t *testing.T) {
 				assert.EqualValues(t, v[i], val)
 			}
 		})
+
+		t.Run("interface", func(t *testing.T) {
+			val, err := any2TmplValue([]any{int64(1), int32(2)})
+			assert.NoError(t, err)
+			assert.Equal(t, []int64{1, 2}, val.GetArrayVal().GetLongData().GetData())
+		})
+
+		t.Run("empty interface", func(t *testing.T) {
+			val, err := any2TmplValue([]any{})
+			assert.NoError(t, err)
+			assert.Nil(t, val.GetArrayVal().GetData())
+		})
+
+		t.Run("nested", func(t *testing.T) {
+			val, err := any2TmplValue([][]int64{{1, 2}, {3, 4}})
+			assert.NoError(t, err)
+
+			data := val.GetArrayVal().GetArrayData().GetData()
+			assert.Len(t, data, 2)
+			assert.Equal(t, []int64{1, 2}, data[0].GetLongData().GetData())
+			assert.Equal(t, []int64{3, 4}, data[1].GetLongData().GetData())
+		})
+
+		t.Run("nested empty", func(t *testing.T) {
+			val, err := any2TmplValue([]any{[]any{}})
+			assert.NoError(t, err)
+
+			data := val.GetArrayVal().GetArrayData().GetData()
+			assert.Len(t, data, 1)
+			assert.Nil(t, data[0].GetData())
+		})
 	})
 
 	t.Run("unsupported", func(*testing.T) {
 		_, err := any2TmplValue(struct{}{})
 		assert.Error(t, err)
 
-		_, err = any2TmplValue([]struct{}{})
+		_, err = any2TmplValue([]struct{}{{}})
 		assert.Error(t, err)
 
 		_, err = any2TmplValue(nil)
