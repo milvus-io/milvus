@@ -196,24 +196,31 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Deterministic cross-cluster autoID: for non-backup autoID imports the primary
-	// allocates a per-file PK range once and ships it on the replicated ImportMsg, so
-	// the secondary derives identical primary keys instead of allocating its own.
-	// Backup imports keep their embedded PKs (UnsetAutoID), so they are skipped here.
-	// A schema without a resolvable primary key is left to normal validation; PK-range
-	// assignment is simply skipped (legacy path) rather than failing the broadcast.
+	// Deterministic cross-cluster autoID: only for non-backup, non-L0 autoID imports
+	// on a replicating cluster. The primary allocates a per-file PK range once and
+	// ships it on the replicated ImportMsg so the secondary derives identical primary
+	// keys instead of allocating its own. Backup imports keep their embedded PKs
+	// (UnsetAutoID) and L0 imports carry no autoID PKs, so both are skipped. A schema
+	// without a resolvable primary key is left to normal validation. Non-replicating
+	// imports keep the legacy zero-IO broadcast and local autoID allocation.
 	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
-		pkField.GetAutoID() && !importutilv2.IsBackup(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
-			s.allocator.AllocN,
-			Params.CommonCfg.ClusterID.GetAsUint64(),
-		); err != nil {
-			return merr.Wrap(err, "failed to assign per-file PK ranges")
-		}
-		for i := range msgFiles {
-			msgFiles[i].PkIdRange = &commonpb.IDRange{
-				Begin: files[i].GetPkIdBegin(),
-				End:   files[i].GetPkIdEnd(),
+		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		// On an indeterminate replication status, assign anyway: a false "not
+		// replicating" here would silently reintroduce cross-cluster PK divergence,
+		// whereas an unnecessary assignment only wastes a little ID space.
+		replicating, repErr := s.isReplicatingClusterNow(ctx)
+		if repErr != nil || replicating {
+			if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+				s.allocator.AllocN,
+				Params.CommonCfg.ClusterID.GetAsUint64(),
+			); err != nil {
+				return merr.Wrap(err, "failed to assign per-file PK ranges")
+			}
+			for i := range msgFiles {
+				msgFiles[i].PkIdRange = &commonpb.IDRange{
+					Begin: files[i].GetPkIdBegin(),
+					End:   files[i].GetPkIdEnd(),
+				}
 			}
 		}
 	}
