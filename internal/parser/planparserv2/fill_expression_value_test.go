@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -763,6 +764,52 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		s.NotNil(bre, "expected BinaryRangeExpr")
 		s.Equal(float64(10.5), bre.GetLowerValue().GetFloatVal())
 		s.Equal(float64(100.5), bre.GetUpperValue().GetFloatVal())
+	})
+
+	s.Run("adjacent mixed bounds above 2^53 should remain valid", func() {
+		expr, err := ParseExpr(schemaH, `{min} <= A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+		s.Require().NoError(err)
+
+		bre := expr.GetBinaryRangeExpr()
+		s.Require().NotNil(bre)
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.Equal(float64(9007199254740992), bre.GetLowerValue().GetFloatVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+		s.Equal(int64(9007199254740993), bre.GetUpperValue().GetInt64Val())
+	})
+
+	s.Run("reverse adjacent mixed bounds above 2^53 should remain valid", func() {
+		expr, err := ParseExpr(schemaH, `{max} > A >= {min}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+		s.Require().NoError(err)
+
+		bre := expr.GetBinaryRangeExpr()
+		s.Require().NotNil(bre)
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+	})
+
+	s.Run("truly reversed mixed bounds should fail", func() {
+		s.assertInvalidExpr(schemaH, `{min} <= A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740994)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+	})
+
+	s.Run("NaN and different dynamic types are deferred to execution", func() {
+		s.assertValidExpr(schemaH, `{min} < A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, math.NaN()),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+		})
+		s.assertValidExpr(schemaH, `{min} < A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_String, "z"),
+		})
 	})
 }
 

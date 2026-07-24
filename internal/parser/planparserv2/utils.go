@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -699,6 +700,112 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 		}
 	}
 	return value, nil
+}
+
+// compareInt64ToFloat64 compares an int64 and a float64 without converting the
+// integer to float64. It returns whether the values are comparable separately
+// so NaN can be left to execution-time predicate semantics.
+func compareInt64ToFloat64(lhs int64, rhs float64) (int, bool) {
+	if math.IsNaN(rhs) {
+		return 0, false
+	}
+
+	const (
+		int64Lower = -0x1p63
+		int64Upper = 0x1p63
+	)
+	if rhs < int64Lower {
+		return 1, true
+	}
+	if rhs >= int64Upper {
+		return -1, true
+	}
+
+	rhsInteger := int64(rhs)
+	if lhs < rhsInteger {
+		return -1, true
+	}
+	if lhs > rhsInteger {
+		return 1, true
+	}
+
+	rhsIntegerAsFloat := float64(rhsInteger)
+	if rhs > rhsIntegerAsFloat {
+		return -1, true
+	}
+	if rhs < rhsIntegerAsFloat {
+		return 1, true
+	}
+	return 0, true
+}
+
+// compareBinaryRangeBounds returns the exact ordering of supported range
+// bounds. Different JSON dynamic types and unsupported literal kinds are not
+// ordered here; segcore applies their runtime type/missing/null semantics.
+func compareBinaryRangeBounds(lower, upper *planpb.GenericValue) (int, bool) {
+	if lower == nil || upper == nil {
+		return 0, false
+	}
+
+	switch lower.GetVal().(type) {
+	case *planpb.GenericValue_Int64Val:
+		switch upper.GetVal().(type) {
+		case *planpb.GenericValue_Int64Val:
+			if lower.GetInt64Val() < upper.GetInt64Val() {
+				return -1, true
+			}
+			if lower.GetInt64Val() > upper.GetInt64Val() {
+				return 1, true
+			}
+			return 0, true
+		case *planpb.GenericValue_FloatVal:
+			return compareInt64ToFloat64(lower.GetInt64Val(), upper.GetFloatVal())
+		}
+	case *planpb.GenericValue_FloatVal:
+		if math.IsNaN(lower.GetFloatVal()) {
+			return 0, false
+		}
+		switch upper.GetVal().(type) {
+		case *planpb.GenericValue_Int64Val:
+			cmp, comparable := compareInt64ToFloat64(upper.GetInt64Val(), lower.GetFloatVal())
+			return -cmp, comparable
+		case *planpb.GenericValue_FloatVal:
+			if math.IsNaN(upper.GetFloatVal()) {
+				return 0, false
+			}
+			if lower.GetFloatVal() < upper.GetFloatVal() {
+				return -1, true
+			}
+			if lower.GetFloatVal() > upper.GetFloatVal() {
+				return 1, true
+			}
+			return 0, true
+		}
+	case *planpb.GenericValue_StringVal:
+		if !IsString(upper) {
+			return 0, false
+		}
+		if lower.GetStringVal() < upper.GetStringVal() {
+			return -1, true
+		}
+		if lower.GetStringVal() > upper.GetStringVal() {
+			return 1, true
+		}
+		return 0, true
+	}
+
+	return 0, false
+}
+
+func validateBinaryRangeBounds(lower, upper *planpb.GenericValue, lowerInclusive, upperInclusive bool) error {
+	cmp, comparable := compareBinaryRangeBounds(lower, upper)
+	if !comparable {
+		return nil
+	}
+	if cmp > 0 || (cmp == 0 && (!lowerInclusive || !upperInclusive)) {
+		return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
+	}
+	return nil
 }
 
 func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {

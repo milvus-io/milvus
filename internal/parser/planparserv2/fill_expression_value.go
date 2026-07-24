@@ -161,6 +161,7 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.LowerValue = castedLowerValue
+		lowerValue = castedLowerValue
 	}
 
 	upperValue := expr.GetUpperValue()
@@ -175,19 +176,10 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.UpperValue = castedUpperValue
+		upperValue = castedUpperValue
 	}
 
-	if !expr.GetLowerInclusive() || !expr.GetUpperInclusive() {
-		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-		}
-	} else {
-		if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-		}
-	}
-
-	return nil
+	return validateBinaryRangeBounds(lowerValue, upperValue, expr.GetLowerInclusive(), expr.GetUpperInclusive())
 }
 
 func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRangeExpr, templateValues map[string]*planpb.GenericValue) error {

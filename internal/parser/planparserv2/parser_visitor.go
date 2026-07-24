@@ -920,14 +920,8 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserLE
 	upperInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserLE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !lowerInclusive || !upperInclusive {
-			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
-		} else {
-			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
+		if err := validateBinaryRangeBounds(lowerValue, upperValue, lowerInclusive, upperInclusive); err != nil {
+			return err
 		}
 	}
 
@@ -1002,14 +996,8 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserGE
 	upperInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserGE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !lowerInclusive || !upperInclusive {
-			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
-		} else {
-			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
+		if err := validateBinaryRangeBounds(lowerValue, upperValue, lowerInclusive, upperInclusive); err != nil {
+			return err
 		}
 	}
 

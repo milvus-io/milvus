@@ -730,6 +730,48 @@ func TestExpr_BinaryRange(t *testing.T) {
 	}
 }
 
+func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for name, exprStr := range map[string]string{
+		"range":         `9007199254740992.0 <= A < 9007199254740993`,
+		"reverse range": `9007199254740993 > A >= 9007199254740992.0`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			expr, err := ParseExpr(helper, exprStr, nil)
+			require.NoError(t, err)
+
+			binaryRange := expr.GetBinaryRangeExpr()
+			require.NotNil(t, binaryRange)
+			assert.IsType(t, &planpb.GenericValue_FloatVal{}, binaryRange.GetLowerValue().GetVal())
+			assert.Equal(t, float64(9007199254740992), binaryRange.GetLowerValue().GetFloatVal())
+			assert.IsType(t, &planpb.GenericValue_Int64Val{}, binaryRange.GetUpperValue().GetVal())
+			assert.Equal(t, int64(9007199254740993), binaryRange.GetUpperValue().GetInt64Val())
+			assert.True(t, binaryRange.GetLowerInclusive())
+			assert.False(t, binaryRange.GetUpperInclusive())
+		})
+	}
+
+	for name, exprStr := range map[string]string{
+		"range lower greater than upper":         `9007199254740994.0 <= A < 9007199254740993`,
+		"reverse range lower greater than upper": `9007199254740993 > A >= 9007199254740994.0`,
+		"equal bounds with open upper":           `9007199254740992.0 <= A < 9007199254740992`,
+		"equal bounds with open lower":           `9007199254740992.0 < A <= 9007199254740992`,
+		"same-type strings in reverse order":     `"z" <= A < "a"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseExpr(helper, exprStr, nil)
+			assert.Error(t, err)
+		})
+	}
+
+	// Bounds with different JSON dynamic types have no parser-level ordering.
+	// Their runtime type semantics are evaluated by segcore.
+	assertValidExpr(t, helper, `1 <= A < "z"`)
+}
+
 func TestExpr_castValue(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

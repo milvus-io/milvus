@@ -1,6 +1,8 @@
 package rewriter
 
 import (
+	"math"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
@@ -337,6 +339,9 @@ func resolveInRangeComparisonType(col *planpb.ColumnInfo, value *planpb.GenericV
 	case "int64":
 		return schemapb.DataType_Int64, true
 	case "float":
+		if math.IsNaN(value.GetFloatVal()) {
+			return schemapb.DataType_None, false
+		}
 		return schemapb.DataType_Double, true
 	case "string":
 		return schemapb.DataType_VarChar, true
