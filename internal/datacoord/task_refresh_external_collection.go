@@ -637,7 +637,8 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 
 	mlog.Info(context.TODO(), "collected current segments", mlog.Int("segmentCount", len(currentSegments)))
 
-	// Pre-allocate segment IDs for data mapping
+	// Use one bounded allocation for the collection-wide task. Multiplying the
+	// range by the former task count can exceed RootCoord's uint32 batch limit.
 	preAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
 
 	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
@@ -733,6 +734,12 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 		}
 		return
 	}
+	if job.GetState() == indexpb.JobState_JobStateFinished {
+		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
+			mlog.Warn(context.TODO(), "failed to align task with finished job", mlog.Err(err))
+		}
+		return
+	}
 
 	// Query task status from worker
 	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
@@ -762,9 +769,38 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			return
 		}
 
-		// Persist the task result. Segment metadata is applied once at the
-		// job level after all sibling tasks have finished, so a single task
-		// cannot drop segments produced by another task of the same job.
+		if t.GetTaskId() == t.GetJobId() {
+			applied, err := t.refreshMeta.UpdateJobStateWithPreApply(
+				t.GetJobId(),
+				indexpb.JobState_JobStateFinished,
+				"",
+				func(*datapb.ExternalCollectionRefreshJob) error {
+					return t.SetJobInfo(context.TODO(), resp)
+				},
+			)
+			if err != nil {
+				mlog.Warn(context.TODO(), "failed to apply refresh task result", mlog.Err(err))
+				return
+			}
+			if !applied {
+				latestJob := t.refreshMeta.GetJob(t.GetJobId())
+				if latestJob != nil {
+					if err := t.UpdateStateWithMeta(latestJob.GetState(), latestJob.GetFailReason()); err != nil {
+						mlog.Warn(context.TODO(), "failed to align task with terminal job", mlog.Err(err))
+					}
+				}
+				return
+			}
+			if err := t.UpdateStateWithMeta(state, ""); err != nil {
+				mlog.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
+				return
+			}
+			mlog.Info(context.TODO(), "refresh task completed successfully")
+			return
+		}
+
+		// Persist results only for legacy multi-task jobs that still need
+		// job-level aggregation after a rolling upgrade.
 		if err := t.UpdateResultWithMeta(
 			state,
 			"",
