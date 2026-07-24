@@ -2547,9 +2547,12 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 	paramtable.Get().Save(Params.DataCoordCfg.BindIndexNodeMode.Key, "true")
 	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeID.Key, "10001")
 	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeAddress.Key, "localhost:10001")
+	// the collection-rooted layout is opt-in; this test covers the QueryNode-session half of the gate
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.BindIndexNodeMode.Key)
 	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeID.Key)
 	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeAddress.Key)
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
 
 	mockSession := sessionutil.NewMockSession(t)
 	mockSession.EXPECT().
