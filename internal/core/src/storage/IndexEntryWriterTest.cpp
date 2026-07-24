@@ -1202,15 +1202,26 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
     milvus::SetLoadTransientBudgetBytes(0);
     ASSERT_EQ(budget.CapacityBytes(), 0);
-    ASSERT_EQ(EntryStreamMaxTransientBytes(),
+    ASSERT_NE(EntryStreamMaxTransientBytes(),
               std::numeric_limits<size_t>::max());
+    ASSERT_EQ(EntryStreamMaxTransientBytes(),
+              EntryStreamPoolBoundTransientBytes());
+
+    const size_t pool_bound_transient_bytes =
+        EntryStreamPoolBoundTransientBytes();
+    ASSERT_LT(
+        pool_bound_transient_bytes,
+        static_cast<size_t>(std::numeric_limits<int64_t>::max()) - slice_size);
+    const size_t oversized_budget = pool_bound_transient_bytes + slice_size;
+    milvus::SetLoadTransientBudgetBytes(static_cast<int64_t>(oversized_budget));
+    ASSERT_EQ(budget.CapacityBytes(), oversized_budget);
+    ASSERT_EQ(EntryStreamMaxTransientBytes(), pool_bound_transient_bytes);
 
     const size_t configured_budget = 3 * slice_size;
     milvus::SetLoadTransientBudgetBytes(
         static_cast<int64_t>(configured_budget));
     ASSERT_EQ(budget.CapacityBytes(), configured_budget);
-    ASSERT_EQ(EntryStreamMaxTransientBytes(),
-              configured_budget + kTailMergeGrace);
+    ASSERT_EQ(EntryStreamMaxTransientBytes(), configured_budget);
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
     const size_t tail_size = kTailMergeGrace + 17;
@@ -1238,6 +1249,70 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     ASSERT_EQ(reassembled, data);
     ASSERT_EQ(slice_sizes,
               (std::vector<size_t>{slice_size, slice_size, tail_size}));
+}
+
+TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamUsesThreeBufferPoolBound) {
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetLoadTransientBudgetBytes(0);
+
+    const auto max_tasks =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    const auto per_task_bound =
+        3 * (DefaultStreamSliceSize() + kTailMergeGrace);
+    const auto encrypted_pool_bound = max_tasks * per_task_bound;
+
+    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(true), encrypted_pool_bound);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(true),
+              std::numeric_limits<size_t>::max());
+}
+
+TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamAccountsForPlaintextCopies) {
+    constexpr size_t stream_bytes = 8 * 1024 * 1024;
+
+    EXPECT_EQ(EntryStreamDataTransientBytes(stream_bytes, false), stream_bytes);
+    EXPECT_EQ(EntryStreamDataTransientBytes(stream_bytes, true),
+              3 * stream_bytes);
+    EXPECT_EQ(
+        EntryStreamDataTransientBytes(std::numeric_limits<size_t>::max(), true),
+        std::numeric_limits<size_t>::max());
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       EncryptedEntryStreamIncludesOversizedSingleTask) {
+    IndexEntryStreamConfigGuard guard;
+    const auto slice_size = DefaultStreamSliceSize();
+    milvus::SetLoadTransientBudgetBytes(static_cast<int64_t>(slice_size));
+
+    const auto per_task_bound = 3 * (slice_size + kTailMergeGrace);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(true), per_task_bound);
+}
+
+TEST_F(IndexEntryWriterV3Test, PlainEntryStreamIncludesOversizedSingleTask) {
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetLoadTransientBudgetBytes(1 * 1024 * 1024);
+
+    EXPECT_EQ(EntryStreamMaxTransientBytes(),
+              DefaultStreamSliceSize() + kTailMergeGrace);
+}
+
+TEST_F(IndexEntryWriterV3Test, PlainEntryStreamPoolBoundCountsTailPerTask) {
+    const auto configured_tasks =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+
+    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(),
+              configured_tasks * (DefaultStreamSliceSize() + kTailMergeGrace));
+}
+
+TEST_F(IndexEntryWriterV3Test, EntryStreamPoolBoundUsesLiveWorkerFloor) {
+    const auto configured_tasks =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    const auto live_workers = configured_tasks + 1;
+
+    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(false, live_workers),
+              live_workers * (DefaultStreamSliceSize() + kTailMergeGrace));
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMergesSmallTail) {
@@ -1410,6 +1485,77 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesStreamToFilesRunsFilesConcurrently) {
     ::unlink(file_a.c_str());
     ::unlink(file_b.c_str());
     ::unlink(file_c.c_str());
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntriesStreamBudgetWaitDoesNotOccupyLoadPoolWorker) {
+    const std::string file_path = kV3FilePath + "_stream_budget_admission";
+    const size_t entry_size = kMinStreamSliceSize;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(entry_size);
+    budget.Acquire(entry_size);
+    bool budget_held = true;
+    auto budget_cleanup = folly::makeGuard([&]() {
+        if (budget_held) {
+            budget.Release(entry_size);
+        }
+        budget.SetCapacityBytes(old_capacity);
+    });
+
+    auto pool_priority = milvus::ThreadPoolPriority::LOW;
+    auto& pool = milvus::ThreadPools::GetThreadPool(pool_priority);
+    auto old_max_threads = pool.GetMaxThreadNum();
+    auto cpu_num = std::max(1, milvus::CPU_NUM);
+    milvus::ThreadPools::ResizeThreadPool(pool_priority,
+                                          1.0F / static_cast<float>(cpu_num));
+    auto pool_cleanup =
+        folly::makeGuard([pool_priority, old_max_threads, cpu_num]() {
+            milvus::ThreadPools::ResizeThreadPool(
+                pool_priority,
+                static_cast<float>(old_max_threads) /
+                    static_cast<float>(cpu_num));
+        });
+    ASSERT_EQ(pool.GetMaxThreadNum(), 1);
+    if (pool.GetThreadNum() > 1) {
+        GTEST_SKIP() << "LOW load thread pool already has more than one worker";
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size, 0, milvus::LOW);
+    std::string local_file = GetRootPath() + "/stream_budget_admission.bin";
+    auto load_future = std::async(std::launch::async, [&]() {
+        reader->ReadEntriesStreamToFiles({{"data", local_file}},
+                                         milvus::storage::io::Priority::LOW);
+    });
+
+    EXPECT_EQ(load_future.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    auto marker_future = pool.Submit([]() {});
+    auto marker_status = marker_future.wait_for(std::chrono::milliseconds(200));
+
+    budget.Release(entry_size);
+    budget_held = false;
+
+    ASSERT_EQ(load_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    load_future.get();
+    ASSERT_EQ(marker_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    marker_future.get();
+    EXPECT_EQ(marker_status, std::future_status::ready);
+
+    ::unlink(local_file.c_str());
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {

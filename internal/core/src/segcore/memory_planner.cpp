@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "arrow/api.h"
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/Channel.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
@@ -53,8 +52,6 @@ std::atomic<int64_t> FIELD_DATA_LOAD_BATCH_TARGET_BYTES(
     kDefaultFieldDataLoadBatchTargetBytes);
 std::atomic<int64_t> FIELD_DATA_READ_WINDOW_BYTES(
     kDefaultFieldDataReadWindowBytes);
-std::atomic<int64_t> FIELD_DATA_MAX_READ_PARALLELISM(
-    kDefaultFieldDataMaxReadParallelism);
 
 int64_t
 PositiveBytes(int64_t bytes, int64_t fallback) {
@@ -89,8 +86,28 @@ FieldDataReadWindowBytes() {
 }
 
 int64_t
-FieldDataMaxReadParallelism() {
-    return std::max<int64_t>(FIELD_DATA_MAX_READ_PARALLELISM.load(), 1);
+LoadTransientPoolUpperBound(size_t max_task_overhead_bytes) {
+    // Load work can run concurrently in both pools because PriorityForLoad
+    // maps foreground loads to HIGH and background loads to LOW.
+    auto configured_high =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    auto configured_low =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    auto live_high =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
+            .GetThreadNum();
+    auto live_low =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW)
+            .GetThreadNum();
+    auto max_load_tasks = std::max(configured_high, live_high) +
+                          std::max(configured_low, live_low);
+    auto max_int64 = static_cast<size_t>(std::numeric_limits<int64_t>::max());
+    if (max_task_overhead_bytes > max_int64 / max_load_tasks) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    return static_cast<int64_t>(max_load_tasks * max_task_overhead_bytes);
 }
 
 void
@@ -109,86 +126,54 @@ SetFieldDataReadWindowBytes(int64_t bytes) {
              FIELD_DATA_READ_WINDOW_BYTES.load());
 }
 
-void
-SetFieldDataMaxReadParallelism(int64_t parallelism) {
-    FIELD_DATA_MAX_READ_PARALLELISM.store(std::max<int64_t>(parallelism, 1));
-    LOG_INFO("set field data max read parallelism: {}",
-             FIELD_DATA_MAX_READ_PARALLELISM.load());
-}
-
 milvus::cachinglayer::ResourceUsage
 FieldDataLoadingOverheadUpperBound(int64_t max_memory_overhead,
                                    std::optional<int64_t> max_file_overhead) {
     auto budget_capacity = static_cast<int64_t>(
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
             .CapacityBytes());
-    if (budget_capacity == 0) {
-        return milvus::cachinglayer::LoadingOverheadTracker::kUnlimited;
+    if (budget_capacity != 0) {
+        auto memory_ub =
+            std::max<int64_t>(budget_capacity, max_memory_overhead);
+        auto file_ub =
+            max_file_overhead.has_value()
+                ? std::max<int64_t>(budget_capacity, max_file_overhead.value())
+                : int64_t{0};
+        return {memory_ub, file_ub};
     }
 
-    auto memory_ub = std::max<int64_t>(budget_capacity, max_memory_overhead);
-    auto file_ub =
-        max_file_overhead.has_value()
-            ? std::max<int64_t>(budget_capacity, max_file_overhead.value())
-            : int64_t{0};
+    auto batch_target = FieldDataLoadBatchSplitTargetBytes();
+    auto memory_task_overhead =
+        static_cast<size_t>(std::max(batch_target, max_memory_overhead));
+    auto memory_ub = LoadTransientPoolUpperBound(memory_task_overhead);
+    auto file_ub = max_file_overhead.has_value()
+                       ? LoadTransientPoolUpperBound(static_cast<size_t>(
+                             std::max(batch_target, max_file_overhead.value())))
+                       : int64_t{0};
     return {memory_ub, file_ub};
 }
 
 namespace {
 
 size_t
-CellLoadingBudgetBytes(const CellSpec& cell) {
-    auto overhead_size = cell.loading_overhead_size > 0
-                             ? cell.loading_overhead_size
-                             : cell.memory_size;
-    AssertInfo(overhead_size > 0,
+CellLoadingOverheadBytes(const CellSpec& cell) {
+    auto loading_overhead_size = cell.loading_overhead_size > 0
+                                     ? cell.loading_overhead_size
+                                     : cell.memory_size;
+    AssertInfo(loading_overhead_size > 0,
                "[StorageV2] Cell loading overhead size must be positive, "
                "cid={}, got {}, memory_size={}",
                cell.cid,
-               overhead_size,
+               loading_overhead_size,
                cell.memory_size);
-    return static_cast<size_t>(overhead_size);
-}
-
-size_t
-BatchLoadingBudgetBytes(const std::vector<CellSpec>& cells) {
-    size_t total = 0;
-    for (const auto& cell : cells) {
-        auto bytes = CellLoadingBudgetBytes(cell);
-        if (bytes > std::numeric_limits<size_t>::max() - total) {
-            return std::numeric_limits<size_t>::max();
-        }
-        total += bytes;
-    }
-    return total;
+    return static_cast<size_t>(loading_overhead_size);
 }
 
 int64_t
-BatchReaderMemoryLimit(int64_t batch_memory, int64_t memory_limit) {
-    auto capped = std::min(batch_memory, memory_limit);
+BatchReaderMemoryLimit(int64_t batch_loaded_memory_bytes,
+                       int64_t memory_limit) {
+    auto capped = std::min(batch_loaded_memory_bytes, memory_limit);
     return std::max<int64_t>(capped, FieldDataReadWindowBytes());
-}
-
-uint64_t
-BatchReadParallelism(size_t batch_budget_bytes, int64_t total_rg_count) {
-    if (total_rg_count <= 1) {
-        return 1;
-    }
-
-    auto read_window = std::max<int64_t>(FieldDataReadWindowBytes(), 1);
-    auto budget_capacity =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-            .CapacityBytes();
-    auto bounded_budget = budget_capacity == 0
-                              ? batch_budget_bytes
-                              : std::min(batch_budget_bytes, budget_capacity);
-    auto parallelism_by_budget =
-        std::max<size_t>(1, bounded_budget / static_cast<size_t>(read_window));
-    auto max_parallelism = FieldDataMaxReadParallelism();
-    auto parallelism = std::min<size_t>(parallelism_by_budget,
-                                        static_cast<size_t>(max_parallelism));
-    return std::min<uint64_t>(static_cast<uint64_t>(parallelism),
-                              static_cast<uint64_t>(total_rg_count));
 }
 
 arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>
@@ -427,16 +412,14 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     }
 }
 
-std::vector<std::future<void>>
+std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority,
                    CellFinalizeFunc finalize_cell) {
     if (cell_specs.empty()) {
-        channel->close();
         return {};
     }
 
@@ -463,18 +446,24 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         size_t file_idx;
         int64_t rg_offset;
         int64_t rg_count;
-        int64_t batch_memory = 0;
+        int64_t batch_loaded_memory_bytes = 0;
+        size_t batch_loading_overhead_bytes = 0;
         std::vector<CellSpec> cells;
     };
 
+    auto batch_limit_bytes =
+        static_cast<size_t>(std::max<int64_t>(memory_limit, 1));
     std::vector<CellBatch> batches;
     CellBatch current{};
 
     for (const auto& spec : cell_specs) {
+        auto cell_loading_overhead_bytes = CellLoadingOverheadBytes(spec);
         bool should_split = false;
         if (!current.cells.empty()) {
             bool batch_full =
-                (current.batch_memory + spec.memory_size > memory_limit);
+                current.batch_loading_overhead_bytes > batch_limit_bytes ||
+                cell_loading_overhead_bytes >
+                    batch_limit_bytes - current.batch_loading_overhead_bytes;
             if (spec.file_idx != current.file_idx ||
                 spec.local_rg_offset != current.rg_offset + current.rg_count ||
                 batch_full) {
@@ -489,10 +478,19 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             current.file_idx = spec.file_idx;
             current.rg_offset = spec.local_rg_offset;
             current.rg_count = 0;
-            current.batch_memory = 0;
+            current.batch_loaded_memory_bytes = 0;
+            current.batch_loading_overhead_bytes = 0;
         }
         current.rg_count += spec.rg_count;
-        current.batch_memory += spec.memory_size;
+        current.batch_loaded_memory_bytes += spec.memory_size;
+        if (cell_loading_overhead_bytes >
+            std::numeric_limits<size_t>::max() -
+                current.batch_loading_overhead_bytes) {
+            current.batch_loading_overhead_bytes =
+                std::numeric_limits<size_t>::max();
+        } else {
+            current.batch_loading_overhead_bytes += cell_loading_overhead_bytes;
+        }
         current.cells.push_back(spec);
     }
     if (!current.cells.empty()) {
@@ -500,143 +498,127 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     }
 
     if (batches.empty()) {
-        channel->close();
         return {};
-    }
-
-    uint64_t max_read_parallelism = 1;
-    for (const auto& batch : batches) {
-        max_read_parallelism =
-            std::max(max_read_parallelism,
-                     BatchReadParallelism(BatchLoadingBudgetBytes(batch.cells),
-                                          batch.rg_count));
     }
 
     LOG_INFO(
         "[StorageV2] LoadCellBatchAsync: {} cells -> {} batches "
-        "(memory_limit={}MB, budget_capacity={}MB, read_window={}MB, "
-        "max_read_parallelism={})",
+        "(memory_limit={}MB, budget_capacity={}MB, read_window={}MB)",
         cell_specs.size(),
         batches.size(),
         memory_limit >> 20,
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
                 .CapacityBytes() >>
             20,
-        FieldDataReadWindowBytes() >> 20,
-        max_read_parallelism);
+        FieldDataReadWindowBytes() >> 20);
 
     auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
-    auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
     auto shared_finalizer =
         std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
+    AssertInfo(static_cast<bool>(*shared_finalizer),
+               "[StorageV2] LoadCellBatchAsync requires a cell finalizer");
 
-    std::vector<std::future<void>> futures;
+    std::vector<CellLoadFuture> futures;
     futures.reserve(batches.size());
 
+    auto append_failed_future = [&](std::exception_ptr error) {
+        std::promise<LoadedCellBatch> promise;
+        futures.emplace_back(promise.get_future());
+        promise.set_exception(std::move(error));
+    };
+
     for (auto& batch : batches) {
-        auto batch_budget_bytes = BatchLoadingBudgetBytes(batch.cells);
-        auto read_parallelism =
-            BatchReadParallelism(batch_budget_bytes, batch.rg_count);
-        auto reader_memory_limit =
-            BatchReaderMemoryLimit(batch.batch_memory, memory_limit);
-        futures.emplace_back(pool.Submit([batch = std::move(batch),
-                                          shared_factory,
-                                          batch_budget_bytes,
-                                          reader_memory_limit,
-                                          read_parallelism,
-                                          channel,
-                                          remaining,
-                                          shared_finalizer,
-                                          op_ctx]() {
-            auto task_guard = folly::makeGuard([&channel, &remaining]() {
-                if (remaining->fetch_sub(1) == 1) {
-                    channel->close();
-                }
-            });
-            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+        auto batch_loading_overhead_bytes = batch.batch_loading_overhead_bytes;
+        auto reader_memory_limit = BatchReaderMemoryLimit(
+            batch.batch_loaded_memory_bytes, memory_limit);
+        auto& budget =
+            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+        auto cancellation_token =
+            op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
+        auto budget_admitted = budget.AcquireUntil(batch_loading_overhead_bytes,
+                                                   cancellation_token);
+        if (!budget_admitted) {
+            // AcquireUntil waits for budget and returns false only when the
+            // caller's lifecycle ends before admission.
+            append_failed_future(std::make_exception_ptr(SegcoreError(
+                ErrorCode::FollyCancel, "LoadCellBatchAsync cancelled")));
+            continue;
+        }
 
-            auto& budget = milvus::storage::TransientMemoryBudget::
-                GetLoadTransientBudget();
-            auto acquired = budget.AcquireUntil(batch_budget_bytes, [op_ctx]() {
-                return op_ctx &&
-                       op_ctx->cancellation_token.isCancellationRequested();
-            });
-            if (!acquired) {
+        try {
+            futures.emplace_back(pool.Submit([batch = std::move(batch),
+                                              shared_factory,
+                                              batch_loading_overhead_bytes,
+                                              reader_memory_limit,
+                                              shared_finalizer,
+                                              op_ctx]() mutable {
+                auto& budget = milvus::storage::TransientMemoryBudget::
+                    GetLoadTransientBudget();
+                size_t transferred_loading_overhead_bytes = 0;
+                auto release_guard =
+                    folly::makeGuard([&budget,
+                                      batch_loading_overhead_bytes,
+                                      &transferred_loading_overhead_bytes]() {
+                        if (transferred_loading_overhead_bytes <
+                            batch_loading_overhead_bytes) {
+                            budget.Release(batch_loading_overhead_bytes -
+                                           transferred_loading_overhead_bytes);
+                        }
+                    });
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                return;
-            }
-            size_t transferred_budget_bytes = 0;
-            auto release_guard = folly::makeGuard(
-                [&budget, batch_budget_bytes, &transferred_budget_bytes]() {
-                    if (transferred_budget_bytes < batch_budget_bytes) {
-                        budget.Release(batch_budget_bytes -
-                                       transferred_budget_bytes);
-                    }
-                });
-            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
-            auto tables_result = (*shared_factory)(batch.file_idx,
-                                                   batch.rg_offset,
-                                                   batch.rg_count,
-                                                   reader_memory_limit,
-                                                   read_parallelism);
-            AssertInfo(tables_result.ok(),
-                       "[StorageV2] Failed to read batch: " +
-                           tables_result.status().ToString());
-            auto all_tables = std::move(tables_result).ValueOrDie();
-            AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
-                       "reader returns less tables than expected, batch rg "
-                       "count: {}, result size: {}",
-                       batch.rg_count,
-                       all_tables.size());
-            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-
-            int64_t table_offset = 0;
-            for (const auto& cell : batch.cells) {
+                auto tables_result = (*shared_factory)(batch.file_idx,
+                                                       batch.rg_offset,
+                                                       batch.rg_count,
+                                                       reader_memory_limit);
+                AssertInfo(tables_result.ok(),
+                           "[StorageV2] Failed to read batch: " +
+                               tables_result.status().ToString());
+                auto all_tables = std::move(tables_result).ValueOrDie();
+                AssertInfo(
+                    all_tables.size() == static_cast<size_t>(batch.rg_count),
+                    "reader returns less tables than expected, batch rg "
+                    "count: {}, result size: {}",
+                    batch.rg_count,
+                    all_tables.size());
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                auto cell_result = std::make_shared<CellLoadResult>();
-                cell_result->cid = cell.cid;
-                auto cell_budget_bytes = CellLoadingBudgetBytes(cell);
-                cell_result->budget_bytes = cell_budget_bytes;
-                cell_result->tables.reserve(cell.rg_count);
-                for (int64_t i = 0; i < cell.rg_count; ++i) {
-                    cell_result->tables.push_back(
-                        std::move(all_tables[table_offset + i]));
-                }
-                table_offset += cell.rg_count;
-                if (*shared_finalizer) {
-                    cell_result->chunk =
-                        (*shared_finalizer)(cell_result->tables, cell.cid);
-                    ReleaseCellLoadResultBudget(cell_result);
-                    transferred_budget_bytes += cell_budget_bytes;
+
+                int64_t table_offset = 0;
+                LoadedCellBatch loaded_cells;
+                loaded_cells.reserve(batch.cells.size());
+                for (const auto& cell : batch.cells) {
                     CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    channel->push(std::move(cell_result));
-                    continue;
+                    auto cell_loading_overhead_bytes =
+                        CellLoadingOverheadBytes(cell);
+                    std::vector<std::shared_ptr<arrow::Table>> cell_tables;
+                    cell_tables.reserve(cell.rg_count);
+                    for (int64_t i = 0; i < cell.rg_count; ++i) {
+                        cell_tables.push_back(
+                            std::move(all_tables[table_offset + i]));
+                    }
+                    table_offset += cell.rg_count;
+                    auto chunk = (*shared_finalizer)(cell_tables, cell.cid);
+                    cell_tables.clear();
+                    budget.Release(cell_loading_overhead_bytes);
+                    transferred_loading_overhead_bytes +=
+                        cell_loading_overhead_bytes;
+                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+                    loaded_cells.push_back({cell.cid, std::move(chunk)});
                 }
-                channel->push(std::move(cell_result));
-                transferred_budget_bytes += cell_budget_bytes;
+                return loaded_cells;
+            }));
+        } catch (...) {
+            if (budget_admitted) {
+                milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+                    .Release(batch_loading_overhead_bytes);
             }
-        }));
+            append_failed_future(std::current_exception());
+        }
     }
 
     return futures;
-}
-
-void
-ReleaseCellLoadResultBudget(
-    const std::shared_ptr<CellLoadResult>& cell_load_result) {
-    if (cell_load_result == nullptr) {
-        return;
-    }
-    cell_load_result->tables.clear();
-    if (cell_load_result->budget_bytes == 0) {
-        return;
-    }
-    milvus::storage::TransientMemoryBudget::GetLoadTransientBudget().Release(
-        cell_load_result->budget_bytes);
-    cell_load_result->budget_bytes = 0;
 }
 
 BatchReaderFactory
@@ -647,8 +629,7 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
     return [files, fs](size_t batch_key,
                        int64_t rg_offset,
                        int64_t total_rg_count,
-                       int64_t reader_memory_limit,
-                       uint64_t /*read_parallelism*/)
+                       int64_t reader_memory_limit)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         const auto& file = (*files)[batch_key];
         return ReadFileRowGroupBlock(
@@ -662,8 +643,7 @@ MakeChunkReaderFactory(
     return [chunk_reader](size_t /*batch_key*/,
                           int64_t rg_offset,
                           int64_t total_rg_count,
-                          int64_t /*reader_memory_limit*/,
-                          uint64_t /*read_parallelism*/)
+                          int64_t /*reader_memory_limit*/)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         std::vector<int64_t> rg_indices(total_rg_count);
         std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);

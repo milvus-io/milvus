@@ -14,8 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <string>
+#include <system_error>
 
 #include "gtest/gtest.h"
 #include "storage/ThreadPool.h"
@@ -136,6 +139,39 @@ TEST_F(ThreadPoolTest, DynamicMaxThreadsSizeUpdate) {
     SetThreadPoolMaxThreadsSize(8);
     pool.Resize(20);
     EXPECT_EQ(pool.GetMaxThreadNum(), 8);
+}
+
+TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {
+    ThreadPool pool(1.0, "test_pool");
+
+    std::promise<void> blocker_started;
+    std::promise<void> unblock_worker;
+    auto unblock_future = unblock_worker.get_future().share();
+    auto blocker = pool.Submit([&blocker_started, unblock_future]() {
+        blocker_started.set_value();
+        unblock_future.wait();
+    });
+    ASSERT_EQ(blocker_started.get_future().wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    pool.worker_spawn_hook_for_test_ = []() {
+        throw std::system_error(
+            std::make_error_code(std::errc::resource_unavailable_try_again));
+    };
+
+    std::atomic<int> task_runs{0};
+    std::future<void> task_future;
+    EXPECT_NO_THROW(
+        task_future = pool.Submit([&task_runs]() { task_runs.fetch_add(1); }));
+
+    unblock_worker.set_value();
+    blocker.get();
+
+    ASSERT_TRUE(task_future.valid());
+    ASSERT_EQ(task_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    task_future.get();
+    EXPECT_EQ(task_runs.load(), 1);
 }
 
 }  // namespace milvus

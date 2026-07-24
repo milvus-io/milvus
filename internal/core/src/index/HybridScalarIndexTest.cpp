@@ -36,7 +36,6 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
 #include "index/Index.h"
@@ -56,6 +55,7 @@
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -789,7 +789,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,
-             ScalarIndexLoadingOverheadDoesNotCapFileDimension) {
+             ScalarIndexLoadingOverheadUsesPoolBoundForMemoryOnly) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
@@ -837,9 +837,15 @@ TYPED_TEST_P(HybridIndexTestInverted,
     ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
     EXPECT_EQ(translator.meta()->loading_overhead->group,
               milvus::segcore::kLoadTransientOverheadGroup);
-    EXPECT_EQ(
-        translator.meta()->loading_overhead->upper_bound.memory_bytes,
-        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
+    auto max_load_tasks =
+        milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()) +
+        milvus::ComputeThreadPoolMaxThreads(
+            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+    auto max_task_overhead =
+        storage::DefaultStreamSliceSize() + storage::kTailMergeGrace;
+    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.memory_bytes,
+              max_load_tasks * max_task_overhead);
     EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
 }
 
@@ -1037,9 +1043,10 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
 
-REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestInverted,
-                            ResourceEstimateUsesInternalInvertedIndexType,
-                            ScalarIndexLoadingOverheadDoesNotCapFileDimension);
+REGISTER_TYPED_TEST_SUITE_P(
+    HybridIndexTestInverted,
+    ResourceEstimateUsesInternalInvertedIndexType,
+    ScalarIndexLoadingOverheadUsesPoolBoundForMemoryOnly);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,

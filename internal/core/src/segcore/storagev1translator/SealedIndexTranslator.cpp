@@ -1,10 +1,10 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <utility>
 
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
@@ -21,6 +21,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/PluginLoader.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -90,11 +91,28 @@ SealedIndexTranslator::SealedIndexTranslator(
         auto budget_capacity = static_cast<int64_t>(
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
                 .CapacityBytes());
+        auto encrypted_stream =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
+            nullptr;
+        auto max_task_overhead =
+            encrypted_stream
+                ? milvus::storage::EncryptedEntryStreamTaskTransientBytes()
+                : milvus::storage::DefaultStreamSliceSize() +
+                      milvus::storage::kTailMergeGrace;
+        auto encrypted_stream_upper_bound = [&]() {
+            auto index_size = static_cast<size_t>(
+                std::max<int64_t>(0, index_load_info_.index_size));
+            return std::min(
+                milvus::storage::EntryStreamDataTransientBytes(index_size,
+                                                               true),
+                static_cast<size_t>(std::numeric_limits<int64_t>::max()));
+        };
         auto memory_upper_bound =
-            budget_capacity == 0
-                ? milvus::cachinglayer::LoadingOverheadTracker::kUnlimited
-                      .memory_bytes
-                : budget_capacity;
+            budget_capacity != 0 ? budget_capacity
+            : encrypted_stream
+                ? static_cast<int64_t>(encrypted_stream_upper_bound())
+                : milvus::segcore::LoadTransientPoolUpperBound(
+                      max_task_overhead);
         auto upper_bound =
             milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
