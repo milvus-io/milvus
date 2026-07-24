@@ -22,6 +22,11 @@ def _row_dict(row) -> dict[str, Any]:
     return dict(row)
 
 
+def _field_names(schema) -> list[str]:
+    names = schema.fieldNames
+    return list(names() if callable(names) else names)
+
+
 def execute_probe(
     *,
     load_dataframe: Callable[[Mapping[str, str]], Any],
@@ -36,7 +41,7 @@ def execute_probe(
     result: dict[str, Any] = {
         "count": count,
         "primaryKeys": primary_keys,
-        "schemaFields": list(frame.schema.fieldNames),
+        "schemaFields": _field_names(frame.schema),
     }
 
     projection_fields = [str(field) for field in spec.get("projectionFields", [])]
@@ -49,7 +54,7 @@ def execute_probe(
             load_dataframe(projection_options) if spec.get("projectionOptions") else frame.select(*projection_fields)
         )
         result["projection"] = {
-            "fields": list(projection.schema.fieldNames),
+            "fields": _field_names(projection.schema),
             "count": projection.count(),
         }
 

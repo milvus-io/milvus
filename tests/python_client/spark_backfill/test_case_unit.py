@@ -68,6 +68,38 @@ def test_backfill_case_builds_remote_job_and_result_under_milvus_root(tmp_path):
     assert request.payload["arguments"][-4:] == ["--mode", "coalesce", "--batch-size", "1024"]
 
 
+def test_backfill_case_normalizes_relative_snapshot_location(tmp_path):
+    runner = FakeRunner()
+    case = BackfillCase(
+        client=None,
+        minio_client=None,
+        runner=runner,
+        settings=SimpleNamespace(
+            minio_bucket="bucket",
+            spark_minio_endpoint="minio.ns:9000",
+            management_endpoint="http://milvus:9091",
+            spark_milvus_uri="http://milvus.ns:19530",
+            milvus_token="root:Milvus",
+        ),
+        tmp_path=tmp_path,
+        collection_name="collection",
+        snapshot_names=["snapshot"],
+        snapshot_location="files/snapshots/100/metadata/1.json",
+        snapshot=None,
+        prefix="files/spark-backfill/run",
+        source_rows=[],
+    )
+
+    case.run_backfill(
+        case_id="coalesce",
+        parquet_uri="s3a://bucket/files/spark-backfill/run/input.parquet",
+        mode="coalesce",
+    )
+
+    arguments = runner.requests[0].payload["arguments"]
+    assert arguments[arguments.index("--snapshot") + 1] == "s3a://bucket/files/snapshots/100/metadata/1.json"
+
+
 def test_backfill_case_lists_objects_from_result_parent_without_truncating_case_id(tmp_path):
     case = BackfillCase(
         client=None,

@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-milvus-toolbox
+  namespace: default
+  labels:
+    app: spark-milvus-toolbox
+spec:
+  progressDeadlineSeconds: 10800
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: spark-milvus-toolbox
+  template:
+    metadata:
+      labels:
+        app: spark-milvus-toolbox
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      securityContext:
+        fsGroup: 185
+      initContainers:
+        - name: build-connector
+          image: apache/spark:4.0.1-scala2.13-java21-python3-ubuntu@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - /opt/toolbox-scripts/build-connector.sh
+          env:
+            - name: CONNECTOR_COMMIT
+              value: dfcec3d564e78be771b6d41fc04632db77d8d507
+          resources:
+            requests:
+              cpu: "4"
+              memory: 12Gi
+            limits:
+              cpu: "6"
+              memory: 16Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/toolbox-scripts
+              readOnly: true
+            - name: build-work
+              mountPath: /build
+            - name: artifacts
+              mountPath: /artifacts
+            - name: conan-cache
+              mountPath: /root/.conan
+            - name: sdkman-cache
+              mountPath: /root/.sdkman
+            - name: root-cache
+              mountPath: /root/.cache
+            - name: sbt-cache
+              mountPath: /root/.sbt
+            - name: ivy-cache
+              mountPath: /root/.ivy2
+      containers:
+        - name: spark-toolbox
+          image: apache/spark:4.0.1-scala2.13-java21-python3-ubuntu@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 185
+            runAsGroup: 185
+            allowPrivilegeEscalation: false
+          command:
+            - bash
+            - -lc
+            - "trap : TERM INT; sleep infinity & wait"
+          env:
+            - name: SPARK_HOME
+              value: /opt/spark
+            - name: CONNECTOR_ROOT
+              value: /opt/spark-milvus
+            - name: PYTHONPATH
+              value: /opt/spark-milvus/python
+            - name: LD_LIBRARY_PATH
+              value: /opt/spark-milvus/native
+            - name: MILVUS_URI
+              value: http://eric-spark-milvus:19530
+            - name: MILVUS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: spark-milvus-toolbox-credentials
+                  key: milvus-token
+            - name: S3_ENDPOINT
+              value: eric-spark-minio:9000
+            - name: S3_BUCKET
+              value: milvus-bucket
+            - name: S3_ROOT
+              value: file
+            - name: S3_USE_SSL
+              value: "false"
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: eric-spark-minio
+                  key: accesskey
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: eric-spark-minio
+                  key: secretkey
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -lc
+                - >-
+                  test -f /opt/spark-milvus/jars/spark-connector-assembly.jar &&
+                  test -f /opt/spark-milvus/native/libmilvus-storage.so &&
+                  test -f /opt/spark-milvus/native/libmilvus-storage-jni.so
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              cpu: "2"
+              memory: 8Gi
+          volumeMounts:
+            - name: artifacts
+              mountPath: /opt/spark-milvus
+              readOnly: true
+            - name: spark-local
+              mountPath: /tmp/spark-local
+            - name: workspace
+              mountPath: /workspace
+            - name: scripts
+              mountPath: /usr/local/bin/spark-submit-milvus
+              subPath: spark-submit-milvus.sh
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: spark-milvus-toolbox-scripts
+            defaultMode: 0755
+        - name: build-work
+          emptyDir: {}
+        - name: artifacts
+          emptyDir: {}
+        - name: conan-cache
+          emptyDir: {}
+        - name: sdkman-cache
+          emptyDir: {}
+        - name: root-cache
+          emptyDir: {}
+        - name: sbt-cache
+          emptyDir: {}
+        - name: ivy-cache
+          emptyDir: {}
+        - name: spark-local
+          emptyDir: {}
+        - name: workspace
+          emptyDir: {}

@@ -101,6 +101,9 @@ def test_build_backfill_command_uses_local_mode_and_secret_credentials(tmp_path)
     assert command[:3] == ["/opt/spark/bin/spark-submit", "--master", "local[2]"]
     assert "org.apache.hadoop:hadoop-aws:3.4.1" in command
     assert f"spark.driver.extraJavaOptions=-Djava.library.path={prepared.library_dir}" in command
+    assert "spark.driver.userClassPathFirst=true" in command
+    assert "spark.executor.userClassPathFirst=false" in command
+    assert "spark.executor.userClassPathFirst=true" not in command
     assert "spark.jars.ivy=/tmp/spark-local/ivy" in command
     assert BACKFILL_MAIN_CLASS in command
     assert str(prepared.jar_path) in command
@@ -111,6 +114,15 @@ def test_build_backfill_command_uses_local_mode_and_secret_credentials(tmp_path)
     assert "--s3-secret-key '<redacted>'" in redacted
     assert "--s3-access-key access" not in redacted
     assert "--s3-secret-key secret" not in redacted
+
+
+def test_manual_toolbox_wrapper_uses_parent_first_executor_classloader():
+    wrapper = Path(__file__).parent / "deploy" / "manual_toolbox" / "spark-submit-milvus.sh"
+    content = wrapper.read_text(encoding="utf-8")
+
+    assert "--conf spark.driver.userClassPathFirst=true" in content
+    assert "--conf spark.executor.userClassPathFirst=false" in content
+    assert "--conf spark.executor.userClassPathFirst=true" not in content
 
 
 def test_build_read_command_passes_options_through_environment(tmp_path):

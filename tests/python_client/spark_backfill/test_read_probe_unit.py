@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from spark_backfill.read_probe import execute_probe
+from spark_backfill.read_probe import _field_names, execute_probe
 
 
 class FakeRow(dict):
@@ -25,6 +25,10 @@ class FakeDataFrame:
 
     def createOrReplaceTempView(self, name):
         self.view_name = name
+
+
+def test_field_names_supports_pyspark_4_callable_api():
+    assert _field_names(SimpleNamespace(fieldNames=lambda: ["id", "score"])) == ["id", "score"]
 
 
 def test_execute_probe_reports_count_projection_sql_and_topk():
