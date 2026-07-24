@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -112,6 +113,23 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.True(t, queue.utFull())
 	err = queue.Enqueue(newDefaultMockTask())
 	assert.Error(t, err)
+}
+
+func TestBaseTaskQueue_SubTaskEnqueuePushesFront(t *testing.T) {
+	queue := newBaseTaskQueue(newMockTsoAllocator())
+
+	first := newDefaultMockTask()
+	second := newDefaultMockTask()
+	subTask := newDefaultMockTask()
+	subTask.subTask = true
+
+	require.NoError(t, queue.Enqueue(first))
+	require.NoError(t, queue.Enqueue(second))
+	require.NoError(t, queue.Enqueue(subTask))
+
+	assert.Same(t, subTask, queue.PopUnissuedTask())
+	assert.Same(t, first, queue.PopUnissuedTask())
+	assert.Same(t, second, queue.PopUnissuedTask())
 }
 
 func TestDdTaskQueue(t *testing.T) {
@@ -759,4 +777,164 @@ func TestBaseTaskQueue_EnqueueNotifierNonBlocking(t *testing.T) {
 		t.Fatalf("Enqueue blocked on utBufChan send")
 	}
 	assert.Equal(t, 1, len(queue.utChan()))
+}
+
+func TestTaskScheduler_ProcessDQLTaskFeedsBackQueueFull(t *testing.T) {
+	sched, err := newTaskScheduler(context.Background(), newMockTsoAllocator())
+	require.NoError(t, err)
+	sched.dqlBackpressure = newDQLBackpressureController(dqlBackpressureControllerConfig{
+		enabled:                true,
+		maxConcurrency:         8,
+		slowdownMinConcurrency: 2,
+		slowdownRatio:          0.5,
+		recoverInterval:        time.Second,
+	})
+
+	task := newDefaultMockDqlTask()
+	task.executeFn = func(context.Context) error {
+		return errors.Wrap(merr.WrapErrTooManyRequests(1024), "query node queue full")
+	}
+
+	sched.processTask(task, sched.dqQueue)
+
+	assert.Equal(t, int64(4), sched.dqlBackpressure.CurrentConcurrency())
+	assert.ErrorIs(t, task.WaitToFinish(), merr.ErrServiceTooManyRequests)
+}
+
+func TestTaskScheduler_DQLBackpressureConfigCallback(t *testing.T) {
+	sched, err := newTaskScheduler(context.Background(), newMockTsoAllocator())
+	require.NoError(t, err)
+	defer sched.Close()
+
+	current := sched.dqlBackpressure.CurrentConcurrency()
+	require.NoError(t, Params.Save(Params.ProxyCfg.DQLBackpressureSlowdownRatio.Key, "0.25"))
+	defer Params.Reset(Params.ProxyCfg.DQLBackpressureSlowdownRatio.Key)
+
+	sched.dqlBackpressure.Observe(merr.WrapErrTooManyRequests(1024))
+
+	assert.Equal(t, int64(float64(current)*0.25), sched.dqlBackpressure.CurrentConcurrency())
+}
+
+func TestTaskScheduler_QueryLoopLimitsDQLDispatchConcurrency(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sched, err := newTaskScheduler(ctx, newMockTsoAllocator())
+	require.NoError(t, err)
+	sched.dqlBackpressure = newDQLBackpressureController(dqlBackpressureControllerConfig{
+		enabled:                true,
+		maxConcurrency:         1,
+		slowdownMinConcurrency: 1,
+		slowdownRatio:          0.5,
+		recoverInterval:        time.Second,
+	})
+
+	firstStarted := make(chan struct{}, 1)
+	firstContinue := make(chan struct{})
+	first := newDefaultMockDqlTask()
+	first.executeFn = func(context.Context) error {
+		firstStarted <- struct{}{}
+		<-firstContinue
+		return nil
+	}
+	secondStarted := make(chan struct{}, 1)
+	second := newDefaultMockDqlTask()
+	second.executeFn = func(context.Context) error {
+		secondStarted <- struct{}{}
+		return nil
+	}
+
+	require.NoError(t, sched.dqQueue.Enqueue(first))
+	require.NoError(t, sched.dqQueue.Enqueue(second))
+
+	sched.wg.Add(1)
+	go sched.queryLoop()
+	defer sched.Close()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("first DQL task was not dispatched")
+	}
+
+	select {
+	case <-secondStarted:
+		t.Fatalf("second DQL task should wait for the first task to release the DQL backpressure window")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	sched.dqQueue.utLock.RLock()
+	assert.Equal(t, 1, sched.dqQueue.unissuedTasks.Len())
+	sched.dqQueue.utLock.RUnlock()
+
+	close(firstContinue)
+	assert.NoError(t, first.WaitToFinish())
+
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("second DQL task was not dispatched after first task completed")
+	}
+	assert.NoError(t, second.WaitToFinish())
+}
+
+func TestTaskScheduler_QueryLoopLimitsDQLSubTaskDispatchConcurrency(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sched, err := newTaskScheduler(ctx, newMockTsoAllocator())
+	require.NoError(t, err)
+	sched.dqlBackpressure = newDQLBackpressureController(dqlBackpressureControllerConfig{
+		enabled:                true,
+		maxConcurrency:         1,
+		slowdownMinConcurrency: 1,
+		slowdownRatio:          0.5,
+		recoverInterval:        time.Second,
+	})
+
+	firstStarted := make(chan struct{}, 1)
+	firstContinue := make(chan struct{})
+	first := newDefaultMockDqlTask()
+	first.executeFn = func(context.Context) error {
+		firstStarted <- struct{}{}
+		<-firstContinue
+		return nil
+	}
+	subStarted := make(chan struct{}, 1)
+	subTask := newDefaultMockDqlTask()
+	subTask.subTask = true
+	subTask.executeFn = func(context.Context) error {
+		subStarted <- struct{}{}
+		return nil
+	}
+
+	require.NoError(t, sched.dqQueue.Enqueue(first))
+
+	sched.wg.Add(1)
+	go sched.queryLoop()
+	defer sched.Close()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("first DQL task was not dispatched")
+	}
+
+	require.NoError(t, sched.dqQueue.Enqueue(subTask))
+
+	select {
+	case <-subStarted:
+		t.Fatalf("DQL sub-task should wait for the shared DQL backpressure window")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(firstContinue)
+	assert.NoError(t, first.WaitToFinish())
+
+	select {
+	case <-subStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("DQL sub-task was not dispatched after the shared window was released")
+	}
+	assert.NoError(t, subTask.WaitToFinish())
 }
