@@ -265,9 +265,13 @@ database → collectionName → shardLeaders {
 - **Concurrent miss**: Coalesced per collection ID. Each caller waits with its own
   context; the shared Coord RPC is detached from the first caller and has a hard
   timeout.
+- **Refresh fencing**: Invalidation and deprecation advance the logical refresh
+  generation. Requests that arrive afterwards start a new flight, and an older
+  in-flight result cannot repopulate the cache.
 - **Historical versions**: At most four collection IDs are retained per name.
   Versions idle for ten minutes are removed before shard locations are used for
-  QueryNode client purging.
+  QueryNode client purging. The purge scans under a read lock and only takes the
+  write lock to revalidate and delete expired candidates.
 - **Invalidation**:
   - `DeprecateShardCache(db, collection)`: Remove every ID version under the name
   - `InvalidateShardLeaderCache(collectionIDs)`: Remove only matching ID versions (called on shard leader changes)

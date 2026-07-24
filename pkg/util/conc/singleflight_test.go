@@ -1,8 +1,10 @@
 package conc
 
 import (
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -65,6 +67,34 @@ func (s *SingleflightSuite) TestDoChan() {
 	if hasShared.Load() {
 		s.Less(counter.Load(), int32(10))
 	}
+}
+
+func (s *SingleflightSuite) TestDoChanDoesNotRetainGoroutinePerWaiter() {
+	sf := Singleflight[any]{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	first := sf.DoChan("test_dochan_goroutines", func() (any, error) {
+		close(started)
+		<-release
+		return struct{}{}, nil
+	})
+	<-started
+
+	baseline := runtime.NumGoroutine()
+	const waiters = 2000
+	for i := 0; i < waiters; i++ {
+		_ = sf.DoChan("test_dochan_goroutines", func() (any, error) {
+			s.FailNow("singleflight callback unexpectedly ran twice")
+			return nil, nil
+		})
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	s.Less(runtime.NumGoroutine(), baseline+50)
+
+	close(release)
+	<-first
 }
 
 func (s *SingleflightSuite) TestForget() {
