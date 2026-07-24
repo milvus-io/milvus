@@ -249,6 +249,19 @@ type CollectionFieldReqWithParams struct {
 	FieldParams    map[string]interface{} `json:"fieldParams"`
 }
 
+type CollectionDropField struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	FieldName      string `json:"fieldName"`
+	FieldID        *int64 `json:"fieldId"`
+}
+
+func (req *CollectionDropField) GetDbName() string { return req.DbName }
+
+func (req *CollectionDropField) GetCollectionName() string {
+	return req.CollectionName
+}
+
 func (req *CollectionFieldReqWithParams) GetDbName() string { return req.DbName }
 
 func (req *CollectionFieldReqWithParams) GetCollectionName() string {
