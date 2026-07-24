@@ -587,32 +587,33 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	return nil
 }
 
-// syncCollectionIndexMeta refreshes the delegator node's CCollection IndexMeta after a
-// forwarded worker load. Worker LoadSegments already updates IndexMeta on the target
-// worker, but the delegator (which executes growing search locally) must stay in sync.
-func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if len(req.GetIndexInfoList()) == 0 {
-		return nil
-	}
-
-	schema := req.GetSchema()
-	if schema == nil {
-		schema = sd.collection.Schema()
-	}
-
-	loadMeta := req.GetLoadMeta()
-	if loadMeta == nil {
-		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID: req.GetCollectionID(),
+// syncCollectionMeta refreshes the delegator node's CCollection IndexMeta and
+// channel-local function runtime after a forwarded worker load. Worker LoadSegments
+// already updates IndexMeta on the target worker, but the delegator must stay in sync.
+func (sd *shardDelegator) syncCollectionMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if len(req.GetIndexInfoList()) > 0 {
+		schema := req.GetSchema()
+		if schema == nil {
+			schema = sd.collection.Schema()
 		}
+
+		loadMeta := req.GetLoadMeta()
+		if loadMeta == nil {
+			loadMeta = &querypb.LoadMetaInfo{
+				CollectionID: req.GetCollectionID(),
+			}
+		}
+
+		meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
+		if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
+			return err
+		}
+		sd.collectionManager.Unref(req.GetCollectionID(), 1)
 	}
 
-	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
-	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
-		return err
-	}
-	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
+	// Reopen and concurrent loads also provide a deterministic catch-up point when
+	// another channel has already advanced the shared Collection schema.
+	return sd.UpdateDelegatorSchema(ctx)
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -692,8 +693,8 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug(ctx, "work loads segments done")
 
-	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
-		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
+	if err := sd.syncCollectionMeta(ctx, req); err != nil {
+		log.Warn(ctx, "failed to sync collection metadata on delegator", mlog.Err(err))
 		return err
 	}
 
