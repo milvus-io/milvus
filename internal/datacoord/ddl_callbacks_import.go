@@ -207,7 +207,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
 			s.allocator.AllocN,
 			Params.CommonCfg.ClusterID.GetAsUint64(),
-			Params.DataCoordCfg.MaxPKRangePerFile.GetAsInt64(),
 		); err != nil {
 			return merr.Wrap(err, "failed to assign per-file PK ranges")
 		}
