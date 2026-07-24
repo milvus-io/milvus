@@ -19,6 +19,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
@@ -136,9 +137,8 @@ GetFieldID(CSearchPlan plan, int64_t* field_id) {
         auto p = static_cast<const milvus::query::Plan*>(plan);
         *field_id = milvus::query::GetFieldID(p);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 const char*

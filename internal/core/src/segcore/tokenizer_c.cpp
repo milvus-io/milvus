@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/protobuf_utils.h"
@@ -29,9 +30,8 @@ set_tokenizer_option(const char* params) {
     try {
         milvus::tantivy::set_tokenizer_options(params);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -43,9 +43,8 @@ create_tokenizer(const char* params,
             std::make_unique<milvus::tantivy::Tokenizer>(params, extra_info);
         *tokenizer = impl.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -54,9 +53,8 @@ clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst) {
         auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(*tokenizer);
         *rst = impl->Clone().release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -79,6 +77,11 @@ validate_tokenizer(const char* params, const char* extra_info) {
         return CValidateResult{ids, count, milvus::SuccessCStatus()};
     } catch (std::exception& e) {
         return CValidateResult{nullptr, 0, milvus::FailureCStatus(&e)};
+    } catch (...) {
+        return CValidateResult{nullptr,
+                               0,
+                               milvus::FailureCStatus(milvus::UnexpectedError,
+                                                      "unknown exception")};
     }
 }
 
@@ -93,7 +96,6 @@ validate_text_schema(const uint8_t* field_schema, uint64_t length) {
         milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params));
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

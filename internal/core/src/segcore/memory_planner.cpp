@@ -368,7 +368,11 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     } catch (std::exception& e) {
         LOG_INFO("[StorageV2] failed to load data from remote: {}", e.what());
         channel->close();
-        throw e;
+        // Rethrow the original exception object: `throw e;` would copy-construct
+        // a plain std::exception (slicing off SegcoreError and its error code),
+        // so the cgo boundary's dynamic_cast could no longer recover the typed
+        // code and every failure here would collapse to UnexpectedError.
+        throw;
     }
 }
 
