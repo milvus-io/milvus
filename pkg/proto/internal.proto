@@ -399,6 +399,12 @@ message ImportFile {
   int64 id = 1;
   // A singular row-based file or multiple column-based files.
   repeated string paths = 2;
+  // Primary-allocated autoID PK range [pk_id_begin, pk_id_end) for this file,
+  // carried from the replicated ImportMsg (msgpb.ImportFile.pk_id_range) so the
+  // secondary derives identical primary keys. begin == end (0) means unset
+  // (legacy / non-autoID / backup imports).
+  int64 pk_id_begin = 3;
+  int64 pk_id_end = 4;
 }
 
 message ImportRequestInternal {
