@@ -75,6 +75,12 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
 				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
 			}},
+			{`A in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
+			{`ArrayField in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -118,6 +124,44 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
+}
+
+func (s *FillExpressionValueSuite) TestEmptyTermRejectsUnsupportedTargetTypes() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyTemplate := map[string]*schemapb.TemplateValue{
+		"empty": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+	}
+	targetFields := []string{
+		"BinaryVectorField",
+		"FloatVectorField",
+		"Float16VectorField",
+		"BFloat16VectorField",
+		"SparseFloatVectorField",
+		"Int8VectorField",
+		"ArrayOfVectorField",
+		"GeometryField",
+	}
+	rightHandSides := []struct {
+		name   string
+		value  string
+		params map[string]*schemapb.TemplateValue
+	}{
+		{name: "inline", value: "[]"},
+		{name: "template", value: "{empty}", params: emptyTemplate},
+	}
+
+	for _, field := range targetFields {
+		for _, op := range []string{"in", "not in"} {
+			for _, rhs := range rightHandSides {
+				s.Run(field+"/"+op+"/"+rhs.name, func() {
+					expr, err := ParseExpr(schemaH, field+" "+op+" "+rhs.value, rhs.params)
+					s.Require().Error(err)
+					s.Require().Nil(expr)
+					s.Contains(err.Error(), "term expression is not supported")
+				})
+			}
+		}
+	}
 }
 
 func (s *FillExpressionValueSuite) TestEmptyArrayComparisonNormalization() {
