@@ -236,6 +236,123 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 	})
 }
 
+// TestExternalCollectionRefreshChecker_AggregateJobState_StaleManifestRetry verifies
+// the manifest-conflict re-drive: when the job-level apply returns the stale sentinel,
+// the checker resets the job's finished tasks to Init (for re-dispatch) and leaves the
+// job non-terminal — neither Finished nor Failed.
+func TestExternalCollectionRefreshChecker_AggregateJobState_StaleManifestRetry(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001, 1002}},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+		{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+	}
+
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+	defer mockSaveJob.UnPatch()
+	mockSaveTask := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(nil).Build()
+	defer mockSaveTask.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	applyJobInfo := func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+		return errExternalRefreshStaleManifest
+	}
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, applyJobInfo, nil, nil, nil)
+
+	checker.aggregateJobState(meta.GetJob(1))
+
+	got := meta.GetJob(1)
+	assert.NotEqual(t, indexpb.JobState_JobStateFinished, got.GetState())
+	assert.NotEqual(t, indexpb.JobState_JobStateFailed, got.GetState())
+	// Both finished tasks are reset to Init so the scheduler re-dispatches them.
+	assert.Equal(t, indexpb.JobState_JobStateInit, meta.GetTask(1001).GetState())
+	assert.Equal(t, indexpb.JobState_JobStateInit, meta.GetTask(1002).GetState())
+}
+
+// TestExternalCollectionRefreshChecker_ResetJobTasksForRetry_SkipsTerminalJob verifies
+// the terminal-job guard: UpdateJobStateWithPreApply releases the job lock before the
+// reset runs, so a concurrent timeout may have already failed the job. In that case the
+// reset must NOT resurrect the job's finished tasks to Init (which would leave the
+// inspector with work for a terminal job).
+func TestExternalCollectionRefreshChecker_ResetJobTasksForRetry_SkipsTerminalJob(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed, Progress: 80, TaskIds: []int64{1001}},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+	}
+
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSaveTask := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(nil).Build()
+	defer mockSaveTask.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
+
+	checker.resetJobTasksForRetry(1, errExternalRefreshStaleManifest)
+
+	// The owning job is already terminal (Failed): the finished task must be left
+	// untouched rather than reset to Init.
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetTask(1001).GetState())
+}
+
+// TestExternalCollectionRefreshChecker_AggregateJobState_NotReadyIsNoOp verifies that a
+// not-ready apply (a task mid-retry) is a no-op: the job is neither finished nor failed
+// and the tasks are untouched, so a concurrent aggregator cannot fail a job that another
+// path is already retrying.
+func TestExternalCollectionRefreshChecker_AggregateJobState_NotReadyIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+	}
+
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+	defer mockSaveJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	applyJobInfo := func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+		return errExternalRefreshNotReady
+	}
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, applyJobInfo, nil, nil, nil)
+
+	checker.aggregateJobState(meta.GetJob(1))
+
+	got := meta.GetJob(1)
+	assert.NotEqual(t, indexpb.JobState_JobStateFinished, got.GetState())
+	assert.NotEqual(t, indexpb.JobState_JobStateFailed, got.GetState())
+	// The task is left untouched (the retry-owning path handles it).
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetTask(1001).GetState())
+}
+
 func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()

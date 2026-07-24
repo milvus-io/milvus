@@ -869,14 +869,20 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		// Query task state from external collection manager
 		info := node.externalCollectionManager.Get(clusterID, taskID)
 		if info == nil {
+			// The worker has no record of this task. For a task DataCoord believes
+			// is in flight this means the entry was lost — typically a DataNode
+			// restart drops the in-memory task map. Report Retry (not Failed) so
+			// DataCoord re-dispatches it (and re-runs on a live node) instead of
+			// failing the whole refresh job on a transient loss.
+			const reason = "task not tracked by worker; re-dispatch needed"
 			resp := &datapb.RefreshExternalCollectionTaskResponse{
 				Status:     merr.Success(),
-				State:      indexpb.JobState_JobStateFailed,
-				FailReason: "task result not found",
+				State:      indexpb.JobState_JobStateRetry,
+				FailReason: reason,
 			}
 			resProperties := taskcommon.NewProperties(nil)
-			resProperties.AppendTaskState(taskcommon.Failed)
-			resProperties.AppendReason("task result not found")
+			resProperties.AppendTaskState(taskcommon.Retry)
+			resProperties.AppendReason(reason)
 			return wrapQueryTaskResult(resp, resProperties)
 		}
 		resp := &datapb.RefreshExternalCollectionTaskResponse{
@@ -948,18 +954,19 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			JobType:   jobType,
 		})
 	case taskcommon.RefreshExternalCollection:
-		// Drop external collection task from external collection manager
+		// Drop external collection task from external collection manager. The
+		// drop is version-fenced: a stale drop for a superseded attempt must not
+		// delete the entry of the re-dispatched attempt on the same taskID.
 		clusterID, err := properties.GetClusterID()
 		if err != nil {
 			return merr.Status(err), nil
 		}
-		canceled := node.externalCollectionManager.CancelTask(clusterID, taskID)
-		info := node.externalCollectionManager.Delete(clusterID, taskID)
-		if !canceled && info != nil && info.Cancel != nil {
-			info.Cancel()
-		}
+		version := properties.GetTaskVersion()
+		removed := node.externalCollectionManager.DeleteIfVersion(clusterID, taskID, version)
 		mlog.Info(ctx, "DropTask for external collection completed",
 			mlog.Int64("taskID", taskID),
+			mlog.Int64("version", version),
+			mlog.Bool("removed", removed != nil),
 			mlog.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:

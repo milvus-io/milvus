@@ -554,6 +554,15 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	}
 
 	// Update segment manifest version so subsequent stats tasks use the latest version.
+	// Route through updateStatsResultIfManifestMatches (not a blind UpdateManifest) so the
+	// adoption performs the same base==current CAS as the text/json paths: a result built on a
+	// stale base (a concurrent commit advanced the segment's manifest in between) is rejected
+	// with errStatsResultStale and the task re-triggers on the current manifest, instead of
+	// overwriting the concurrent commit. Sort results carry no base_manifest by design (the
+	// worker leaves it empty — the target is a freshly allocated segment, so its result is a
+	// birth commit, and stamping the ORIGIN's manifest would compare across segments); an
+	// empty base skips the CAS and is adopted, which also keeps sort/index results from older
+	// DataNodes (no base_manifest) working across a rolling upgrade.
 	if manifest := result.GetManifest(); manifest != "" &&
 		st.GetSubJobType() != indexpb.StatsSubJob_TextIndexJob &&
 		st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob {
@@ -561,7 +570,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
 			segID = st.GetTargetSegmentID()
 		}
-		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
+		if updateErr := st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, segID, st.GetTaskID(), result)); updateErr != nil {
 			mlog.Warn(ctx, "failed to update manifest after stats task",
 				mlog.FieldTaskID(st.GetTaskID()),
 				mlog.FieldSegmentID(segID),
@@ -588,14 +597,50 @@ func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID i
 				mlog.Bool("segmentMissing", current == nil))
 			return modPack.fail(errStatsResultDiscarded)
 		}
-		if result.GetBaseManifest() != "" && current.GetManifestPath() != result.GetBaseManifest() {
-			mlog.Info(ctx, "discard stale stats result",
+		// Only reject when the result carries a base that no longer matches. An
+		// EMPTY base is adopted (fail-open): it is either a birth commit (a
+		// freshly allocated sort target with no manifest yet) or a pre-CAS /
+		// rolling-upgrade worker that cannot report a base. Rejecting a baseless
+		// result would break sort/index adoption from older DataNodes without
+		// giving any real protection — a mixed-version cluster cannot fence what
+		// the old worker never sends, and in an all-new cluster a stats base is
+		// empty only for a legitimate sort birth. base-fencing across concurrent
+		// commits is enforced only where the worker does set a base.
+		base := result.GetBaseManifest()
+		resultManifest := result.GetManifest()
+		currentManifest := current.GetManifestPath()
+		reject := func(cause error) bool {
+			mlog.Info(ctx, "discard stale or illegitimate stats result",
 				mlog.FieldTaskID(taskID),
 				mlog.FieldSegmentID(segmentID),
-				mlog.String("baseManifest", result.GetBaseManifest()),
-				mlog.String("currentManifest", current.GetManifestPath()),
-				mlog.String("resultManifest", result.GetManifest()))
+				mlog.String("baseManifest", base),
+				mlog.String("currentManifest", currentManifest),
+				mlog.String("resultManifest", resultManifest),
+				mlog.Err(cause))
 			return modPack.fail(errStatsResultStale)
+		}
+		// Base fence (fail-open on an empty base for older-DataNode / sort-birth
+		// compatibility): a non-empty base that no longer matches the current
+		// manifest means the result was built on a manifest a concurrent commit has
+		// since superseded.
+		if base != "" && currentManifest != base {
+			return reject(nil)
+		}
+		// Successor fence: whenever the result actually MOVES the pointer of an
+		// already-materialized segment, it must be a legal, strictly-forward
+		// successor on the same base path — not a cross-segment pointer or a
+		// rollback. base==current alone is not enough, so this also guards a
+		// correct-base worker that emits a bogus result. A true birth (empty current
+		// manifest) or a stats-only result that does not move the pointer skips it.
+		if resultManifest != "" && currentManifest != "" && resultManifest != currentManifest {
+			cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
+			if err != nil || cmp <= 0 {
+				if err == nil {
+					err = merr.WrapErrServiceInternalMsg("stats result manifest %q does not advance the current manifest %q",
+						resultManifest, currentManifest)
+				}
+				return reject(err)
+			}
 		}
 
 		hasTextStats := len(result.GetTextStatsLogs()) > 0

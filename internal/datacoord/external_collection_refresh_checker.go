@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -254,6 +255,22 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 				func(latestJob *datapb.ExternalCollectionRefreshJob) error {
 					return c.applyJobInfo(c.ctx, latestJob)
 				})
+			if errors.Is(err, errExternalRefreshStaleManifest) {
+				// The apply raced a concurrent manifest commit. Do not finish or
+				// fail the job; rebuild its results on the current manifest by
+				// resetting the job's finished tasks to Init. The inspector
+				// re-dispatches them and the per-job timeout bounds the loop.
+				c.resetJobTasksForRetry(job.GetJobId(), err)
+				return
+			}
+			if errors.Is(err, errExternalRefreshNotReady) {
+				// A task is mid-retry (already reset by a concurrent stale-manifest
+				// rebuild). Nothing to do this cycle — the retry-owning path drives
+				// the job forward on a later tick.
+				mlog.Info(c.ctx, "external refresh apply not ready, tasks are mid-retry",
+					mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+				return
+			}
 			if err != nil {
 				mlog.Warn(c.ctx, "failed to apply external collection refresh result",
 					mlog.FieldJobID(job.GetJobId()),
@@ -325,6 +342,50 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), progress); err != nil {
 			mlog.Warn(c.ctx, "failed to update job progress",
 				mlog.FieldJobID(job.GetJobId()),
+				mlog.Err(err))
+		}
+	}
+}
+
+// resetJobTasksForRetry handles a job-apply that raced a concurrent manifest
+// commit (errExternalRefreshStaleManifest). It resets the job's finished tasks
+// to Init (clearing their stale result/progress) so the inspector re-dispatches
+// them and the worker rebuilds on the current manifest. The re-dispatch's
+// CreateTaskOnWorker drops any leftover worker-side task first, so the DataNode
+// re-runs instead of replaying the cached result. The reset is idempotent, so a
+// concurrent aggregator that hits the same conflict and resets again is
+// harmless. The job stays non-terminal; tryTimeoutJob is the ultimate bound if
+// the conflict never clears. This mirrors how the stats and compaction paths
+// self-heal a stale result by re-running the task instead of silently completing.
+func (c *externalCollectionRefreshChecker) resetJobTasksForRetry(jobID int64, cause error) {
+	// UpdateJobStateWithPreApply released the job lock before this runs, so a
+	// concurrent timeout may have already driven the job terminal. Resetting a
+	// finished task back to Init under a Failed/Finished job would leave the
+	// inspector with work for a terminal job — skip the whole reset in that case.
+	// The inspector's dispatch-time terminal-job guard is the hard backstop; this
+	// just avoids the needless churn (and log noise) at the source.
+	if job := c.refreshMeta.GetJob(jobID); job == nil ||
+		job.GetState() == indexpb.JobState_JobStateFinished ||
+		job.GetState() == indexpb.JobState_JobStateFailed {
+		mlog.Info(c.ctx, "skip stale-manifest task reset; owning job already terminal or gone",
+			mlog.FieldJobID(jobID))
+		return
+	}
+	mlog.Warn(c.ctx, "external refresh apply raced a concurrent manifest commit; resetting tasks to rebuild on the current manifest",
+		mlog.FieldJobID(jobID),
+		mlog.Err(cause))
+	tasks := c.refreshMeta.GetTasksByJobID(jobID)
+	for _, task := range tasks {
+		if task.GetState() != indexpb.JobState_JobStateFinished {
+			continue
+		}
+		// Fence to the task's current attempt version (freshly read here), so a
+		// concurrent supersede does not turn this into a stale reset.
+		if _, err := c.refreshMeta.ResetTaskForRetry(task.GetTaskId(), task.GetVersion(),
+			"manifest advanced during apply; rebuilding on the current manifest"); err != nil {
+			mlog.Warn(c.ctx, "failed to reset refresh task for stale-manifest rebuild",
+				mlog.FieldJobID(jobID),
+				mlog.Int64("taskID", task.GetTaskId()),
 				mlog.Err(err))
 		}
 	}
@@ -416,7 +477,8 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			if task.GetState() == indexpb.JobState_JobStateInit ||
 				task.GetState() == indexpb.JobState_JobStateRetry ||
 				task.GetState() == indexpb.JobState_JobStateInProgress {
-				_ = c.refreshMeta.UpdateTaskState(task.GetTaskId(), indexpb.JobState_JobStateFailed, "job timeout")
+				// Job-scoped write (timeout fails every attempt): unconditional (version 0).
+				_, _ = c.refreshMeta.UpdateTaskState(task.GetTaskId(), 0, indexpb.JobState_JobStateFailed, "job timeout")
 			}
 		}
 
