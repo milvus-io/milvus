@@ -180,11 +180,11 @@ func minRowTextBytes(schema *schemapb.CollectionSchema) (int64, error) {
 }
 
 // computeFileRowUpperBound returns a provable upper bound on the row count of one
-// ImportFile, capped at cap (cap <= 0 means uncapped). Parquet is exact (footer);
-// numpy/text divide Σ file size by a provable per-row byte floor; if that floor is
-// unknown (0), it falls back to Σ file size (>= 1 byte per row).
+// ImportFile. Parquet is exact (footer num_rows); numpy/text divide Σ file size by
+// a provable per-row byte floor, so their bound never exceeds the file size; if
+// that floor is unknown (0), it falls back to Σ file size (>= 1 byte per row).
 func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
-	schema *schemapb.CollectionSchema, file *internalpb.ImportFile, cap int64,
+	schema *schemapb.CollectionSchema, file *internalpb.ImportFile,
 ) (int64, error) {
 	ft, err := importutilv2.GetFileType(file)
 	if err != nil {
@@ -235,9 +235,6 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 	if bound < 0 {
 		bound = 0
 	}
-	if cap > 0 && bound > cap {
-		bound = cap
-	}
 	return bound, nil
 }
 
@@ -266,12 +263,12 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 // later file regrouping/reordering.
 func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile,
-	allocN func(int64) (int64, int64, error), clusterID uint64, cap int64,
+	allocN func(int64) (int64, int64, error), clusterID uint64,
 ) error {
 	bounds := make([]int64, len(files))
 	var total int64
 	for i, f := range files {
-		b, err := computeFileRowUpperBound(ctx, cm, schema, f, cap)
+		b, err := computeFileRowUpperBound(ctx, cm, schema, f)
 		if err != nil {
 			return err
 		}
