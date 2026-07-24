@@ -210,15 +210,26 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // Regular nullable ARRAY FieldData is dense: invalid rows retain
-            // their physical Array slot but contribute no logical elements.
-            auto* raw_data = static_cast<const Array*>(data->Data());
-            for (int64_t i = 0; i < num_rows; ++i) {
-                if (data->IsNullable() && !data->is_valid(i)) {
-                    array_lengths[offset + i] = 0;
-                    continue;
+            if (field_meta.has_element_schema()) {
+                auto* raw_data = static_cast<const ArrayValue*>(data->Data());
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    array_lengths[offset + i] =
+                        data->IsNullable() && !data->is_valid(i)
+                            ? 0
+                            : static_cast<int32_t>(raw_data[i].size());
                 }
-                array_lengths[offset + i] = raw_data[i].length();
+            } else {
+                // Regular nullable ARRAY FieldData is dense: invalid rows
+                // retain their physical Array slot but contribute no logical
+                // elements.
+                auto* raw_data = static_cast<const Array*>(data->Data());
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    if (data->IsNullable() && !data->is_valid(i)) {
+                        array_lengths[offset + i] = 0;
+                        continue;
+                    }
+                    array_lengths[offset + i] = raw_data[i].length();
+                }
             }
         }
         offset += num_rows;
@@ -287,6 +298,18 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
+        if (field_meta.has_element_schema()) {
+            const auto has_valid_data =
+                field_data.valid_data_size() == num_rows;
+            for (int64_t i = 0; i < num_rows; ++i) {
+                if (has_valid_data && !field_data.valid_data(i)) {
+                    array_lengths[i] = 0;
+                    continue;
+                }
+                array_lengths[i] = array_data.data(i).array_data().data_size();
+            }
+            return;
+        }
         auto element_type = field_meta.get_element_type();
 
         for (int i = 0; i < num_rows; ++i) {
@@ -894,6 +917,17 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             continue;
         }
 
+        if (!SystemProperty::Instance().IsSystem(field_id)) {
+            const auto& field_meta = (*schema_)[field_id];
+            if (field_meta.has_element_schema() &&
+                infos.storage_version < STORAGE_V2) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "nested ARRAY field {} is supported only by Storage "
+                          "V2/V3",
+                          field_id.get());
+            }
+        }
+
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
 
@@ -912,12 +946,18 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
+            std::optional<proto::schema::TypeSchema> array_type;
+            if (infos.storage_version >= STORAGE_V2 &&
+                field_meta.has_element_schema()) {
+                array_type = field_meta.get_array_type_schema();
+            }
             auto field_data =
                 storage::CreateFieldData(field_meta.get_data_type(),
                                          field_meta.get_element_type(),
                                          true,
                                          1,
-                                         lack_num);
+                                         lack_num,
+                                         std::move(array_type));
             field_data->FillFieldData(field_meta.default_value(), lack_num);
             channel->push(field_data);
         }
@@ -926,10 +966,17 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
+        std::optional<proto::schema::TypeSchema> array_type;
+        const auto& field_meta = (*schema_)[field_id];
+        if (infos.storage_version >= STORAGE_V2 &&
+            field_meta.has_element_schema()) {
+            array_type = field_meta.get_array_type_schema();
+        }
         auto load_future = pool.Submit(LoadFieldDatasFromRemote,
                                        insert_files,
                                        channel,
-                                       infos.load_priority);
+                                       infos.load_priority,
+                                       std::move(array_type));
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -1194,7 +1241,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     !IsSparseFloatVectorDataType(data_type)
                                 ? field.second.get_dim()
                                 : 1,
-                            batch_num_rows);
+                            batch_num_rows,
+                            field.second.has_element_schema()
+                                ? std::make_optional(
+                                      field.second.get_array_type_schema())
+                                : std::nullopt);
                         field_data->FillFieldData(table_info.table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
                     }
@@ -1296,6 +1347,12 @@ PinWrapper<SpanBase>
 SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
+    const auto& field_meta = (*schema_)[field_id];
+    if (field_meta.has_element_schema()) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "Span API does not support nested ARRAY field {}",
+                  field_id.get());
+    }
     return PinWrapper<SpanBase>(
         get_insert_record().get_span_base(field_id, chunk_id));
 }
@@ -2045,13 +2102,24 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) const {
+    if (auto vec_ptr =
+            dynamic_cast<const ConcurrentVector<ArrayValue>*>(&vec_raw);
+        vec_ptr != nullptr) {
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            if (offset != INVALID_SEG_OFFSET) {
+                dst->at(i) = vec_ptr->view_element(offset).output_data();
+            }
+        }
+        return;
+    }
+
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Array>*>(&vec_raw);
-    AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
-    auto& vec = *vec_ptr;
+    AssertInfo(vec_ptr, "ARRAY field has an unexpected growing vector type");
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec[offset].output_data();
+            dst->at(i) = (*vec_ptr)[offset].output_data();
         }
     }
 }
@@ -2220,6 +2288,12 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
+            if (field_meta.has_element_schema()) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "raw Array* API does not support nested ARRAY field "
+                          "{}; use protobuf retrieve output",
+                          field_id.get());
+            }
             auto vec = dynamic_cast<const ConcurrentVector<Array>*>(vec_ptr);
             AssertInfo(vec, "Pointer of vec_ptr is nullptr for ARRAY type");
             auto& src = *vec;
@@ -2971,7 +3045,10 @@ SegmentGrowingImpl::LoadColumnGroup(
                             !IsSparseFloatVectorDataType(data_type)
                         ? field.get_dim()
                         : 1,
-                    rows_to_load);
+                    rows_to_load,
+                    field.has_element_schema()
+                        ? std::make_optional(field.get_array_type_schema())
+                        : std::nullopt);
                 auto array = record_batch->column(i);
                 if (rows_to_load < batch_num_rows) {
                     array = array->Slice(0, rows_to_load);

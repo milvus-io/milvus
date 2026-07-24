@@ -38,17 +38,23 @@ PayloadReader::PayloadReader(const milvus::FieldDataPtr& fieldData)
     field_data_ = fieldData;
 }
 
-PayloadReader::PayloadReader(const uint8_t* data,
-                             int length,
-                             DataType data_type,
-                             bool nullable,
-                             bool is_field_data)
-    : column_type_(data_type), nullable_(nullable) {
-    init(data, length, is_field_data);
+PayloadReader::PayloadReader(
+    const uint8_t* data,
+    int length,
+    DataType data_type,
+    bool nullable,
+    bool is_field_data,
+    std::optional<proto::schema::TypeSchema> array_type)
+    : column_type_(data_type),
+      nullable_(nullable) {
+    init(data, length, is_field_data, std::move(array_type));
 }
 
 void
-PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
+PayloadReader::init(const uint8_t* data,
+                    int length,
+                    bool is_field_data,
+                    std::optional<proto::schema::TypeSchema> array_type) {
     if (column_type_ == DataType::NONE) {
         payload_buf_ = std::make_shared<BytesBuf>(data, length);
     } else {
@@ -160,8 +166,12 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
             auto total_num_rows = file_meta->num_rows();
 
             // Create FieldData, passing element_type for VectorArray
-            field_data_ = CreateFieldData(
-                column_type_, element_type, nullable_, dim_, total_num_rows);
+            field_data_ = CreateFieldData(column_type_,
+                                          element_type,
+                                          nullable_,
+                                          dim_,
+                                          total_num_rows,
+                                          std::move(array_type));
 
             for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
                      maybe_batch : *rb_reader) {

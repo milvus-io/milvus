@@ -25,6 +25,7 @@
 
 #include <oneapi/tbb/concurrent_queue.h>
 
+#include "common/ArrayValue.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/FastMem.h"
@@ -105,6 +106,56 @@ class FieldData<Array> : public FieldDataArrayImpl {
                        int64_t buffered_num_rows = 0)
         : FieldDataArrayImpl(data_type, nullable, buffered_num_rows) {
     }
+};
+
+template <>
+class FieldData<ArrayValue> : public FieldDataImpl<ArrayValue, true> {
+    using Base = FieldDataImpl<ArrayValue, true>;
+
+ public:
+    explicit FieldData(proto::schema::TypeSchema array_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldData(
+              std::make_shared<const proto::schema::TypeSchema>(
+                  std::move(array_type)),
+              nullable,
+              buffered_num_rows) {
+    }
+
+    explicit FieldData(
+        std::shared_ptr<const proto::schema::TypeSchema> array_type,
+        bool nullable,
+        int64_t buffered_num_rows = 0)
+        : Base(1, DataType::ARRAY, nullable, buffered_num_rows),
+          array_type_(std::move(array_type)) {
+        AssertInfo(array_type_ != nullptr,
+                   "nested ARRAY FieldData type must not be null");
+        ColumnarArrayChunk::ValidateArrayType(*array_type_);
+    }
+
+    using Base::FillFieldData;
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::Array> array) override;
+
+    void
+    FillFieldData(const std::optional<DefaultValueType> default_value,
+                  ssize_t element_count) override;
+
+    int64_t
+    DataSize() const override;
+
+    int64_t
+    DataSize(ssize_t offset) const override;
+
+    const proto::schema::TypeSchema&
+    get_array_type_schema() const {
+        return *array_type_;
+    }
+
+ private:
+    std::shared_ptr<const proto::schema::TypeSchema> array_type_;
 };
 
 template <>

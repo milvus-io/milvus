@@ -837,7 +837,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of vector")
 	})
 
-	t.Run("struct array field - nested array", func(t *testing.T) {
+	t.Run("struct array field - old-style nested element_type", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -863,7 +863,43 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nested array is not supported")
+		assert.Contains(t, err.Error(), "should be specified by element_schema")
+	})
+
+	t.Run("struct array field - nested array of vector rejected", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					Name: "struct_field",
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:       "nested_array_of_vector",
+							DataType:   schemapb.DataType_ArrayOfVector,
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							ElementSchema: &schemapb.TypeSchema{
+								DataType:    schemapb.DataType_ArrayOfVector,
+								ElementType: schemapb.DataType_FloatVector,
+								TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.MaxCapacityKey, Value: "10"},
+									{Key: common.DimKey, Value: "4"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nested ArrayOfVector is not supported")
 	})
 
 	t.Run("struct array field - invalid element type", func(t *testing.T) {

@@ -24,6 +24,7 @@ type Field struct {
 	IsFunctionOutput bool
 	DefaultValue     *schemapb.ValueField
 	ElementType      schemapb.DataType
+	ElementSchema    *schemapb.TypeSchema
 	Nullable         bool
 	ExternalField    string
 }
@@ -49,6 +50,7 @@ func (f *Field) Clone() *Field {
 		IsFunctionOutput: f.IsFunctionOutput,
 		DefaultValue:     f.DefaultValue,
 		ElementType:      f.ElementType,
+		ElementSchema:    cloneTypeSchema(f.ElementSchema),
 		Nullable:         f.Nullable,
 		ExternalField:    f.ExternalField,
 	}
@@ -81,9 +83,17 @@ func (f *Field) Equal(other Field) bool {
 		f.IsClusteringKey == other.IsClusteringKey &&
 		proto.Equal(f.DefaultValue, other.DefaultValue) &&
 		f.ElementType == other.ElementType &&
+		proto.Equal(f.ElementSchema, other.ElementSchema) &&
 		f.IsFunctionOutput == other.IsFunctionOutput &&
 		f.Nullable == other.Nullable &&
 		f.ExternalField == other.ExternalField
+}
+
+func cloneTypeSchema(schema *schemapb.TypeSchema) *schemapb.TypeSchema {
+	if schema == nil {
+		return nil
+	}
+	return proto.Clone(schema).(*schemapb.TypeSchema)
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -123,6 +133,7 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 		IsFunctionOutput: field.IsFunctionOutput,
 		DefaultValue:     proto.Clone(field.DefaultValue).(*schemapb.ValueField),
 		ElementType:      field.ElementType,
+		ElementSchema:    cloneTypeSchema(field.ElementSchema),
 		Nullable:         field.Nullable,
 		ExternalField:    field.ExternalField,
 	}
@@ -160,6 +171,7 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 		IsFunctionOutput: fieldSchema.IsFunctionOutput,
 		DefaultValue:     fieldSchema.DefaultValue,
 		ElementType:      fieldSchema.ElementType,
+		ElementSchema:    cloneTypeSchema(fieldSchema.ElementSchema),
 		Nullable:         fieldSchema.Nullable,
 		ExternalField:    fieldSchema.ExternalField,
 	}

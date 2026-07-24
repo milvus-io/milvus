@@ -184,4 +184,87 @@ VectorBase::set_data_raw(ssize_t element_offset,
     }
 }
 
+void
+ConcurrentVector<ArrayValue>::set_data_raw(ssize_t element_offset,
+                                           ssize_t element_count,
+                                           const DataArray* data,
+                                           const FieldMeta& field_meta) {
+    const auto& array_data = FIELD_DATA(data, array);
+    std::call_once(array_type_once_, [&] {
+        array_type_ = std::make_shared<const proto::schema::TypeSchema>(
+            field_meta.get_array_type_schema());
+    });
+
+    if (!is_mmap()) {
+        std::vector<ArrayValue> data_raw;
+        data_raw.reserve(element_count);
+        for (ssize_t i = 0; i < element_count; ++i) {
+            const auto& row = array_data.Get(static_cast<int>(i));
+            data_raw.emplace_back(ArrayValue(row, array_type_));
+        }
+        return Base::set_data_raw(
+            element_offset, data_raw.data(), element_count);
+    }
+
+    std::vector<const ScalarFieldProto*> rows;
+    rows.reserve(element_count);
+    for (ssize_t i = 0; i < element_count; ++i) {
+        rows.push_back(&array_data.Get(static_cast<int>(i)));
+    }
+
+    set_mmap_proto_rows(
+        element_offset,
+        std::span<const ScalarFieldProto* const>(rows.data(), rows.size()),
+        field_meta.is_nullable());
+}
+
+void
+ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
+    ssize_t element_offset,
+    std::span<const ScalarFieldProto* const> rows,
+    bool nullable) {
+    if (rows.empty()) {
+        return;
+    }
+
+    const auto element_count = static_cast<ssize_t>(rows.size());
+    const auto end_offset = element_offset + element_count;
+
+    int64_t chunk_num;
+    int64_t allocation_chunk_size;
+    if (size_per_chunk_ == MAX_ROW_COUNT) {
+        chunk_num = 1;
+        allocation_chunk_size = end_offset;
+    } else {
+        chunk_num = upper_div(end_offset, size_per_chunk_);
+        allocation_chunk_size = size_per_chunk_;
+    }
+    chunks_ptr_->emplace_to_at_least(chunk_num, allocation_chunk_size);
+
+    using MmapArrayChunkVector =
+        ThreadSafeChunkVector<ArrayValue,
+                              VariableLengthChunk<ArrayValue>,
+                              true>;
+    auto* mmap_chunks = static_cast<MmapArrayChunkVector*>(chunks_ptr_.get());
+
+    ssize_t current_offset = element_offset;
+    size_t source_offset = 0;
+    while (source_offset < rows.size()) {
+        const auto chunk_id = current_offset / size_per_chunk_;
+        const auto chunk_offset = current_offset % size_per_chunk_;
+        const auto remaining_in_chunk = size_per_chunk_ - chunk_offset;
+        const auto remaining_rows =
+            static_cast<ssize_t>(rows.size() - source_offset);
+        const auto copy_count = std::min(remaining_in_chunk, remaining_rows);
+        mmap_chunks->copy_array_rows_to_chunk(
+            chunk_id,
+            static_cast<size_t>(chunk_offset),
+            rows.subspan(source_offset, static_cast<size_t>(copy_count)),
+            *array_type_,
+            nullable);
+        current_offset += copy_count;
+        source_offset += static_cast<size_t>(copy_count);
+    }
+}
+
 }  // namespace milvus::segcore

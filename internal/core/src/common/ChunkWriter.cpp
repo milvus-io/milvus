@@ -11,9 +11,12 @@
 
 #include "common/ChunkWriter.h"
 
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -24,6 +27,9 @@
 #include "arrow/record_batch.h"
 #include "arrow/result.h"
 #include "common/Array.h"
+#include "common/ArrayChunkBuilder.h"
+#include "common/ArrayValue.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -34,8 +40,570 @@
 #include "simdjson/base.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileWriter.h"
+#include "storage/MmapManager.h"
 
 namespace milvus {
+namespace {
+
+struct ColumnarArrayBuildNode {
+    ArrayOffsets offsets;
+    // Serialized with the existing Chunk/Arrow convention: one bit per row,
+    // where 1 means valid and 0 means null.
+    std::vector<uint8_t> validity_bitmap;
+    std::unique_ptr<ColumnarArrayBuildNode> array_child;
+    DataType leaf_type{DataType::NONE};
+    std::vector<char> fixed_data;
+    std::vector<uint32_t> string_offsets;
+    std::string string_data;
+};
+
+class BorrowedArrayChunkTarget final : public ChunkTarget {
+ public:
+    BorrowedArrayChunkTarget(char* data, size_t capacity)
+        : data_(data), capacity_(capacity) {
+    }
+
+    void
+    write(const void* data, size_t size) override {
+        AssertInfo(size <= capacity_ - position_,
+                   "borrowed array chunk target capacity exceeded");
+        if (size != 0) {
+            std::memcpy(data_ + position_, data, size);
+        }
+        position_ += size;
+    }
+
+    char*
+    release() override {
+        return data_;
+    }
+
+    size_t
+    tell() override {
+        return position_;
+    }
+
+ private:
+    char* data_;
+    size_t capacity_;
+    size_t position_{0};
+};
+
+size_t
+CheckedAdd(size_t left, size_t right, std::string_view description) {
+    AssertInfo(left <= std::numeric_limits<size_t>::max() - right,
+               "{} size overflow: {} + {}",
+               description,
+               left,
+               right);
+    return left + right;
+}
+
+size_t
+CheckedMultiply(size_t left, size_t right, std::string_view description) {
+    AssertInfo(right == 0 || left <= std::numeric_limits<size_t>::max() / right,
+               "{} size overflow: {} * {}",
+               description,
+               left,
+               right);
+    return left * right;
+}
+
+DataType
+GetColumnarArrayElementType(const proto::schema::TypeSchema& type) {
+    return type.has_element_schema() ? DataType::ARRAY
+                                     : DataType(type.element_type());
+}
+
+bool
+IsSupportedColumnarArrayLeaf(DataType data_type) {
+    switch (data_type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void
+ValidateColumnarArrayType(const proto::schema::TypeSchema& type) {
+    AssertInfo(DataType(type.data_type()) == DataType::ARRAY,
+               "columnar array type must be ARRAY, got {}",
+               type.data_type());
+    if (type.has_element_schema()) {
+        AssertInfo(type.element_type() == proto::schema::DataType::None,
+                   "nested columnar array type must not set element_type");
+        AssertInfo(
+            DataType(type.element_schema().data_type()) == DataType::ARRAY,
+            "nested columnar array element_schema must be ARRAY, got {}",
+            type.element_schema().data_type());
+        ValidateColumnarArrayType(type.element_schema());
+        return;
+    }
+
+    const auto element_type = DataType(type.element_type());
+    AssertInfo(element_type != DataType::NONE,
+               "leaf columnar array type must set element_type");
+    AssertInfo(element_type != DataType::ARRAY,
+               "nested columnar array type must use element_schema");
+    AssertInfo(IsSupportedColumnarArrayLeaf(element_type),
+               "unsupported columnar array leaf type {}",
+               element_type);
+}
+
+template <typename T>
+void
+AppendFixedValue(std::vector<char>& data, T value) {
+    const auto old_size = data.size();
+    data.resize(CheckedAdd(old_size, sizeof(T), "fixed array leaf"));
+    std::memcpy(data.data() + old_size, &value, sizeof(T));
+}
+
+size_t
+AppendLeafRow(ColumnarArrayBuildNode& node,
+              const ScalarFieldProto& row,
+              DataType data_type) {
+    if (row.data_case() == ScalarFieldProto::DATA_NOT_SET) {
+        return 0;
+    }
+
+    switch (data_type) {
+        case DataType::BOOL: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kBoolData,
+                       "expected bool array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            for (auto value : row.bool_data().data()) {
+                AppendFixedValue<uint8_t>(node.fixed_data, value ? 1 : 0);
+            }
+            return row.bool_data().data_size();
+        }
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kIntData,
+                       "expected int array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            for (auto value : row.int_data().data()) {
+                AppendFixedValue<int32_t>(node.fixed_data, value);
+            }
+            return row.int_data().data_size();
+        }
+        case DataType::INT64: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kLongData,
+                       "expected long array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            for (auto value : row.long_data().data()) {
+                AppendFixedValue<int64_t>(node.fixed_data, value);
+            }
+            return row.long_data().data_size();
+        }
+        case DataType::FLOAT: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kFloatData,
+                       "expected float array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            for (auto value : row.float_data().data()) {
+                AppendFixedValue<float>(node.fixed_data, value);
+            }
+            return row.float_data().data_size();
+        }
+        case DataType::DOUBLE: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kDoubleData,
+                       "expected double array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            for (auto value : row.double_data().data()) {
+                AppendFixedValue<double>(node.fixed_data, value);
+            }
+            return row.double_data().data_size();
+        }
+        case DataType::STRING:
+        case DataType::VARCHAR: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kStringData,
+                       "expected string array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            for (const auto& value : row.string_data().data()) {
+                node.string_data.append(value);
+                AssertInfo(
+                    node.string_data.size() <=
+                        static_cast<size_t>(
+                            std::numeric_limits<uint32_t>::max()),
+                    "columnar array string leaf exceeds uint32 offset range");
+                node.string_offsets.push_back(
+                    static_cast<uint32_t>(node.string_data.size()));
+            }
+            return row.string_data().data_size();
+        }
+        default:
+            ThrowInfo(Unsupported,
+                      "unsupported columnar array leaf type {}",
+                      data_type);
+    }
+}
+
+std::unique_ptr<ColumnarArrayBuildNode>
+BuildColumnarArrayNodeImpl(const std::vector<const ScalarFieldProto*>& rows,
+                           const proto::schema::TypeSchema& type) {
+    auto node = std::make_unique<ColumnarArrayBuildNode>();
+    node->validity_bitmap.resize(rows.size() / 8 + (rows.size() % 8 != 0), 0);
+    node->offsets.reserve(rows.size() + 1);
+    node->offsets.push_back(0);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i]->data_case() != ScalarFieldProto::DATA_NOT_SET) {
+            node->validity_bitmap[i >> 3] |=
+                static_cast<uint8_t>(1U << (i & 0x07));
+        }
+    }
+
+    if (type.has_element_schema()) {
+        std::vector<const ScalarFieldProto*> child_rows;
+        for (const auto* row : rows) {
+            if (row->data_case() == ScalarFieldProto::DATA_NOT_SET) {
+                node->offsets.push_back(child_rows.size());
+                continue;
+            }
+
+            AssertInfo(row->data_case() == ScalarFieldProto::kArrayData,
+                       "expected nested array proto row, got case {}",
+                       static_cast<int>(row->data_case()));
+            const auto& array_data = row->array_data();
+            const auto expected_element_type =
+                static_cast<proto::schema::DataType>(
+                    GetColumnarArrayElementType(type.element_schema()));
+            if (array_data.element_type() != proto::schema::DataType::None) {
+                AssertInfo(
+                    array_data.element_type() == expected_element_type,
+                    "nested array proto element type must be {}, got {}",
+                    expected_element_type,
+                    array_data.element_type());
+            }
+            for (const auto& child_row : array_data.data()) {
+                child_rows.push_back(&child_row);
+            }
+            node->offsets.push_back(child_rows.size());
+        }
+        node->array_child =
+            BuildColumnarArrayNodeImpl(child_rows, type.element_schema());
+        return node;
+    }
+
+    node->leaf_type = GetColumnarArrayElementType(type);
+    if (IsStringDataType(node->leaf_type)) {
+        node->string_offsets.push_back(0);
+    }
+
+    size_t child_count = 0;
+    for (const auto* row : rows) {
+        child_count = CheckedAdd(child_count,
+                                 AppendLeafRow(*node, *row, node->leaf_type),
+                                 "columnar array child count");
+        node->offsets.push_back(child_count);
+    }
+
+    if (IsStringDataType(node->leaf_type)) {
+        const auto offsets_bytes = CheckedMultiply(
+            node->string_offsets.size(), sizeof(uint32_t), "string offsets");
+        AssertInfo(offsets_bytes <= static_cast<size_t>(
+                                        std::numeric_limits<uint32_t>::max()),
+                   "columnar array string offsets exceed uint32 range");
+        for (auto& offset : node->string_offsets) {
+            AssertInfo(
+                offset <= std::numeric_limits<uint32_t>::max() - offsets_bytes,
+                "columnar array string offset exceeds uint32 range");
+            offset += static_cast<uint32_t>(offsets_bytes);
+        }
+    }
+
+    return node;
+}
+
+std::unique_ptr<ColumnarArrayBuildNode>
+BuildColumnarArrayNode(const std::vector<const ScalarFieldProto*>& rows,
+                       const proto::schema::TypeSchema& type) {
+    ValidateColumnarArrayType(type);
+    return BuildColumnarArrayNodeImpl(rows, type);
+}
+
+size_t
+ColumnarArrayNodeSize(const ColumnarArrayBuildNode& node);
+
+void
+WriteColumnarArrayNode(const ColumnarArrayBuildNode& node,
+                       const std::shared_ptr<ChunkTarget>& target);
+
+void
+WriteColumnarArrayAlignment(int64_t row_count,
+                            bool nullable,
+                            const std::shared_ptr<ChunkTarget>& target);
+
+size_t
+ColumnarArrayChildSize(const ColumnarArrayBuildNode& node) {
+    if (node.array_child != nullptr) {
+        return ColumnarArrayNodeSize(*node.array_child);
+    }
+    if (IsStringDataType(node.leaf_type)) {
+        const auto offsets_size = CheckedMultiply(
+            node.string_offsets.size(), sizeof(uint32_t), "string offsets");
+        return CheckedAdd(offsets_size, node.string_data.size(), "array child");
+    }
+    return node.fixed_data.size();
+}
+
+size_t
+ColumnarArrayNodeSize(const ColumnarArrayBuildNode& node) {
+    const auto row_count = node.offsets.size() - 1;
+    AssertInfo(
+        row_count <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+        "nested array row count {} exceeds int64 range",
+        row_count);
+    const auto prefix_size = ColumnarArrayChunk::RootDataOffset(
+        static_cast<int64_t>(row_count), true);
+    const auto offsets_size = CheckedMultiply(
+        node.offsets.size(), sizeof(ArrayOffset), "array offsets");
+    auto size = CheckedAdd(prefix_size, offsets_size, "array node");
+    return CheckedAdd(size, ColumnarArrayChildSize(node), "array node");
+}
+
+void
+WriteColumnarArrayChild(const ColumnarArrayBuildNode& node,
+                        const std::shared_ptr<ChunkTarget>& target) {
+    if (node.array_child != nullptr) {
+        WriteColumnarArrayNode(*node.array_child, target);
+        return;
+    }
+    if (IsStringDataType(node.leaf_type)) {
+        target->write(node.string_offsets.data(),
+                      node.string_offsets.size() * sizeof(uint32_t));
+        if (!node.string_data.empty()) {
+            target->write(node.string_data.data(), node.string_data.size());
+        }
+        return;
+    }
+    if (!node.fixed_data.empty()) {
+        target->write(node.fixed_data.data(), node.fixed_data.size());
+    }
+}
+
+void
+WriteColumnarArrayNode(const ColumnarArrayBuildNode& node,
+                       const std::shared_ptr<ChunkTarget>& target) {
+    const auto row_count = node.offsets.size() - 1;
+    target->write(node.validity_bitmap.data(), node.validity_bitmap.size());
+    WriteColumnarArrayAlignment(static_cast<int64_t>(row_count), true, target);
+    target->write(node.offsets.data(),
+                  node.offsets.size() * sizeof(ArrayOffset));
+    WriteColumnarArrayChild(node, target);
+}
+
+void
+WriteColumnarArrayRootNode(const ColumnarArrayBuildNode& node,
+                           const std::shared_ptr<ChunkTarget>& target) {
+    target->write(node.offsets.data(),
+                  node.offsets.size() * sizeof(ArrayOffset));
+    WriteColumnarArrayChild(node, target);
+}
+
+size_t
+ColumnarArraySerializedSize(int64_t row_count,
+                            bool nullable,
+                            const ColumnarArrayBuildNode& root) {
+    auto size = ColumnarArrayChunk::RootDataOffset(row_count, nullable);
+    const auto offsets_size = CheckedMultiply(
+        root.offsets.size(), sizeof(ArrayOffset), "root array offsets");
+    size = CheckedAdd(size, offsets_size, "columnar array");
+    size = CheckedAdd(size, ColumnarArrayChildSize(root), "columnar array");
+    return CheckedAdd(size, MMAP_ARRAY_PADDING, "columnar array");
+}
+
+void
+WriteColumnarArrayAlignment(int64_t row_count,
+                            bool nullable,
+                            const std::shared_ptr<ChunkTarget>& target) {
+    const auto null_bitmap_bytes =
+        nullable ? (static_cast<size_t>(row_count) + 7) / 8 : 0;
+    const auto root_data_offset =
+        ColumnarArrayChunk::RootDataOffset(row_count, nullable);
+    const auto alignment_bytes = root_data_offset - null_bitmap_bytes;
+    if (alignment_bytes != 0) {
+        std::array<char, alignof(ArrayOffset)> zeros{};
+        target->write(zeros.data(), alignment_bytes);
+    }
+}
+
+}  // namespace
+
+std::shared_ptr<const ColumnarArrayChunk>
+CreateMmapColumnarArrayChunkFromProtoRows(
+    std::span<const ScalarFieldProto* const> rows,
+    const proto::schema::TypeSchema& type,
+    bool nullable,
+    const storage::MmapChunkDescriptorPtr& mmap_descriptor) {
+    AssertInfo(
+        rows.size() <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+        "nested ARRAY row count {} exceeds int64 range",
+        rows.size());
+
+    std::vector<const ScalarFieldProto*> row_ptrs(rows.begin(), rows.end());
+    if (!nullable) {
+        for (const auto* row : row_ptrs) {
+            AssertInfo(row->data_case() != ScalarFieldProto::DATA_NOT_SET,
+                       "non-nullable nested ARRAY row has no payload");
+        }
+    }
+
+    auto root = BuildColumnarArrayNode(row_ptrs, type);
+    const auto row_count = static_cast<int64_t>(rows.size());
+    const auto serialized_size =
+        ColumnarArraySerializedSize(row_count, nullable, *root);
+
+    auto mmap_manager =
+        storage::MmapManager::GetInstance().GetMmapChunkManager();
+    auto* data = static_cast<char*>(
+        mmap_manager->Allocate(mmap_descriptor, serialized_size));
+    AssertInfo(data != nullptr,
+               "failed to allocate {} bytes for nested ARRAY mmap block",
+               serialized_size);
+
+    auto target =
+        std::make_shared<BorrowedArrayChunkTarget>(data, serialized_size);
+    if (nullable) {
+        target->write(root->validity_bitmap.data(),
+                      root->validity_bitmap.size());
+    }
+    WriteColumnarArrayAlignment(row_count, nullable, target);
+    WriteColumnarArrayRootNode(*root, target);
+    char padding[MMAP_ARRAY_PADDING] = {};
+    target->write(padding, MMAP_ARRAY_PADDING);
+
+    return std::make_shared<const ColumnarArrayChunk>(
+        row_count, data, serialized_size, type, nullable, nullptr);
+}
+
+struct ColumnarArrayChunkWriter::Impl {
+    std::vector<ScalarFieldProto> rows;
+    std::unique_ptr<ColumnarArrayBuildNode> root;
+    size_t serialized_size{0};
+};
+
+ColumnarArrayChunkWriter::ColumnarArrayChunkWriter(
+    proto::schema::TypeSchema type, bool nullable)
+    : ChunkWriterBase(nullable),
+      type_(std::move(type)),
+      impl_(std::make_unique<Impl>()) {
+    ValidateColumnarArrayType(type_);
+}
+
+ColumnarArrayChunkWriter::~ColumnarArrayChunkWriter() = default;
+
+std::pair<size_t, size_t>
+ColumnarArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    row_nums_ = 0;
+    for (const auto& data : array_vec) {
+        row_nums_ =
+            CheckedAdd(row_nums_, data->length(), "columnar array row count");
+    }
+    AssertInfo(
+        row_nums_ <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+        "columnar array row count {} exceeds int64 range",
+        row_nums_);
+
+    impl_->rows.clear();
+    impl_->rows.reserve(row_nums_);
+    for (const auto& data : array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "ColumnarArrayChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
+        AssertInfo(nullable_ || array->null_count() == 0,
+                   "non-nullable nested ARRAY column contains {} null rows",
+                   array->null_count());
+        for (int64_t i = 0; i < array->length(); ++i) {
+            ScalarFieldProto row;
+            if (!array->IsNull(i)) {
+                const auto value = array->GetView(i);
+                AssertInfo(row.ParseFromArray(value.data(), value.size()),
+                           "failed to parse columnar array row {}",
+                           i);
+                AssertInfo(
+                    row.data_case() != ScalarFieldProto::DATA_NOT_SET,
+                    "valid columnar array row {} has no ScalarField payload",
+                    i);
+            }
+            impl_->rows.emplace_back(std::move(row));
+        }
+    }
+
+    std::vector<const ScalarFieldProto*> rows;
+    rows.reserve(impl_->rows.size());
+    for (const auto& row : impl_->rows) {
+        rows.push_back(&row);
+    }
+    impl_->root = BuildColumnarArrayNode(rows, type_);
+    impl_->serialized_size = ColumnarArraySerializedSize(
+        static_cast<int64_t>(row_nums_), nullable_, *impl_->root);
+    return {impl_->serialized_size, row_nums_};
+}
+
+void
+ColumnarArrayChunkWriter::write_to_target(
+    const arrow::ArrayVector& array_vec,
+    const std::shared_ptr<ChunkTarget>& target) {
+    if (nullable_) {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        null_bitmaps.reserve(array_vec.size());
+        for (const auto& data : array_vec) {
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
+        }
+        write_null_bit_maps(null_bitmaps, target);
+    }
+
+    WriteColumnarArrayAlignment(
+        static_cast<int64_t>(row_nums_), nullable_, target);
+    WriteColumnarArrayRootNode(*impl_->root, target);
+    char padding[MMAP_ARRAY_PADDING] = {};
+    target->write(padding, MMAP_ARRAY_PADDING);
+
+    impl_->root.reset();
+    impl_->rows.clear();
+    impl_->rows.shrink_to_fit();
+}
+
+std::shared_ptr<const ArrayValueStorage>
+CreateArrayValueStorageFromProto(const ScalarFieldProto& row,
+                                 std::shared_ptr<const proto::schema::TypeSchema>
+                                     type) {
+    AssertInfo(type != nullptr, "ArrayValue type must not be null");
+    auto root = BuildColumnarArrayNode({&row}, *type);
+
+    auto storage = std::make_shared<ArrayValueStorage>();
+    storage->type = std::move(type);
+    storage->length = root->offsets.back();
+    storage->is_null = row.data_case() == ScalarFieldProto::DATA_NOT_SET;
+
+    const auto child_size = ColumnarArrayChildSize(*root);
+    const auto storage_size =
+        CheckedAdd(child_size, MMAP_ARRAY_PADDING, "ArrayValue storage");
+    storage->buffer.resize(storage_size);
+    auto target = std::make_shared<BorrowedArrayChunkTarget>(
+        storage->buffer.data(), storage->buffer.size());
+    WriteColumnarArrayChild(*root, target);
+    char padding[MMAP_ARRAY_PADDING] = {};
+    target->write(padding, MMAP_ARRAY_PADDING);
+
+    auto* data = target->release();
+    storage->child = array_detail::CreateColumnarArrayChild(
+        storage->type, storage->length, data, child_size, nullptr);
+    return storage;
+}
+
 namespace {
 
 size_t
@@ -603,6 +1171,10 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<GeometryChunkWriter>(nullable);
         }
         case milvus::DataType::ARRAY:
+            if (field_meta.has_element_schema()) {
+                return std::make_shared<ColumnarArrayChunkWriter>(
+                    field_meta.get_array_type_schema(), nullable);
+            }
             return std::make_shared<ArrayChunkWriter>(
                 field_meta.get_element_type(), nullable);
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
@@ -744,6 +1316,15 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
+            if (field_meta.has_element_schema()) {
+                return std::make_unique<ColumnarArrayChunk>(
+                    row_nums,
+                    data,
+                    size,
+                    field_meta.get_array_type_schema(),
+                    nullable,
+                    chunk_mmap_guard);
+            }
             return std::make_unique<ArrayChunk>(row_nums,
                                                 data,
                                                 size,

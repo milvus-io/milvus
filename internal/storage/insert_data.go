@@ -2028,27 +2028,49 @@ func (data *StringFieldData) GetMemorySize() int {
 	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
+func getArrayScalarFieldMemorySize(data *schemapb.ScalarField, elementType schemapb.DataType) int {
+	if data == nil {
+		return 0
+	}
+
+	// Array rows are stored as recursively nested ScalarField_ArrayData values.
+	// Inspect the payload before elementType so nested arrays still work when the
+	// top-level FieldSchema uses element_schema and therefore leaves element_type
+	// unset.
+	if arrayData := data.GetArrayData(); arrayData != nil {
+		var size int
+		for _, element := range arrayData.GetData() {
+			size += getArrayScalarFieldMemorySize(element, arrayData.GetElementType())
+		}
+		return size
+	}
+
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return binary.Size(data.GetBoolData().GetData())
+	case schemapb.DataType_Int8:
+		return binary.Size(data.GetIntData().GetData()) / 4
+	case schemapb.DataType_Int16:
+		return binary.Size(data.GetIntData().GetData()) / 2
+	case schemapb.DataType_Int32:
+		return binary.Size(data.GetIntData().GetData())
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		return binary.Size(data.GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return binary.Size(data.GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return binary.Size(data.GetDoubleData().GetData())
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return (&StringFieldData{Data: data.GetStringData().GetData()}).GetMemorySize()
+	default:
+		return 0
+	}
+}
+
 func (data *ArrayFieldData) GetMemorySize() int {
 	var size int
 	for _, val := range data.Data {
-		switch data.ElementType {
-		case schemapb.DataType_Bool:
-			size += binary.Size(val.GetBoolData().GetData())
-		case schemapb.DataType_Int8:
-			size += binary.Size(val.GetIntData().GetData()) / 4
-		case schemapb.DataType_Int16:
-			size += binary.Size(val.GetIntData().GetData()) / 2
-		case schemapb.DataType_Int32:
-			size += binary.Size(val.GetIntData().GetData())
-		case schemapb.DataType_Int64:
-			size += binary.Size(val.GetLongData().GetData())
-		case schemapb.DataType_Float:
-			size += binary.Size(val.GetFloatData().GetData())
-		case schemapb.DataType_Double:
-			size += binary.Size(val.GetDoubleData().GetData())
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			size += (&StringFieldData{Data: val.GetStringData().GetData()}).GetMemorySize()
-		}
+		size += getArrayScalarFieldMemorySize(val, data.ElementType)
 	}
 	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
@@ -2116,25 +2138,7 @@ func (data *StringFieldData) GetRowSize(i int) int   { return len(data.Data[i]) 
 func (data *JSONFieldData) GetRowSize(i int) int     { return len(data.Data[i]) + 16 }
 func (data *GeometryFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 16 }
 func (data *ArrayFieldData) GetRowSize(i int) int {
-	switch data.ElementType {
-	case schemapb.DataType_Bool:
-		return binary.Size(data.Data[i].GetBoolData().GetData())
-	case schemapb.DataType_Int8:
-		return binary.Size(data.Data[i].GetIntData().GetData()) / 4
-	case schemapb.DataType_Int16:
-		return binary.Size(data.Data[i].GetIntData().GetData()) / 2
-	case schemapb.DataType_Int32:
-		return binary.Size(data.Data[i].GetIntData().GetData())
-	case schemapb.DataType_Int64:
-		return binary.Size(data.Data[i].GetLongData().GetData())
-	case schemapb.DataType_Float:
-		return binary.Size(data.Data[i].GetFloatData().GetData())
-	case schemapb.DataType_Double:
-		return binary.Size(data.Data[i].GetDoubleData().GetData())
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return (&StringFieldData{Data: data.Data[i].GetStringData().GetData()}).GetMemorySize()
-	}
-	return 0
+	return getArrayScalarFieldMemorySize(data.Data[i], data.ElementType)
 }
 
 func (data *SparseFloatVectorFieldData) GetRowSize(i int) int {

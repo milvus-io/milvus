@@ -1243,7 +1243,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               ChunkedColumnInterface* column,
                               const int64_t* seg_offsets,
                               int64_t count,
-                              google::protobuf::RepeatedPtrField<T>* dst);
+                              google::protobuf::RepeatedPtrField<T>* dst,
+                              bool nested_array);
 
     template <typename T>
     static void

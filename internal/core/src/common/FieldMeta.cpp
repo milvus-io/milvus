@@ -91,6 +91,9 @@ FieldMeta::ToProto() const {
     if (element_type_ != DataType::NONE) {
         proto.set_element_type(ToProtoDataType(element_type_));
     }
+    if (element_schema_.has_value()) {
+        *proto.mutable_element_schema() = *element_schema_;
+    }
 
     auto add_type_param = [&proto](const std::string& key,
                                    const std::string& value) {
@@ -273,6 +276,10 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     }
 
     if (IsArrayDataType(data_type)) {
+        auto element_schema =
+            schema_proto.has_element_schema()
+                ? std::make_optional(schema_proto.element_schema())
+                : std::nullopt;
         return FieldMeta{name,
                          field_id,
                          data_type,
@@ -280,7 +287,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          nullable,
                          default_value,
                          external_field_mapping,
-                         local_format()};
+                         local_format(),
+                         std::move(element_schema)};
     }
 
     return FieldMeta{name,
