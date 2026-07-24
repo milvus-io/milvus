@@ -79,7 +79,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 		{Key: "timeout", Value: "invalid_timeout_format"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := server.validateImportRequest(ctx, files, options, nil)
 
 	s.Error(err)
 	s.Contains(err.Error(), "timeout")
@@ -104,7 +104,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := server.validateImportRequest(ctx, files, options, nil)
 
 	s.Error(err)
 	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
@@ -138,7 +138,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := server.validateImportRequest(ctx, files, options, nil)
 
 	s.Error(err)
 	s.Contains(err.Error(), "balancer not available")
@@ -183,7 +183,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := server.validateImportRequest(ctx, files, options, nil)
 
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrOperationNotSupported))
@@ -229,7 +229,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 
 	err := server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
 		{Key: "timeout", Value: "300s"},
-	})
+	}, nil)
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "auto_commit=true")
@@ -237,8 +237,67 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 	err = server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
 		{Key: "timeout", Value: "300s"},
 		{Key: importutilv2.AutoCommitKey, Value: "false"},
-	})
+	}, nil)
 	s.NoError(err)
+}
+
+func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRejectsAutoIDSchema() {
+	ctx := context.Background()
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key)
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+					Clusters: []*commonpb.MilvusCluster{
+						{ClusterId: "cluster1"},
+						{ClusterId: "cluster2"},
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+		{Key: importutilv2.AutoCommitKey, Value: "false"},
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "id",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				AutoID:       true,
+			},
+		},
+	}
+
+	err := server.validateImportRequest(ctx, files, options, schema)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
+	s.Contains(err.Error(), "autoID")
 }
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput() {
@@ -274,7 +333,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := server.validateImportRequest(ctx, files, options, nil)
 
 	s.NoError(err)
 }
@@ -626,6 +685,17 @@ func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAs
 	// Ensure the function body is long enough for mockey to patch
 	result := &channel.WatchChannelAssignmentsCallbackParam{}
 	return result, nil
+}
+
+func (m *mockBalancerImpl) WatchChannelAssignments(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+	assignment, err := m.GetLatestChannelAssignment()
+	if err != nil {
+		return err
+	}
+	if cb != nil && assignment != nil {
+		cb(*assignment)
+	}
+	return nil
 }
 
 // mockBroadcastAPIImpl is a mock implementation for broadcaster.BroadcastAPI interface
