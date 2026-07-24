@@ -800,7 +800,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool {
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
-		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
+		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
 			if len(index.IndexFileKeys) == 0 {
@@ -811,17 +811,17 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 
-			var currentEngineVersion int32
+			var resolvedEngineVersion int32
 			var segmentIndexVersion int32
 			if isVectorIndex {
-				currentEngineVersion = t.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+				resolvedEngineVersion = t.indexEngineVersionManager.ResolveVecIndexVersion()
 				segmentIndexVersion = index.CurrentIndexVersion
 			} else {
-				currentEngineVersion = t.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion()
+				resolvedEngineVersion = t.indexEngineVersionManager.ResolveScalarIndexVersion()
 				segmentIndexVersion = index.CurrentScalarIndexVersion
 			}
 
-			if segmentIndexVersion < currentEngineVersion {
+			if segmentIndexVersion < resolvedEngineVersion {
 				mlog.Info(context.TODO(), "index version is too old, trigger compaction",
 					mlog.FieldSegmentID(segment.ID),
 					mlog.FieldIndexID(index.IndexID),
@@ -829,7 +829,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 					mlog.Bool("isVectorIndex", isVectorIndex),
 					mlog.Strings("indexFileKeys", index.IndexFileKeys),
 					mlog.Int32("segmentIndexVersion", segmentIndexVersion),
-					mlog.Int32("currentEngineVersion", currentEngineVersion))
+					mlog.Int32("resolvedEngineVersion", resolvedEngineVersion))
 				return true
 			}
 		}

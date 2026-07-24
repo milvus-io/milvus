@@ -3439,8 +3439,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
 
 		mockVM := NewMockVersionManager(t)
-		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
@@ -3463,8 +3462,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
 
 		mockVM := NewMockVersionManager(t)
-		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
