@@ -423,6 +423,14 @@ func (t *searchTask) initSearchAggregation() error {
 		return merr.WrapErrParameterInvalidMsg("highlighter and search_aggregation cannot be used simultaneously")
 	}
 
+	isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, t.request.GetSearchParams())
+	isIterator := isIteratorStr == "True" || isIteratorStr == "true"
+	isIteratorV2Str, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterV2Key, t.request.GetSearchParams())
+	isIteratorV2, _ := strconv.ParseBool(isIteratorV2Str)
+	if isIterator || isIteratorV2 {
+		return merr.WrapErrParameterInvalidMsg("search_aggregation is not supported with search iterator")
+	}
+
 	groupByField, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, t.request.GetSearchParams())
 	if err == nil && strings.TrimSpace(groupByField) != "" {
 		return merr.WrapErrParameterInvalidMsg("group_by_field and search_aggregation cannot be used simultaneously")
