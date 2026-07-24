@@ -71,5 +71,3 @@ TEST(UuidTest, SchemaAddField) {
     ASSERT_EQ(field_meta.get_data_type(), DataType::UUID);
     ASSERT_EQ(field_meta.get_name(), "uuid_field");
 }
-
-
