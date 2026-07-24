@@ -439,6 +439,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     const Schema&
     get_schema() const override;
 
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return CaptureSchemaSnapshot();
+    }
+
     void
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,

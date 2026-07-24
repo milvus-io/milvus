@@ -61,11 +61,12 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto pk_field_id_opt = get_schema().get_primary_field_id();
+    auto schema = get_schema_snapshot();
+    auto pk_field_id_opt = schema->get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
     auto pk_field_id = pk_field_id_opt.value();
-    AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
+    AssertInfo(IsPrimaryKeyDataType((*schema)[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
@@ -657,8 +658,7 @@ SegmentInternalInterface::get_real_count() const {
     mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
     return bitset_holder.size() - bitset_holder.count();
 #endif
-    auto plan = std::make_unique<query::RetrievePlan>(
-        std::make_shared<Schema>(get_schema()));
+    auto plan = std::make_unique<query::RetrievePlan>(get_schema_snapshot());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
@@ -725,8 +725,8 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto& schema = get_schema();
-    auto& field_meta = schema[field_id];
+    auto schema = get_schema_snapshot();
+    auto& field_meta = (*schema)[field_id];
     auto data_type = field_meta.get_data_type();
 
     std::shared_lock lck(mutex_);
@@ -748,8 +748,8 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto& schema = get_schema();
-    auto& field_meta = schema[field_id];
+    auto schema = get_schema_snapshot();
+    auto& field_meta = (*schema)[field_id];
     auto data_type = field_meta.get_data_type();
 
     std::unique_lock lck(mutex_);
