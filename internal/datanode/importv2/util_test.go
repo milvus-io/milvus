@@ -1089,3 +1089,56 @@ func Test_appendSystemFieldsDataWithCursor(t *testing.T) {
 	err = appendSystemFieldsDataWithCursor(task, insertData2, count, small)
 	assert.Error(t, err)
 }
+
+// Test_Import_CrossClusterDeterminism proves that autoID PKs derived from replicated
+// per-file ranges are identical regardless of (a) file processing order (concurrency
+// on different clusters) and (b) the local allocator, which the deterministic path
+// must never touch.
+func Test_Import_CrossClusterDeterminism(t *testing.T) {
+	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64}
+	vecField := &schemapb.FieldSchema{
+		FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField, vecField}}
+
+	// Two files with disjoint replicated ranges (as assigned once on the primary).
+	type fileRange struct {
+		name       string
+		begin, end int64
+		rows       int
+	}
+	f0 := fileRange{"file0", 1000, 1100, 40}
+	f1 := fileRange{"file1", 5000, 5100, 30}
+
+	// run simulates one cluster: a fresh task with a deliberately tiny local
+	// allocator (would error if the cursor path used it), processing files in the
+	// given order. Returns file name -> derived PK slice.
+	run := func(order []fileRange) map[string][]int64 {
+		task := &ImportTask{
+			req:       &datapb.ImportRequest{Ts: 1, Schema: schema},
+			allocator: allocator.NewLocalAllocator(0, 1), // 1 id only: any use blows up
+		}
+		out := make(map[string][]int64)
+		for _, f := range order {
+			data, err := testutil.CreateInsertData(schema, f.rows)
+			assert.NoError(t, err)
+			cur := &pkCursor{begin: f.begin, end: f.end, next: f.begin}
+			err = appendSystemFieldsDataWithCursor(task, data, f.rows, cur)
+			assert.NoError(t, err)
+			out[f.name] = append([]int64(nil), data.Data[pkField.GetFieldID()].(*storage.Int64FieldData).Data...)
+		}
+		return out
+	}
+
+	clusterA := run([]fileRange{f0, f1}) // primary order
+	clusterB := run([]fileRange{f1, f0}) // secondary: reversed concurrent order
+
+	assert.Equal(t, clusterA["file0"], clusterB["file0"])
+	assert.Equal(t, clusterA["file1"], clusterB["file1"])
+	// concrete values: literal range, no cluster bits, row-order within file
+	assert.Equal(t, int64(1000), clusterA["file0"][0])
+	assert.Equal(t, int64(1039), clusterA["file0"][39])
+	assert.Equal(t, int64(5000), clusterA["file1"][0])
+	assert.Equal(t, int64(5029), clusterA["file1"][29])
+}
