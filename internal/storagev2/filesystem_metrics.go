@@ -228,12 +228,13 @@ func GetFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*File
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 	defer C.loon_ffi_free_result(&ffiResult)
 	if C.loon_ffi_is_success(&ffiResult) == 0 {
+		errCode := int(ffiResult.err_code)
 		errMsg := C.loon_ffi_get_errmsg(&ffiResult)
 		errStr := "Unknown error"
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)
 		}
-		return merr.WrapErrStorageMsg("loon FFI error: %s", errStr)
+		return merr.WrapErrStorageMsg("loon FFI error (code %d): %s", errCode, errStr)
 	}
 	return nil
 }

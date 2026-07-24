@@ -18,6 +18,7 @@
 
 #include "common/EasyAssert.h"
 #include "log/Log.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 
 namespace milvus::segcore {
@@ -71,10 +72,11 @@ TextColumnCache::GetOrCreateReader(
 
     auto reader_result = reader_factory_(std::move(fs), config);
     if (!reader_result.ok()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        auto error = milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
                   "Failed to create LobColumnReader for {}: {}",
                   lob_base_path,
-                  reader_result.status().message());
+                  error.what());
     }
 
     auto reader = std::shared_ptr<LobColumnReader>(
@@ -120,10 +122,11 @@ TextColumnCache::ReadText(const std::string& lob_base_path,
     std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
     auto result = cached_reader->reader->ReadText(encoded_ref, ref_size);
     if (!result.ok()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        auto error = milvus_storage::ToSegcoreError(result.status());
+        ThrowInfo(error.get_error_code(),
                   "Failed to read text from {}: {}",
                   lob_base_path,
-                  result.status().message());
+                  error.what());
     }
 
     return std::move(result).ValueOrDie();
@@ -168,10 +171,12 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
             std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
             auto batch_result = cached_reader->reader->ReadBatch(pending_refs);
             if (!batch_result.ok()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                auto error =
+                    milvus_storage::ToSegcoreError(batch_result.status());
+                ThrowInfo(error.get_error_code(),
                           "Failed to read text batch from {}: {}",
                           lob_base_path,
-                          batch_result.status().message());
+                          error.what());
             }
             texts = std::move(batch_result).ValueOrDie();
         }
@@ -225,10 +230,12 @@ TextColumnCache::ReadBatchInto(
             std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
             auto batch_result = cached_reader->reader->ReadBatch(pending_refs);
             if (!batch_result.ok()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                auto error =
+                    milvus_storage::ToSegcoreError(batch_result.status());
+                ThrowInfo(error.get_error_code(),
                           "Failed to read text batch from {}: {}",
                           lob_base_path,
-                          batch_result.status().message());
+                          error.what());
             }
             texts = std::move(batch_result).ValueOrDie();
         }

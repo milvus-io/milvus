@@ -24,6 +24,7 @@
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/manifest.h"
@@ -154,9 +155,10 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
             std::make_shared<milvus_storage::api::ColumnGroups>();
         auto status = milvus_storage::column_groups_import(
             &loon_manifest->column_groups, column_groups.get());
-        AssertInfo(status.ok(),
-                   "Failed to import column groups: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
 
         auto reader = GetLoonReader(column_groups,
                                     schema,
@@ -200,9 +202,10 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
             std::make_shared<milvus_storage::api::ColumnGroups>();
         auto status = milvus_storage::column_groups_import(
             column_groups, imported_column_groups.get());
-        AssertInfo(status.ok(),
-                   "Failed to import column groups: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
 
         auto reader = GetLoonReader(imported_column_groups,
                                     schema,
@@ -229,9 +232,10 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
             static_cast<milvus_storage::api::Reader*>(c_packed_reader);
 
         auto result = reader->get_record_batch_reader();
-        AssertInfo(result.ok(),
-                   "failed to get record batch reader, {}",
-                   result.status().ToString());
+        if (!result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
 
         auto array_stream = result.ValueOrDie();
 
