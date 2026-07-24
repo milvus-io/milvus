@@ -232,6 +232,9 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 		}
 	}
 
+	if err := analyzer.UpdateGlobalResourceInfo(newResourceMap); err != nil {
+		return err
+	}
 	for _, resourceID := range removes {
 		err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(resourceID)))
 		if err != nil {
@@ -240,9 +243,6 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 	}
 	m.resourceMap = newResourceMap
 	m.version.Store(version)
-	if err := analyzer.UpdateGlobalResourceInfo(newResourceMap); err != nil {
-		return err
-	}
 	notifyListeners(SyncEvent{Version: version, Resources: resolvedResources})
 	return nil
 }
