@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // IndexEngineVersionManager manages the index engine versions reported by all QueryNodes in the cluster.
@@ -125,7 +126,22 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 	m.addOrUpdate(session)
 }
 
+// GetClusterMinIndexStorePathVersion returns the index file layout to use for new index builds.
+//
+// COLLECTION_ROOTED requires BOTH:
+//   - the operator to opt in via dataCoord.index.storePathVersion, because a binary older than
+//     this one cannot read that layout and the opt-in is what gives up rollback compatibility;
+//   - every QueryNode to already run this version, because QueryNodes rebuild the remote index
+//     prefix themselves (storage/FileManager.h GetRemoteIndexObjectPrefix), so an older one
+//     would look for the files under the legacy layout.
+//
+// Falling back to BUILD_ROOTED is always safe: the layout is recorded per SegmentIndex, so
+// records built earlier keep being read and GC'd under the layout they were built with.
 func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	if !metautil.IsCollectionRooted(indexpb.IndexStorePathVersion(Params.DataCoordCfg.IndexStorePathVersion.GetAsInt32())) {
+		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
