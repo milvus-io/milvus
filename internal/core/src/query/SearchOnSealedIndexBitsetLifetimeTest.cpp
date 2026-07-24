@@ -268,6 +268,58 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
 }
 
+TEST(SearchOnSealedIndexCachePinLifetime,
+     GroupByIteratorKeepsVectorIndexPinnedUntilSearchResultDestruction) {
+    constexpr int64_t total_count = 10000;
+
+    int64_t valid_count = 0;
+    auto valid_data = MakeValidData(total_count, valid_count);
+    auto vectors = MakeCompactVectors(valid_count, kDim);
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE, true);
+    auto group_by_field = schema->AddDebugField("group_by", DataType::INT8);
+    schema->set_primary_field_id(group_by_field);
+
+    auto index_base =
+        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+    auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
+    ASSERT_NE(vector_index, nullptr);
+    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
+
+    auto cache_index = CreateTestCacheIndex(
+        "nullable-vector-index-pin-lifetime", std::move(index_base));
+    auto indexing_entry =
+        MakeSealedIndexingEntry(knowhere::metric::COSINE, cache_index);
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + kDim);
+    auto search_info = MakeGroupBySearchInfo(
+        vector_field, group_by_field, knowhere::metric::COSINE);
+
+    {
+        SearchResult search_result;
+        SearchOnSealedIndex(*schema,
+                            indexing_entry,
+                            search_info,
+                            query.data(),
+                            nullptr,
+                            1,
+                            BitsetView{},
+                            nullptr,
+                            search_result);
+
+        ASSERT_TRUE(search_result.vector_iterators_.has_value());
+        ASSERT_FALSE(search_result.vector_iterators_->empty());
+        ASSERT_FALSE(cache_index->ManualEvictAll())
+            << "the vector index must stay pinned while SearchResult owns "
+               "iterators";
+    }
+
+    EXPECT_TRUE(cache_index->ManualEvictAll())
+        << "the vector index pin must be released with SearchResult";
+}
+
 TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
     constexpr int64_t total_count = 1000;
     constexpr int64_t topk = 10;
