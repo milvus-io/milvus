@@ -354,6 +354,9 @@ func repackInsertDataByPartitionForStreamingService(
 		// metadata. Validate the fully built message and split the original row
 		// offsets again when that final envelope crosses the transport limit.
 		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
+			if err := validateStreamingInsertMessageSize(msg); err != nil {
+				return nil, err
+			}
 			messages = append(messages, msg)
 			continue
 		}
@@ -410,4 +413,23 @@ func buildInsertMessageForStreamingService(
 	return builder.
 		WithCipher(ez).
 		BuildMutable()
+}
+
+func validateStreamingInsertMessageSize(msg message.MutableMessage) error {
+	if msg == nil {
+		return nil
+	}
+	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	if maxSize <= 0 {
+		return nil
+	}
+	messageSize := msg.EstimateSize()
+	if messageSize <= maxSize {
+		return nil
+	}
+	return merr.WrapErrParameterInvalidMsg(
+		"insert message size %d exceeds max message size %d after adding streaming headers; reduce insert batch size",
+		messageSize,
+		maxSize,
+	)
 }

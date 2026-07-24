@@ -21,7 +21,6 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		Enabled:      params.StreamingCfg.IdempotencyEnabled.GetAsBool(),
 		WindowTTL:    params.StreamingCfg.IdempotencyWindowTTL.GetAsDurationByParse(),
 		MinEntries:   params.StreamingCfg.IdempotencyMinEntriesPerWindow.GetAsInt(),
-		MaxEntries:   params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt(),
 		MaxBytes:     int(params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize()),
 		MaxKeyLength: params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(),
 	})
@@ -33,20 +32,20 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 
 // sanitizeWindowConfig repairs invalid combinations of the runtime-tunable
 // idempotency parameters by falling back to their defaults with a warning:
-// with neither a positive TTL nor a positive max entry cap the window would
-// grow without bound per key. Kept in sync with the recovery-side
+// with neither a positive TTL nor a positive max byte cap the window would grow
+// without bound per key. Kept in sync with the recovery-side
 // config.sanitizeIdempotency, which applies the same fallback.
 func sanitizeWindowConfig(config WindowConfig) WindowConfig {
 	if !config.Enabled {
 		return config
 	}
-	if config.WindowTTL <= 0 && config.MaxEntries <= 0 && config.MaxBytes <= 0 {
+	if config.WindowTTL <= 0 && config.MaxBytes <= 0 {
 		fallback, err := time.ParseDuration(paramtable.Get().StreamingCfg.IdempotencyWindowTTL.DefaultValue)
 		if err != nil {
 			// The default is a compile-time literal; parsing it cannot fail.
 			panic(err)
 		}
-		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max entry cap; falling back to default TTL",
+		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max byte cap; falling back to default TTL",
 			mlog.Duration("configuredTTL", config.WindowTTL),
 			mlog.Duration("fallbackTTL", fallback))
 		config.WindowTTL = fallback

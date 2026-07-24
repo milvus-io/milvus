@@ -32,23 +32,25 @@ type vchannelWindow struct {
 	entryBytes int
 
 	// generationStats is the view's durable-retention ledger: one row per
-	// persisted chunk generation, tracking how many window entries it holds and
-	// the newest commit timetick among them. minRequiredGeneration derives from
-	// this ledger under evictionCfg (TTL / min / max entries) — NOT from the
-	// entries materialized in this staging window, which are cleared on persist
-	// (evictPersisted). Rebuilt on restart from the chunk replay.
+	// persisted chunk generation, tracking how many window entries it holds, how
+	// many serialized bytes they occupy, and the newest commit timetick among
+	// them. minRequiredGeneration derives from this ledger under evictionCfg
+	// (TTL / min entries / max bytes) — NOT from the entries materialized in this
+	// staging window, which are cleared on persist (evictPersisted). Rebuilt on
+	// restart from the chunk replay.
 	generationStats map[uint64]*windowGenerationStat
-	// evictionCfg is the view's retention policy, assigned by the windowManager
-	// on construction. A zero policy (no TTL, no count cap) makes no durable
+	// evictionCfg is the view's retention policy, assigned by the windowManager on
+	// construction. A zero policy (no TTL, no byte cap) makes no durable
 	// retention promise: the ledger is ignored and only materialized entries pin
-	// chunks (the legacy behavior, kept for tests constructing windows directly).
+	// chunks.
 	evictionCfg windowEvictionConfig
 }
 
 // windowGenerationStat aggregates the entries persisted at one chunk
-// generation. ~16 bytes per retained generation.
+// generation.
 type windowGenerationStat struct {
 	entryCount  int
+	byteSize    int
 	maxCommitTT uint64
 }
 
@@ -241,12 +243,16 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 	if key == "" {
 		return merr.WrapErrServiceInternalMsg("committed write record has malformed idempotency info")
 	}
-	if _, ok := s.entries[key]; ok {
-		if markDirty {
-			s.pendingRecords = append(s.pendingRecords, cloneCommittedWriteRecord(record))
+	if existing, ok := s.entries[key]; ok {
+		if s.entryTTLExpiredAt(existing.entry, record.SourceTimeTick) {
+			s.dropEntry(key)
+		} else {
+			if markDirty {
+				s.pendingRecords = append(s.pendingRecords, cloneCommittedWriteRecord(record))
+			}
+			s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
+			return nil
 		}
-		s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
-		return nil
 	}
 	entry := record.WindowEntry()
 	if entry == nil {
@@ -262,6 +268,54 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 	s.advanceCheckpointToCommittedWriteRecord(record, markDirty)
 	s.refreshMinRequiredGeneration()
 	return nil
+}
+
+func (s *vchannelWindow) entryTTLExpiredAt(entry *streamingpb.WindowEntry, nowTT uint64) bool {
+	if entry == nil || s.evictionCfg.windowTTL <= 0 {
+		return false
+	}
+	evictBeforeTT := evictBeforeTimetick(nowTT, s.evictionCfg.windowTTL)
+	return evictBeforeTT > 0 && entry.GetCommitTimetick() < evictBeforeTT
+}
+
+func (s *vchannelWindow) dropEntry(key string) {
+	e, ok := s.entries[key]
+	if !ok {
+		return
+	}
+	delete(s.entries, key)
+	s.entryBytes -= proto.Size(e.entry)
+	for idx, ordered := range s.commitOrder {
+		if ordered == key {
+			s.commitOrder = append(s.commitOrder[:idx], s.commitOrder[idx+1:]...)
+			break
+		}
+	}
+	if e.generationSet {
+		s.rebuildGenerationStat(e.generation)
+	}
+}
+
+func (s *vchannelWindow) rebuildGenerationStat(generation uint64) {
+	var stat windowGenerationStat
+	for _, e := range s.entries {
+		if e == nil || !e.generationSet || e.generation != generation {
+			continue
+		}
+		stat.entryCount++
+		stat.byteSize += proto.Size(e.entry)
+		if e.entry.GetCommitTimetick() > stat.maxCommitTT {
+			stat.maxCommitTT = e.entry.GetCommitTimetick()
+		}
+	}
+	if stat.entryCount == 0 {
+		delete(s.generationStats, generation)
+		return
+	}
+	if s.generationStats == nil {
+		s.generationStats = make(map[uint64]*windowGenerationStat)
+	}
+	s.generationStats[generation] = &stat
 }
 
 func (s *vchannelWindow) advanceCheckpointToCommittedWriteRecord(record committedWriteRecord, markDirty bool) {
@@ -324,14 +378,17 @@ func (s *vchannelWindow) markCommittedWriteRecordGeneration(record committedWrit
 	if !e.generationSet {
 		e.generation = generation
 		e.generationSet = true
-		s.registerGenerationEntry(generation, e.entry.GetCommitTimetick())
+		s.registerGenerationEntry(generation, e.entry)
 	}
 }
 
 // registerGenerationEntry records one persisted entry in the durable-retention
 // ledger. The generationSet guard on the caller ensures each entry is counted
 // exactly once.
-func (s *vchannelWindow) registerGenerationEntry(generation, commitTT uint64) {
+func (s *vchannelWindow) registerGenerationEntry(generation uint64, entry *streamingpb.WindowEntry) {
+	if entry == nil {
+		return
+	}
 	if s.generationStats == nil {
 		s.generationStats = make(map[uint64]*windowGenerationStat)
 	}
@@ -341,7 +398,8 @@ func (s *vchannelWindow) registerGenerationEntry(generation, commitTT uint64) {
 		s.generationStats[generation] = stat
 	}
 	stat.entryCount++
-	if commitTT > stat.maxCommitTT {
+	stat.byteSize += proto.Size(entry)
+	if commitTT := entry.GetCommitTimetick(); commitTT > stat.maxCommitTT {
 		stat.maxCommitTT = commitTT
 	}
 }
@@ -428,14 +486,14 @@ func (s *vchannelWindow) materializedMinGeneration() (uint64, bool) {
 
 // statsMinRequiredGeneration walks the durable-retention ledger newest-first
 // under the eviction policy and returns the oldest generation still holding a
-// retained entry: generations are kept while the count cap is not exhausted and
+// retained entry: generations are kept while the byte cap is not exhausted and
 // either some entry is within TTL or the minEntries floor still needs them.
 // Rows older than the returned boundary are dropped from the ledger, keeping it
 // bounded to the retained window. A zero policy makes no durable retention
 // promise and contributes no pin.
 func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 	cfg := s.evictionCfg
-	if len(s.generationStats) == 0 || (cfg.windowTTL <= 0 && cfg.maxEntries <= 0) {
+	if len(s.generationStats) == 0 || (cfg.windowTTL <= 0 && cfg.maxBytes <= 0) {
 		return 0, false
 	}
 	generations := make([]uint64, 0, len(s.generationStats))
@@ -445,21 +503,23 @@ func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 	sort.Slice(generations, func(i, j int) bool { return generations[i] > generations[j] })
 
 	evictBefore := evictBeforeTimetick(s.snapshotCheckpointTimetick, cfg.windowTTL)
-	cumulative := 0
+	cumulativeEntries := 0
+	cumulativeBytes := 0
 	var minRequired uint64
 	retainedAny := false
 	for _, generation := range generations {
 		stat := s.generationStats[generation]
-		if cfg.maxEntries > 0 && cumulative >= cfg.maxEntries {
+		if cfg.maxBytes > 0 && cumulativeBytes >= cfg.maxBytes {
 			break
 		}
 		withinTTL := cfg.windowTTL <= 0 || stat.maxCommitTT >= evictBefore
-		if !withinTTL && cumulative >= cfg.minEntries {
+		if !withinTTL && cumulativeEntries >= cfg.minEntries {
 			break
 		}
 		minRequired = generation
 		retainedAny = true
-		cumulative += stat.entryCount
+		cumulativeEntries += stat.entryCount
+		cumulativeBytes += stat.byteSize
 	}
 	if !retainedAny {
 		return 0, false
@@ -472,7 +532,7 @@ func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 	return minRequired, true
 }
 
-func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxEntries, maxBytes int) {
+func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxBytes int) {
 	for len(s.entries) > minEntries && len(s.commitOrder) > 0 {
 		key := s.commitOrder[0]
 		e, ok := s.entries[key]
@@ -484,22 +544,14 @@ func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxE
 			break
 		}
 		s.commitOrder = s.commitOrder[1:]
-		s.dropEntryBytes(key)
-		delete(s.entries, key)
-	}
-	for maxEntries > 0 && len(s.entries) > maxEntries && len(s.commitOrder) > 0 {
-		key := s.commitOrder[0]
-		s.commitOrder = s.commitOrder[1:]
-		s.dropEntryBytes(key)
-		delete(s.entries, key)
+		s.dropEntry(key)
 	}
 	// Hard byte cap, overriding the minEntries floor: an entry-count floor cannot
 	// bound memory when each entry carries a per-row PK list.
 	for maxBytes > 0 && s.entryBytes > maxBytes && len(s.commitOrder) > 0 {
 		key := s.commitOrder[0]
 		s.commitOrder = s.commitOrder[1:]
-		s.dropEntryBytes(key)
-		delete(s.entries, key)
+		s.dropEntry(key)
 	}
 	s.refreshEvictedWatermark()
 	s.refreshMinRequiredGeneration()

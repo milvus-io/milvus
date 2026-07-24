@@ -31,10 +31,10 @@ func (m *windowManager) persistPChannelWindow(
 		return nil, 0, err
 	}
 	windowMetas := materializeWindowMetaUpdates(windowMetaUpdates, persistedChunk.generation)
-	if err := m.persistIdempotencyWindowMetas(ctx, logger, windowMetas); err != nil {
+	if err := m.persistPChannelWindowMeta(ctx, logger, persistedChunk, m.minRequiredGenerationForPChannelWindow(windowMetas, persistedChunk.generation)); err != nil {
 		return nil, 0, err
 	}
-	if err := m.persistPChannelWindowMeta(ctx, logger, persistedChunk, m.minRequiredGenerationForPChannelWindow(windowMetas, persistedChunk.generation)); err != nil {
+	if err := m.persistIdempotencyWindowMetas(ctx, logger, windowMetas); err != nil {
 		return nil, 0, err
 	}
 	return windowMetas, persistedChunk.generation, nil
@@ -272,12 +272,10 @@ func buildPChannelWindowChunkPrefix(pchannel string) string {
 
 // removeAllPChannelWindowChunks deletes every chunk object of the pchannel's
 // window store. It is only correct where no catalog meta references a chunk any
-// more: dropping the store while idempotency is disabled, and bootstrapping a
-// store whose catalog meta is missing. There a leftover chunk is pure garbage
-// that must not survive, because the store writes those generations again and
-// writePChannelWindowChunkIfAbsent rejects a same-key-different-payload chunk
-// with an unretriable corruption error that retryOperationWithBackoff then
-// retries forever.
+// more, such as dropping the store while idempotency is disabled. A bootstrap
+// path must not call this based on a stale no-meta read: another owner may have
+// published a meta after the read, and a prefix delete would remove referenced
+// chunks before the stale opener is fenced.
 //
 // A prefix removal (rather than a walk over [MinAvailableGeneration,
 // LatestGeneration]) is what makes that guarantee hold: it also reaps orphans

@@ -22,7 +22,6 @@ func newConfig() *config {
 		idempotencyEnabled:          params.StreamingCfg.IdempotencyEnabled.GetAsBool(),
 		idempotencyWindowTTL:        params.StreamingCfg.IdempotencyWindowTTL.GetAsDurationByParse(),
 		idempotencyMinEntries:       params.StreamingCfg.IdempotencyMinEntriesPerWindow.GetAsInt(),
-		idempotencyMaxEntries:       params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt(),
 		idempotencyMaxBytes:         int(params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize()),
 		idempotencySnapshotInterval: params.StreamingCfg.IdempotencySnapshotInterval.GetAsDurationByParse(),
 	}
@@ -36,7 +35,7 @@ func newConfig() *config {
 // sanitizeIdempotency repairs invalid combinations of the runtime-tunable
 // idempotency parameters by falling back to their defaults with a warning,
 // instead of panicking the WAL open into a crash loop over an operator typo
-// (e.g. windowTTL: 0s with maxEntriesPerWindow left at its 0 default). The
+// (e.g. windowTTL: 0s with maxBytesPerWindow left at its 0 default). The
 // same fallback is applied by the idempotency interceptor builder — keep both
 // in sync.
 func (cfg *config) sanitizeIdempotency() {
@@ -53,11 +52,11 @@ func (cfg *config) sanitizeIdempotency() {
 			mlog.Duration("fallback", fallback))
 		cfg.idempotencySnapshotInterval = fallback
 	}
-	// With neither a TTL nor a max entry cap the live window would grow without
+	// With neither a TTL nor a max byte cap the live window would grow without
 	// bound per key; fall back to the default TTL.
-	if cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxEntries <= 0 && cfg.idempotencyMaxBytes <= 0 {
+	if cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxBytes <= 0 {
 		fallback := defaultDuration(&params.StreamingCfg.IdempotencyWindowTTL)
-		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max entry cap; falling back to default TTL",
+		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max byte cap; falling back to default TTL",
 			mlog.Duration("configuredTTL", cfg.idempotencyWindowTTL),
 			mlog.Duration("fallbackTTL", fallback))
 		cfg.idempotencyWindowTTL = fallback
@@ -83,7 +82,6 @@ type config struct {
 	idempotencyEnabled          bool          // idempotencyEnabled gates all idempotency-window machinery (recovery, bootstrap, in-memory windows).
 	idempotencyWindowTTL        time.Duration // idempotencyWindowTTL is the TTL for evicting entries during recovery.
 	idempotencyMinEntries       int           // idempotencyMinEntries is the minimum entries to keep per window during eviction.
-	idempotencyMaxEntries       int           // idempotencyMaxEntries is the hard cap per window during eviction.
 	idempotencyMaxBytes         int           // idempotencyMaxBytes is the hard byte cap per window during eviction (0 disables).
 	idempotencySnapshotInterval time.Duration // idempotencySnapshotInterval is the interval to persist idempotency window snapshots. Non-positive disables periodic window snapshots.
 }

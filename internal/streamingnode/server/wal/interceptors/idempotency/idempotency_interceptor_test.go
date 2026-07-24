@@ -1031,10 +1031,34 @@ func TestInterceptorMalformedIdempotencyErrors(t *testing.T) {
 
 func TestInterceptorIdempotencyMetrics(t *testing.T) {
 	paramtable.Init()
-	interceptor := newInterceptor(WindowConfig{MinEntries: 0, MaxEntries: 1})
+	msg := newIdempotentInsertMessage(t, "metrics-v1", "key-1")
+	probe := NewWindow(WindowConfig{})
+	probeBegin := probe.Begin("key-1", nil)
+	require.Equal(t, BeginDecisionOwner, probeBegin.Decision)
+	completed, _ := probe.Complete(probeBegin.Pending, CommitResult{
+		CommitTimeTick:         100,
+		MessageID:              newTestMessageID(10).IntoProto(),
+		LastConfirmedMessageID: newTestMessageID(9).IntoProto(),
+	}, nil)
+	require.True(t, completed)
+	require.Positive(t, probe.bytes)
+	probeNext := NewWindow(WindowConfig{})
+	probeNextBegin := probeNext.Begin("key-2", nil)
+	require.Equal(t, BeginDecisionOwner, probeNextBegin.Decision)
+	completed, _ = probeNext.Complete(probeNextBegin.Pending, CommitResult{
+		CommitTimeTick:         110,
+		MessageID:              newTestMessageID(11).IntoProto(),
+		LastConfirmedMessageID: newTestMessageID(10).IntoProto(),
+	}, nil)
+	require.True(t, completed)
+	maxBytes := probe.bytes
+	if probeNext.bytes > maxBytes {
+		maxBytes = probeNext.bytes
+	}
+
+	interceptor := newInterceptor(WindowConfig{MinEntries: 0, MaxBytes: maxBytes})
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
 
-	msg := newIdempotentInsertMessage(t, "metrics-v1", "key-1")
 	nodeID := paramtable.GetStringNodeID()
 	vchannel := msg.VChannel()
 	entryGauge := metrics.WALIdempotencyWindowEntries.WithLabelValues(nodeID, vchannel)

@@ -3,7 +3,6 @@ package recovery
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -131,16 +130,13 @@ func TestRecoverWindowsDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) {
 	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 1, false)
 }
 
-// The chunk removal of a drop is best-effort, so re-enabling idempotency can find
-// chunks that no catalog meta references any more. Bootstrap must reap them:
-// otherwise generation 0 fails write-if-absent with a payload mismatch, which is
-// retried until the context dies and hangs the WAL open, and a leftover at a
-// higher generation would be adopted by the orphan probe (rewinding recovery to
-// an already-truncated source checkpoint) or wedge the persist that later reaches
-// that generation.
-func TestBootstrapReapsChunksLeftByIncompleteDrop(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+// A stale opener can observe no pchannel meta, pause, and resume after another
+// owner has bootstrapped. Bootstrap must therefore not prefix-delete chunks
+// based on the earlier no-meta read; it publishes only the current term's
+// generation-0 chunk through the pchannel meta CAS and leaves unrelated
+// term-suffixed leftovers unreferenced.
+func TestBootstrapDoesNotReapChunksLeftByIncompleteDrop(t *testing.T) {
+	ctx := context.Background()
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
@@ -149,19 +145,19 @@ func TestBootstrapReapsChunksLeftByIncompleteDrop(t *testing.T) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	// Leftovers of a store whose metas are already gone: generation 0 carries a
-	// different payload than the one bootstrap is about to write, and generation 3
-	// sits above a gap, at a generation the store writes again later.
-	writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	// Leftovers of a store whose metas are already gone. Their term suffix keeps
+	// them from colliding with the new bootstrap chunk, and bootstrap must not
+	// delete them based only on catalog absence.
+	_, gen0Term1Key, _ := writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 0, 1, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}, nil)
-	writeTestPChannelWindowChunk(ctx, t, "p1", 3, chunkManager, &utility.WALCheckpoint{
+	_, gen3Term1Key, _ := writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 3, 1, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(40),
 		TimeTick:  40,
 	}, nil)
 
-	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 2}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(100),
 		TimeTick:  100,
 	})
@@ -173,12 +169,18 @@ func TestBootstrapReapsChunksLeftByIncompleteDrop(t *testing.T) {
 	checkpoint, err := rs.windowManager.recoverWindows(ctx, "p1", rs.checkpoint, rs.vchannels)
 	require.NoError(t, err)
 	// The store is bootstrapped from the current checkpoint, not from the stale
-	// leftovers, and no leftover chunk survives.
+	// leftovers, and the stale leftovers are not referenced by the new manifest.
 	require.Equal(t, uint64(100), checkpoint.TimeTick)
 	require.NotNil(t, catalogState.storeMeta)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
 	require.Equal(t, uint64(100), catalogState.storeMeta.GetSourceCheckpointTimetick())
-	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 3, false)
+	require.Equal(t, int64(2), catalogState.storeMeta.GetChunkManifest().GetRanges()[0].GetTerm())
+	exists, err := chunkManager.Exist(ctx, gen0Term1Key)
+	require.NoError(t, err)
+	require.True(t, exists)
+	exists, err = chunkManager.Exist(ctx, gen3Term1Key)
+	require.NoError(t, err)
+	require.True(t, exists)
 }
 
 // Window lifecycle (creation) belongs on vchannel events, not the per-message

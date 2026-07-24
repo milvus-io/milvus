@@ -97,6 +97,47 @@ func TestRecoverWindowsFencedByNewerTermMeta(t *testing.T) {
 	require.ErrorIs(t, err, ErrPChannelWindowStoreFenced)
 }
 
+func TestPersistPChannelWindowFencesBeforeSavingVChannelMetas(t *testing.T) {
+	ctx := context.Background()
+	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	chunkManager := newTestPChannelWindowCleanerChunkManager()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	footer, _, _ := writeTestPChannelWindowChunkWithTerm(ctx, t, "p1", 0, 5, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	}, nil)
+	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+
+	window := newEmptyVChannelWindow("p1", "v1", nil)
+	record := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		Key:            "stale-key",
+		CommitTimetick: 210,
+		MessageId:      rmq.NewRmqID(210).IntoProto(),
+	})
+	require.NoError(t, window.applyCommittedWriteRecord(record, true))
+	records, metaUpdate := window.consumePendingCommittedWriteRecords()
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1", Term: 3}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(200),
+		TimeTick:  200,
+	})
+	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": window})
+	rs.SetLogger(resource.Resource().Logger())
+
+	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+		"v1": records,
+	}, map[string]*idempotencyWindowMetaUpdate{
+		"v1": metaUpdate,
+	}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(220),
+		TimeTick:  220,
+	})
+	require.ErrorIs(t, err, ErrPChannelWindowStoreFenced)
+	require.NotContains(t, catalogState.operations, "vchannel-window-meta")
+	require.Empty(t, catalogState.windowMetas)
+}
+
 func TestRecoverWindowsReadsOnlyManifestPublishedTerm(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
