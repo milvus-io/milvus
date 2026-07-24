@@ -990,6 +990,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSo
 	newTaskCalled := false
 	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
 		func(
+			parentCtx context.Context,
 			gotReq *datapb.CopySegmentRequest,
 			manager importv2.TaskManager,
 			gotSourceCM storage.ChunkManager,
@@ -998,7 +999,6 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSo
 			gotCopier storage.CrossBucketCopier,
 			sourceBucket string,
 			targetBucket string,
-			parentCtx context.Context,
 		) importv2.Task {
 			newTaskCalled = true
 			s.Same(req, gotReq)
@@ -1092,6 +1092,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesSameBucke
 
 	mockNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
 		func(
+			parentCtx context.Context,
 			gotReq *datapb.CopySegmentRequest,
 			_ importv2.TaskManager,
 			gotSourceCM storage.ChunkManager,
@@ -1100,7 +1101,6 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesSameBucke
 			gotCopier storage.CrossBucketCopier,
 			sourceBucket string,
 			targetBucket string,
-			parentCtx context.Context,
 		) importv2.Task {
 			s.Same(req, gotReq)
 			s.Same(sourceCM, gotSourceCM)
@@ -1178,6 +1178,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 	var sourceStorageConfig *indexpb.StorageConfig
 	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
 		func(
+			parentCtx context.Context,
 			gotReq *datapb.CopySegmentRequest,
 			manager importv2.TaskManager,
 			gotSourceCM storage.ChunkManager,
@@ -1186,7 +1187,6 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 			gotCopier storage.CrossBucketCopier,
 			sourceBucket string,
 			targetBucket string,
-			parentCtx context.Context,
 		) importv2.Task {
 			sourceStorageConfig = gotSourceStorageConfig
 			s.Same(req, gotReq)

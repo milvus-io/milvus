@@ -62,6 +62,10 @@ type restoreBrokerTarget struct {
 	broker.Broker
 }
 
+type restoreWALAccesserTarget struct {
+	streaming.WALAccesser
+}
+
 // --- Test CreateSnapshot ---
 
 func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
@@ -2066,8 +2070,8 @@ func TestRestoreSnapshot_StartBroadcasterFailureUnpinsAndRollsBack(t *testing.T)
 
 func TestFinishRestoreSnapshot_BroadcastFailureRollbackBoundary(t *testing.T) {
 	oldWAL := streaming.WAL()
-	fakeWAL := &struct{ streaming.WALAccesser }{}
-	mockControlChannel := mockey.Mock((*struct{ streaming.WALAccesser }).ControlChannel).
+	fakeWAL := &restoreWALAccesserTarget{}
+	mockControlChannel := mockey.Mock((*restoreWALAccesserTarget).ControlChannel).
 		Return("control_channel").Build()
 	defer mockControlChannel.UnPatch()
 	streaming.SetWALForTest(fakeWAL)
