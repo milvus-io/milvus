@@ -17,6 +17,7 @@
 #include <string>
 
 #include "cachinglayer/Manager.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
@@ -177,9 +178,8 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" CStatus
@@ -192,9 +192,8 @@ SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" void

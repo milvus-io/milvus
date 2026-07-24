@@ -343,6 +343,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         return ok;
     } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return MakeCStatusError("unknown exception");
     }
 }
 
