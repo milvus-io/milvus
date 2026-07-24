@@ -54,6 +54,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "common/Common.h"
+#include "common/Decimal.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
 #include "storage/ThreadPools.h"
@@ -261,6 +262,13 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                 payload.valid_data,
                 nullable,
                 length);
+            break;
+        }
+        case DataType::DECIMAL: {
+            // Already the decoded unscaled int64 by this point.
+            auto decimal_data = reinterpret_cast<int64_t*>(raw_data);
+            add_numeric_payload<int64_t, arrow::Int64Builder>(
+                builder, decimal_data, payload.valid_data, nullable, length);
             break;
         }
 
@@ -474,6 +482,9 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::TIMESTAMPTZ: {
             return std::make_shared<arrow::Int64Builder>();
         }
+        case DataType::DECIMAL: {
+            return std::make_shared<arrow::Int64Builder>();
+        }
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT: {
@@ -634,6 +645,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::TIMESTAMPTZ:
             return std::make_shared<arrow::Int64Scalar>(
                 default_value.timestamptz_data());
+        case DataType::DECIMAL:
+            return std::make_shared<arrow::Int64Scalar>(DecodeDecimalUnscaled(
+                default_value.bytes_data(), field_meta.get_decimal_scale()));
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
@@ -681,6 +695,10 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::float64(), nullable)});
         }
         case DataType::TIMESTAMPTZ: {
+            return arrow::schema(
+                {arrow::field("val", arrow::int64(), nullable)});
+        }
+        case DataType::DECIMAL: {
             return arrow::schema(
                 {arrow::field("val", arrow::int64(), nullable)});
         }
@@ -1247,6 +1265,7 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<double>>(
                 type, nullable, total_num_rows);
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
             return std::make_shared<FieldData<int64_t>>(
                 type, nullable, total_num_rows);
         case DataType::STRING:

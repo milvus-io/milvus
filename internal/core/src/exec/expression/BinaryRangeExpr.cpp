@@ -86,6 +86,14 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
+        // Unlike TIMESTAMPTZ (which only ever reaches this expr node via its
+        // own bespoke "± INTERVAL" grammar, never generic Range/ReverseRange),
+        // DECIMAL uses ordinary Range/ReverseRange grammar (`10 < price < 100`),
+        // so it must be dispatched in this main switch, not just PrefetchRawData.
+        case DataType::DECIMAL: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
         case DataType::FLOAT: {
             result = ExecRangeVisitorImpl<float>(context);
             break;
@@ -1201,6 +1209,9 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
             PrefetchRawData<int64_t>();
             break;
         case DataType::TIMESTAMPTZ:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::DECIMAL:
             PrefetchRawData<int64_t>();
             break;
         case DataType::FLOAT:

@@ -85,6 +85,8 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
+    DECIMAL = 27,  // Fixed-point exact numeric, stored as its unscaled int64
+                   // representation (e.g. "19.99" at scale 4 -> 199900)
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -136,6 +138,8 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         case DataType::DOUBLE:
             return sizeof(double);
         case DataType::TIMESTAMPTZ:
+            return sizeof(int64_t);
+        case DataType::DECIMAL:
             return sizeof(int64_t);
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
@@ -195,6 +199,8 @@ ToProtoDataType(DataType data_type) {
             return proto::schema::DataType::Text;
         case DataType::TIMESTAMPTZ:
             return proto::schema::DataType::Timestamptz;
+        case DataType::DECIMAL:
+            return proto::schema::DataType::Decimal;
 
         case DataType::VECTOR_BINARY:
             return proto::schema::DataType::BinaryVector;
@@ -240,6 +246,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::DOUBLE:
             return arrow::float64();
         case DataType::TIMESTAMPTZ:
+            return arrow::int64();
+        case DataType::DECIMAL:
             return arrow::int64();
         case DataType::STRING:
         case DataType::VARCHAR:
@@ -329,6 +337,8 @@ GetDataTypeName(DataType data_type) {
             return "double";
         case DataType::TIMESTAMPTZ:
             return "timestamptz";
+        case DataType::DECIMAL:
+            return "decimal";
         case DataType::STRING:
             return "string";
         case DataType::VARCHAR:
@@ -549,6 +559,7 @@ IsPrimitiveType(proto::schema::DataType type) {
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
         case proto::schema::DataType::Timestamptz:
+        case proto::schema::DataType::Decimal:
             return true;
         default:
             return false;
@@ -819,6 +830,15 @@ struct TypeTraits<DataType::TIMESTAMPTZ> {
 };
 
 template <>
+struct TypeTraits<DataType::DECIMAL> {
+    using NativeType = int64_t;
+    static constexpr DataType TypeKind = DataType::DECIMAL;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "DECIMAL";
+};
+
+template <>
 struct TypeTraits<DataType::VARCHAR> {
     using NativeType = std::string;
     static constexpr DataType TypeKind = DataType::VARCHAR;
@@ -1014,6 +1034,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::TIMESTAMPTZ:
                 name = "TIMESTAMPTZ";
+                break;
+            case milvus::DataType::DECIMAL:
+                name = "DECIMAL";
                 break;
             case milvus::DataType::STRING:
                 name = "STRING";
@@ -1581,6 +1604,8 @@ using RowTypePtr = std::shared_ptr<const RowType>;
             case milvus::DataType::TIMESTAMPTZ:                               \
                 return PREFIX<milvus::DataType::TIMESTAMPTZ> SUFFIX(          \
                     __VA_ARGS__);                                             \
+            case milvus::DataType::DECIMAL:                                   \
+                return PREFIX<milvus::DataType::DECIMAL> SUFFIX(__VA_ARGS__); \
             case milvus::DataType::FLOAT:                                     \
                 return PREFIX<milvus::DataType::FLOAT> SUFFIX(__VA_ARGS__);   \
             case milvus::DataType::DOUBLE:                                    \

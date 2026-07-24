@@ -13,6 +13,7 @@ import (
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -356,6 +357,14 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	if err = checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
 		return err
 	}
+
+	// "price - 5": re-derive the literal side from exact source text at price's declared
+	// scale, so the unscaled int64 subtraction stays correct (see fixupDecimalOperands).
+	leftExpr, rightExpr, err = v.fixupDecimalOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
+	if err != nil {
+		return err
+	}
+
 	var dataType schemapb.DataType
 	if leftExpr.expr.GetIsTemplate() {
 		dataType = rightExpr.dataType
@@ -439,6 +448,14 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
+	// Multiply/divide/modulo need the literal operand rescaled differently than add/subtract
+	// (an integer multiplier must stay unscaled; a fractional one needs real fixed-point
+	// rescaling), which isn't implemented yet - reject explicitly rather than silently
+	// producing a wrong result.
+	if leftExpr.dataType == schemapb.DataType_Decimal || rightExpr.dataType == schemapb.DataType_Decimal {
+		return merr.WrapErrParameterInvalidMsg("decimal fields only support add/subtract in arithmetic expressions for now, got: %s", ctx.GetOp().GetText())
+	}
+
 	if err := checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
 		return err
 	}
@@ -485,6 +502,124 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 }
 
 // VisitEquality translates expr to compare/range plan.
+// fixupDecimalLiteral re-derives a numeric literal's value from its original source text
+// (via litCtx.GetText()) instead of trusting the already-parsed value on litExpr, which was
+// produced by VisitInteger/VisitFloating going through strconv.ParseFloat — a lossy path
+// that would silently reintroduce binary floating-point error, defeating the entire point
+// of the Decimal type, if used to compare against a Decimal column.
+func (v *ParserVisitor) fixupDecimalLiteral(litCtx parser.IExprContext, colExpr *ExprWithType) (*ExprWithType, error) {
+	columnInfo := decimalArithColumnInfo(colExpr)
+	if columnInfo == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cannot resolve decimal field for literal %q", litCtx.GetText())
+	}
+	fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return nil, err
+	}
+	precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+	if err != nil {
+		return nil, err
+	}
+	literalText := litCtx.GetText()
+	unscaled, err := parameterutil.EncodeUnscaledInt64(literalText, precision, scale)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid decimal literal %q for field %s: %s", literalText, fieldSchema.GetName(), err.Error())
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Decimal,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{Value: NewInt(unscaled)},
+			},
+		},
+		nodeDependent: true,
+	}, nil
+}
+
+// fixupDecimalRangeBound re-derives a range bound literal (e.g. the "10"/"100" in
+// "10 < price < 100") from its exact source text when fieldDataType is Decimal — same
+// rationale as fixupDecimalLiteral, applied to BinaryRangeExpr's lower/upper bounds
+// instead of a direct column comparison.
+func (v *ParserVisitor) fixupDecimalRangeBound(litCtx parser.IExprContext, fieldDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	if fieldDataType != schemapb.DataType_Decimal || !IsInteger(value) && !IsFloating(value) {
+		return value, nil
+	}
+	fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return nil, err
+	}
+	precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+	if err != nil {
+		return nil, err
+	}
+	literalText := litCtx.GetText()
+	unscaled, err := parameterutil.EncodeUnscaledInt64(literalText, precision, scale)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid decimal literal %q for field %s: %s", literalText, fieldSchema.GetName(), err.Error())
+	}
+	return NewInt(unscaled), nil
+}
+
+// fixupDecimalTermValues re-derives each element of an IN-list literal from its exact
+// source text when dataType is Decimal — same rationale as fixupDecimalLiteral, applied
+// to TermExpr's array of values instead of a single comparison operand. termCtx must be
+// the *parser.ArrayContext backing the already-parsed `array` values, in the same order.
+func (v *ParserVisitor) fixupDecimalTermValues(termCtx parser.IExprContext, dataType schemapb.DataType, columnInfo *planpb.ColumnInfo, array []*planpb.GenericValue) ([]*planpb.GenericValue, error) {
+	if dataType != schemapb.DataType_Decimal {
+		return array, nil
+	}
+	arrayCtx, ok := termCtx.(*parser.ArrayContext)
+	if !ok || len(arrayCtx.AllExpr()) != len(array) {
+		return nil, merr.WrapErrParameterInvalidMsg("decimal 'in' list must be a literal array, but got: %s", termCtx.GetText())
+	}
+	fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return nil, err
+	}
+	precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+	if err != nil {
+		return nil, err
+	}
+	elemCtxs := arrayCtx.AllExpr()
+	fixed := make([]*planpb.GenericValue, len(array))
+	for i, elemCtx := range elemCtxs {
+		literalText := elemCtx.GetText()
+		unscaled, err := parameterutil.EncodeUnscaledInt64(literalText, precision, scale)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid decimal literal %q for field %s: %s", literalText, fieldSchema.GetName(), err.Error())
+		}
+		fixed[i] = NewInt(unscaled)
+	}
+	return fixed, nil
+}
+
+// fixupDecimalOperands detects "Decimal-typed expr op numeric-literal" (in either order)
+// and swaps the literal side's ExprWithType for one derived from exact source text. The
+// Decimal-typed side may be a direct column reference (plain comparisons, e.g. "price >
+// 10") or a BinaryArithExpr wrapping one (arithmetic, e.g. "price - 5 > 10", where this
+// same function also fixes up the "5" operand from within VisitAddSub). No-op (returns
+// inputs unchanged) for every other shape, including Decimal-vs-Decimal field comparisons
+// and non-Decimal columns.
+func (v *ParserVisitor) fixupDecimalOperands(leftCtx, rightCtx parser.IExprContext, leftExpr, rightExpr *ExprWithType) (*ExprWithType, *ExprWithType, error) {
+	leftIsValue, rightIsValue := leftExpr.expr.GetValueExpr() != nil, rightExpr.expr.GetValueExpr() != nil
+	switch {
+	case rightIsValue && !leftIsValue && leftExpr.dataType == schemapb.DataType_Decimal:
+		fixed, err := v.fixupDecimalLiteral(rightCtx, leftExpr)
+		if err != nil {
+			return nil, nil, err
+		}
+		return leftExpr, fixed, nil
+	case leftIsValue && !rightIsValue && rightExpr.dataType == schemapb.DataType_Decimal:
+		fixed, err := v.fixupDecimalLiteral(leftCtx, rightExpr)
+		if err != nil {
+			return nil, nil, err
+		}
+		return fixed, rightExpr, nil
+	default:
+		return leftExpr, rightExpr, nil
+	}
+}
+
 func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 	left := ctx.Expr(0).Accept(v)
 	if err := getError(left); err != nil {
@@ -518,6 +653,10 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	leftExpr, rightExpr, err := v.fixupDecimalOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
+	if err != nil {
+		return err
+	}
 
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
 	if err != nil {
@@ -571,6 +710,10 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 		return err
 	}
 	if err := checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
+		return err
+	}
+	leftExpr, rightExpr, err := v.fixupDecimalOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
+	if err != nil {
 		return err
 	}
 
@@ -1165,6 +1308,10 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 			return merr.WrapErrParameterInvalidMsg("the right-hand side of 'in' must be a list, but got: %s", ctx.Expr(1).GetText())
 		}
 		array := elementValue.GetArrayVal().GetArray()
+		array, err := v.fixupDecimalTermValues(ctx.Expr(1), dataType, columnInfo, array)
+		if err != nil {
+			return err
+		}
 		values = make([]*planpb.GenericValue, len(array))
 		for i, e := range array {
 			castedValue, err := castValue(dataType, e)
@@ -1408,9 +1555,15 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		if lowerValue, err = castRangeValue(fieldDataType, lowerValue); err != nil {
 			return err
 		}
+		if lowerValue, err = v.fixupDecimalRangeBound(ctx.Expr(0), fieldDataType, columnInfo, lowerValue); err != nil {
+			return err
+		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
 		if upperValue, err = castRangeValue(fieldDataType, upperValue); err != nil {
+			return err
+		}
+		if upperValue, err = v.fixupDecimalRangeBound(ctx.Expr(1), fieldDataType, columnInfo, upperValue); err != nil {
 			return err
 		}
 	}
@@ -1495,9 +1648,15 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		if lowerValue, err = castRangeValue(fieldDataType, lowerValue); err != nil {
 			return err
 		}
+		if lowerValue, err = v.fixupDecimalRangeBound(ctx.Expr(1), fieldDataType, columnInfo, lowerValue); err != nil {
+			return err
+		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
 		if upperValue, err = castRangeValue(fieldDataType, upperValue); err != nil {
+			return err
+		}
+		if upperValue, err = v.fixupDecimalRangeBound(ctx.Expr(0), fieldDataType, columnInfo, upperValue); err != nil {
 			return err
 		}
 	}

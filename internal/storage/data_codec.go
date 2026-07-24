@@ -406,6 +406,10 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		if err = eventWriter.AddTimestamptzToPayload(singleData.(*TimestamptzFieldData).Data, singleData.(*TimestamptzFieldData).ValidData); err != nil {
 			return err
 		}
+	case schemapb.DataType_Decimal:
+		if err = eventWriter.AddDecimalToPayload(singleData.(*DecimalFieldData).Data, singleData.(*DecimalFieldData).ValidData); err != nil {
+			return err
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for i, singleString := range singleData.(*StringFieldData).Data {
 			isValid := true
@@ -686,6 +690,19 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		timestamptzFieldData.Data = append(timestamptzFieldData.Data, singleData...)
 		timestamptzFieldData.ValidData = append(timestamptzFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = timestamptzFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Decimal:
+		// Values on disk are always the already-decoded unscaled int64, never decimal text.
+		singleData := data.([]int64)
+		if fieldData == nil {
+			fieldData = &DecimalFieldData{Data: make([]int64, 0, rowNum)}
+		}
+		decimalFieldData := fieldData.(*DecimalFieldData)
+
+		decimalFieldData.Data = append(decimalFieldData.Data, singleData...)
+		decimalFieldData.ValidData = append(decimalFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = decimalFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:

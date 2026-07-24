@@ -345,7 +345,8 @@ class ChunkedColumnInterface {
                data_type == DataType::INT32 || data_type == DataType::INT64 ||
                data_type == DataType::FLOAT || data_type == DataType::DOUBLE ||
                data_type == DataType::BOOL ||
-               data_type == DataType::TIMESTAMPTZ;
+               data_type == DataType::TIMESTAMPTZ ||
+               data_type == DataType::DECIMAL;
     }
 
     static bool

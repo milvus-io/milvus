@@ -219,6 +219,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
+        case DataType::DECIMAL: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
         case DataType::FLOAT: {
             result = ExecRangeVisitorImpl<float>(context);
             break;
@@ -2039,6 +2043,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             break;
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
             can_use = SegmentExpr::CanUseIndexForOp<int64_t>(expr_->op_type_);
             break;
         case DataType::FLOAT:
@@ -2343,6 +2348,9 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
             PrefetchRawData<int64_t>();
             break;
         case DataType::TIMESTAMPTZ:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::DECIMAL:
             PrefetchRawData<int64_t>();
             break;
         case DataType::FLOAT:

@@ -36,6 +36,7 @@ type PayloadWriterInterface interface {
 	AddFloatToPayload([]float32, []bool) error
 	AddDoubleToPayload([]float64, []bool) error
 	AddTimestamptzToPayload([]int64, []bool) error
+	AddDecimalToPayload([]int64, []bool) error
 	AddOneStringToPayload(string, bool) error
 	AddOneArrayToPayload(*schemapb.ScalarField, bool) error
 	AddOneJSONToPayload([]byte, bool) error

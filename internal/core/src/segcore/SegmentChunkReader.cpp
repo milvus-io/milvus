@@ -262,6 +262,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
             return GetMultipleChunkDataAccessor<int64_t>(
                 field_id, current_chunk_id, current_chunk_pos, pinned_index);
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
             return GetMultipleChunkDataAccessor<int64_t>(
                 field_id, current_chunk_id, current_chunk_pos, pinned_index);
         case DataType::FLOAT:
@@ -389,6 +390,7 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
             return GetChunkDataAccessor<int32_t>(
                 field_id, chunk_id, pinned_index);
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
         case DataType::INT64:
             return GetChunkDataAccessor<int64_t>(
                 field_id, chunk_id, pinned_index);

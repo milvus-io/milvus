@@ -50,6 +50,7 @@
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/Span.h"
+#include "common/Decimal.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
 #include "glog/logging.h"
@@ -538,6 +539,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
                     break;
                 case DataType::INT64:
                 case DataType::TIMESTAMPTZ:
+                case DataType::DECIMAL:
                     field_bytes = num_rows * sizeof(int64_t);
                     break;
                 case DataType::FLOAT:
@@ -1833,6 +1835,27 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_timestamptz_data()
                                              ->mutable_data()
                                              ->mutable_data());
+            break;
+        }
+        case DataType::DECIMAL: {
+            // Unlike every other case here, the client-facing value is text
+            // ("19.99"), not the internal unscaled int64 ("199900") — encode
+            // back before returning, the mirror image of the decode done once
+            // at insert time in ConcurrentVector::set_data_raw.
+            auto scale = field_meta.get_decimal_scale();
+            auto vec = dynamic_cast<const ConcurrentVector<int64_t>*>(vec_ptr);
+            AssertInfo(vec, "Pointer of vec_ptr is nullptr for DECIMAL field");
+            auto dst =
+                result->mutable_scalars()->mutable_bytes_data()->mutable_data();
+            for (int64_t i = 0; i < count; ++i) {
+                auto offset = seg_offsets[i];
+                if (offset != INVALID_SEG_OFFSET) {
+                    auto value = vec->get_element(offset);
+                    dst->at(i) = value ? EncodeDecimalText(*value, scale) : "";
+                } else {
+                    dst->at(i) = "";
+                }
+            }
             break;
         }
         case DataType::VARCHAR: {

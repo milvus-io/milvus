@@ -913,6 +913,18 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::DECIMAL: {
+                // Default value and query result are both decimal text —
+                // no decode/encode needed here, just a direct copy.
+                auto dst = result->mutable_scalars()
+                               ->mutable_bytes_data()
+                               ->mutable_data();
+                const auto& text = field_meta.default_value()->bytes_data();
+                for (int64_t i = 0; i < count; ++i) {
+                    dst->at(i) = text;
+                }
+                break;
+            }
             case DataType::VARCHAR: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()
