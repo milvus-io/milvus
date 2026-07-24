@@ -16,15 +16,28 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
 #include "common/BitsetView.h"
 #include "common/Types.h"
+#include "storage/MmapChunkManager.h"
 
 namespace milvus {
+
+struct OffsetMappingBuildOptions {
+    // i2o: index/internal id -> original/logical offset.
+    bool enable_mmap_i2o_map{false};
+    // o2i: original/logical offset -> index/internal id.
+    bool enable_mmap_o2i_map{false};
+    storage::MmapChunkManagerPtr mmap_chunk_manager{nullptr};
+    storage::MmapChunkDescriptorPtr i2o_mmap_descriptor{nullptr};
+    storage::MmapChunkDescriptorPtr o2i_mmap_descriptor{nullptr};
+};
 
 // Bidirectional offset mapping for nullable vector storage
 // Maps between logical offsets (with nulls) and physical offsets (only valid
@@ -61,6 +74,9 @@ class OffsetMapping {
     virtual bool
     IsEnabled() const;
 
+    virtual bool
+    IsMmap() const;
+
     // Get total logical count (including nulls)
     virtual int64_t
     GetTotalCount() const;
@@ -81,10 +97,52 @@ class OffsetMapping {
                               std::vector<int64_t>& physical_offsets) const;
 };
 
+class OffsetMappingArray {
+ public:
+    void
+    Resize(size_t size,
+           int32_t value,
+           bool enable_mmap,
+           const storage::MmapChunkManagerPtr& mmap_chunk_manager,
+           const storage::MmapChunkDescriptorPtr& mmap_descriptor);
+
+    void
+    Clear();
+
+    size_t
+    size() const {
+        return size_;
+    }
+
+    bool
+    IsMmap() const {
+        return mmap_data_ != nullptr;
+    }
+
+    int32_t&
+    operator[](size_t index) {
+        return IsMmap() ? mmap_data_[index] : vec_[index];
+    }
+
+    const int32_t&
+    operator[](size_t index) const {
+        return IsMmap() ? mmap_data_[index] : vec_[index];
+    }
+
+ private:
+    size_t size_{0};
+    std::vector<int32_t> vec_;
+    int32_t* mmap_data_{nullptr};
+    storage::MmapChunkManagerPtr mmap_chunk_manager_{nullptr};
+    storage::MmapChunkDescriptorPtr mmap_descriptor_{nullptr};
+};
+
 class SealedOffsetMapping final : public OffsetMapping {
  public:
     void
-    Build(const bool* valid_data, int64_t total_count);
+    Build(const bool* valid_data,
+          int64_t total_count,
+          const OffsetMappingBuildOptions& options = {});
 
     int64_t
     GetPhysicalOffset(int64_t logical_offset) const override;
@@ -97,6 +155,9 @@ class SealedOffsetMapping final : public OffsetMapping {
 
     bool
     IsEnabled() const override;
+
+    bool
+    IsMmap() const override;
 
     int64_t
     GetTotalCount() const override;
@@ -118,6 +179,31 @@ class SealedOffsetMapping final : public OffsetMapping {
         bool* valid_data,
         std::vector<int64_t>& physical_offsets) const override;
 
+    bool
+    IsUsingMap() const {
+        return IsI2OUsingMap() || IsO2IUsingMap();
+    }
+
+    bool
+    IsI2OUsingMap() const {
+        return use_i2o_map_;
+    }
+
+    bool
+    IsO2IUsingMap() const {
+        return use_o2i_map_;
+    }
+
+    bool
+    IsI2OMmap() const {
+        return p2l_vec_.IsMmap();
+    }
+
+    bool
+    IsO2IMmap() const {
+        return l2p_vec_.IsMmap();
+    }
+
  private:
     int64_t
     GetPhysicalOffsetInternal(int64_t logical_offset) const;
@@ -126,10 +212,11 @@ class SealedOffsetMapping final : public OffsetMapping {
     GetLogicalOffsetInternal(int64_t physical_offset) const;
 
     bool enabled_{false};
-    bool use_map_{false};
+    bool use_i2o_map_{false};
+    bool use_o2i_map_{false};
     // Sealed vec mode storage (uses int32_t to save memory)
-    std::vector<int32_t> l2p_vec_;  // logical -> physical, -1 means null
-    std::vector<int32_t> p2l_vec_;  // physical -> logical
+    OffsetMappingArray l2p_vec_;  // o2i: logical/original -> physical/index
+    OffsetMappingArray p2l_vec_;  // i2o: physical/index -> logical/original
 
     // Sealed map mode storage (for sparse valid data)
     std::unordered_map<int32_t, int32_t> l2p_map_;  // logical -> physical

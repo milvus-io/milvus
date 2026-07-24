@@ -18,16 +18,19 @@
 
 #include <algorithm>
 #include <cstddef>
-#include "common/FastMem.h"
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/OffsetMapping.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
 #include "index/VectorIndex.h"
 
 namespace milvus::index {
@@ -124,6 +127,33 @@ CountValidDataBitmap(size_t count, const uint8_t* bitmap) {
     return valid_count;
 }
 
+inline constexpr const char* OFFSET_MAPPING_MMAP_DIR = "id_mapping_mmap";
+
+inline std::string
+GetOffsetMappingMmapDir(const std::string& local_index_path_prefix) {
+    return (std::filesystem::path(local_index_path_prefix) /
+            OFFSET_MAPPING_MMAP_DIR)
+        .string();
+}
+
+inline bool
+NeedOffsetMappingMmap(const OffsetMappingBuildOptions& options,
+                      size_t total_count,
+                      size_t valid_count) {
+    return (options.enable_mmap_o2i_map && total_count > 0) ||
+           (options.enable_mmap_i2o_map && valid_count > 0);
+}
+
+inline OffsetMappingBuildOptions
+GetOffsetMappingMmapOptions(const Config& config) {
+    OffsetMappingBuildOptions options;
+    options.enable_mmap_i2o_map =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP_I2O_MAP).value_or(false);
+    options.enable_mmap_o2i_map =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP_O2I_MAP).value_or(false);
+    return options;
+}
+
 inline std::vector<uint8_t>
 PackValidDataBitmap(const OffsetMapping& offset_mapping) {
     auto count = static_cast<size_t>(offset_mapping.GetTotalCount());
@@ -139,12 +169,13 @@ PackValidDataBitmap(const OffsetMapping& offset_mapping) {
 inline void
 BuildValidDataFromBitmap(VectorIndex* vector_index,
                          size_t count,
-                         const uint8_t* bitmap) {
+                         const uint8_t* bitmap,
+                         const OffsetMappingBuildOptions& options = {}) {
     std::unique_ptr<bool[]> valid_data(new bool[count]);
     for (size_t i = 0; i < count; ++i) {
         valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
     }
-    vector_index->BuildValidData(valid_data.get(), count);
+    vector_index->BuildValidData(valid_data.get(), count, options);
 }
 
 inline void
@@ -171,7 +202,8 @@ AppendValidDataToBinarySet(const OffsetMapping& offset_mapping,
 
 inline bool
 LoadValidDataFromBinarySet(const BinarySet& binary_set,
-                           VectorIndex* vector_index) {
+                           VectorIndex* vector_index,
+                           const OffsetMappingBuildOptions& options = {}) {
     bool has_count = binary_set.Contains(VALID_DATA_COUNT_KEY);
     bool has_data = binary_set.Contains(VALID_DATA_KEY);
     if (!has_count && !has_data) {
@@ -192,7 +224,8 @@ LoadValidDataFromBinarySet(const BinarySet& binary_set,
     AssertInfo(
         data_ptr != nullptr && data_ptr->size >= GetValidDataBitmapSize(count),
         "nullable vector index valid_data bitmap file is invalid");
-    BuildValidDataFromBitmap(vector_index, count, data_ptr->data.get());
+    BuildValidDataFromBitmap(
+        vector_index, count, data_ptr->data.get(), options);
     return true;
 }
 

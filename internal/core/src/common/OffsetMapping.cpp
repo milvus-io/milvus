@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "storage/MmapManager.h"
 
 namespace milvus {
 namespace {
@@ -33,6 +34,48 @@ ShouldSkipBitsetTransform(const BitsetView& bitset,
 
 }  // namespace
 
+void
+OffsetMappingArray::Resize(
+    size_t size,
+    int32_t value,
+    bool enable_mmap,
+    const storage::MmapChunkManagerPtr& mmap_chunk_manager,
+    const storage::MmapChunkDescriptorPtr& mmap_descriptor) {
+    Clear();
+    if (size == 0) {
+        return;
+    }
+
+    if (enable_mmap) {
+        AssertInfo(mmap_chunk_manager != nullptr,
+                   "offset mapping mmap chunk manager is null");
+        AssertInfo(mmap_descriptor != nullptr,
+                   "offset mapping mmap descriptor is null");
+        mmap_chunk_manager_ = mmap_chunk_manager;
+        mmap_descriptor_ = mmap_descriptor;
+        mmap_data_ = static_cast<int32_t*>(mmap_chunk_manager_->Allocate(
+            mmap_descriptor_, sizeof(int32_t) * size));
+        AssertInfo(mmap_data_ != nullptr,
+                   "failed to allocate offset mapping mmap buffer, size: {}",
+                   sizeof(int32_t) * size);
+        size_ = size;
+        std::fill_n(mmap_data_, size_, value);
+        return;
+    }
+
+    vec_.assign(size, value);
+    size_ = size;
+}
+
+void
+OffsetMappingArray::Clear() {
+    size_ = 0;
+    vec_.clear();
+    mmap_data_ = nullptr;
+    mmap_descriptor_ = nullptr;
+    mmap_chunk_manager_ = nullptr;
+}
+
 int64_t
 OffsetMapping::GetPhysicalOffset(int64_t logical_offset) const {
     return logical_offset;
@@ -55,6 +98,11 @@ OffsetMapping::GetValidCount() const {
 
 bool
 OffsetMapping::IsEnabled() const {
+    return false;
+}
+
+bool
+OffsetMapping::IsMmap() const {
     return false;
 }
 
@@ -99,20 +147,28 @@ OffsetMapping::FilterValidLogicalOffsets(
 }
 
 void
-SealedOffsetMapping::Build(const bool* valid_data, int64_t total_count) {
+SealedOffsetMapping::Build(const bool* valid_data,
+                           int64_t total_count,
+                           const OffsetMappingBuildOptions& options) {
     constexpr int64_t start_logical = 0;
     constexpr int64_t start_physical = 0;
+
+    valid_count_ = 0;
+    total_count_ = 0;
+    enabled_ = false;
+    use_i2o_map_ = false;
+    use_o2i_map_ = false;
+    l2p_vec_.Clear();
+    p2l_vec_.Clear();
+    l2p_map_.clear();
+    p2l_map_.clear();
+
     if (total_count == 0 || valid_data == nullptr) {
         return;
     }
 
     enabled_ = true;
     total_count_ = start_logical + total_count;
-    valid_count_ = 0;
-    l2p_vec_.clear();
-    p2l_vec_.clear();
-    l2p_map_.clear();
-    p2l_map_.clear();
 
     int64_t valid_count = 0;
     for (int64_t i = 0; i < total_count; ++i) {
@@ -121,33 +177,70 @@ SealedOffsetMapping::Build(const bool* valid_data, int64_t total_count) {
         }
     }
 
-    use_map_ = valid_count * 10 < total_count;
+    const bool use_sparse_mapping = valid_count * 10 < total_count;
+    use_i2o_map_ = !options.enable_mmap_i2o_map && use_sparse_mapping;
+    use_o2i_map_ = !options.enable_mmap_o2i_map && use_sparse_mapping;
 
-    if (use_map_) {
-        int64_t physical_idx = start_physical;
-        for (int64_t i = 0; i < total_count; ++i) {
-            if (valid_data[i]) {
-                l2p_map_[start_logical + i] = physical_idx;
-                p2l_map_[physical_idx] = start_logical + i;
-                ++physical_idx;
-            }
+    const int64_t required_size = start_logical + total_count;
+    const int64_t required_p2l_size = start_physical + valid_count;
+
+    auto build_options = options;
+    const bool need_o2i_mmap =
+        !use_o2i_map_ && build_options.enable_mmap_o2i_map && required_size > 0;
+    const bool need_i2o_mmap = !use_i2o_map_ &&
+                               build_options.enable_mmap_i2o_map &&
+                               required_p2l_size > 0;
+    if (need_i2o_mmap || need_o2i_mmap) {
+        if (build_options.mmap_chunk_manager == nullptr) {
+            build_options.mmap_chunk_manager =
+                storage::MmapManager::GetInstance().GetMmapChunkManager();
         }
-    } else {
-        const int64_t required_size = start_logical + total_count;
-        l2p_vec_.resize(required_size, -1);
+    }
+    if (need_o2i_mmap && build_options.o2i_mmap_descriptor == nullptr) {
+        build_options.o2i_mmap_descriptor =
+            build_options.mmap_chunk_manager->Register();
+    }
+    if (need_i2o_mmap && build_options.i2o_mmap_descriptor == nullptr) {
+        build_options.i2o_mmap_descriptor =
+            build_options.mmap_chunk_manager->Register();
+    }
+    if (need_i2o_mmap && need_o2i_mmap) {
+        AssertInfo(build_options.i2o_mmap_descriptor !=
+                       build_options.o2i_mmap_descriptor,
+                   "offset mapping i2o and o2i mmap descriptors must be "
+                   "different");
+    }
 
-        const int64_t required_p2l_size = start_physical + valid_count;
-        p2l_vec_.resize(required_p2l_size, -1);
+    if (!use_o2i_map_) {
+        l2p_vec_.Resize(required_size,
+                        -1,
+                        build_options.enable_mmap_o2i_map,
+                        build_options.mmap_chunk_manager,
+                        build_options.o2i_mmap_descriptor);
+    }
 
-        int64_t physical_idx = start_physical;
-        for (int64_t i = 0; i < total_count; ++i) {
-            if (valid_data[i]) {
-                l2p_vec_[start_logical + i] = physical_idx;
-                p2l_vec_[physical_idx] = start_logical + i;
-                ++physical_idx;
+    if (!use_i2o_map_) {
+        p2l_vec_.Resize(required_p2l_size,
+                        -1,
+                        build_options.enable_mmap_i2o_map,
+                        build_options.mmap_chunk_manager,
+                        build_options.i2o_mmap_descriptor);
+    }
+
+    int64_t physical_idx = start_physical;
+    for (int64_t i = 0; i < total_count; ++i) {
+        if (valid_data[i]) {
+            if (use_o2i_map_) {
+                l2p_map_[start_logical + i] = physical_idx;
             } else {
-                l2p_vec_[start_logical + i] = -1;
+                l2p_vec_[start_logical + i] = physical_idx;
             }
+            if (use_i2o_map_) {
+                p2l_map_[physical_idx] = start_logical + i;
+            } else {
+                p2l_vec_[physical_idx] = start_logical + i;
+            }
+            ++physical_idx;
         }
     }
 
@@ -167,7 +260,7 @@ SealedOffsetMapping::GetPhysicalOffsetInternal(int64_t logical_offset) const {
     if (logical_offset < 0 || logical_offset >= total_count_) {
         return -1;
     }
-    if (use_map_) {
+    if (use_o2i_map_) {
         auto it = l2p_map_.find(static_cast<int32_t>(logical_offset));
         return it == l2p_map_.end() ? -1 : it->second;
     }
@@ -189,7 +282,7 @@ SealedOffsetMapping::GetLogicalOffsetInternal(int64_t physical_offset) const {
     if (physical_offset < 0 || physical_offset >= valid_count_) {
         return -1;
     }
-    if (use_map_) {
+    if (use_i2o_map_) {
         auto it = p2l_map_.find(static_cast<int32_t>(physical_offset));
         return it == p2l_map_.end() ? -1 : it->second;
     }
@@ -206,6 +299,11 @@ SealedOffsetMapping::GetValidCount() const {
 bool
 SealedOffsetMapping::IsEnabled() const {
     return enabled_;
+}
+
+bool
+SealedOffsetMapping::IsMmap() const {
+    return l2p_vec_.IsMmap() || p2l_vec_.IsMmap();
 }
 
 int64_t
@@ -226,7 +324,7 @@ SealedOffsetMapping::TransformBitset(const BitsetView& bitset,
     }
 
     result.resize(valid_count_, true);
-    if (use_map_) {
+    if (use_i2o_map_) {
         for (int64_t physical_idx = 0; physical_idx < valid_count_;
              ++physical_idx) {
             auto it = p2l_map_.find(static_cast<int32_t>(physical_idx));

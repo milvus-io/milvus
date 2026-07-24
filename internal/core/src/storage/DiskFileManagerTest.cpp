@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <future>
 #include <initializer_list>
 #include <iostream>
@@ -112,6 +113,48 @@ class DiskAnnFileManagerTest : public testing::Test {
     ChunkManagerPtr cm_;
     milvus_storage::ArrowFileSystemPtr fs_;
 };
+
+namespace {
+
+std::string
+GeneratedIndexIdentifierPrefixForTest(const IndexMeta& index_meta) {
+    return std::to_string(index_meta.build_id) + "_" +
+           std::to_string(index_meta.index_version) + "_" +
+           std::to_string(index_meta.segment_id) + "_" +
+           std::to_string(index_meta.field_id) + "_";
+}
+
+std::vector<std::string>
+CollectOffsetMappingMmapFiles(const std::string& root_path,
+                              const IndexMeta& index_meta) {
+    std::vector<std::string> files;
+    boost::filesystem::path root(root_path);
+    if (!boost::filesystem::exists(root)) {
+        return files;
+    }
+
+    const auto index_identifier =
+        GeneratedIndexIdentifierPrefixForTest(index_meta);
+    for (boost::filesystem::recursive_directory_iterator it(root), end;
+         it != end;
+         ++it) {
+        const auto& path = it->path();
+        if (!boost::filesystem::is_regular_file(path)) {
+            continue;
+        }
+        if (path.string().find(index_identifier) == std::string::npos) {
+            continue;
+        }
+        if (path.parent_path().filename().string() ==
+            milvus::index::OFFSET_MAPPING_MMAP_DIR) {
+            files.emplace_back(path.string());
+        }
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+}  // namespace
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -1714,6 +1757,47 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     ASSERT_EQ(files.size(), 1);
     EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
 
+    milvus::Config load_config;
+    load_config[DIM_KEY] = dim;
+    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+    load_config["index_files"] = files;
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto mmap_file_count_before_load =
+        CollectOffsetMappingMmapFiles(local_chunk_manager->GetRootPath(),
+                                      index_meta)
+            .size();
+
+    {
+        auto generic_mmap_load_config = load_config;
+        generic_mmap_load_config[milvus::index::ENABLE_MMAP] = true;
+
+        milvus::index::VectorDiskAnnIndex<float> loaded_index(
+            DataType::NONE,
+            knowhere::IndexEnum::INDEX_DISKANN,
+            knowhere::metric::L2,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            file_manager_context);
+
+        loaded_index.Load(milvus::tracer::TraceContext{},
+                          generic_mmap_load_config);
+        ASSERT_TRUE(loaded_index.GetOffsetMapping().IsEnabled());
+        EXPECT_FALSE(loaded_index.GetOffsetMapping().IsMmap());
+        EXPECT_EQ(loaded_index.GetOffsetMapping().GetTotalCount(), num_rows);
+        EXPECT_EQ(loaded_index.GetOffsetMapping().GetValidCount(), 0);
+        EXPECT_EQ(loaded_index.GetDim(), dim);
+    }
+
+    EXPECT_EQ(CollectOffsetMappingMmapFiles(local_chunk_manager->GetRootPath(),
+                                            index_meta)
+                  .size(),
+              mmap_file_count_before_load);
+
+    auto offset_mapping_mmap_load_config = load_config;
+    offset_mapping_mmap_load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
+    offset_mapping_mmap_load_config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
+
     milvus::index::VectorDiskAnnIndex<float> loaded_index(
         DataType::NONE,
         knowhere::IndexEnum::INDEX_DISKANN,
@@ -1721,16 +1805,24 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
         knowhere::Version::GetCurrentVersion().VersionNumber(),
         file_manager_context);
 
-    milvus::Config load_config;
-    load_config[DIM_KEY] = dim;
-    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
-    load_config["index_files"] = files;
-
-    loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
-    ASSERT_TRUE(loaded_index.GetOffsetMapping().IsEnabled());
-    EXPECT_EQ(loaded_index.GetOffsetMapping().GetTotalCount(), num_rows);
-    EXPECT_EQ(loaded_index.GetOffsetMapping().GetValidCount(), 0);
+    loaded_index.Load(milvus::tracer::TraceContext{},
+                      offset_mapping_mmap_load_config);
+    const auto& offset_mapping = loaded_index.GetOffsetMapping();
+    ASSERT_TRUE(offset_mapping.IsEnabled());
+    EXPECT_TRUE(offset_mapping.IsMmap());
+    EXPECT_EQ(offset_mapping.GetTotalCount(), num_rows);
+    EXPECT_EQ(offset_mapping.GetValidCount(), 0);
     EXPECT_EQ(loaded_index.GetDim(), dim);
+
+    const auto* sealed_mapping =
+        dynamic_cast<const SealedOffsetMapping*>(&offset_mapping);
+    ASSERT_NE(sealed_mapping, nullptr);
+    EXPECT_FALSE(sealed_mapping->IsI2OMmap());
+    EXPECT_TRUE(sealed_mapping->IsO2IMmap());
+    EXPECT_EQ(CollectOffsetMappingMmapFiles(local_chunk_manager->GetRootPath(),
+                                            index_meta)
+                  .size(),
+              mmap_file_count_before_load + 1);
 
     for (const auto& file : files) {
         cm_->Remove(file);
