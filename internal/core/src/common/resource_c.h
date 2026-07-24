@@ -29,6 +29,9 @@ typedef struct LoadResourceRequest {
     uint64_t final_memory_cost;  // final memory (in bytes) cost after loading
     uint64_t final_disk_cost;    // final disk cost (in bytes) after loading
     bool has_raw_data;           // the filed contains raw data or not
+    uint64_t gpu_memory_cost;  // device (GPU) memory (in bytes) retained after
+                               // loading; 0 for non-GPU / indexes that do not
+                               // report a distinct device footprint
 } LoadResourceRequest;
 
 #ifdef __cplusplus

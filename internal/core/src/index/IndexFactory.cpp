@@ -547,10 +547,27 @@ IndexFactory::VecIndexLoadResource(
     request.has_raw_data = CanUseIndexRawDataForField(field_type, has_raw_data);
     request.final_disk_cost = res.diskCost;
     request.final_memory_cost = res.memoryCost;
+    // Device footprint retained after load (0 for CPU indexes). Kept distinct
+    // from the host transient max_memory_cost so GPU admission reserves the real
+    // VRAM growth rather than the (larger) host reconstruct/upload peak.
+    request.gpu_memory_cost = res.gpuMemoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
         request.max_disk_cost = res.diskCost;
         request.max_memory_cost =
             std::max(res.memoryCost, download_buffer_size_in_bytes);
+    } else if (res.maxMemoryCost > 0) {
+        // Phase-separated accounting (e.g. GPU_HNSW): the index reports a peak
+        // transient host cost that differs from the retained memoryCost. Reserve
+        // the peak for admission, but final_memory_cost stays res.memoryCost
+        // (~0 once the CPU copy is freed after GPU upload). Falling back to the
+        // 2*memoryCost heuristic here would under-reserve and risk a host OOM.
+        // NOTE: GPU_HNSW is currently the only index type that populates
+        // maxMemoryCost (> 0); every other index leaves it 0 and takes the
+        // 2*memoryCost fallback below, so this branch is effectively
+        // GPU_HNSW-only today. Any new index that sets maxMemoryCost will opt
+        // into this same peak-based admission automatically.
+        request.max_disk_cost = 0;
+        request.max_memory_cost = res.maxMemoryCost;
     } else {
         request.max_disk_cost = 0;
         request.max_memory_cost = 2 * res.memoryCost;

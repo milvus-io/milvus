@@ -62,6 +62,8 @@ const (
 
 	GPUCagra      IndexType = "GPU_CAGRA"
 	GPUBruteForce IndexType = "GPU_BRUTE_FORCE"
+	GPUHnswSQ     IndexType = "GPU_HNSW_SQ"
+	GPUHnsw       IndexType = "GPU_HNSW"
 
 	Trie     IndexType = "Trie"
 	Sorted   IndexType = "STL_SORT"

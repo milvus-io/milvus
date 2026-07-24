@@ -14,11 +14,34 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# zilliztech/knowhere#1699 (iterator error-code interface) that this segcore
-# adaptation depends on has landed on knowhere main and is included in the
-# v3.0.6 release tag, so pin to the tagged release instead of a raw commit.
-set( KNOWHERE_VERSION v3.0.6 )
-set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
+# Pinned to an immutable commit SHA on 6si/knowhere@gpu-hnsw rather than the
+# branch name: a branch is mutable and the build could change with no milvus PR.
+# Repoint to a tagged 6si/knowhere release before merging to production. This SHA
+# is 6si/knowhere@gpu-hnsw merged up to knowhere main, so it INCLUDES the
+# expected<T> iterator error-code interface (knowhere #1699) that the segcore
+# adaptation on milvus master now depends on. It re-vendors the
+# vanilla-faiss-structured GpuIndexHNSW (built on faiss::IndexHNSW,
+# cppcontrib-free) and rewires GpuHnswIndexNode to be a pure consumer of it: the
+# deserialized cppcontrib index is converted to a vanilla faiss::IndexHNSW and
+# uploaded via copyFrom(), cosine folded into normalize+IP. It carries GPU-side
+# filtered search, warp-cooperative layer-0 distance, and nq-chunked
+# visited-bitmap VRAM bounding. Quantized-cosine numerics differ from the legacy
+# inverse-norm path (recall-gated; may require re-ingest).
+# Accurate int8 cosine: QT_8bit_direct_signed collapses L2-normalized vectors
+# (components ~1/sqrt(d)) onto a few of the 256 levels, so int8 cosine is
+# re-encoded as fp16 at load (validated fp16 GPU path; the int8 query is widened
+# to fp32 through searchHost). int8 L2/IP keep direct_signed + DP4A.
+# Includes the faiss review fixes: upload the filter bitset in
+# GpuIndexHNSW::searchImpl_ (standard search() path); guard extract_hnsw_layers
+# against an OOB nb_neighbors(1) read on a layer-0-only index; and select the
+# int8 DP4A layer-0 path on a per-search staged flag (not a leftover pooled
+# d_queries_i8 buffer) so a fp32-query search reusing the slot can't score
+# against stale int8 data. Also converts the standard search() label output
+# on-device (convert_labels_kernel) instead of a D2H->host->H2D round-trip;
+# milvus uses the searchHost path so this is a no-op for production but keeps
+# the vendored tree in sync with faiss.
+set( KNOWHERE_VERSION 0d01cac0d961c923596262cc05f5539fb9bed338 )
+set( GIT_REPOSITORY  "https://github.com/6si/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
@@ -81,7 +104,7 @@ if ( WITH_SVS STREQUAL "ON" )
                 DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
                 FILES_MATCHING PATTERN "libsvs_runtime.so*")
     else()
-        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found \u2014 libsvs_runtime.so will not be installed")
+        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found -- libsvs_runtime.so will not be installed")
     endif()
 endif()
 
@@ -92,7 +115,7 @@ if ( WITH_CUVS STREQUAL "ON" )
                 DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
                 FILES_MATCHING PATTERN "librmm.so*")
     else()
-        message(WARNING "cuVS enabled but ${_RMM_LIB_DIR} not found \u2014 librmm.so will not be installed")
+        message(WARNING "cuVS enabled but ${_RMM_LIB_DIR} not found -- librmm.so will not be installed")
     endif()
 
     set( _RAPIDS_LOGGER_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rapids_logger-build" )
@@ -101,7 +124,7 @@ if ( WITH_CUVS STREQUAL "ON" )
                 DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
                 FILES_MATCHING PATTERN "librapids_logger.so*")
     else()
-        message(WARNING "cuVS enabled but ${_RAPIDS_LOGGER_LIB_DIR} not found \u2014 librapids_logger.so will not be installed")
+        message(WARNING "cuVS enabled but ${_RAPIDS_LOGGER_LIB_DIR} not found -- librapids_logger.so will not be installed")
     endif()
 endif()
 
