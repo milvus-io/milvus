@@ -816,6 +816,44 @@ CurrentJsonStatsDataFormatVersion() {
 }
 
 bool
+TextStatsFilesEqual(const proto::segcore::TextIndexStats& lhs,
+                    const proto::segcore::TextIndexStats& rhs) {
+    if (lhs.files_size() != rhs.files_size()) {
+        return false;
+    }
+    for (int i = 0; i < lhs.files_size(); ++i) {
+        if (lhs.files(i) != rhs.files(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+TextStatsLoadIdentityEqual(const proto::segcore::TextIndexStats& lhs,
+                           const proto::segcore::TextIndexStats& rhs) {
+    return lhs.fieldid() == rhs.fieldid() && lhs.version() == rhs.version() &&
+           lhs.buildid() == rhs.buildid() &&
+           lhs.current_scalar_index_version() ==
+               rhs.current_scalar_index_version() &&
+           lhs.base_path() == rhs.base_path() &&
+           lhs.log_size() == rhs.log_size() &&
+           lhs.memory_size() == rhs.memory_size() &&
+           TextStatsFilesEqual(lhs, rhs);
+}
+
+bool
+TextIndexSchemaIdentityEqual(const FieldMeta& lhs, const FieldMeta& rhs) {
+    if (lhs.get_data_type() != rhs.get_data_type() ||
+        lhs.enable_match() != rhs.enable_match() ||
+        lhs.enable_analyzer() != rhs.enable_analyzer()) {
+        return false;
+    }
+    return !lhs.enable_analyzer() ||
+           lhs.get_analyzer_params() == rhs.get_analyzer_params();
+}
+
+bool
 JsonStatsFilesEqual(const proto::segcore::JsonKeyStats& lhs,
                     const proto::segcore::JsonKeyStats& rhs) {
     if (lhs.files_size() != rhs.files_size()) {
@@ -846,6 +884,89 @@ JsonStatsLoadIdentityEqual(const proto::segcore::JsonKeyStats& lhs,
 void
 SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
                                         SegmentLoadInfo& new_info) {
+    // Online reopen currently supports adding a text index, preserving an
+    // unchanged text index, or dropping it together with its schema field.
+    // Replacing a pre-built index or changing between pre-built and raw-built
+    // sources requires full segment replacement. Reject these transitions
+    // before any load IO or staged runtime mutation starts.
+    for (const auto& [field_id, current_stats] : GetTextStatsLogs()) {
+        auto fid = FieldId(field_id);
+        AssertInfo(HasFieldInSchema(fid),
+                   "published pre-built text index field {} is absent from "
+                   "the current schema for segment {}",
+                   field_id,
+                   GetSegmentID());
+        AssertInfo(created_text_indexes_.count(fid) == 0,
+                   "published text index field {} is marked as both "
+                   "pre-built and raw-built for segment {}",
+                   field_id,
+                   GetSegmentID());
+        if (!new_info.HasFieldInSchema(fid)) {
+            continue;
+        }
+
+        const auto* incoming_stats = new_info.GetTextStatsLog(field_id);
+        const auto& incoming_meta = new_info.schema_->operator[](fid);
+        AssertInfo(
+            incoming_stats != nullptr,
+            "online reopen cannot change text index source for segment {}, "
+            "field {} from pre-built to {}; use full segment replacement "
+            "instead",
+            new_info.GetSegmentID(),
+            field_id,
+            incoming_meta.enable_match() ? "raw-built" : "none");
+        AssertInfo(
+            TextStatsLoadIdentityEqual(current_stats, *incoming_stats),
+            "online reopen cannot replace pre-built text index identity for "
+            "segment {}, field {}; use full segment replacement instead",
+            new_info.GetSegmentID(),
+            field_id);
+        AssertInfo(TextIndexSchemaIdentityEqual(schema_->operator[](fid),
+                                                incoming_meta),
+                   "online reopen cannot change text index schema identity for "
+                   "segment {}, field {}; use full segment replacement instead",
+                   new_info.GetSegmentID(),
+                   field_id);
+    }
+
+    for (const auto& fid : created_text_indexes_) {
+        AssertInfo(HasFieldInSchema(fid),
+                   "published raw-built text index field {} is absent from "
+                   "the current schema for segment {}",
+                   fid.get(),
+                   GetSegmentID());
+        AssertInfo(GetTextStatsLog(fid.get()) == nullptr,
+                   "published text index field {} is marked as both "
+                   "pre-built and raw-built for segment {}",
+                   fid.get(),
+                   GetSegmentID());
+        if (!new_info.HasFieldInSchema(fid)) {
+            continue;
+        }
+
+        AssertInfo(
+            new_info.GetTextStatsLog(fid.get()) == nullptr,
+            "online reopen cannot change text index source for segment {}, "
+            "field {} from raw-built to pre-built; use full segment "
+            "replacement instead",
+            new_info.GetSegmentID(),
+            fid.get());
+        const auto& incoming_meta = new_info.schema_->operator[](fid);
+        AssertInfo(
+            incoming_meta.enable_match(),
+            "online reopen cannot remove raw-built text index for segment "
+            "{}, field {} while keeping the field; use full segment "
+            "replacement instead",
+            new_info.GetSegmentID(),
+            fid.get());
+        AssertInfo(TextIndexSchemaIdentityEqual(schema_->operator[](fid),
+                                                incoming_meta),
+                   "online reopen cannot change text index schema identity for "
+                   "segment {}, field {}; use full segment replacement instead",
+                   new_info.GetSegmentID(),
+                   fid.get());
+    }
+
     // Build current text indexed fields (fields with loaded text index stats)
     std::set<FieldId> current_text_indexed;
     for (const auto& [field_id, stats] : GetTextStatsLogs()) {

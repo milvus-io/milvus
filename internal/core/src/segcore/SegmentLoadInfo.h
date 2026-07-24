@@ -1195,6 +1195,17 @@ class SegmentLoadInfo {
         prune_set(field_index_has_raw_data_);
         prune_set(fields_filled_with_default_);
         prune_set(created_text_indexes_);
+
+        std::vector<int64_t> dropped_text_stats_fields;
+        for (const auto& [field_id, _] : info_.textstatslogs()) {
+            if (!HasFieldInSchema(FieldId(field_id))) {
+                dropped_text_stats_fields.push_back(field_id);
+            }
+        }
+        auto* text_stats_logs = info_.mutable_textstatslogs();
+        for (auto field_id : dropped_text_stats_fields) {
+            text_stats_logs->erase(field_id);
+        }
     }
 
     void

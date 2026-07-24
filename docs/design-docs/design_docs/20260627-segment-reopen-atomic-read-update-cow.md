@@ -240,6 +240,91 @@ The design rule is:
 
 > The published runtime object graph and readiness bitsets must describe the same visible world.
 
+### 4.4 Row Count and Delete Bitmap Capacity
+
+`RuntimeResourceState::row_count` is snapshot-owned runtime state. A prepared
+runtime may populate or verify it while loading fields, and readers consume the
+value from the published runtime snapshot.
+
+The sealed segment delete bitmap has different lifetime semantics: its capacity
+is initialized exactly once during segment bootstrap and is not resized by an
+online runtime update. Resizing it while delete ingestion or readers are active
+would mutate live, non-snapshot state and invalidate the COW publication model.
+
+Therefore:
+
+- online `Reopen` requires the incoming row count to equal the currently
+  published row count
+- a mismatch is rejected before diff computation, IO, or runtime preparation
+- field-load compatibility paths may initialize the delete bitmap when no
+  bootstrap load-info was provided, but subsequent calls only verify the same
+  value
+- any refresh that changes row count must use full segment replacement, which
+  creates a new segment instance and a new delete bitmap
+
+### 4.5 Commit Timestamp Publication
+
+`PublishedSegmentState::commit_ts` is the only source of truth for both readers
+and load preparation. Direct load paths capture it once from the current
+published snapshot, while Reopen paths use the value already carried by their
+staged snapshot. The captured value remains stable for the complete prepare
+operation.
+
+`SetCommitTimestamp()` and `SetLoadInfo()` publish a new state containing the
+new timestamp. They must not first mutate a separate live timestamp member,
+because a prepare or publication failure would otherwise expose a mixed world
+where load preparation and readers observe different commit timestamps.
+
+### 4.6 Text Index Lifecycle and Reopen Contract
+
+A published text index has one of two source identities:
+
+- **Prebuilt**: loaded from `TextIndexStats`; its load identity is the field,
+  version/build ID, scalar-index version, base path, sizes, and ordered file
+  list.
+- **RawBuilt**: built locally from the field column or scalar-index raw data;
+  `SegmentLoadInfo::created_text_indexes_` records that source identity as
+  snapshot-owned bookkeeping.
+
+The schema identity of either source includes the field data type,
+`enable_match`, `enable_analyzer`, and analyzer parameters. Online `Reopen`
+supports only these transitions:
+
+- no text index to Prebuilt
+- no text index to RawBuilt
+- unchanged Prebuilt to unchanged Prebuilt
+- unchanged RawBuilt to unchanged RawBuilt
+- either source to field removal from the schema
+
+The following transitions are rejected during diff validation, before index
+IO or staged runtime mutation begins:
+
+- replacing a Prebuilt load identity
+- Prebuilt to RawBuilt or RawBuilt to Prebuilt
+- removing a RawBuilt index while retaining the field
+- changing text-index schema identity while retaining the field
+
+These transitions require full segment replacement until staged text-index
+replacement is implemented explicitly. This keeps online reopen from silently
+retaining an old runtime index under new metadata or destroying a published
+index before a replacement is ready.
+
+Text-index update serialization belongs to `reopen_mutex_`: full load,
+`Reopen`, and direct `CreateTextIndex` cannot overlap. Within one staged load,
+prebuilt work is keyed by a unique field map and raw-build work by a unique
+field set; parallel commits into the cloned runtime are serialized by
+`StagedStateCommitter`. Consequently, a separate live
+`pending_text_index_fields_` set and its mutex-protected build guard do not
+provide an independent correctness guarantee and are removed.
+
+Both loaded and raw-built text indexes are inserted only into cloned runtime
+state and become visible with the published snapshot. On field removal, the
+entry is erased from the cloned runtime; old snapshots retain the old index by
+shared ownership until their readers finish. The new load-info snapshot also
+prunes both the runtime-only `created_text_indexes_` marker and the proto-backed
+`textstatslogs` entry for the removed field, so a later `Reopen` cannot observe
+stale text-index identity metadata.
+
 ---
 
 ## 5. Reader Model
@@ -270,6 +355,46 @@ With a snapshot-owned runtime graph:
 - old and new readers do not need to share one mutable live-member view
 
 This is one of the main benefits of the COW publication model.
+
+### 5.4 Snapshot-Only Leaf Readers Do Not Need the Inherited Segment Mutex
+
+Once a reader captures one `PublishedSegmentState`, the snapshot owns the
+schema, readiness facts, and runtime resources used by that operation. Holding
+the snapshot keeps the selected columns and indexes alive even if a later
+publication installs a new generation.
+
+The historical shared locks taken by snapshot-only sealed-segment leaf helpers
+did not participate in this publication protocol: runtime writers are
+serialized by `reopen_mutex_` and publish with an atomic shared-pointer swap,
+rather than by taking the inherited segment mutex. Those leaf-reader locks
+therefore had no writer counterpart that could make snapshot capture more
+atomic or extend resource lifetime.
+
+Snapshot-only readers should instead:
+
+- capture one published snapshot, or one runtime pointer derived from it
+- pass that captured generation through nested helpers
+- pin cache cells or retain shared owners for the duration of the operation
+- avoid recapturing schema/runtime when the caller already selected a
+  generation
+
+This migration step applies only to leaf readers implemented by
+`ChunkedSegmentSealedImpl`. It does not change the common
+`SegmentInternalInterface::Search` or `Retrieve` entry-point locks, because
+those methods are also used by Growing segments whose live mutable state still
+depends on the inherited mutex. Separating Growing and Sealed query
+synchronization ownership is deferred to a follow-up change.
+
+Production multi-stage Sealed requests remain generation-consistent through
+the request-level `SegmentReadLease` acquired at the C API boundary. Direct C++
+Search/Retrieve calls that do not acquire such a lease are not made
+concurrency-safe with online publication by this migration step.
+
+Under this scoped rule, removing the leaf-reader shared locks does not weaken
+the COW publication boundary. The remaining inherited locks include the common
+Search/Retrieve entry-point shared locks and the `ClearData()` exclusive lock
+around legacy live state; none of them is the lifetime mechanism for
+snapshot-owned resources.
 
 ---
 
@@ -320,6 +445,13 @@ Drop / replace should also become snapshot-driven:
 - the old snapshot retains ownership of the old resource until no reader still references it
 
 This avoids the fragile pattern of “delete from live member first, then hope readers do not step on it.”
+
+Cancellation of asynchronous cache warmup is a retirement side effect, not a
+prepare action. A scalar index removed or replaced in a cloned runtime is kept
+in a retirement list while the new state is prepared. `CancelWarmup()` is
+called only after publication succeeds and the publication gate has drained
+old readers. If prepare or publication fails, the currently published index is
+left untouched and its warmup is not cancelled.
 
 ---
 

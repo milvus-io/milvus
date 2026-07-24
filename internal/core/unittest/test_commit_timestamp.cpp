@@ -18,7 +18,8 @@
 //
 // Tests for commit_timestamp behavior in ChunkedSegmentSealedImpl (Approach A).
 // Approach A: during LoadFieldData, in-memory timestamps are overwritten to
-// commit_ts_ when commit_ts_ != 0. This file tests the four invariants:
+// the published commit timestamp when it is non-zero. This file tests the four
+// invariants:
 //
 //   I1. MVCC gate  — rows invisible for query_ts < commit_ts after overwrite
 //   I2. TTL gate   — rows NOT expired when commit_ts > ttl_threshold
@@ -498,7 +499,7 @@ TEST(CommitTimestamp, NormalSegment_BehaviorUnchanged) {
     constexpr Timestamp ROW_TS_MAX = 1009;
 
     auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/ROW_TS_MIN);
-    // No SetCommitTimestamp call -> commit_ts_=0 -> no overwrite.
+    // No SetCommitTimestamp call -> published commit_ts=0 -> no overwrite.
     auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // MVCC: query_ts=500 < ROW_TS_MIN=1000 -> all rows masked
