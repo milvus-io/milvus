@@ -189,22 +189,11 @@ func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchann
 	}
 	chunkKey := buildPChannelWindowChunkKey(pchannel, footer.Generation, m.term)
 	logger := m.Logger().With(mlog.String("op", "bootstrapPChannelWindowStore"), mlog.Uint64("generation", footer.Generation))
-	// Bootstrap only runs with no catalog meta and no vchannel window metas, so
-	// nothing references any chunk of this pchannel: whatever is left under the
-	// chunk prefix is garbage from a store dropped while idempotency was disabled
-	// (its chunk removal is best-effort) or from an earlier bootstrap that wrote
-	// the chunk and crashed before saving the meta. Reap it before writing
-	// generation 0, otherwise a leftover chunk either fails the write-if-absent
-	// below with a payload mismatch -- an unretriable error that
-	// retryOperationWithBackoff retries forever, hanging the WAL open -- or gets
-	// adopted by the orphan probe of
-	// recoverIdempotencyWindowsFromPChannelWindowStore, rewinding recovery to an
-	// already-truncated source checkpoint.
-	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
-		return removeAllPChannelWindowChunks(ctx, pchannel)
-	}); err != nil {
-		return nil, err
-	}
+	// Do not remove chunks here based only on the earlier no-meta read: another
+	// owner may have bootstrapped and published a meta after that read. A stale
+	// opener can safely write an orphan term-suffixed generation-0 chunk and then
+	// lose the pchannel-meta CAS, but a prefix delete would remove the new
+	// owner's referenced chunk before the stale owner is fenced.
 	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
 		return writePChannelWindowChunkIfAbsent(ctx, chunkKey, chunkPayload, m.term)
 	}); err != nil {
@@ -331,16 +320,13 @@ func (m *windowManager) recoverPChannelWindowChunk(
 		if state == nil {
 			continue
 		}
-		if generation < state.minRequiredGeneration {
-			continue
-		}
 		if err := state.applyCommittedWriteRecordsAtGeneration(records, generation); err != nil {
 			return nil, errors.Wrapf(err, "failed to apply pchannel window chunk %s for vchannel %s", chunkKey, vchannel)
 		}
 	}
 	evictBeforeTT := evictBeforeTimetick(footer.SourceCheckpointTimetick, m.evictionConfig.windowTTL)
 	for _, state := range m.idempotencyWindows() {
-		state.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxEntries, m.evictionConfig.maxBytes)
+		state.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxBytes)
 	}
 	return footer, nil
 }

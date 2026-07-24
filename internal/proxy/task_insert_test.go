@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,8 +102,6 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *testing.T) {
 	paramtable.Init()
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
 	oldCache := globalMetaCache
 	cache := NewMockCache(t)
@@ -110,6 +110,17 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 	t.Cleanup(func() { globalMetaCache = oldCache })
 
 	insertMsg, result := newIdempotentRepackInsertMsg(3)
+	payloads := insertMsg.GetFieldsData()[2].GetScalars().GetStringData().GetData()
+	for i := range payloads {
+		payloads[i] = strings.Repeat("x", 512)
+	}
+	idxComputer := typeutil.NewFieldDataIdxComputer(insertMsg.GetFieldsData())
+	fieldIdxs := idxComputer.Compute(0)
+	rowSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), 0, fieldIdxs...)
+	require.NoError(t, err)
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(rowSize*2)))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
 
 	msgs, err := repackInsertDataForStreamingService(
@@ -125,6 +136,60 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 	require.Greater(t, len(msgs), 1)
 
 	assert.Equal(t, []uint32{0, 1, 2}, collectIdempotentRepackOffsets(t, msgs, "ch", "key-split"))
+}
+
+func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessage(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
+
+	insertMsg, result := newIdempotentRepackInsertMsg(1)
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+
+	bodyOnly, err := repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, bodyOnly, 1)
+
+	withIdempotency, err := repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.NoError(t, err)
+	require.Len(t, withIdempotency, 1)
+	require.Greater(t, withIdempotency[0].EstimateSize(), bodyOnly[0].EstimateSize())
+	require.Greater(t, withIdempotency[0].EstimateSize()-1, bodyOnly[0].EstimateSize())
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(withIdempotency[0].EstimateSize()-1)))
+	_, err = repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), "after adding streaming headers")
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessagesShareKey(t *testing.T) {

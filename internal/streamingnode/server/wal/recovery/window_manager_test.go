@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -121,7 +122,7 @@ func TestEvictForRecoveryByTTL(t *testing.T) {
 	populateWindowEntries(state, timeticks)
 	require.Len(t, state.entries, 5)
 
-	state.evictForRecovery(350, 0, 0, 0)
+	state.evictForRecovery(350, 0, 0)
 	require.Len(t, state.entries, 2)
 	require.Contains(t, state.entries, "key-3")
 	require.Contains(t, state.entries, "key-4")
@@ -135,13 +136,13 @@ func TestEvictForRecoveryRespectsMinEntries(t *testing.T) {
 	populateWindowEntries(state, []uint64{100, 200, 300})
 	require.Len(t, state.entries, 3)
 
-	state.evictForRecovery(500, 2, 0, 0)
+	state.evictForRecovery(500, 2, 0)
 	require.Len(t, state.entries, 2)
 	require.Contains(t, state.entries, "key-1")
 	require.Contains(t, state.entries, "key-2")
 }
 
-func TestEvictForRecoveryEnforcesMaxEntries(t *testing.T) {
+func TestEvictForRecoveryEnforcesMaxBytes(t *testing.T) {
 	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
@@ -152,8 +153,13 @@ func TestEvictForRecoveryEnforcesMaxEntries(t *testing.T) {
 	}
 	populateWindowEntries(state, timeticks)
 	require.Len(t, state.entries, 10)
+	require.Positive(t, state.entryBytes)
 
-	state.evictForRecovery(0, 0, 5, 0)
+	capBytes := 0
+	for _, key := range state.commitOrder[5:] {
+		capBytes += proto.Size(state.entries[key].entry)
+	}
+	state.evictForRecovery(0, 0, capBytes)
 	require.Len(t, state.entries, 5)
 }
 
@@ -228,7 +234,6 @@ func TestObserveTimeTickTriggersRecoveryEviction(t *testing.T) {
 	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
 		windowTTL:  ttl,
 		minEntries: 0,
-		maxEntries: 0,
 	})
 	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
@@ -251,7 +256,6 @@ func TestObserveTimeTickNoEvictionInNormalMode(t *testing.T) {
 	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
 		windowTTL:  ttl,
 		minEntries: 0,
-		maxEntries: 0,
 	})
 	manager.setNormalMode()
 	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{

@@ -25,8 +25,8 @@ import (
 // as an error, so the pchannel meta must outlive them), then the pchannel
 // meta, then the chunk objects. A crash before the meta removal is retried on
 // the next disabled open; a crash after it only leaks unreferenced chunk
-// objects, which the next bootstrap reaps (removeAllPChannelWindowChunks) —
-// leaked bytes never wedge a later re-enable. Best-effort: failures only log —
+// objects, because bootstrap must not prefix-delete chunks based on a stale
+// no-meta read. Best-effort: failures only log —
 // recovery with idempotency disabled must never block on window-store IO — and
 // the next open retries.
 func (m *windowManager) dropWindowStoreForDisabledIdempotency(ctx context.Context, pchannel string) {

@@ -132,10 +132,14 @@ func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
 	// completion order.
 	require.Equal(t, uint64(90), window.EvictedWatermarkTT())
 
-	// Count-cap eviction drops the oldest entry by commit timetick ("b"), not
+	// Byte-cap eviction drops the oldest entry by commit timetick ("b"), not
 	// the first-completed one ("a"). The cap is hard: it may evict a key that is
 	// still within TTL.
-	capped := NewWindow(WindowConfig{WindowTTL: time.Hour, MaxEntries: 2})
+	probe := NewWindow(WindowConfig{})
+	completeKey(t, probe, "a", 100)
+	entrySize := probe.bytes
+	require.Positive(t, entrySize)
+	capped := NewWindow(WindowConfig{WindowTTL: time.Hour, MaxBytes: entrySize * 2})
 	completeKey(t, capped, "a", 100)
 	completeKey(t, capped, "b", 90)
 	completeKey(t, capped, "c", 95)
@@ -308,8 +312,13 @@ func TestDIDWindowEvictRespectsMinEntries(t *testing.T) {
 	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-3", nil).Decision)
 }
 
-func TestDIDWindowEvictAppliesMaxEntries(t *testing.T) {
-	window := NewWindow(WindowConfig{MinEntries: 1, MaxEntries: 2})
+func TestDIDWindowEvictAppliesMaxBytes(t *testing.T) {
+	probe := NewWindow(WindowConfig{})
+	completeKey(t, probe, "key-1", 10)
+	entrySize := probe.bytes
+	require.Positive(t, entrySize)
+
+	window := NewWindow(WindowConfig{MinEntries: 1, MaxBytes: entrySize * 2})
 
 	completeKey(t, window, "key-1", 10)
 	completeKey(t, window, "key-2", 20)
@@ -324,7 +333,12 @@ func TestDIDWindowEvictAppliesMaxEntries(t *testing.T) {
 }
 
 func TestDIDWindowCompleteReportsEvictionCount(t *testing.T) {
-	window := NewWindow(WindowConfig{MinEntries: 0, MaxEntries: 1})
+	probe := NewWindow(WindowConfig{})
+	completeKey(t, probe, "key-1", 10)
+	entrySize := probe.bytes
+	require.Positive(t, entrySize)
+
+	window := NewWindow(WindowConfig{MinEntries: 0, MaxBytes: entrySize})
 
 	begin := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionOwner, begin.Decision)

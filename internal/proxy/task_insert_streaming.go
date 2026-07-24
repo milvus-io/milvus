@@ -171,6 +171,9 @@ func repackInsertDataForStreamingService(
 			if err != nil {
 				return nil, err
 			}
+			if err := validateStreamingInsertMessageSize(newMsg); err != nil {
+				return nil, err
+			}
 			messages = append(messages, newMsg)
 		}
 	}
@@ -271,9 +274,31 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				if err != nil {
 					return nil, err
 				}
+				if err := validateStreamingInsertMessageSize(newMsg); err != nil {
+					return nil, err
+				}
 				messages = append(messages, newMsg)
 			}
 		}
 	}
 	return messages, nil
+}
+
+func validateStreamingInsertMessageSize(msg message.MutableMessage) error {
+	if msg == nil {
+		return nil
+	}
+	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	if maxSize <= 0 {
+		return nil
+	}
+	messageSize := msg.EstimateSize()
+	if messageSize <= maxSize {
+		return nil
+	}
+	return merr.WrapErrParameterInvalidMsg(
+		"insert message size %d exceeds max message size %d after adding streaming headers; reduce insert batch size",
+		messageSize,
+		maxSize,
+	)
 }

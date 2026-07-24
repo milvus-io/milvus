@@ -7611,7 +7611,6 @@ type streamingConfig struct {
 	IdempotencyEnabled             ParamItem `refreshable:"false"`
 	IdempotencyWindowTTL           ParamItem `refreshable:"false"`
 	IdempotencyMinEntriesPerWindow ParamItem `refreshable:"false"`
-	IdempotencyMaxEntriesPerWindow ParamItem `refreshable:"false"`
 	IdempotencyMaxBytesPerWindow   ParamItem `refreshable:"false"`
 	IdempotencySnapshotInterval    ParamItem `refreshable:"false"`
 	IdempotencyMaxKeyLength        ParamItem `refreshable:"false"`
@@ -8053,7 +8052,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyWindowTTL = ParamItem{
 		Key:          "streaming.idempotency.windowTTL",
 		Version:      "3.0.0",
-		Doc:          `The retention TTL target for completed idempotency key window entries. For entries still retained in memory, duplicate visibility does not extend past this TTL; maxEntriesPerWindow and maxBytesPerWindow are hard caps and may evict entries before TTL.`,
+		Doc:          `The retention TTL target for completed idempotency key window entries. For entries still retained in memory, duplicate visibility does not extend past this TTL; maxBytesPerWindow is a hard cap and may evict entries before TTL.`,
 		DefaultValue: "10m",
 		FallbackKeys: []string{"idempotency.windowTTL"},
 		Export:       false,
@@ -8063,22 +8062,12 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.IdempotencyMinEntriesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.minEntriesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The minimum completed idempotency key entries retained for each vchannel window after TTL eviction. It does not extend duplicate visibility past windowTTL and can be overridden by the hard maxEntriesPerWindow/maxBytesPerWindow caps.`,
+		Doc:          `The minimum completed idempotency key entries retained for each vchannel window after TTL eviction. It does not extend duplicate visibility past windowTTL and can be overridden by the hard maxBytesPerWindow cap.`,
 		DefaultValue: "1000",
 		FallbackKeys: []string{"idempotency.minEntriesPerWindow"},
 		Export:       false,
 	}
 	p.IdempotencyMinEntriesPerWindow.Init(base.mgr)
-
-	p.IdempotencyMaxEntriesPerWindow = ParamItem{
-		Key:          "streaming.idempotency.maxEntriesPerWindow",
-		Version:      "3.0.0",
-		Doc:          `The hard maximum completed idempotency key entries retained for each vchannel window; the oldest entries (by commit timetick) are evicted first, even when they are still within windowTTL. This caps entry COUNT only: each entry holds the per-row primary keys of its insert, so use maxBytesPerWindow to bound dedup-metadata memory. 0 means no count cap beyond TTL/minEntries.`,
-		DefaultValue: "10000",
-		FallbackKeys: []string{"idempotency.maxEntriesPerWindow"},
-		Export:       false,
-	}
-	p.IdempotencyMaxEntriesPerWindow.Init(base.mgr)
 
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",

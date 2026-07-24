@@ -503,7 +503,6 @@ func resetProxyIdempotencyParams(t *testing.T) {
 		Params.StreamingCfg.IdempotencyEnabled.Key,
 		Params.StreamingCfg.IdempotencyWindowTTL.Key,
 		Params.StreamingCfg.IdempotencyMinEntriesPerWindow.Key,
-		Params.StreamingCfg.IdempotencyMaxEntriesPerWindow.Key,
 		Params.StreamingCfg.IdempotencySnapshotInterval.Key,
 		Params.StreamingCfg.IdempotencyMaxKeyLength.Key,
 	}

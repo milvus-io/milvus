@@ -97,7 +97,6 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		windowTTL:  cfg.idempotencyWindowTTL,
 		maxBytes:   cfg.idempotencyMaxBytes,
 		minEntries: cfg.idempotencyMinEntries,
-		maxEntries: cfg.idempotencyMaxEntries,
 	})
 	return rs
 }

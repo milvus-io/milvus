@@ -14,7 +14,6 @@ type windowEvictionConfig struct {
 	windowTTL  time.Duration
 	maxBytes   int
 	minEntries int
-	maxEntries int
 }
 
 type windowManager struct {
@@ -197,7 +196,7 @@ func (m *windowManager) observeMessage(msg message.ImmutableMessage) {
 		if m.recoveryMode {
 			evictBeforeTT := evictBeforeTimetick(msg.TimeTick(), m.evictionConfig.windowTTL)
 			for _, window := range windows {
-				window.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxEntries, m.evictionConfig.maxBytes)
+				window.evictForRecovery(evictBeforeTT, m.evictionConfig.minEntries, m.evictionConfig.maxBytes)
 			}
 		}
 		return

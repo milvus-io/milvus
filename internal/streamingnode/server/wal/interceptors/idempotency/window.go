@@ -28,7 +28,6 @@ type WindowConfig struct {
 	Enabled      bool
 	WindowTTL    time.Duration
 	MinEntries   int
-	MaxEntries   int
 	MaxBytes     int
 	MaxKeyLength int
 	Now          func() time.Time
@@ -50,7 +49,6 @@ type Window struct {
 	ttlEvictBoundTT uint64
 
 	minEntries int
-	maxEntries int
 	// maxBytes caps the total serialized size of retained entries (each entry
 	// carries the per-row PKs of its insert), overriding both the minEntries floor
 	// and the TTL horizon: entry COUNT alone cannot bound dedup-metadata memory.
@@ -115,7 +113,6 @@ func NewWindow(config WindowConfig) *Window {
 		entries:    make(map[IdempotencyKey]*streamingpb.WindowEntry),
 		inflight:   make(map[IdempotencyKey]*PendingEntry),
 		minEntries: config.MinEntries,
-		maxEntries: config.MaxEntries,
 		maxBytes:   config.MaxBytes,
 		windowTTL:  config.WindowTTL,
 		now:        now,
@@ -164,9 +161,9 @@ func (w *Window) Begin(key IdempotencyKey, msg message.MutableMessage) BeginResu
 		// TTL-expired but still held by the minEntries floor: serving it would make
 		// the floor extend duplicate visibility forever on quiet shards. For entries
 		// still retained in memory, duplicate visibility ends at the TTL bound. The
-		// hard maxEntries/maxBytes caps below are stricter capacity limits and may
-		// remove an entry before TTL; that is a documented retention limitation, not
-		// an extension of the TTL answer.
+		// hard maxBytes cap below is a stricter capacity limit and may remove an
+		// entry before TTL; that is a documented retention limitation, not an
+		// extension of the TTL answer.
 		w.dropEntryLocked(key)
 	}
 
@@ -208,7 +205,7 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	evicted := 0
 	if w.windowTTL > 0 {
 		evicted = w.evictLocked(evictBeforeCommitTT(entry.GetCommitTimetick(), w.windowTTL))
-	} else if w.maxEntries > 0 || w.maxBytes > 0 {
+	} else if w.maxBytes > 0 {
 		evicted = w.evictLocked(0)
 	}
 	w.refreshEvictedWatermarkLocked()
@@ -309,8 +306,8 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 // servableLocked reports whether an entry may still answer a duplicate hit.
 // For entries still retained in memory, the minEntries floor must not extend
 // duplicate visibility beyond the TTL bound. Hard capacity caps are different:
-// maxEntries/maxBytes may delete entries before TTL to bound memory, at which
-// point there is no entry left to serve.
+// maxBytes may delete entries before TTL to bound memory, at which point there
+// is no entry left to serve.
 func (w *Window) servableLocked(entry *streamingpb.WindowEntry) bool {
 	if w.windowTTL <= 0 || w.ttlEvictBoundTT == 0 {
 		return true
@@ -357,22 +354,10 @@ func (w *Window) evictLocked(evictBeforeTT uint64) int {
 		evicted++
 	}
 
-	for w.maxEntries > 0 && len(w.entries) > w.maxEntries && len(w.commitOrder) > 0 {
-		key := w.commitOrder[0]
-		w.commitOrder = w.commitOrder[1:]
-		if entry, ok := w.entries[key]; ok {
-			// Hard capacity limit: maxEntries may shorten the effective dedup
-			// horizon below TTL on a hot vchannel.
-			w.bytes -= proto.Size(entry)
-			delete(w.entries, key)
-			evicted++
-		}
-	}
-
-	// The byte cap is a hard bound like maxEntries: it overrides the minEntries
-	// floor and may shorten the effective dedup horizon below TTL, because a floor
-	// measured in entries cannot promise anything about memory when each entry
-	// carries an unbounded per-row PK list.
+	// The byte cap is a hard bound: it overrides the minEntries floor and may
+	// shorten the effective dedup horizon below TTL, because a floor measured in
+	// entries cannot promise anything about memory when each entry carries an
+	// unbounded per-row PK list.
 	for w.maxBytes > 0 && w.bytes > w.maxBytes && len(w.commitOrder) > 0 {
 		key := w.commitOrder[0]
 		w.commitOrder = w.commitOrder[1:]

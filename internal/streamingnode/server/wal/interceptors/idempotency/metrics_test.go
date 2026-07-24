@@ -27,7 +27,23 @@ func TestIdempotencyMetricsObserveWindowInflightEntriesAndEvents(t *testing.T) {
 	duplicateBefore := testutil.ToFloat64(duplicateCounter)
 	evictionBefore := testutil.ToFloat64(evictionCounter)
 
-	window := NewWindow(WindowConfig{MinEntries: 0, MaxEntries: 1})
+	probe := NewWindow(WindowConfig{})
+	probeBegin := probe.Begin("metrics-key", nil)
+	require.Equal(t, BeginDecisionOwner, probeBegin.Decision)
+	completed, _ := probe.Complete(probeBegin.Pending, CommitResult{CommitTimeTick: 100}, nil)
+	require.True(t, completed)
+	require.Positive(t, probe.bytes)
+	probeNext := NewWindow(WindowConfig{})
+	probeNextBegin := probeNext.Begin("metrics-key-2", nil)
+	require.Equal(t, BeginDecisionOwner, probeNextBegin.Decision)
+	completed, _ = probeNext.Complete(probeNextBegin.Pending, CommitResult{CommitTimeTick: 110}, nil)
+	require.True(t, completed)
+	maxBytes := probe.bytes
+	if probeNext.bytes > maxBytes {
+		maxBytes = probeNext.bytes
+	}
+
+	window := NewWindow(WindowConfig{MinEntries: 0, MaxBytes: maxBytes})
 	begin := window.Begin("metrics-key", msg)
 	require.Equal(t, BeginDecisionOwner, begin.Decision)
 

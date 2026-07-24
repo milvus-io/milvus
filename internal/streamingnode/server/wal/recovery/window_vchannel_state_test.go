@@ -113,11 +113,16 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	state.refreshMinRequiredGeneration()
 	require.Equal(t, uint64(3), state.minRequiredGeneration)
 
-	// A count cap releases generations beyond the cap even within TTL.
+	// A byte cap releases generations beyond the cap even within TTL.
 	capped := newEmptyVChannelWindow("p1", "v2", testRecoveryCheckpoint(1, 1))
-	capped.evictionCfg = windowEvictionConfig{windowTTL: 10 * time.Minute, maxEntries: 1}
+	capped.evictionCfg = windowEvictionConfig{windowTTL: 10 * time.Minute}
+	var capBytes int
 	for i, gen := range []uint64{1, 2} {
 		rec := entryAt("v2", fmt.Sprintf("cap-key-%d", gen), int64(600_000+i*60_000))
+		if capBytes == 0 {
+			capBytes = proto.Size(rec.WindowEntry())
+			capped.evictionCfg.maxBytes = capBytes
+		}
 		require.NoError(t, capped.applyCommittedWriteRecord(rec, true))
 		capped.markCommittedWriteRecordsPersisted([]committedWriteRecord{rec}, gen)
 		capped.evictPersisted()
@@ -125,6 +130,39 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	capped.snapshotCheckpointTimetick = tsoutil.ComposeTS(600_000+2*60_000, 0)
 	capped.refreshMinRequiredGeneration()
 	require.Equal(t, uint64(2), capped.minRequiredGeneration)
+}
+
+func TestMinRequiredGenerationHonorsByteOnlyRetention(t *testing.T) {
+	entryAt := func(key string, physicalMs int64) committedWriteRecord {
+		return *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			Key:            key,
+			CommitTimetick: tsoutil.ComposeTS(physicalMs, 0),
+			MessageId:      rmq.NewRmqID(physicalMs).IntoProto(),
+		})
+	}
+
+	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
+
+	totalBytes := 0
+	latestBytes := 0
+	for _, gen := range []uint64{1, 2} {
+		rec := entryAt(fmt.Sprintf("byte-key-%d", gen), int64(600_000+gen*60_000))
+		size := proto.Size(rec.WindowEntry())
+		totalBytes += size
+		latestBytes = size
+		require.NoError(t, state.applyCommittedWriteRecord(rec, true))
+		state.markCommittedWriteRecordsPersisted([]committedWriteRecord{rec}, gen)
+		state.evictPersisted()
+	}
+	require.Empty(t, state.entries)
+
+	state.evictionCfg.maxBytes = totalBytes
+	state.refreshMinRequiredGeneration()
+	require.Equal(t, uint64(1), state.minRequiredGeneration)
+
+	state.evictionCfg.maxBytes = latestBytes
+	state.refreshMinRequiredGeneration()
+	require.Equal(t, uint64(2), state.minRequiredGeneration)
 }
 
 func writeTestBootstrapPChannelWindowMeta(
@@ -823,7 +861,35 @@ func TestDIDWindowMaterializerApplyCommittedWriteRecordDuplicate(t *testing.T) {
 
 	snapshot := state.snapshot()
 	require.Len(t, snapshot.GetEntries(), 1)
+	require.Equal(t, uint64(100), snapshot.GetEntries()[0].GetCommitTimetick())
 	require.Equal(t, uint64(101), snapshot.GetSnapshotCheckpointTimetick())
+}
+
+func TestDIDWindowMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
+	state := newEmptyVChannelWindow("p1", "v1", nil)
+	state.evictionCfg = windowEvictionConfig{windowTTL: time.Second}
+	firstTT := tsoutil.ComposeTS(100_000, 0)
+	reusedTT := tsoutil.ComposeTS(102_000, 0)
+	first := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		Key:            "key-1",
+		CommitTimetick: firstTT,
+		MessageId:      rmq.NewRmqID(100).IntoProto(),
+	})
+	reused := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		Key:            "key-1",
+		CommitTimetick: reusedTT,
+		MessageId:      rmq.NewRmqID(101).IntoProto(),
+	})
+
+	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{first}, 0))
+	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{reused}, 1))
+
+	snapshot := state.snapshot()
+	require.Len(t, snapshot.GetEntries(), 1)
+	require.Equal(t, reusedTT, snapshot.GetEntries()[0].GetCommitTimetick())
+	require.Equal(t, uint64(1), state.latestAppliedGeneration)
+	_, oldGenerationPinned := state.generationStats[0]
+	require.False(t, oldGenerationPinned)
 }
 
 func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
@@ -1153,7 +1219,7 @@ func TestPChannelWindowRecoverWithContinuousChunks(t *testing.T) {
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetMinAvailableGeneration())
 }
 
-func TestPChannelWindowRecoverySkipsGenerationBelowViewMinRequired(t *testing.T) {
+func TestPChannelWindowRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -1186,7 +1252,7 @@ func TestPChannelWindowRecoverySkipsGenerationBelowViewMinRequired(t *testing.T)
 		MessageID: rmq.NewRmqID(140),
 		TimeTick:  140,
 	}, records1)
-	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 1).intoCatalogMeta()
+	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 	catalogState.windowMetas["v1"] = &streamingpb.VChannelWindowMeta{
 		Pchannel:                    "p1",
 		Vchannel:                    "v1",
@@ -1208,9 +1274,10 @@ func TestPChannelWindowRecoverySkipsGenerationBelowViewMinRequired(t *testing.T)
 	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
 
 	window := recovered.windowManager.idempotencyWindows()["v1"].snapshot()
-	require.Len(t, window.GetEntries(), 1)
-	require.Equal(t, "key-retained", window.GetEntries()[0].GetKey())
-	require.Equal(t, uint64(1), recovered.windowManager.idempotencyWindows()["v1"].minRequiredGeneration)
+	require.Len(t, window.GetEntries(), 2)
+	require.Equal(t, "key-evicted", window.GetEntries()[0].GetKey())
+	require.Equal(t, "key-retained", window.GetEntries()[1].GetKey())
+	require.Equal(t, uint64(0), recovered.windowManager.idempotencyWindows()["v1"].minRequiredGeneration)
 }
 
 func TestPChannelWindowRecoverFailsWhenGenerationHasHole(t *testing.T) {
@@ -1866,7 +1933,7 @@ func TestPChannelWindowPersistEmptyActiveWindowAdvancesMinInUse(t *testing.T) {
 	require.Equal(t, uint64(1), rs.windowManager.idempotencyWindows()["v1"].windowMeta().GetMinRequiredGeneration())
 }
 
-func TestPChannelWindowPersistSavesViewMetaBeforePChannelMeta(t *testing.T) {
+func TestPChannelWindowPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
 	ctx := context.Background()
 	catalog, catalogState := newTestPChannelWindowCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -1899,7 +1966,7 @@ func TestPChannelWindowPersistSavesViewMetaBeforePChannelMeta(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
 	require.Equal(t, uint64(0), windowMetas["v1"].GetMinRequiredGeneration())
-	require.Equal(t, []string{"vchannel-window-meta", "pchannel-window-meta"}, catalogState.operations)
+	require.Equal(t, []string{"pchannel-window-meta", "vchannel-window-meta"}, catalogState.operations)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetMinInUseGeneration())
 }
 

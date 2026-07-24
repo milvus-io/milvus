@@ -202,7 +202,7 @@ func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
 // forgot a key its siblings still hold — the retry then re-appends rows that are
 // already in the WAL. Failing here would break the legitimate case, so the mix is
 // only reported. The idempotency window prevents minEntries from extending a
-// retained entry past TTL, but hard maxEntries/maxBytes caps may still shorten
+// retained entry past TTL, but the hard maxBytes cap may still shorten
 // retention independently per vchannel under skewed load; this warning is the
 // visibility hook for either accepted partial-retry progress or cap pressure.
 func warnOnPartialIdempotentDuplicate(ctx context.Context, key string, resp types.AppendResponses) {
