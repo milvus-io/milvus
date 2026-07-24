@@ -382,15 +382,56 @@ func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
 	}
 }
 
+// pkCursor derives deterministic autoID primary keys from a per-file id range
+// [begin, end) that was allocated once on the primary and replicated. It is
+// advanced sequentially as batches of a single import file are read; files are
+// read in order and each file owns a disjoint range, so the assignment is stable
+// and identical across clusters. A nil or empty cursor selects the legacy
+// local-allocator path (non-autoID / backup / pre-upgrade jobs).
+type pkCursor struct {
+	begin, end, next int64
+}
+
+// take reserves n contiguous ids and returns the starting id, failing loudly if
+// the file yields more rows than its reserved range (the files differ between the
+// two clusters, or the file exceeded the size bound the range was computed from).
+func (c *pkCursor) take(n int) (int64, error) {
+	if c.next+int64(n) > c.end {
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf(
+			"import file produced more rows than its reserved PK range [%d, %d); "+
+				"files may differ between clusters or exceeded the sizing bound", c.begin, c.end))
+	}
+	start := c.next
+	c.next += int64(n)
+	return start, nil
+}
+
+// AppendSystemFieldsData assigns autoID PK/RowID/timestamp using the task's local
+// allocator (legacy path). appendSystemFieldsDataWithCursor is the deterministic
+// per-file path used for cross-cluster-consistent autoID imports.
 func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
+	return appendSystemFieldsDataWithCursor(task, data, rowNum, nil)
+}
+
+func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData, rowNum int, cur *pkCursor) error {
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
 	ids := make([]int64, rowNum)
-	start, _, err := task.allocator.Alloc(uint32(rowNum))
-	if err != nil {
-		return err
+	var start int64
+	if cur != nil && cur.end > cur.begin {
+		// Deterministic path: derive PKs from the primary-allocated per-file range.
+		start, err = cur.take(rowNum)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Legacy path: allocate PKs from the task's local allocator.
+		start, _, err = task.allocator.Alloc(uint32(rowNum))
+		if err != nil {
+			return err
+		}
 	}
 	for i := 0; i < rowNum; i++ {
 		ids[i] = start + int64(i)
