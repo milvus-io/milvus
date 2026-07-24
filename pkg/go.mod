@@ -24,7 +24,7 @@ require (
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260625075625-7262f8042a55
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
-	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/client_golang v1.23.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.52.0
 	github.com/sirupsen/logrus v1.9.3
@@ -55,7 +55,7 @@ require (
 	golang.org/x/crypto v0.52.0
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
 	golang.org/x/net v0.55.0
-	golang.org/x/oauth2 v0.35.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.45.0
 	golang.org/x/time v0.10.0
@@ -130,7 +130,7 @@ require (
 	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/btree v1.1.2 // indirect
@@ -187,8 +187,8 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.55.0 // indirect
-	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/prometheus/common v0.69.0 // indirect
+	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rs/xid v1.5.0 // indirect
