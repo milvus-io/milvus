@@ -98,7 +98,7 @@ func TestValidateDecimalString(t *testing.T) {
 		{"negative decimal", "-19.99", 18, 4, false},
 		{"zero", "0", 18, 4, false},
 		{"zero with fraction", "0.00", 18, 4, false},
-		{"precision exceeded", "99999999999999999.99", 18, 2, true}, // 17 int digits + 2 frac = 19 > 18
+		{"precision exceeded", "99999999999999999.99", 18, 2, true},       // 17 int digits + 2 frac = 19 > 18
 		{"exact precision boundary", "9999999999999999.99", 18, 2, false}, // 16 int digits + 2 frac = 18 == 18
 		{"scale exceeded", "1.12345", 18, 4, true},
 		{"malformed trailing dot", "5.", 18, 4, true},
