@@ -231,11 +231,18 @@ func slice2TmplArrayValue(rv reflect.Value) (*schemapb.TemplateArrayValue, error
 	}
 
 	result := &schemapb.TemplateArrayValue{}
-	if rv.Len() == 0 {
-		return result, nil
-	}
 
-	_, elementKind, err := templateArrayElement(rv.Index(0))
+	var elementKind reflect.Kind
+	if rv.Len() == 0 {
+		// Preserve the data oneof for typed empty slices so older servers can
+		// decode them. An empty interface slice has no encodable element type.
+		if rv.Type().Elem().Kind() == reflect.Interface {
+			return result, nil
+		}
+		elementKind, err = normalizeTemplateArrayElementKind(rv.Type().Elem().Kind())
+	} else {
+		_, elementKind, err = templateArrayElement(rv.Index(0))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -332,21 +339,29 @@ func templateArrayElement(rv reflect.Value) (reflect.Value, reflect.Kind, error)
 		return reflect.Value{}, reflect.Invalid, err
 	}
 
-	switch rv.Kind() {
+	kind, err := normalizeTemplateArrayElementKind(rv.Kind())
+	if err != nil {
+		return reflect.Value{}, reflect.Invalid, err
+	}
+	return rv, kind, nil
+}
+
+func normalizeTemplateArrayElementKind(kind reflect.Kind) (reflect.Kind, error) {
+	switch kind {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return rv, reflect.Int64, nil
+		return reflect.Int64, nil
 	case reflect.Bool:
-		return rv, reflect.Bool, nil
+		return reflect.Bool, nil
 	case reflect.Float32, reflect.Float64:
-		return rv, reflect.Float64, nil
+		return reflect.Float64, nil
 	case reflect.String:
-		return rv, reflect.String, nil
+		return reflect.String, nil
 	case reflect.Slice:
-		return rv, reflect.Slice, nil
+		return reflect.Slice, nil
 	default:
-		return reflect.Value{}, reflect.Invalid, fmt.Errorf(
+		return reflect.Invalid, fmt.Errorf(
 			"unsupported template type: slice of %v",
-			rv.Kind(),
+			kind,
 		)
 	}
 }
