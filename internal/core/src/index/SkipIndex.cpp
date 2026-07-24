@@ -25,20 +25,6 @@ SkipIndex::GetFieldChunkMetrics(milvus::OpContext* op_ctx,
                                 milvus::FieldId field_id,
                                 int chunk_id) const {
     // skip index structure must be setup before using, thus we do not lock here.
-    // Resident, distilled metrics take precedence over the evictable cache
-    // slots: they are positional (index == chunk id) and outlive every read
-    // that can see this SkipIndex, so no cache access or pin is needed. A
-    // chunk id past the end degrades to "cannot skip" (never a false negative).
-    auto static_metrics = fieldStaticMetrics_.find(field_id);
-    if (static_metrics != fieldStaticMetrics_.end()) {
-        const auto& cells = static_metrics->second;
-        if (chunk_id >= 0 && static_cast<size_t>(chunk_id) < cells.size()) {
-            return cachinglayer::PinWrapper<const index::FieldChunkMetrics*>(
-                cells[chunk_id].get());
-        }
-        return cachinglayer::PinWrapper<const index::FieldChunkMetrics*>(
-            &defaultFieldChunkMetrics);
-    }
     auto field_metrics = fieldChunkMetrics_.find(field_id);
     if (field_metrics != fieldChunkMetrics_.end()) {
         auto& field_chunk_metrics = field_metrics->second;
