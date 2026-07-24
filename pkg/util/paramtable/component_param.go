@@ -5331,7 +5331,6 @@ type dataCoordConfig struct {
 	ImportCheckIntervalHigh         ParamItem `refreshable:"true"`
 	ImportCheckIntervalLow          ParamItem `refreshable:"true"`
 	MaxFilesPerImportReq            ParamItem `refreshable:"true"`
-	MaxPKRangePerFile               ParamItem `refreshable:"true"`
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
@@ -6535,16 +6534,6 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.MaxFilesPerImportReq.Init(base.mgr)
-
-	p.MaxPKRangePerFile = ParamItem{
-		Key:          "dataCoord.import.maxPKRangePerFile",
-		Version:      "2.6.0",
-		DefaultValue: "17179869184", // 2^34; safety cap on the autoID PK id range reserved per import file for cross-cluster determinism
-		Doc:          "The maximum autoID primary-key id range reserved per import file. Bounds ID-space usage when replicating imports across clusters (issue #51667).",
-		PanicIfEmpty: false,
-		Export:       true,
-	}
-	p.MaxPKRangePerFile.Init(base.mgr)
 
 	p.MaxImportJobNum = ParamItem{
 		Key:          "dataCoord.import.maxImportJobNum",

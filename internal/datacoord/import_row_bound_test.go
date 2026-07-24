@@ -77,7 +77,7 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*100), nil)
 		file := &internalpb.ImportFile{Paths: []string{"a.json"}}
 		// minRowTextBytes(schemaVec(768,0)) == 768; 768*100 / 768 + 1 == 101.
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file, 0)
+		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(101), bound)
 	})
@@ -87,19 +87,9 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		cm.EXPECT().Size(mock.Anything, "a.npy").Return(int64(3072*50), nil)
 		file := &internalpb.ImportFile{Paths: []string{"a.npy"}}
 		// numpyRowByteSize(schemaVec(768,0)) == 3072; 3072*50 / 3072 + 1 == 51.
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file, 0)
+		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(51), bound)
-	})
-
-	t.Run("cap applied", func(t *testing.T) {
-		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(1)<<40, nil)
-		file := &internalpb.ImportFile{Paths: []string{"a.json"}}
-		// minRowTextBytes(schemaVec(1,0)) == 1; bound would be huge, capped to 1<<34.
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(1, 0), file, int64(1)<<34)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(1)<<34, bound)
 	})
 
 	t.Run("parquet mocked", func(t *testing.T) {
@@ -107,14 +97,10 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		defer mk.UnPatch()
 		cm := mocks.NewChunkManager(t)
 		file := &internalpb.ImportFile{Paths: []string{"a.parquet"}}
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file, 0)
+		// Parquet is exact and never clamped: the range must fit the real row count.
+		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(123), bound)
-
-		// cap smaller than the exact count clamps it.
-		bound, err = computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file, int64(100))
-		assert.NoError(t, err)
-		assert.Equal(t, int64(100), bound)
 	})
 }
 
@@ -131,7 +117,7 @@ func Test_assignPKRangesToFiles(t *testing.T) {
 	// fake allocator hands out [1000, 1000+n)
 	alloc := func(n int64) (int64, int64, error) { return 1000, 1000 + n, nil }
 
-	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1 /*clusterID*/, int64(1)<<34)
+	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1 /*clusterID*/)
 	assert.NoError(t, err)
 	// each file's range width equals its own bound
 	assert.Equal(t, int64(11), files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
@@ -145,6 +131,6 @@ func Test_assignPKRangesToFiles(t *testing.T) {
 func Test_assignPKRangesToFiles_zeroTotal(t *testing.T) {
 	// no files -> nothing to allocate, no allocator call
 	err := assignPKRangesToFiles(context.TODO(), mocks.NewChunkManager(t), schemaVec(8, 0),
-		nil, func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1, 0)
+		nil, func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1)
 	assert.NoError(t, err)
 }

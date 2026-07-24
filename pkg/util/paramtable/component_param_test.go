@@ -633,7 +633,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
 		assert.Equal(t, 120*time.Second, Params.ImportCheckIntervalLow.GetAsDuration(time.Second))
 		assert.Equal(t, 1024, Params.MaxFilesPerImportReq.GetAsInt())
-		assert.Equal(t, int64(17179869184), Params.MaxPKRangePerFile.GetAsInt64())
 		assert.Equal(t, 1024, Params.MaxImportJobNum.GetAsInt())
 		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
 		assert.Equal(t, false, Params.ImportInReplicatingCluster.GetAsBool())
