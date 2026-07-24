@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -47,6 +48,9 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	if os.Getenv("MILVUS_METACACHE_BENCH_QUIET") == "1" {
+		mlog.SetLevel(mlog.ErrorLevel)
+	}
 	gin.SetMode(gin.TestMode)
 	streaming.SetupNoopWALForTest()
 	code := m.Run()

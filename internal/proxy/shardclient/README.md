@@ -252,17 +252,29 @@ The shard leader cache stores the mapping of shards to their leader QueryNodes:
 
 ```
 database → collectionName → shardLeaders {
-    collectionID: int64
-    shardLeaders: map[channel][]nodeInfo
+    collectionID → {
+        shardLeaders: map[channel][]nodeInfo
+        lastAccess: timestamp
+    }
 }
 ```
 
 **Cache Operations**:
 - **Hit**: When cached shard leaders are used (tracked via `ProxyCacheStatsCounter`)
-- **Miss**: When cache lookup fails, triggers RPC to QueryCoord via `GetShardLeaders`
+- **Miss**: When cache lookup fails, triggers RPC to MixCoord via `GetShardLeaders`
+- **Concurrent miss**: Coalesced per collection ID. Each caller waits with its own
+  context; the shared Coord RPC is detached from the first caller and has a hard
+  timeout.
+- **Refresh fencing**: Invalidation and deprecation advance the logical refresh
+  generation. Requests that arrive afterwards start a new flight, and an older
+  in-flight result cannot repopulate the cache.
+- **Historical versions**: At most four collection IDs are retained per name.
+  Versions idle for ten minutes are removed before shard locations are used for
+  QueryNode client purging. The purge scans under a read lock and only takes the
+  write lock to revalidate and delete expired candidates.
 - **Invalidation**:
-  - `DeprecateShardCache(db, collection)`: Remove specific collection
-  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by ID (called on shard leader changes)
+  - `DeprecateShardCache(db, collection)`: Remove every ID version under the name
+  - `InvalidateShardLeaderCache(collectionIDs)`: Remove only matching ID versions (called on shard leader changes)
   - `RemoveDatabase(db)`: Remove entire database
 
 ### Client Purging

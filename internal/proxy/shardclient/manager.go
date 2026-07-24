@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -63,13 +64,52 @@ type shardClientMgrImpl struct {
 
 	mixCoord types.MixCoordClient
 
-	leaderMut  sync.RWMutex
-	collLeader map[string]map[string]*shardLeaders // database -> collectionName -> collection_leaders
+	leaderMut    sync.RWMutex
+	collLeader   map[string]shardLeadersByCollectionName // database -> collectionName -> collectionID -> collection_leaders
+	sfShardCache conc.Singleflight[*shardLeaders]
+	refreshSeq   uint64
+	refreshes    map[shardCacheRefreshKey]*shardCacheRefreshToken
+
+	shardCacheRefreshTimeout     time.Duration
+	shardCacheVersionTTL         time.Duration
+	maxShardCacheVersionsPerName int
+
+	testHookAfterShardCacheDoChan       func()
+	testHookListShardLocationReadLocked func()
+	testHookBeforeShardLocationDelete   func()
 }
+
+type (
+	shardLeadersByCollectionID   map[int64]*shardLeaders
+	shardLeadersByCollectionName map[string]shardLeadersByCollectionID
+	shardCacheRefreshKey         struct {
+		database       string
+		collectionName string
+		collectionID   int64
+		force          bool
+	}
+	shardCacheRefreshToken struct {
+		id uint64
+	}
+	shardCacheVersionRef struct {
+		database       string
+		collectionName string
+		collectionID   int64
+		leaders        *shardLeaders
+	}
+)
 
 const (
 	defaultPurgeInterval   = 600 * time.Second
 	defaultExpiredDuration = 60 * time.Minute
+
+	defaultShardCacheRefreshTimeout = 10 * time.Second
+	// Historical alias targets need a short grace period for in-flight requests,
+	// but must not retain QueryNode locations beyond the client-purge cadence.
+	defaultShardCacheVersionTTL = defaultPurgeInterval
+	// Two entries cover the common old/new alias transition; two extra slots
+	// absorb overlapping multi-target changes without unbounded growth.
+	defaultMaxShardCacheVersionsPerName = 4
 )
 
 // SessionOpt provides a way to set params in ShardClientMgr
@@ -92,8 +132,13 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[string]map[string]*shardLeaders),
+		collLeader: make(map[string]shardLeadersByCollectionName),
+		refreshes:  make(map[shardCacheRefreshKey]*shardCacheRefreshToken),
 		mixCoord:   mixCoord,
+
+		shardCacheRefreshTimeout:     defaultShardCacheRefreshTimeout,
+		shardCacheVersionTTL:         defaultShardCacheVersionTTL,
+		maxShardCacheVersionsPerName: defaultMaxShardCacheVersionsPerName,
 	}
 	for _, opt := range options {
 		opt(s)
@@ -107,47 +152,37 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 }
 
 func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error) {
-	method := "GetShard"
-	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
-	if cacheShardLeaders == nil || !withCache {
-		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		cacheShardLeaders = newShardLeaders
+	shardLeaders, err := m.getShardLeaders(ctx, withCache, database, collectionName, collectionID, "GetShard")
+	if err != nil {
+		return nil, err
 	}
 
-	return cacheShardLeaders.Get(channel), nil
+	return shardLeaders.Get(channel), nil
 }
 
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
-	method := "GetShardLeaderList"
-	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
-	if cacheShardLeaders == nil || !withCache {
-		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		cacheShardLeaders = newShardLeaders
+	shardLeaders, err := m.getShardLeaders(ctx, withCache, database, collectionName, collectionID, "GetShardLeaderList")
+	if err != nil {
+		return nil, err
 	}
 
-	return cacheShardLeaders.GetShardLeaderList(), nil
+	return shardLeaders.GetShardLeaderList(), nil
 }
 
-func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, caller string) *shardLeaders {
+func (m *shardClientMgrImpl) loadCachedShardLeaders(database, collectionName string, collectionID int64) *shardLeaders {
 	m.leaderMut.RLock()
-	var cacheShardLeaders *shardLeaders
-	db, ok := m.collLeader[database]
-	if !ok {
-		cacheShardLeaders = nil
-	} else {
-		cacheShardLeaders = db[collectionName]
+	defer m.leaderMut.RUnlock()
+
+	if db, ok := m.collLeader[database]; ok {
+		if collection, ok := db[collectionName]; ok {
+			return collection[collectionID]
+		}
 	}
-	m.leaderMut.RUnlock()
+	return nil
+}
+
+func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName string, collectionID int64, caller string) *shardLeaders {
+	cacheShardLeaders := m.loadCachedShardLeaders(database, collectionName, collectionID)
 
 	if cacheShardLeaders != nil {
 		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), caller, metrics.CacheHitLabel).Inc()
@@ -158,7 +193,113 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, cal
 	return cacheShardLeaders
 }
 
-func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
+func (m *shardClientMgrImpl) acquireShardCacheRefresh(key shardCacheRefreshKey) *shardCacheRefreshToken {
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+
+	// The token is the refresh generation for this logical cache entry. Removing
+	// it during invalidation makes later callers use a different singleflight key.
+	if refresh := m.refreshes[key]; refresh != nil {
+		return refresh
+	}
+	if m.refreshes == nil {
+		m.refreshes = make(map[shardCacheRefreshKey]*shardCacheRefreshToken)
+	}
+	m.refreshSeq++
+	refresh := &shardCacheRefreshToken{id: m.refreshSeq}
+	m.refreshes[key] = refresh
+	return refresh
+}
+
+func (m *shardClientMgrImpl) finishShardCacheRefresh(key shardCacheRefreshKey, refresh *shardCacheRefreshToken) {
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+
+	if m.refreshes[key] == refresh {
+		delete(m.refreshes, key)
+	}
+}
+
+func (m *shardClientMgrImpl) invalidateShardCacheRefreshesLocked(match func(shardCacheRefreshKey) bool) {
+	for key := range m.refreshes {
+		if match(key) {
+			delete(m.refreshes, key)
+		}
+	}
+}
+
+func (m *shardClientMgrImpl) getShardLeaders(
+	ctx context.Context,
+	withCache bool,
+	database string,
+	collectionName string,
+	collectionID int64,
+	caller string,
+) (*shardLeaders, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, collectionID, caller)
+	if cacheShardLeaders != nil && withCache {
+		cacheShardLeaders.touch(time.Now())
+		return cacheShardLeaders, nil
+	}
+
+	// Keep independently addressable entries for every collection ID that may
+	// still have requests in flight under the same name/alias. The singleflight
+	// key includes the ID so old and new alias targets neither overwrite nor
+	// join each other's refresh. Forced refreshes use a separate key to preserve
+	// their semantics while still coalescing concurrent forced refreshes.
+	refreshKey := shardCacheRefreshKey{
+		database:       database,
+		collectionName: collectionName,
+		collectionID:   collectionID,
+		force:          !withCache,
+	}
+	refresh := m.acquireShardCacheRefresh(refreshKey)
+	key := fmt.Sprintf("%s/%s/%d/%t/%d", database, collectionName, collectionID, refreshKey.force, refresh.id)
+	resultCh := m.sfShardCache.DoChanRaw(key, func() (*shardLeaders, error) {
+		defer m.finishShardCacheRefresh(refreshKey, refresh)
+		if withCache {
+			if cached := m.loadCachedShardLeaders(database, collectionName, collectionID); cached != nil {
+				cached.touch(time.Now())
+				return cached, nil
+			}
+		}
+
+		// A shared refresh must not inherit the first caller's cancellation or
+		// deadline: other waiters may still need the result. Keep request-scoped
+		// values while imposing a hard upper bound on the detached Coord RPC.
+		refreshTimeout := m.shardCacheRefreshTimeout
+		if refreshTimeout <= 0 {
+			refreshTimeout = defaultShardCacheRefreshTimeout
+		}
+		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+		defer cancel()
+		return m.updateShardLocationCache(refreshCtx, database, collectionName, collectionID, refreshKey, refresh)
+	})
+	if m.testHookAfterShardCacheDoChan != nil {
+		m.testHookAfterShardCacheDoChan()
+	}
+
+	select {
+	case result := <-resultCh:
+		leaders, err, _ := conc.UnwrapSingleflightRawResult[*shardLeaders](result)
+		return leaders, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (m *shardClientMgrImpl) updateShardLocationCache(
+	ctx context.Context,
+	database,
+	collectionName string,
+	collectionID int64,
+	refreshKey shardCacheRefreshKey,
+	refresh *shardCacheRefreshToken,
+) (*shardLeaders, error) {
 	log := mlog.With(
 		mlog.String("db", database),
 		mlog.FieldCollectionName(collectionName),
@@ -205,15 +346,79 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		shardLeaders: shards,
 		idx:          atomic.NewInt64(0),
 	}
+	newShardLeaders.touch(time.Now())
 
-	m.leaderMut.Lock()
-	if _, ok := m.collLeader[database]; !ok {
-		m.collLeader[database] = make(map[string]*shardLeaders)
-	}
-	m.collLeader[database][collectionName] = newShardLeaders
-	m.leaderMut.Unlock()
+	m.cacheShardLeaders(database, collectionName, collectionID, refreshKey, refresh, newShardLeaders)
 
 	return newShardLeaders, nil
+}
+
+func (m *shardClientMgrImpl) cacheShardLeaders(
+	database,
+	collectionName string,
+	collectionID int64,
+	refreshKey shardCacheRefreshKey,
+	refresh *shardCacheRefreshToken,
+	leaders *shardLeaders,
+) {
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	// Check the token under the same lock used by invalidation and cache deletion,
+	// so an older RPC cannot write back after an invalidation has completed.
+	if m.refreshes[refreshKey] != refresh {
+		return
+	}
+
+	if _, ok := m.collLeader[database]; !ok {
+		m.collLeader[database] = make(shardLeadersByCollectionName)
+	}
+	if _, ok := m.collLeader[database][collectionName]; !ok {
+		m.collLeader[database][collectionName] = make(shardLeadersByCollectionID)
+	}
+	versions := m.collLeader[database][collectionName]
+	versions[collectionID] = leaders
+	m.pruneExpiredShardVersionsLocked(versions, time.Now())
+	m.pruneExcessShardVersionsLocked(versions, collectionID)
+}
+
+func (m *shardClientMgrImpl) pruneExpiredShardVersionsLocked(versions shardLeadersByCollectionID, now time.Time) {
+	ttl := m.shardCacheVersionTTL
+	if ttl <= 0 {
+		ttl = defaultShardCacheVersionTTL
+	}
+	cutoff := now.Add(-ttl)
+	for collectionID, leaders := range versions {
+		if leaders.idleBefore(cutoff) {
+			delete(versions, collectionID)
+		}
+	}
+}
+
+func (m *shardClientMgrImpl) pruneExcessShardVersionsLocked(versions shardLeadersByCollectionID, protectedID int64) {
+	limit := m.maxShardCacheVersionsPerName
+	if limit <= 0 {
+		limit = defaultMaxShardCacheVersionsPerName
+	}
+	for len(versions) > limit {
+		var oldestID int64
+		oldestAccess := int64(^uint64(0) >> 1)
+		found := false
+		for collectionID, leaders := range versions {
+			if collectionID == protectedID {
+				continue
+			}
+			lastAccess := leaders.lastAccessUnixNano.Load()
+			if lastAccess < oldestAccess {
+				oldestID = collectionID
+				oldestAccess = lastAccess
+				found = true
+			}
+		}
+		if !found {
+			return
+		}
+		delete(versions, oldestID)
+	}
 }
 
 func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
@@ -234,16 +439,72 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 
 // used for Garbage collection shard client
 func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
-	m.leaderMut.RLock()
-	defer m.leaderMut.RUnlock()
 	shardLeaderInfo := make(map[int64]NodeInfo)
+	now := time.Now()
+	ttl := m.shardCacheVersionTTL
+	if ttl <= 0 {
+		ttl = defaultShardCacheVersionTTL
+	}
+	cutoff := now.Add(-ttl)
+	expired := make([]shardCacheVersionRef, 0)
 
-	for _, dbInfo := range m.collLeader {
-		for _, shardLeaders := range dbInfo {
-			for _, nodeInfos := range shardLeaders.shardLeaders {
-				for _, node := range nodeInfos {
-					shardLeaderInfo[node.NodeID] = node
+	m.leaderMut.RLock()
+	if m.testHookListShardLocationReadLocked != nil {
+		m.testHookListShardLocationReadLocked()
+	}
+	for database, dbInfo := range m.collLeader {
+		for collectionName, collectionInfo := range dbInfo {
+			for collectionID, leaders := range collectionInfo {
+				if leaders.idleBefore(cutoff) {
+					expired = append(expired, shardCacheVersionRef{
+						database:       database,
+						collectionName: collectionName,
+						collectionID:   collectionID,
+						leaders:        leaders,
+					})
+					continue
 				}
+				for _, nodeInfos := range leaders.shardLeaders {
+					for _, node := range nodeInfos {
+						shardLeaderInfo[node.NodeID] = node
+					}
+				}
+			}
+		}
+	}
+	m.leaderMut.RUnlock()
+
+	if len(expired) == 0 {
+		return shardLeaderInfo
+	}
+	if m.testHookBeforeShardLocationDelete != nil {
+		m.testHookBeforeShardLocationDelete()
+	}
+
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	// A cache hit may touch or replace a candidate after the read scan. Recheck
+	// both pointer identity and last access before deleting it under the write lock.
+	for _, candidate := range expired {
+		dbInfo := m.collLeader[candidate.database]
+		collectionInfo := dbInfo[candidate.collectionName]
+		leaders := collectionInfo[candidate.collectionID]
+		if leaders == nil {
+			continue
+		}
+		if leaders == candidate.leaders && leaders.idleBefore(cutoff) {
+			delete(collectionInfo, candidate.collectionID)
+			if len(collectionInfo) == 0 {
+				delete(dbInfo, candidate.collectionName)
+			}
+			if len(dbInfo) == 0 {
+				delete(m.collLeader, candidate.database)
+			}
+			continue
+		}
+		for _, nodeInfos := range leaders.shardLeaders {
+			for _, node := range nodeInfos {
+				shardLeaderInfo[node.NodeID] = node
 			}
 		}
 	}
@@ -253,6 +514,9 @@ func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
 func (m *shardClientMgrImpl) RemoveDatabase(database string) {
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
+	m.invalidateShardCacheRefreshesLocked(func(key shardCacheRefreshKey) bool {
+		return key.database == database
+	})
 	delete(m.collLeader, database)
 }
 
@@ -261,6 +525,9 @@ func (m *shardClientMgrImpl) DeprecateShardCache(database, collectionName string
 	mlog.Info(context.TODO(), "deprecate shard cache for collection", mlog.FieldCollectionName(collectionName))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
+	m.invalidateShardCacheRefreshesLocked(func(key shardCacheRefreshKey) bool {
+		return key.database == database && key.collectionName == collectionName
+	})
 	dbInfo, ok := m.collLeader[database]
 	if ok {
 		delete(dbInfo, collectionName)
@@ -276,9 +543,17 @@ func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
 	collectionSet := typeutil.NewUniqueSet(collections...)
+	m.invalidateShardCacheRefreshesLocked(func(key shardCacheRefreshKey) bool {
+		return collectionSet.Contain(key.collectionID)
+	})
 	for dbName, dbInfo := range m.collLeader {
-		for collectionName, shardLeaders := range dbInfo {
-			if collectionSet.Contain(shardLeaders.collectionID) {
+		for collectionName, collectionInfo := range dbInfo {
+			for collectionID := range collectionInfo {
+				if collectionSet.Contain(collectionID) {
+					delete(collectionInfo, collectionID)
+				}
+			}
+			if len(collectionInfo) == 0 {
 				delete(dbInfo, collectionName)
 			}
 		}

@@ -197,6 +197,30 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, cacheNameLabelName})
 
+	// ProxyMetaCacheLockWaitLatency records how long MetaCache fills and
+	// invalidations wait to acquire the global fill gate. Labels are deliberately
+	// bounded: operation is selected from a fixed set in meta_cache.go and never
+	// contains database, collection, alias, or partition names.
+	ProxyMetaCacheLockWaitLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "metacache_lock_wait_latency",
+			Help:      "latency in milliseconds waiting for the Proxy MetaCache fill gate",
+			Buckets:   subMsBuckets,
+		}, []string{nodeIDLabelName, "mode", "operation"})
+
+	// ProxyMetaCacheInvalidationLatency records end-to-end cache invalidation
+	// time, including any wait for in-flight fills to drain.
+	ProxyMetaCacheInvalidationLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "metacache_invalidation_latency",
+			Help:      "end-to-end Proxy MetaCache invalidation latency in milliseconds",
+			Buckets:   subMsBuckets,
+		}, []string{nodeIDLabelName, "operation"})
+
 	// ProxySyncTimeTickLag record Proxy synchronization timestamp statistics, differentiated by Channel.
 	ProxySyncTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -519,6 +543,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyCacheStatsCounter)
 	registry.MustRegister(ProxyUpdateCacheLatency)
+	registry.MustRegister(ProxyMetaCacheLockWaitLatency)
+	registry.MustRegister(ProxyMetaCacheInvalidationLatency)
 
 	registry.MustRegister(ProxySyncTimeTickLag)
 	registry.MustRegister(ProxyApplyPrimaryKeyLatency)
