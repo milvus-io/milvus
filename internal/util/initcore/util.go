@@ -79,6 +79,10 @@ func UpdateDefaultDeleteDumpBatchSize(size int) {
 	C.SetDefaultDeleteDumpBatchSize(C.int64_t(size))
 }
 
+func UpdateDefaultVortexScanPushdownEnable(enable bool) {
+	C.SetDefaultVortexScanPushdownEnable(C.bool(enable))
+}
+
 func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }

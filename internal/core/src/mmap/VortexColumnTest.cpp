@@ -30,6 +30,7 @@
 #include "common/Common.h"
 #include "common/FieldMeta.h"
 #include "common/Geometry.h"
+#include "exec/expression/Expr.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/format/vortex/vortex_writer.h"
@@ -37,6 +38,51 @@
 
 namespace milvus {
 namespace {
+
+class SingleRowIdBatchCursor final : public ChunkedColumnInterface::ScanCursor {
+ public:
+    explicit SingleRowIdBatchCursor(ChunkedColumnInterface::ScanBatch batch)
+        : batch_(std::move(batch)) {
+    }
+
+    int64_t
+    Position() const override {
+        return returned_ ? batch_.row_id_start + batch_.size
+                         : batch_.row_id_start;
+    }
+
+    bool
+    Next(int64_t max_rows, ChunkedColumnInterface::ScanBatch* out) override {
+        if (returned_) {
+            return false;
+        }
+        AssertInfo(batch_.size <= max_rows,
+                   "test row id batch size {} exceeds limit {}",
+                   batch_.size,
+                   max_rows);
+        *out = batch_;
+        returned_ = true;
+        return true;
+    }
+
+ private:
+    ChunkedColumnInterface::ScanBatch batch_;
+    bool returned_{false};
+};
+
+ChunkedColumnInterface::ScanBatch
+MakeNullableRowIdBatch() {
+    ChunkedColumnInterface::ScanBatch batch;
+    batch.row_ids = {1, 2};
+    batch.row_id_start = 1;
+    batch.size = 2;
+    auto validity = std::make_shared<FixedVector<bool>>();
+    validity->push_back(false);
+    validity->push_back(true);
+    batch.validity = validity->data();
+    batch.owner = std::move(validity);
+    return batch;
+}
 
 constexpr int64_t kIntFieldId = 101;
 constexpr int64_t kStringFieldId = 102;
@@ -250,6 +296,21 @@ bool
 IsVortexStringPushdownType(DataType type) {
     return type == DataType::STRING || type == DataType::VARCHAR;
 }
+
+class ScopedVortexScanPushdownEnable {
+ public:
+    explicit ScopedVortexScanPushdownEnable(bool enable)
+        : old_(ENABLE_VORTEX_SCAN_PUSHDOWN.load()) {
+        SetDefaultVortexScanPushdownEnable(enable);
+    }
+
+    ~ScopedVortexScanPushdownEnable() {
+        SetDefaultVortexScanPushdownEnable(old_);
+    }
+
+ private:
+    bool old_;
+};
 
 void
 CheckNullableFilteredScanReturnsValidity(VortexColumn& column, DataType type) {
@@ -894,6 +955,32 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
 
 }  // namespace
 
+TEST(VortexColumnTest, RowIdScanPreservesExpressionValiditySemantics) {
+    TargetBitmap bitmap_input(4, true);
+    bitmap_input[1] = false;
+
+    auto evaluate = [&](bool mask_validity_by_bitmap_input) {
+        SingleRowIdBatchCursor cursor(MakeNullableRowIdBatch());
+        std::deque<exec::RowIdScanEntry> buffered_entries;
+        ChunkedColumnInterface::ScanBatch scan_batch;
+        return exec::RowIdScanToBitmaps(&cursor,
+                                        buffered_entries,
+                                        scan_batch,
+                                        0,
+                                        4,
+                                        bitmap_input,
+                                        mask_validity_by_bitmap_input);
+    };
+
+    auto unary = evaluate(true);
+    EXPECT_TRUE(unary.validity[1]);
+    EXPECT_TRUE(unary.result[2]);
+
+    auto binary = evaluate(false);
+    EXPECT_FALSE(binary.validity[1]);
+    EXPECT_TRUE(binary.result[2]);
+}
+
 TEST(VortexColumnTest, ScanAndTake) {
     auto schema = MakeSchema();
     auto properties =
@@ -1208,6 +1295,14 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
 
     auto string_filter_options = ChunkedColumnInterface::ScanOptions::ForUnary(
         0, 16, proto::plan::OpType::Equal, StringValue("v4"));
+    EXPECT_TRUE(string_column.SupportsScanPushdown(string_filter_options));
+    {
+        ScopedVortexScanPushdownEnable disable_pushdown(false);
+        EXPECT_FALSE(string_column.SupportsScanPushdown(string_filter_options));
+        EXPECT_EQ(
+            CollectFilteredRowIdPayload(string_column, string_filter_options),
+            (std::vector<int64_t>{4}));
+    }
     EXPECT_TRUE(string_column.SupportsScanPushdown(string_filter_options));
 
     auto filter_options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(

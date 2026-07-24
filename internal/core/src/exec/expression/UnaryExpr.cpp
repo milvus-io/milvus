@@ -1773,6 +1773,41 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         return nullptr;
     }
 
+    if (!has_offset_input_ && !expr_->column_.element_level_) {
+        if (!row_id_scan_initialized_) {
+            row_id_scan_initialized_ = true;
+            row_id_scan_column_ = segment_->GetChunkedColumn(field_id_);
+            if (row_id_scan_column_ != nullptr) {
+                auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
+                    current_data_global_pos_,
+                    active_count_ - current_data_global_pos_,
+                    expr_->op_type_,
+                    expr_->val_);
+                if (row_id_scan_column_->SupportsScanPushdown(options)) {
+                    row_id_scan_cursor_ =
+                        row_id_scan_column_->Scan(op_ctx_, options);
+                    AssertInfo(row_id_scan_cursor_ != nullptr,
+                               "row id scan cursor is null for field {}",
+                               field_id_.get());
+                } else {
+                    row_id_scan_column_.reset();
+                }
+            }
+        }
+        if (row_id_scan_cursor_ != nullptr) {
+            auto bitmaps = RowIdScanToBitmaps(row_id_scan_cursor_.get(),
+                                              buffered_scan_entries_,
+                                              row_id_scan_batch_,
+                                              current_data_global_pos_,
+                                              real_batch_size,
+                                              bitmap_input,
+                                              true);
+            MoveCursor();
+            return std::make_shared<ColumnVector>(std::move(bitmaps.result),
+                                                  std::move(bitmaps.validity));
+        }
+    }
+
     if (!arg_inited_) {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;

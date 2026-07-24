@@ -134,6 +134,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cDeleteDumpBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.GetAsInt64())
 	C.SetDefaultDeleteDumpBatchSize(cDeleteDumpBatchSize)
 
+	cVortexScanPushdownEnabled := C.bool(paramtable.Get().QueryNodeCfg.EnableVortexScanPushdown.GetAsBool())
+	C.SetDefaultVortexScanPushdownEnable(cVortexScanPushdownEnabled)
+
 	cEnableLatestDeleteSnapshotOptimization := C.bool(paramtable.Get().QueryNodeCfg.EnableLatestDeleteSnapshotOptimization.GetAsBool())
 	C.SetEnableLatestDeleteSnapshotOptimization(cEnableLatestDeleteSnapshotOptimization)
 
