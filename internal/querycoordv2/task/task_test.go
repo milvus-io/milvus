@@ -2212,12 +2212,16 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 	ctx := context.Background()
 	scheduler := suite.newScheduler()
 
-	mockTarget := meta.NewMockTargetManager(suite.T())
-	mockTarget.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil)
-	scheduler.targetMgr = mockTarget
-
 	coll := int64(1001)
 	nodeID := int64(1)
+	staleTargetCollection := int64(0)
+	staleTargetSegment := int64(0)
+	staleCalls := 0
+	scheduler.SetNextTargetStaleHandler(func(collectionID, segmentID int64) {
+		staleTargetCollection = collectionID
+		staleTargetSegment = segmentID
+		staleCalls++
+	})
 	// add segment task for collection
 	task1, err := NewSegmentTask(
 		ctx,
@@ -2232,10 +2236,52 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 	err = scheduler.Add(task1)
 	suite.NoError(err)
 
-	task1.Fail(merr.ErrSegmentNotFound)
-	// when try to remove task with ErrSegmentNotFound, should trigger UpdateNextTarget
+	task1.Fail(merr.WrapErrSegmentNotFound(1, "query node failed to load segment"))
+	// When removing a task with ErrSegmentNotFound, mark the next target as stale.
 	scheduler.remove(task1)
-	mockTarget.AssertExpectations(suite.T())
+	suite.Equal(coll, staleTargetCollection)
+	suite.Equal(int64(1), staleTargetSegment)
+	suite.Equal(1, staleCalls)
+
+	channelTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewChannelAction(nodeID, ActionTypeGrow, "channel"),
+	)
+	suite.NoError(err)
+	channelTask.Fail(merr.ErrSegmentNotFound)
+	scheduler.remove(channelTask)
+	suite.Equal(1, staleCalls)
+
+	leaderTask := NewLeaderSegmentTask(
+		ctx,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		nodeID,
+		NewLeaderAction(nodeID, nodeID, ActionTypeGrow, "channel", 2, 0),
+	)
+	leaderTask.Fail(merr.CheckRPCCall(merr.Status(merr.WrapErrSegmentNotFound(2)), nil))
+	scheduler.remove(leaderTask)
+	suite.Equal(coll, staleTargetCollection)
+	suite.Equal(int64(2), staleTargetSegment)
+	suite.Equal(2, staleCalls)
+
+	leaderPartStatsTask := NewLeaderPartStatsTask(
+		ctx,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		nodeID,
+		NewLeaderUpdatePartStatsAction(nodeID, nodeID, ActionTypeUpdate, "channel", map[int64]int64{1: 1}),
+	)
+	suite.Zero(leaderPartStatsTask.SegmentID())
+	leaderPartStatsTask.Fail(merr.ErrSegmentNotFound)
+	scheduler.remove(leaderPartStatsTask)
+	suite.Equal(2, staleCalls)
 
 	// test remove task with ErrSegmentRequestResourceFailed
 	task2, err := NewSegmentTask(
