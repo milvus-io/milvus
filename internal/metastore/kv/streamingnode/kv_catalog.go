@@ -301,6 +301,45 @@ func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string)
 	return checkpoints, nil
 }
 
+// SaveRecoverySnapshot saves a WAL recovery snapshot in one compound
+// operation: segment assignments, vchannels, salvage checkpoint, and strictly
+// last the consume checkpoint (the commit point of the snapshot). Nil or empty
+// parts are skipped. All parts are idempotent puts on deterministic keys, so a
+// failed snapshot can be retried as a whole. A future atomic implementation
+// can persist the snapshot in a single compare-and-swap round-trip (see the
+// CAS TODO in the recovery storage). See metastore.StreamingNodeCataLog for
+// the contract.
+func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pchannelName string, snapshot *metastore.WALRecoverySnapshot) error {
+	if snapshot == nil {
+		return nil
+	}
+	if len(snapshot.SegmentAssignments) > 0 {
+		if err := c.SaveSegmentAssignments(ctx, pchannelName, snapshot.SegmentAssignments); err != nil {
+			return err
+		}
+	}
+	if len(snapshot.VChannels) > 0 {
+		if err := c.SaveVChannels(ctx, pchannelName, snapshot.VChannels); err != nil {
+			return err
+		}
+	}
+	// The salvage checkpoint must be persisted before the consume checkpoint
+	// to guarantee ordering across a crash in between.
+	if snapshot.SalvageCheckpoint != nil {
+		if err := c.SaveSalvageCheckpoint(ctx, pchannelName, snapshot.SalvageCheckpoint); err != nil {
+			return err
+		}
+	}
+	// The consume checkpoint is always written last: it is the commit point of
+	// the snapshot.
+	if snapshot.ConsumeCheckpoint != nil {
+		if err := c.SaveConsumeCheckpoint(ctx, pchannelName, snapshot.ConsumeCheckpoint); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Prefix functions: return paths ending with "/" for LoadWithPrefix queries.
 
 // buildWALPrefix returns the prefix for all WAL metadata under a pchannel.

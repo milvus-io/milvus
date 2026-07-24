@@ -608,6 +608,61 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, droppedCount)
 	})
 
+	suite.Run("test mutation persisted via one compound catalog call", func() {
+		latestSegments := getLatestSegments()
+		compactToSeg := &datapb.CompactionSegment{
+			SegmentID:           3,
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+			NumOfRows:           2,
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{compactToSeg},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+
+		catalog := mocks2.NewDataCoordCatalog(suite.T())
+		catalog.EXPECT().AlterCompactionSegments(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Run(func(ctx context.Context, compactToSegments []*datapb.SegmentInfo, compactFromSegments []*datapb.SegmentInfo, compactToBinlogs []metastore.BinlogsIncrement) {
+				// compactTo segments
+				suite.Require().Len(compactToSegments, 1)
+				suite.EqualValues(3, compactToSegments[0].GetID())
+				suite.Equal(commonpb.SegmentState_Flushed, compactToSegments[0].GetState())
+				suite.True(compactToSegments[0].GetCreatedByCompaction())
+				suite.ElementsMatch([]int64{1, 2}, compactToSegments[0].GetCompactionFrom())
+				// compactFrom segments
+				suite.Require().Len(compactFromSegments, 2)
+				fromIDs := lo.Map(compactFromSegments, func(seg *datapb.SegmentInfo, _ int) int64 { return seg.GetID() })
+				suite.ElementsMatch([]int64{1, 2}, fromIDs)
+				for _, seg := range compactFromSegments {
+					suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
+					suite.True(seg.GetCompacted())
+					suite.NotEmpty(seg.GetDroppedAt())
+				}
+				// binlog increments belong to the compactTo segments
+				suite.Require().Len(compactToBinlogs, 1)
+				suite.Same(compactToSegments[0], compactToBinlogs[0].Segment)
+			}).
+			Return(nil).Once()
+
+		m := &meta{
+			ctx:          context.TODO(),
+			catalog:      catalog,
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.NotNil(mutation)
+	})
+
 	suite.Run("mixed schema version mix compaction uses task schema version", func() {
 		latestSegments := getLatestSegments()
 		latestSegments.segments[1].SchemaVersion = 2
@@ -3098,6 +3153,106 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchema
 	suite.NotNil(mutation)
 	suite.Require().Len(infos, 1)
 	suite.EqualValues(task.GetSchema().GetVersion(), infos[0].GetSchemaVersion())
+}
+
+func TestMetaCleanPartitionStatsInfo(t *testing.T) {
+	const (
+		collectionID  = int64(100)
+		partitionID   = int64(10)
+		vChannel      = "ch-1"
+		analyzeTaskID = int64(7)
+	)
+
+	newStatsInfo := func(version int64) *datapb.PartitionStatsInfo {
+		return &datapb.PartitionStatsInfo{
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			VChannel:      vChannel,
+			Version:       version,
+			SegmentIDs:    []int64{1},
+			AnalyzeTaskID: analyzeTaskID,
+		}
+	}
+
+	newTestMeta := func(t *testing.T, catalog metastore.DataCoordCatalog, currentVersion int64, versions ...int64) *meta {
+		chunkManager := mocks.NewChunkManager(t)
+		chunkManager.EXPECT().RootPath().Return("root")
+		chunkManager.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
+
+		infos := make(map[int64]*datapb.PartitionStatsInfo)
+		for _, version := range versions {
+			infos[version] = newStatsInfo(version)
+		}
+		return &meta{
+			ctx:          context.Background(),
+			catalog:      catalog,
+			chunkManager: chunkManager,
+			analyzeMeta: &analyzeMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.AnalyzeTask{
+					analyzeTaskID: {TaskID: analyzeTaskID, CollectionID: collectionID, PartitionID: partitionID},
+				},
+			},
+			partitionStatsMeta: &partitionStatsMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+					vChannel: {partitionID: {currentVersion: currentVersion, infos: infos}},
+				},
+			},
+		}
+	}
+
+	t.Run("drop current version rolls back to previous version", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropPartitionStatsAndAnalyzeTask(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Run(func(ctx context.Context, info *datapb.PartitionStatsInfo, taskID int64, rollbackVersion *int64) {
+				assert.EqualValues(t, 2, info.GetVersion())
+				assert.EqualValues(t, analyzeTaskID, taskID)
+				require.NotNil(t, rollbackVersion)
+				assert.EqualValues(t, 1, *rollbackVersion)
+			}).
+			Return(nil).Once()
+
+		m := newTestMeta(t, catalog, 2, 1, 2)
+		err := m.CleanPartitionStatsInfo(context.Background(), newStatsInfo(2))
+		assert.NoError(t, err)
+		// memory updated after the compound catalog write succeeded
+		assert.Nil(t, m.analyzeMeta.GetTask(analyzeTaskID))
+		assert.EqualValues(t, 1, m.partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, vChannel))
+		assert.Nil(t, m.partitionStatsMeta.GetPartitionStats(collectionID, partitionID, vChannel, 2))
+		assert.NotNil(t, m.partitionStatsMeta.GetPartitionStats(collectionID, partitionID, vChannel, 1))
+	})
+
+	t.Run("drop non-current version needs no rollback", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropPartitionStatsAndAnalyzeTask(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Run(func(ctx context.Context, info *datapb.PartitionStatsInfo, taskID int64, rollbackVersion *int64) {
+				assert.EqualValues(t, 1, info.GetVersion())
+				assert.Nil(t, rollbackVersion)
+			}).
+			Return(nil).Once()
+
+		m := newTestMeta(t, catalog, 2, 1, 2)
+		err := m.CleanPartitionStatsInfo(context.Background(), newStatsInfo(1))
+		assert.NoError(t, err)
+		assert.EqualValues(t, 2, m.partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, vChannel))
+		assert.Nil(t, m.partitionStatsMeta.GetPartitionStats(collectionID, partitionID, vChannel, 1))
+	})
+
+	t.Run("catalog failure keeps memory untouched", func(t *testing.T) {
+		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropPartitionStatsAndAnalyzeTask(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("mock error")).Once()
+
+		m := newTestMeta(t, catalog, 2, 1, 2)
+		err := m.CleanPartitionStatsInfo(context.Background(), newStatsInfo(2))
+		assert.Error(t, err)
+		assert.NotNil(t, m.analyzeMeta.GetTask(analyzeTaskID))
+		assert.EqualValues(t, 2, m.partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, vChannel))
+		assert.NotNil(t, m.partitionStatsMeta.GetPartitionStats(collectionID, partitionID, vChannel, 2))
+	})
 }
 
 func TestMeta(t *testing.T) {

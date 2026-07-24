@@ -124,6 +124,110 @@ func (_c *RootCoordCatalog_AlterCollection_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// AlterCollectionAndDeleteGrants provides a mock function with given fields: ctx, oldColl, newColl, ts, tenant, dbName, collectionName
+func (_m *RootCoordCatalog) AlterCollectionAndDeleteGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, tenant string, dbName string, collectionName string) error {
+	ret := _m.Called(ctx, oldColl, newColl, ts, tenant, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionAndDeleteGrants")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, uint64, string, string, string) error); ok {
+		r0 = rf(ctx, oldColl, newColl, ts, tenant, dbName, collectionName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_AlterCollectionAndDeleteGrants_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionAndDeleteGrants'
+type RootCoordCatalog_AlterCollectionAndDeleteGrants_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionAndDeleteGrants is a helper method to define mock.On call
+//   - ctx context.Context
+//   - oldColl *model.Collection
+//   - newColl *model.Collection
+//   - ts uint64
+//   - tenant string
+//   - dbName string
+//   - collectionName string
+func (_e *RootCoordCatalog_Expecter) AlterCollectionAndDeleteGrants(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}, tenant interface{}, dbName interface{}, collectionName interface{}) *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call {
+	return &RootCoordCatalog_AlterCollectionAndDeleteGrants_Call{Call: _e.mock.On("AlterCollectionAndDeleteGrants", ctx, oldColl, newColl, ts, tenant, dbName, collectionName)}
+}
+
+func (_c *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, tenant string, dbName string, collectionName string)) *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(*model.Collection), args[3].(uint64), args[4].(string), args[5].(string), args[6].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call) Return(_a0 error) *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, uint64, string, string, string) error) *RootCoordCatalog_AlterCollectionAndDeleteGrants_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AlterCollectionAndMigrateGrants provides a mock function with given fields: ctx, oldColl, newColl, ts, fieldModify, dbChanged, tenant
+func (_m *RootCoordCatalog) AlterCollectionAndMigrateGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, fieldModify bool, dbChanged bool, tenant string) error {
+	ret := _m.Called(ctx, oldColl, newColl, ts, fieldModify, dbChanged, tenant)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionAndMigrateGrants")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, uint64, bool, bool, string) error); ok {
+		r0 = rf(ctx, oldColl, newColl, ts, fieldModify, dbChanged, tenant)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_AlterCollectionAndMigrateGrants_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionAndMigrateGrants'
+type RootCoordCatalog_AlterCollectionAndMigrateGrants_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionAndMigrateGrants is a helper method to define mock.On call
+//   - ctx context.Context
+//   - oldColl *model.Collection
+//   - newColl *model.Collection
+//   - ts uint64
+//   - fieldModify bool
+//   - dbChanged bool
+//   - tenant string
+func (_e *RootCoordCatalog_Expecter) AlterCollectionAndMigrateGrants(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}, fieldModify interface{}, dbChanged interface{}, tenant interface{}) *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call {
+	return &RootCoordCatalog_AlterCollectionAndMigrateGrants_Call{Call: _e.mock.On("AlterCollectionAndMigrateGrants", ctx, oldColl, newColl, ts, fieldModify, dbChanged, tenant)}
+}
+
+func (_c *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64, fieldModify bool, dbChanged bool, tenant string)) *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(*model.Collection), args[3].(uint64), args[4].(bool), args[5].(bool), args[6].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call) Return(_a0 error) *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, uint64, bool, bool, string) error) *RootCoordCatalog_AlterCollectionAndMigrateGrants_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterCollectionDB provides a mock function with given fields: ctx, oldColl, newColl, ts
 func (_m *RootCoordCatalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64) error {
 	ret := _m.Called(ctx, oldColl, newColl, ts)
@@ -1037,6 +1141,57 @@ func (_c *RootCoordCatalog_DropCollection_Call) Return(_a0 error) *RootCoordCata
 }
 
 func (_c *RootCoordCatalog_DropCollection_Call) RunAndReturn(run func(context.Context, *model.Collection, uint64) error) *RootCoordCatalog_DropCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropCollectionAndDeleteGrants provides a mock function with given fields: ctx, collectionInfo, ts, tenant, dbName, collectionName
+func (_m *RootCoordCatalog) DropCollectionAndDeleteGrants(ctx context.Context, collectionInfo *model.Collection, ts uint64, tenant string, dbName string, collectionName string) error {
+	ret := _m.Called(ctx, collectionInfo, ts, tenant, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCollectionAndDeleteGrants")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, uint64, string, string, string) error); ok {
+		r0 = rf(ctx, collectionInfo, ts, tenant, dbName, collectionName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_DropCollectionAndDeleteGrants_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCollectionAndDeleteGrants'
+type RootCoordCatalog_DropCollectionAndDeleteGrants_Call struct {
+	*mock.Call
+}
+
+// DropCollectionAndDeleteGrants is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionInfo *model.Collection
+//   - ts uint64
+//   - tenant string
+//   - dbName string
+//   - collectionName string
+func (_e *RootCoordCatalog_Expecter) DropCollectionAndDeleteGrants(ctx interface{}, collectionInfo interface{}, ts interface{}, tenant interface{}, dbName interface{}, collectionName interface{}) *RootCoordCatalog_DropCollectionAndDeleteGrants_Call {
+	return &RootCoordCatalog_DropCollectionAndDeleteGrants_Call{Call: _e.mock.On("DropCollectionAndDeleteGrants", ctx, collectionInfo, ts, tenant, dbName, collectionName)}
+}
+
+func (_c *RootCoordCatalog_DropCollectionAndDeleteGrants_Call) Run(run func(ctx context.Context, collectionInfo *model.Collection, ts uint64, tenant string, dbName string, collectionName string)) *RootCoordCatalog_DropCollectionAndDeleteGrants_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(uint64), args[3].(string), args[4].(string), args[5].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_DropCollectionAndDeleteGrants_Call) Return(_a0 error) *RootCoordCatalog_DropCollectionAndDeleteGrants_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_DropCollectionAndDeleteGrants_Call) RunAndReturn(run func(context.Context, *model.Collection, uint64, string, string, string) error) *RootCoordCatalog_DropCollectionAndDeleteGrants_Call {
 	_c.Call.Return(run)
 	return _c
 }

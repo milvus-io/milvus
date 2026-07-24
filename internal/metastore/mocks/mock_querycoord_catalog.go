@@ -671,6 +671,55 @@ func (_c *QueryCoordCatalog_RemoveResourceGroup_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// SaveAndReleaseReplicas provides a mock function with given fields: ctx, collectionID, saves, releases
+func (_m *QueryCoordCatalog) SaveAndReleaseReplicas(ctx context.Context, collectionID int64, saves []*querypb.Replica, releases []int64) error {
+	ret := _m.Called(ctx, collectionID, saves, releases)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveAndReleaseReplicas")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*querypb.Replica, []int64) error); ok {
+		r0 = rf(ctx, collectionID, saves, releases)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// QueryCoordCatalog_SaveAndReleaseReplicas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveAndReleaseReplicas'
+type QueryCoordCatalog_SaveAndReleaseReplicas_Call struct {
+	*mock.Call
+}
+
+// SaveAndReleaseReplicas is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - saves []*querypb.Replica
+//   - releases []int64
+func (_e *QueryCoordCatalog_Expecter) SaveAndReleaseReplicas(ctx interface{}, collectionID interface{}, saves interface{}, releases interface{}) *QueryCoordCatalog_SaveAndReleaseReplicas_Call {
+	return &QueryCoordCatalog_SaveAndReleaseReplicas_Call{Call: _e.mock.On("SaveAndReleaseReplicas", ctx, collectionID, saves, releases)}
+}
+
+func (_c *QueryCoordCatalog_SaveAndReleaseReplicas_Call) Run(run func(ctx context.Context, collectionID int64, saves []*querypb.Replica, releases []int64)) *QueryCoordCatalog_SaveAndReleaseReplicas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].([]*querypb.Replica), args[3].([]int64))
+	})
+	return _c
+}
+
+func (_c *QueryCoordCatalog_SaveAndReleaseReplicas_Call) Return(_a0 error) *QueryCoordCatalog_SaveAndReleaseReplicas_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *QueryCoordCatalog_SaveAndReleaseReplicas_Call) RunAndReturn(run func(context.Context, int64, []*querypb.Replica, []int64) error) *QueryCoordCatalog_SaveAndReleaseReplicas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveCollection provides a mock function with given fields: ctx, collection, partitions
 func (_m *QueryCoordCatalog) SaveCollection(ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
 	_va := make([]interface{}, len(partitions))

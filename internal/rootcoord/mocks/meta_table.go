@@ -5,16 +5,12 @@ package mockrootcoord
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-
-	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
-	mock "github.com/stretchr/testify/mock"
-
 	model "github.com/milvus-io/milvus/internal/metastore/model"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	mock "github.com/stretchr/testify/mock"
 
 	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )

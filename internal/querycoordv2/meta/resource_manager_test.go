@@ -657,9 +657,17 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Unset()
 	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
-	suite.Panics(func() {
+	// commitStaging returns the error instead of crashing the process,
+	// memory is kept consistent with the catalog, so the node is still assigned.
+	suite.NotPanics(func() {
 		suite.manager.HandleNodeDown(ctx, 1)
 	})
+	suite.True(suite.manager.ContainsNode(ctx, "rg1", 1))
+
+	// storage recovered, the whole batch can be retried.
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
+	suite.manager.HandleNodeDown(ctx, 1)
+	suite.False(suite.manager.ContainsNode(ctx, "rg1", 1))
 }
 
 func TestGetResourceGroupsJSON(t *testing.T) {

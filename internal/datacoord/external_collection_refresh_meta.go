@@ -488,35 +488,27 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 		return nil
 	}
 
-	// Drop all associated tasks first
+	// Collect task IDs, then drop tasks and job in one compound catalog call.
+	// On failure the in-memory state is left fully untouched (the drops are
+	// idempotent, so a retry converges).
+	taskIDs := make([]int64, 0)
 	if taskMap, ok := m.jobTasks.Get(jobID); ok {
-		var dropErr error
 		taskMap.Range(func(taskID int64, _ *datapb.ExternalCollectionRefreshTask) bool {
-			if err := m.catalog.DropExternalCollectionRefreshTask(ctx, taskID); err != nil {
-				mlog.Warn(ctx, "drop task failed during job drop",
-					mlog.Int64("jobID", jobID),
-					mlog.Int64("taskID", taskID),
-					mlog.Err(err))
-				dropErr = err
-				return false
-			}
-			m.tasks.Remove(taskID)
+			taskIDs = append(taskIDs, taskID)
 			return true
 		})
-		if dropErr != nil {
-			return dropErr
-		}
-		m.jobTasks.Remove(jobID)
 	}
-
-	// Drop job
-	if err := m.catalog.DropExternalCollectionRefreshJob(ctx, jobID); err != nil {
-		mlog.Warn(ctx, "drop job failed",
+	if err := m.catalog.DropExternalCollectionRefreshJobAndTasks(ctx, jobID, taskIDs); err != nil {
+		mlog.Warn(ctx, "drop job and tasks failed",
 			mlog.Int64("jobID", jobID),
 			mlog.Err(err))
 		return err
 	}
 
+	for _, taskID := range taskIDs {
+		m.tasks.Remove(taskID)
+	}
+	m.jobTasks.Remove(jobID)
 	m.jobs.Remove(jobID)
 	m.removeFromCollectionJobs(job.GetCollectionId(), jobID)
 

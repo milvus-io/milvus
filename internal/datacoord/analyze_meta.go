@@ -99,15 +99,22 @@ func (m *analyzeMeta) DropAnalyzeTask(ctx context.Context, taskID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
-	mlog.Info(ctx, "drop analyze task", mlog.FieldTaskID(taskID))
 	if err := m.catalog.DropAnalyzeTask(ctx, taskID); err != nil {
 		mlog.Warn(ctx, "drop analyze task by catalog failed", mlog.FieldTaskID(taskID),
 			mlog.Err(err))
 		return err
 	}
 
-	delete(m.tasks, taskID)
+	m.dropTaskLocked(ctx, taskID)
 	return nil
+}
+
+// dropTaskLocked removes the analyze task from the in-memory cache. Callers
+// must hold the write lock and have already persisted the deletion through
+// the catalog.
+func (m *analyzeMeta) dropTaskLocked(ctx context.Context, taskID int64) {
+	mlog.Info(ctx, "drop analyze task", mlog.FieldTaskID(taskID))
+	delete(m.tasks, taskID)
 }
 
 func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {

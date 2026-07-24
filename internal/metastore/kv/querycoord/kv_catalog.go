@@ -387,3 +387,18 @@ func encodeResourceGroupKey(rgName string) string {
 func encodeCollectionTargetKey(collection int64) string {
 	return fmt.Sprintf("%s/%d", CollectionTargetPrefix, collection)
 }
+
+// SaveAndReleaseReplicas saves the given replicas and then releases the given
+// replica IDs of the collection, fail-hard. See metastore.QueryCoordCatalog
+// for the contract and the atomicity contract-gap note.
+func (s Catalog) SaveAndReleaseReplicas(ctx context.Context, collectionID int64, saves []*querypb.Replica, releases []int64) error {
+	if len(saves) > 0 {
+		if err := s.SaveReplica(ctx, saves...); err != nil {
+			return err
+		}
+	}
+	if len(releases) > 0 {
+		return s.ReleaseReplica(ctx, collectionID, releases...)
+	}
+	return nil
+}

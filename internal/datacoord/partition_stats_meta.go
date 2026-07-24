@@ -125,20 +125,10 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info 
 	psm.Lock()
 	defer psm.Unlock()
 	// if the dropping partitionStats is the current version, should update currentPartitionStats
-	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
-	if currentVersion == info.GetVersion() && currentVersion != emptyPartitionStatsVersion {
-		infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
-		if len(infos) > 0 {
-			var maxVersion int64 = 0
-			for version := range infos {
-				if version > maxVersion && version < currentVersion {
-					maxVersion = version
-				}
-			}
-			err := psm.innerSaveCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), maxVersion)
-			if err != nil {
-				return err
-			}
+	if rollbackVersion := psm.getRollbackVersionLocked(info); rollbackVersion != nil {
+		err := psm.innerSaveCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), *rollbackVersion)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -151,11 +141,57 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info 
 			mlog.Err(err))
 		return err
 	}
-	if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; !ok {
+	// the rollback (if any) was already applied in memory by
+	// innerSaveCurrentPartitionStatsVersion above, so only the drop is applied here
+	psm.applyDropLocked(info, nil)
+	return nil
+}
+
+// getRollbackVersionLocked computes the current-version rollback required when
+// dropping the given partition-stats version: if the dropped version is the
+// (non-empty) current version and other versions exist, it returns the largest
+// remaining version below it; otherwise nil (no rollback needed). Callers must
+// hold at least the read lock.
+func (psm *partitionStatsMeta) getRollbackVersionLocked(info *datapb.PartitionStatsInfo) *int64 {
+	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
+	if currentVersion != info.GetVersion() || currentVersion == emptyPartitionStatsVersion {
 		return nil
 	}
-	if _, ok := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()]; !ok {
+	// a non-empty current version implies the vChannel/partition entry exists
+	infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
+	if len(infos) == 0 {
 		return nil
+	}
+	var maxVersion int64 = 0
+	for version := range infos {
+		if version > maxVersion && version < currentVersion {
+			maxVersion = version
+		}
+	}
+	return &maxVersion
+}
+
+// applyDropLocked applies the in-memory effects of dropping a partition-stats
+// version after the catalog write succeeded: it rolls the current version back
+// when rollbackVersion is non-nil and removes the info from the three-level
+// map. Callers must hold the write lock.
+func (psm *partitionStatsMeta) applyDropLocked(info *datapb.PartitionStatsInfo, rollbackVersion *int64) {
+	if rollbackVersion != nil {
+		// getRollbackVersionLocked returns non-nil only when the dropped version
+		// is the non-empty current version, which implies the vChannel/partition
+		// entry exists — the "no partition info" error branch of
+		// innerSaveCurrentPartitionStatsVersion is unreachable here, so this
+		// in-memory update cannot fail.
+		mlog.Info(psm.ctx, "update current partition stats version", mlog.FieldCollectionID(info.GetCollectionID()),
+			mlog.FieldPartitionID(info.GetPartitionID()),
+			mlog.String("vChannel", info.GetVChannel()), mlog.Int64("currentPartitionStatsVersion", *rollbackVersion))
+		psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].currentVersion = *rollbackVersion
+	}
+	if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; !ok {
+		return
+	}
+	if _, ok := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()]; !ok {
+		return
 	}
 	delete(psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos, info.GetVersion())
 	if len(psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos) == 0 {
@@ -164,7 +200,6 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info 
 	if len(psm.partitionStatsInfos[info.GetVChannel()]) == 0 {
 		delete(psm.partitionStatsInfos, info.GetVChannel())
 	}
-	return nil
 }
 
 func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {

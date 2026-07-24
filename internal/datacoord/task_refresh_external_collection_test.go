@@ -76,6 +76,10 @@ func (s *stubCatalog) DropExternalCollectionRefreshTask(ctx context.Context, tas
 	return nil
 }
 
+func (s *stubCatalog) DropExternalCollectionRefreshJobAndTasks(ctx context.Context, jobID typeutil.UniqueID, taskIDs []typeutil.UniqueID) error {
+	return nil
+}
+
 func (s *stubCatalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...metastore.BinlogsIncrement) error {
 	s.alteredSegments = append([]*datapb.SegmentInfo(nil), newSegments...)
 	return s.alterSegmentErr
