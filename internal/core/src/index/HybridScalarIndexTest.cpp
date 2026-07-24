@@ -36,7 +36,6 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
 #include "index/Index.h"
@@ -56,15 +55,41 @@
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/IndexEntryEncryptedLocalWriter.h"
+#include "storage/PluginLoader.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/PlannerCipherPlugin.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
+
+class CountingOpenFileSystem : public arrow::fs::SubTreeFileSystem {
+ public:
+    explicit CountingOpenFileSystem(
+        std::shared_ptr<arrow::fs::FileSystem> base_fs)
+        : arrow::fs::SubTreeFileSystem("", std::move(base_fs)) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string& path) override {
+        ++open_input_file_count_;
+        return arrow::fs::SubTreeFileSystem::OpenInputFile(path);
+    }
+
+    size_t
+    OpenInputFileCount() const {
+        return open_input_file_count_;
+    }
+
+ private:
+    size_t open_input_file_count_{0};
+};
 
 TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
     HybridScalarIndex<int64_t> int_index(7);
@@ -752,6 +777,12 @@ TYPED_TEST_SUITE_P(HybridIndexTestInverted);
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ResourceEstimateUsesInternalInvertedIndexType) {
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.addPluginForTest(
+        std::make_shared<milvus::test::PlannerCipherPlugin>());
+    auto plugin_cleanup = folly::makeGuard(
+        [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
+
     auto stream_budget = storage::EntryStreamMaxTransientBytes();
     auto index_size = static_cast<uint64_t>(stream_budget);
     if (stream_budget == std::numeric_limits<size_t>::max() ||
@@ -761,14 +792,18 @@ TYPED_TEST_P(HybridIndexTestInverted,
     } else {
         index_size += 1024;
     }
-    auto stream_overhead = static_cast<uint64_t>(
-        std::min<size_t>(index_size, storage::EntryStreamMaxTransientBytes()));
+    auto stream_overhead = static_cast<uint64_t>(std::min<size_t>(
+        storage::PlainEntryFileStreamTransientBytes(index_size),
+        storage::PlainEntryFileStreamMaxTransientBytes()));
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
 
-    storage::FileManagerContext ctx(
-        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    auto counting_fs = std::make_shared<CountingOpenFileSystem>(this->fs_);
+    storage::FileManagerContext ctx(this->field_meta_,
+                                    this->index_meta_,
+                                    this->chunk_manager_,
+                                    counting_fs);
     ctx.set_for_loading_index(true);
 
     auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -786,15 +821,32 @@ TYPED_TEST_P(HybridIndexTestInverted,
     EXPECT_EQ(request.max_memory_cost, stream_overhead);
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
+    EXPECT_EQ(counting_fs->OpenInputFileCount(), 1);
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,
-             ScalarIndexLoadingOverheadDoesNotCapFileDimension) {
+             ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
-    auto cleanup = folly::makeGuard(
-        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto old_high_max = high_pool.GetMaxThreadNum();
+    auto old_low_max = low_pool.GetMaxThreadNum();
+    auto cleanup = folly::makeGuard([&budget,
+                                     old_capacity,
+                                     &high_pool,
+                                     &low_pool,
+                                     old_high_max,
+                                     old_low_max]() {
+        budget.SetCapacityBytes(old_capacity);
+        high_pool.Resize(old_high_max);
+        low_pool.Resize(old_low_max);
+    });
     budget.SetCapacityBytes(0);
+    high_pool.Resize(2);
+    low_pool.Resize(3);
 
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
@@ -816,6 +868,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
     load_info.index_size = 1024;
     load_info.num_rows = this->nb_;
     load_info.dim = 0;
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/2048,
+                            /*max_disk_cost=*/512,
+                            /*final_memory_cost=*/1024,
+                            /*final_disk_cost=*/128,
+                            /*has_raw_data=*/true};
 
     index::CreateIndexInfo index_info{};
     index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
@@ -834,13 +892,150 @@ TYPED_TEST_P(HybridIndexTestInverted,
         ctx,
         std::move(config));
 
-    ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
-    EXPECT_EQ(translator.meta()->loading_overhead->group,
-              milvus::segcore::kLoadTransientOverheadGroup);
-    EXPECT_EQ(
-        translator.meta()->loading_overhead->upper_bound.memory_bytes,
-        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
-    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
+    EXPECT_FALSE(translator.meta()->loading_overhead.has_value());
+    auto max_task_overhead = storage::PlainEntryFileStreamTaskTransientBytes();
+    auto [loaded_resource, loading_overhead] =
+        translator.estimated_byte_size_of_cell(0);
+    EXPECT_EQ(loaded_resource,
+              (milvus::cachinglayer::ResourceUsage{1024, 128}));
+    EXPECT_EQ(loading_overhead,
+              (milvus::cachinglayer::ResourceUsage{1024, 896}));
+
+    budget.SetCapacityBytes(storage::kTailMergeGrace);
+    Config budgeted_config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator
+        budgeted_translator(index_info,
+                            &load_info,
+                            milvus::tracer::TraceContext{},
+                            ctx,
+                            std::move(budgeted_config));
+
+    ASSERT_TRUE(budgeted_translator.meta()->loading_overhead.has_value());
+    ASSERT_TRUE(
+        budgeted_translator.meta()->loading_overhead->memory.has_value());
+    EXPECT_FALSE(
+        budgeted_translator.meta()->loading_overhead->file.has_value());
+    EXPECT_EQ(budgeted_translator.meta()->loading_overhead->memory->upper_bound,
+              max_task_overhead);
+
+    budget.SetCapacityBytes(0);
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.addPluginForTest(
+        std::make_shared<milvus::test::PlannerCipherPlugin>());
+    auto plugin_cleanup = folly::makeGuard(
+        [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
+    Config plugin_loaded_config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator
+        plugin_loaded_translator(index_info,
+                                 &load_info,
+                                 milvus::tracer::TraceContext{},
+                                 ctx,
+                                 std::move(plugin_loaded_config));
+
+    EXPECT_FALSE(plugin_loaded_translator.meta()->loading_overhead.has_value());
+}
+
+TYPED_TEST_P(HybridIndexTestInverted,
+             EncryptedResourceEstimateUsesCollectionId) {
+    auto collection_id = this->field_meta_.collection_id;
+    auto cipher_plugin =
+        std::make_shared<milvus::test::CollectionBoundPlannerCipherPlugin>(
+            collection_id);
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.addPluginForTest(cipher_plugin);
+    auto plugin_cleanup = folly::makeGuard(
+        [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+    storage::MemFileManagerImpl file_manager(ctx);
+    auto file_name = fmt::format("encrypted_hybrid_collection_{}",
+                                 static_cast<int>(this->type_));
+    auto remote_path =
+        file_manager.GetRemoteIndexObjectPrefix() + "/" + file_name;
+
+    {
+        storage::IndexEntryEncryptedLocalWriter writer(
+            remote_path,
+            this->fs_,
+            cipher_plugin,
+            /*ez_id=*/7,
+            collection_id,
+            this->chunk_manager_->GetRootPath());
+        writer.PutMeta(INDEX_TYPE,
+                       static_cast<uint8_t>(ScalarIndexType::INVERTED));
+        writer.Finish();
+    }
+
+    auto file_info = this->fs_->GetFileInfo(remote_path).ValueOrDie();
+    auto index_size = static_cast<uint64_t>(file_info.size());
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
+
+    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+        this->type_,
+        0,
+        index_size,
+        index_params,
+        false,
+        this->nb_,
+        {remote_path},
+        ctx,
+        &stream_load_info);
+
+    ASSERT_TRUE(stream_load_info.has_value());
+    EXPECT_TRUE(stream_load_info->encrypted);
+    EXPECT_EQ(request.final_memory_cost, 0);
+    EXPECT_EQ(request.final_disk_cost, index_size);
+}
+
+TYPED_TEST_P(HybridIndexTestInverted, ScalarV3LoadingRequiresStreamLoadInfo) {
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.collection_id = 1;
+    load_info.partition_id = 2;
+    load_info.segment_id = 3;
+    load_info.field_id = 101;
+    load_info.field_type = this->type_;
+    load_info.element_type = DataType::NONE;
+    load_info.enable_mmap = false;
+    load_info.index_id = this->index_build_id_;
+    load_info.index_build_id = this->index_build_id_;
+    load_info.index_version = this->index_version_;
+    load_info.index_params = index_params;
+    load_info.index_engine_version = this->index_version_;
+    load_info.index_size = 1024;
+    load_info.num_rows = this->nb_;
+    load_info.dim = 0;
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/2048,
+                            /*max_disk_cost=*/512,
+                            /*final_memory_cost=*/1024,
+                            /*final_disk_cost=*/128,
+                            /*has_raw_data=*/true};
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = this->type_;
+    index_info.index_engine_version = this->index_version_;
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    Config config = index_params;
+    EXPECT_THROW(milvus::segcore::storagev1translator::SealedIndexTranslator(
+                     index_info,
+                     &load_info,
+                     milvus::tracer::TraceContext{},
+                     ctx,
+                     std::move(config)),
+                 milvus::SegcoreError);
 }
 
 template <typename T>
@@ -1037,9 +1232,12 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
 
-REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestInverted,
-                            ResourceEstimateUsesInternalInvertedIndexType,
-                            ScalarIndexLoadingOverheadDoesNotCapFileDimension);
+REGISTER_TYPED_TEST_SUITE_P(
+    HybridIndexTestInverted,
+    ResourceEstimateUsesInternalInvertedIndexType,
+    ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds,
+    EncryptedResourceEstimateUsesCollectionId,
+    ScalarV3LoadingRequiresStreamLoadInfo);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,
