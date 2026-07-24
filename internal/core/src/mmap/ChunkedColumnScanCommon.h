@@ -18,10 +18,13 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "pb/plan.pb.h"
 
 namespace milvus {
 
@@ -109,13 +112,16 @@ struct ValueView {
 
 struct ScanBatch {
     // Every batch represents the dense row range
-    // [row_id_start, row_id_start + size). Values are optional based on the
-    // requested projection, while validity remains aligned with this range.
+    // [row_id_start, row_id_start + size) for data scans. Payload fields are
+    // optional based on ScanOptions. For data scans, values and validity are
+    // dense over this range. For filter pushdown scans, row_ids is sparse and
+    // validity, when present, is aligned with row_ids.
     ValueView values;
     // Evaluators consume validity as one bool per logical row. nullptr means
     // every row in this batch is valid. Storage-native bitmap encodings must
     // be normalized by the cursor before they cross this boundary.
     const bool* validity = nullptr;
+    std::vector<int64_t> row_ids;
     std::shared_ptr<void> owner;
     int64_t row_id_start = 0;
     int64_t size = 0;
@@ -169,8 +175,9 @@ class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
 
-    // The next logical source row that has neither been returned nor skipped
-    // by the scan plan.
+    // Source scan progress. For dense data scans this is the next logical row
+    // that has neither been returned nor planner-skipped. Sparse row-id scans
+    // may advance past entries that are already buffered inside the cursor.
     virtual int64_t
     Position() const = 0;
 
@@ -180,6 +187,7 @@ class ScanCursor {
     // scans may advance Position() across a data-skip range without returning
     // it. Nullable scans return that range as a validity-only batch so null
     // rows preserve expression Unknown semantics without reopening a cursor.
+    // Sparse row-id batches contain at most max_rows row ids.
     virtual bool
     Next(int64_t max_rows, ScanBatch* out) = 0;
 };
@@ -229,11 +237,73 @@ class PreparedScan {
     Open(const ScanPlan& plan, ScanProjection projection) const = 0;
 };
 
-enum class ScanProjection {
-    // Return ScanBatch::values.
+enum class ScanOutput {
+    // Filter pushdown payload: ScanBatch::row_ids contains predicate true or
+    // unknown rows; ScanBatch::validity is aligned with row_ids.
+    RowIds,
+    // Dense data payload: ScanBatch::values contains values over the batch
+    // range unless projection asks to omit data.
     Data,
-    // Omit ScanBatch::values while still returning validity.
+};
+
+enum class ScanProjection {
+    // Return ScanBatch::values for dense data scans.
+    Data,
+    // Omit ScanBatch::values. Dense data scans still return validity over the
+    // batch range; filter pushdown scans return row_ids plus row-aligned
+    // validity.
     NoData,
+};
+
+inline std::optional<ScanValueKind>
+GetScanValueKindForDataType(DataType data_type) {
+    if (data_type == DataType::BOOL || data_type == DataType::INT8 ||
+        data_type == DataType::INT16 || data_type == DataType::INT32 ||
+        data_type == DataType::INT64 || data_type == DataType::FLOAT ||
+        data_type == DataType::DOUBLE || data_type == DataType::TIMESTAMPTZ) {
+        return ScanValueKind::FixedWidth;
+    }
+    if (data_type == DataType::JSON) {
+        return ScanValueKind::JsonView;
+    }
+    if (data_type == DataType::STRING || data_type == DataType::VARCHAR ||
+        data_type == DataType::TEXT || data_type == DataType::GEOMETRY) {
+        return ScanValueKind::StringView;
+    }
+    if (data_type == DataType::ARRAY) {
+        return ScanValueKind::ArrayView;
+    }
+    if (data_type == DataType::VECTOR_ARRAY) {
+        return ScanValueKind::VectorArrayView;
+    }
+    return std::nullopt;
+}
+
+inline ScanValueKind
+ResolveDataScanValueKind(DataType data_type,
+                         ScanProjection projection,
+                         ScanValueKind requested_kind) {
+    const auto column_kind = GetScanValueKindForDataType(data_type);
+    AssertInfo(column_kind.has_value(),
+               "data scan does not support column type {}",
+               data_type);
+    const auto resolved_kind =
+        projection == ScanProjection::NoData ||
+                requested_kind == ScanValueKind::Default
+            ? *column_kind
+            : requested_kind;
+    AssertInfo(resolved_kind == *column_kind,
+               "data scan kind {} does not match column type {}, expected {}",
+               static_cast<int>(resolved_kind),
+               data_type,
+               static_cast<int>(*column_kind));
+    return resolved_kind;
+}
+
+enum class ScanPredicate {
+    None,
+    Unary,
+    BinaryRange,
 };
 
 struct ScanOptions {
@@ -241,14 +311,30 @@ struct ScanOptions {
 
     ScanOptions() = default;
 
-    ScanOptions(int64_t start_offset,
+    ScanOptions(ScanOutput output,
+                ScanPredicate predicate,
+                int64_t start_offset,
                 int64_t length,
                 ScanProjection projection = ScanProjection::Data,
-                ScanValueKind value_kind = ScanValueKind::Default)
-        : start_offset(start_offset),
+                ScanValueKind value_kind = ScanValueKind::Default,
+                proto::plan::OpType op_type = proto::plan::OpType::Invalid,
+                proto::plan::GenericValue value = {},
+                proto::plan::GenericValue lower_value = {},
+                proto::plan::GenericValue upper_value = {},
+                bool lower_inclusive = false,
+                bool upper_inclusive = false)
+        : output(output),
+          predicate(predicate),
+          start_offset(start_offset),
           length(length),
           projection(projection),
-          value_kind(value_kind) {
+          value_kind(value_kind),
+          op_type(op_type),
+          value(std::move(value)),
+          lower_value(std::move(lower_value)),
+          upper_value(std::move(upper_value)),
+          lower_inclusive(lower_inclusive),
+          upper_inclusive(upper_inclusive) {
     }
 
     static ScanOptions
@@ -256,7 +342,12 @@ struct ScanOptions {
             int64_t length,
             ScanProjection projection = ScanProjection::Data,
             ScanValueKind value_kind = ScanValueKind::Default) {
-        return ScanOptions(start_offset, length, projection, value_kind);
+        return ScanOptions(ScanOutput::Data,
+                           ScanPredicate::None,
+                           start_offset,
+                           length,
+                           projection,
+                           value_kind);
     }
 
     static ScanOptions
@@ -267,6 +358,44 @@ struct ScanOptions {
             start_offset, length, ScanProjection::NoData, value_kind);
     }
 
+    static ScanOptions
+    ForUnary(int64_t start_offset,
+             int64_t length,
+             proto::plan::OpType op_type,
+             const proto::plan::GenericValue& value) {
+        return ScanOptions(ScanOutput::RowIds,
+                           ScanPredicate::Unary,
+                           start_offset,
+                           length,
+                           ScanProjection::NoData,
+                           ScanValueKind::Default,
+                           op_type,
+                           value);
+    }
+
+    static ScanOptions
+    ForBinaryRange(int64_t start_offset,
+                   int64_t length,
+                   const proto::plan::GenericValue& lower_value,
+                   bool lower_inclusive,
+                   const proto::plan::GenericValue& upper_value,
+                   bool upper_inclusive) {
+        return ScanOptions(ScanOutput::RowIds,
+                           ScanPredicate::BinaryRange,
+                           start_offset,
+                           length,
+                           ScanProjection::NoData,
+                           ScanValueKind::Default,
+                           proto::plan::OpType::Invalid,
+                           {},
+                           lower_value,
+                           upper_value,
+                           lower_inclusive,
+                           upper_inclusive);
+    }
+
+    ScanOutput output = ScanOutput::Data;
+    ScanPredicate predicate = ScanPredicate::None;
     int64_t start_offset = 0;
     int64_t length = 0;
     ScanProjection projection = ScanProjection::Data;
@@ -278,6 +407,12 @@ struct ScanOptions {
     // final skipped set into segment-offset ScanPlan ranges.
     CellSkipPredicate metadata_skip_cell;
     CellSkipPredicate loaded_skip_cell;
+    proto::plan::OpType op_type = proto::plan::OpType::Invalid;
+    proto::plan::GenericValue value;
+    proto::plan::GenericValue lower_value;
+    proto::plan::GenericValue upper_value;
+    bool lower_inclusive = false;
+    bool upper_inclusive = false;
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;

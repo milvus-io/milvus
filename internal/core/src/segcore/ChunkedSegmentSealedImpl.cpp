@@ -110,6 +110,7 @@
 #include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/VortexColumn.h"
 #include "mmap/VirtualPKChunkedColumn.h"
 #include "mmap/Types.h"
 #include "common/VirtualPK.h"
@@ -8167,6 +8168,189 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                     nullptr);
 }
 
+VortexColumnGroupLocalFormat
+ChunkedSegmentSealedImpl::ResolveVortexColumnGroupLocalFormat(
+    const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
+    const SchemaPtr& schema_snapshot) const {
+    const auto primary_field_id = schema_snapshot->get_primary_field_id();
+    if (primary_field_id.has_value() &&
+        std::find(column_group->columns.begin(),
+                  column_group->columns.end(),
+                  schema_snapshot->get_storage_column_name(
+                      *primary_field_id)) != column_group->columns.end()) {
+        // PK data must always retain the Raw row layout. In particular, a
+        // future configurable default must not make a mixed PK group select
+        // Vortex indirectly.
+        return VortexColumnGroupLocalFormat::Raw;
+    }
+
+    if (column_group->format != STORAGE_FORMAT_VORTEX) {
+        return VortexColumnGroupLocalFormat::Default;
+    }
+
+    std::unordered_map<std::string, bool> physical_column_is_vortex;
+    physical_column_is_vortex.reserve(
+        schema_snapshot->get_field_ids().size());
+    for (const auto field_id : schema_snapshot->get_field_ids()) {
+        const auto column_name =
+            schema_snapshot->get_storage_column_name(field_id);
+        const auto is_vortex =
+            (*schema_snapshot)[field_id].get_local_format() ==
+            LOCAL_FORMAT_VORTEX;
+        auto [entry, inserted] =
+            physical_column_is_vortex.emplace(column_name, is_vortex);
+        if (!inserted) {
+            // Multiple logical fields may map to one external physical
+            // column. The physical column is unambiguously Vortex only when
+            // every mapping requests Vortex.
+            entry->second = entry->second && is_vortex;
+        }
+    }
+
+    if (column_group->columns.empty()) {
+        return VortexColumnGroupLocalFormat::Default;
+    }
+    for (const auto& column_name : column_group->columns) {
+        const auto column = physical_column_is_vortex.find(column_name);
+        if (column == physical_column_is_vortex.end() || !column->second) {
+            // A mixed or unknown group has no unambiguous field-level local
+            // format. Delegate it to the group default, which is Raw today
+            // and may become configurable.
+            return VortexColumnGroupLocalFormat::Default;
+        }
+    }
+    return VortexColumnGroupLocalFormat::Vortex;
+}
+
+bool
+ChunkedSegmentSealedImpl::TryLoadVortexColumnGroup(
+    const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
+    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    int64_t index,
+    const std::vector<FieldId>& milvus_field_ids,
+    const std::unordered_map<FieldId, FieldMeta>& field_metas,
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot,
+    bool eager_load,
+    const std::string& aggregated_warmup_policy,
+    milvus::OpContext* op_ctx,
+    bool is_replace,
+    RuntimeResourceState* runtime,
+    StagedStateCommitter* committer) {
+    AssertInfo(runtime == nullptr || committer == nullptr,
+               "vortex column group load cannot use runtime and committer "
+               "simultaneously");
+    if (ResolveVortexColumnGroupLocalFormat(column_group, schema_snapshot) !=
+        VortexColumnGroupLocalFormat::Vortex) {
+        return false;
+    }
+
+    const auto& local_vortex_field_ids = milvus_field_ids;
+    for (const auto& field_id : local_vortex_field_ids) {
+        const auto& field_meta = field_metas.at(field_id);
+        AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
+                   "vortex local_format is not supported for system field {}",
+                   field_id.get());
+        AssertInfo(!IsVectorDataType(field_meta.get_data_type()),
+                   "vortex local_format is not supported for vector field {}",
+                   field_id.get());
+    }
+    AssertInfo(segment_load_info.GetStorageVersion() == STORAGE_V3,
+               "vortex local_format is only supported for storage v3, segment "
+               "{}, column group {}, storage version {}",
+               get_segment_id(),
+               index,
+               segment_load_info.GetStorageVersion());
+    AssertInfo(!column_group->files.empty(),
+               "vortex column group {} has no files, segment {}",
+               index,
+               get_segment_id());
+
+    std::vector<VortexColumnGroup::FileInfo> vortex_files;
+    vortex_files.reserve(column_group->files.size());
+    for (const auto& file : column_group->files) {
+        vortex_files.emplace_back(VortexColumnGroup::FileInfo{
+            file.path,
+            file.start_index,
+            file.end_index,
+            file.Get<uint64_t>(milvus_storage::api::kPropertyFileSize, 0),
+            file.Get<uint64_t>(milvus_storage::api::kPropertyFooterSize, 0)});
+    }
+
+    std::vector<std::string> vortex_field_names;
+    vortex_field_names.reserve(local_vortex_field_ids.size());
+    for (const auto& field_id : local_vortex_field_ids) {
+        const auto& field_meta = field_metas.at(field_id);
+        vortex_field_names.emplace_back(field_meta.is_external_field()
+                                            ? field_meta.get_external_field()
+                                            : std::to_string(field_id.get()));
+    }
+
+    auto group_cache_warmup_policy =
+        getCacheWarmupPolicy(aggregated_warmup_policy,
+                             /*is_vector=*/false,
+                             /*is_index=*/false,
+                             /*in_load_list=*/eager_load);
+    auto vortex_column_group =
+        std::make_shared<VortexColumnGroup>(vortex_files,
+                                            properties,
+                                            vortex_field_names,
+                                            group_cache_warmup_policy,
+                                            op_ctx);
+
+    const auto expected_num_rows = segment_load_info.GetNumOfRows();
+    AssertInfo(vortex_column_group->num_rows() == expected_num_rows,
+               "vortex column group {} rows {} does not match segment {} "
+               "manifest rows {}",
+               index,
+               vortex_column_group->num_rows(),
+               get_segment_id(),
+               expected_num_rows);
+
+    const auto vortex_group_memory_size = vortex_column_group->memory_size();
+    const auto vortex_group_field_count = local_vortex_field_ids.size();
+    const auto base_data_byte_size =
+        vortex_group_memory_size / vortex_group_field_count;
+    const auto data_byte_size_remainder =
+        vortex_group_memory_size % vortex_group_field_count;
+
+    for (size_t field_index = 0; field_index < local_vortex_field_ids.size();
+         ++field_index) {
+        const auto field_id = local_vortex_field_ids[field_index];
+        const auto& field_meta = field_metas.at(field_id);
+        const auto data_byte_size =
+            base_data_byte_size +
+            (field_index < data_byte_size_remainder ? 1 : 0);
+        auto column = std::make_shared<VortexColumn>(field_id,
+                                                     field_meta,
+                                                     properties,
+                                                     vortex_column_group,
+                                                     data_byte_size);
+        load_field_data_common(field_id,
+                               column,
+                               expected_num_rows,
+                               field_meta.get_data_type(),
+                               false,
+                               true,
+                               segment_load_info,
+                               schema_snapshot,
+                               runtime,
+                               std::nullopt,
+                               op_ctx,
+                               is_replace,
+                               committer);
+    }
+
+    LOG_INFO(
+        "[StorageV3] segment {} loaded vortex column group {} with {} fields "
+        "and {} files",
+        get_segment_id(),
+        index,
+        local_vortex_field_ids.size(),
+        column_group->files.size());
+    return true;
+}
+
 void
 ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
@@ -8211,6 +8395,22 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+    }
+
+    if (TryLoadVortexColumnGroup(column_group,
+                                 properties,
+                                 index,
+                                 milvus_field_ids,
+                                 field_metas,
+                                 segment_load_info,
+                                 schema_snapshot,
+                                 eager_load,
+                                 aggregated_warmup_policy,
+                                 op_ctx,
+                                 is_replace,
+                                 runtime,
+                                 nullptr)) {
+        return;
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -8368,6 +8568,22 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+    }
+
+    if (TryLoadVortexColumnGroup(column_group,
+                                 properties,
+                                 index,
+                                 milvus_field_ids,
+                                 field_metas,
+                                 segment_load_info,
+                                 schema_snapshot,
+                                 eager_load,
+                                 aggregated_warmup_policy,
+                                 op_ctx,
+                                 is_replace,
+                                 nullptr,
+                                 &committer)) {
+        return;
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();

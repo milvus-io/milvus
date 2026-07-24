@@ -110,8 +110,11 @@ true:
 - all fields in the physical column group have `local_format=vortex`;
 - the Storage V3 manifest says the physical column group file is Vortex.
 
-If either condition is false, the segment uses the existing raw loading path for
-that column group.
+If the group mixes Vortex with default or explicit raw local-format fields, the
+segment falls back to the group default local format. The default is currently
+the existing raw row layout; a future server-level default may change this
+resolution. A group containing the primary-key field is the exception: it must
+always fall back to the raw row layout, regardless of the configured default.
 
 ## Design Details
 
@@ -361,6 +364,12 @@ Responsibilities:
   internal fields use the field id string.
 - Build a field-level projected Arrow schema.
 - Create field-level planner/reader state.
+- Validate every file's Arrow field type against the Milvus `FieldMeta` before
+  publishing the column. Direct scans use checked Arrow casts; physical
+  representations that require the existing normalization path fall back to
+  materialized raw-compatible scans instead of being reinterpreted in place.
+- Reject actual NULL rows returned for a non-nullable Milvus field across scan
+  and take paths as `DataFormatBroken`.
 - Implement `Scan`.
 - Implement positional take helpers for retrieve output.
 
@@ -540,6 +549,8 @@ System and integration validation:
 - Verify `local_format=vortex` is rejected for primary-key and vector fields.
 - Verify Storage V3 manifests with Vortex physical column groups load as
   `VortexColumnGroup + VortexColumn`.
+- Verify mixed local-format groups fall back to the default local format and
+  groups containing the primary key always fall back to the raw row layout.
 - Verify non-Vortex physical files continue to load through the raw path.
 - Run scalar filter benchmark cases for primitive predicates, complex
   expressions, offset-input execution, and retrieve/requery output.
