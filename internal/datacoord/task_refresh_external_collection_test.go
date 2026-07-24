@@ -868,13 +868,18 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		const targetRowsPerSegmentKey = "dataNode.externalCollection.targetRowsPerSegment"
 		paramtable.Get().Save(targetRowsPerSegmentKey, "12345")
 		defer paramtable.Get().Reset(targetRowsPerSegmentKey)
+		filesPerTaskKey := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.Key
+		paramtable.Get().Save(filesPerTaskKey, "1")
+		defer paramtable.Get().Reset(filesPerTaskKey)
 
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
-		basePreAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
+		preAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
+		assert.Equal(t, int64(10000000), preAllocCount)
+		// This file count previously overflowed RootCoord's uint32 allocation
+		// limit when filesPerTask was set to 1 and the capacity was multiplied.
 		protoTask := &datapb.ExternalCollectionRefreshTask{
 			TaskId:         1001,
 			JobId:          1001,
@@ -883,7 +888,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
 			FileIndexBegin: 0,
-			FileIndexEnd:   filesPerTask*2 + 1,
+			FileIndexEnd:   8590,
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
@@ -921,8 +926,8 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NotNil(t, cluster.refreshReq)
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
-		assert.Equal(t, basePreAllocCount*3, cluster.refreshReq.GetNumSegmentsExpected())
-		assert.Equal(t, basePreAllocCount*3,
+		assert.Equal(t, preAllocCount, cluster.refreshReq.GetNumSegmentsExpected())
+		assert.Equal(t, preAllocCount,
 			cluster.refreshReq.GetPreAllocatedSegmentIds().GetEnd()-cluster.refreshReq.GetPreAllocatedSegmentIds().GetBegin())
 	})
 }

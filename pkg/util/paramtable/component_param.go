@@ -6680,7 +6680,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Doc: "The number of IDs to pre-allocate for each external collection refresh task. " +
 			"Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID); " +
 			"milvus-table deltalogs without LogID consume additional fallback IDs.",
-		DefaultValue: "500000",
+		DefaultValue: "10000000",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
@@ -6688,7 +6688,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionFilesPerTask = ParamItem{
 		Key:          "dataCoord.externalCollectionFilesPerTask",
 		Version:      "3.0.0",
-		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		Doc:          "Target number of external files per refresh task. Task splitting is temporarily disabled.",
 		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}
