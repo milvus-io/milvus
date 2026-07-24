@@ -16,9 +16,11 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <stddef.h>
+#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <thread>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -38,6 +40,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/Geometry.h"
+#include "common/GeometryCache.h"
 #include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -326,8 +329,13 @@ TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
     milvus::tracer::TraceContext trace_ctx;
     rtree_load.LoadUnified(cfg);
 
-    // Only 2 valid points should be present
-    ASSERT_EQ(rtree_load.Count(), 2);
+    // All 3 rows must be present: the row whose WKB fails to parse is indexed
+    // with a placeholder MBR rather than dropped. Dropping it would leave the
+    // index row count permanently short of the segment row count, which then
+    // trips the growing coarse-bitmap bounds check on every subsequent
+    // geometry query. The R-tree is only a coarse filter -- exact refinement
+    // still filters the placeholder row out of any result.
+    ASSERT_EQ(rtree_load.Count(), 3);
 }
 
 TEST_F(RTreeIndexTest, Build_VariousGeometries) {
@@ -542,8 +550,12 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 
     rtree.Build(build_cfg);
 
-    // expect: 3 geometries (0, 2, 4) are valid and parsable, 1st geometry is marked null and skipped, 3rd geometry is bad WKB and skipped
-    ASSERT_EQ(rtree.Count(), 4);
+    // All 5 rows are indexed. The bad-WKB row (index 3) is NOT dropped: like the
+    // growing add_geometry path, bulk_load now indexes it with a placeholder MBR
+    // so the index row count stays in lockstep with the segment rows, and exact
+    // refinement tolerates the placeholder (Geometry::TryParseFromWkb -> skip) in
+    // every configuration. See PR #50951 review.
+    ASSERT_EQ(rtree.Count(), 5);
 
     // upload -> load back and verify consistency
     auto stats = rtree.UploadUnified({});
@@ -559,7 +571,7 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 
     milvus::tracer::TraceContext trace_ctx;
     rtree_load.LoadUnified(cfg);
-    ASSERT_EQ(rtree_load.Count(), 4);
+    ASSERT_EQ(rtree_load.Count(), 5);
 }
 
 TEST_F(RTreeIndexTest, LoadSlicedNullOffsets) {
@@ -896,4 +908,544 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
 
     // Clean up any remaining index files
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
+}
+
+// Regression for PR #50951 review (RTreeIndexWrapper:212): an unparseable-WKB
+// row is indexed with a placeholder MBR at the origin (never dropped), so an
+// origin-covering query selects it as a coarse candidate. Exact refinement must
+// then tolerate the corrupt WKB instead of throwing. With the geometry cache
+// OFF (the default), refinement re-parses the raw WKB, so before the fix the
+// throwing Geometry(ctx, wkb) ctor failed the ENTIRE query; now
+// Geometry::TryParseFromWkb skips the row. Drives EvalForIndexSegment, which is
+// exactly what stayed green before (the empty/unparseable index tests only
+// check Count(), never a query over such a row).
+TEST_F(RTreeIndexTest, GIS_Index_Refine_ToleratesUnparseableCandidate) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 40;
+    const int kBad = 7;  // the one unparseable row
+    auto full_ds = DataGen(schema, N);
+    auto sealed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    // Every row is POINT(0 0) (so a valid row intersects the origin), except
+    // kBad which is a truncated -- unparseable -- WKB. The placeholder MBR the
+    // index assigns kBad is also the origin, so the origin query below pulls it
+    // into the candidate set and forces refinement to re-parse its raw bytes.
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    auto ctx = GEOS_init_r();
+    std::string origin_wkb =
+        milvus::Geometry(ctx, "POINT(0 0)").to_wkb_string();
+    GEOS_finish_r(ctx);
+    for (int i = 0; i < N; ++i) {
+        if (i == kBad) {
+            std::string bad = origin_wkb;
+            bad.resize(bad.size() / 2);  // truncate -> unparseable
+            wkbs.emplace_back(std::move(bad));
+        } else {
+            wkbs.emplace_back(origin_wkb);
+        }
+    }
+
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    sealed->LoadFieldData(load_info);
+
+    // Distinct field/index ids so the index build temp dir (derived from
+    // collection_partition_segment_field) does not collide with the leftovers
+    // of GIS_Index_Exact_Filtering, which reuses the fixture's {1,1,1,100}.
+    milvus::storage::FieldDataMeta bad_field_meta{1, 1, 1, 300};
+    bad_field_meta.field_schema.set_data_type(
+        ::milvus::proto::schema::DataType::Geometry);
+    milvus::storage::IndexMeta bad_index_meta{1, 300, 1, 1};
+    auto remote_file = (temp_path_.get() / "rtree_bad_refine.parquet").string();
+    WriteGeometryInsertFile(chunk_manager_, bad_field_meta, remote_file, wkbs);
+    milvus::storage::FileManagerContext fm_ctx(
+        bad_field_meta, bad_index_meta, chunk_manager_, fs_);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
+    nlohmann::json build_cfg;
+    build_cfg["insert_files"] = std::vector<std::string>{remote_file};
+    build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    rtree_index->Build(build_cfg);
+    auto stats = rtree_index->UploadUnified({});
+
+    milvus::segcore::LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = 1;
+    info.field_id = geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema = proto::schema::FieldSchema();
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    nlohmann::json cfg_load;
+    cfg_load["index_files"] = stats->GetIndexFiles();
+    rtree_index->LoadUnified(cfg_load);
+    info.cache_index =
+        CreateTestCacheIndex("rtree_bad_refine_key", std::move(rtree_index));
+    sealed->LoadIndex(info);
+
+    // Origin-covering intersects query: must NOT throw, must select every valid
+    // origin point and skip the unparseable row.
+    auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        "POINT(0 0)");
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gis_expr);
+    BitsetType bits;
+    ASSERT_NO_THROW(
+        { bits = ExecuteQueryExpr(plan, sealed.get(), N, MAX_TIMESTAMP); });
+    ASSERT_EQ(bits.size(), static_cast<size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(bool(bits[i]), i != kBad) << "row " << i;
+    }
+
+    sealed.reset();
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS bad-refine test");
+}
+
+namespace {
+// RAII toggle for the static geometry-cache switch: restores the previous
+// value even when a gtest ASSERT returns out of the test body early, so a
+// failing test cannot leak the flag into later tests.
+struct GeometryCacheFlagGuard {
+    explicit GeometryCacheFlagGuard(bool enable)
+        : previous_(milvus::segcore::SegcoreConfig::default_config()
+                        .get_enable_geometry_cache()) {
+        milvus::segcore::SegcoreConfig::default_config()
+            .set_enable_geometry_cache(enable);
+    }
+    ~GeometryCacheFlagGuard() {
+        milvus::segcore::SegcoreConfig::default_config()
+            .set_enable_geometry_cache(previous_);
+    }
+    bool previous_;
+};
+
+// Build the WKB column used by the corrupt-row tolerance tests: every row is
+// POINT(0 0) except `bad_row`, whose WKB is truncated (unparseable).
+std::vector<std::string>
+MakeOriginWkbsWithOneCorruptRow(int n, int bad_row) {
+    std::vector<std::string> wkbs;
+    wkbs.reserve(n);
+    auto ctx = GEOS_init_r();
+    std::string origin_wkb =
+        milvus::Geometry(ctx, "POINT(0 0)").to_wkb_string();
+    GEOS_finish_r(ctx);
+    for (int i = 0; i < n; ++i) {
+        if (i == bad_row) {
+            std::string bad = origin_wkb;
+            bad.resize(bad.size() / 2);  // truncate -> unparseable
+            wkbs.emplace_back(std::move(bad));
+        } else {
+            wkbs.emplace_back(origin_wkb);
+        }
+    }
+    return wkbs;
+}
+}  // namespace
+
+// Regression for PR #50951 review (GISFunctionFilterExpr no-cache brute-force
+// branch): with NO index and the geometry cache OFF (the default
+// configuration), a GIS predicate over a segment containing a corrupt WKB row
+// used the throwing Geometry(ctx, wkb) constructor on a per-batch
+// GEOS_init_r() context -- one corrupt row failed the whole query AND leaked
+// the context (the throw skipped GEOS_finish_r). Now the branch parses with
+// TryParseFromWkb on a thread-local context: the query succeeds and the
+// corrupt row simply evaluates to false.
+TEST_F(RTreeIndexTest, GIS_BruteForce_ToleratesCorruptRow_CacheOff) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    GeometryCacheFlagGuard cache_off(false);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 40;
+    const int kBad = 7;
+    auto full_ds = DataGen(schema, N);
+    auto sealed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    auto wkbs = MakeOriginWkbsWithOneCorruptRow(N, kBad);
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    sealed->LoadFieldData(load_info);
+
+    // No index loaded -> ExprExecPath::RawData -> the brute-force macro branch.
+    auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        "POINT(0 0)");
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gis_expr);
+    BitsetType bits;
+    ASSERT_NO_THROW(
+        { bits = ExecuteQueryExpr(plan, sealed.get(), N, MAX_TIMESTAMP); });
+    ASSERT_EQ(bits.size(), static_cast<size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(bool(bits[i]), i != kBad) << "row " << i;
+    }
+}
+
+// Regression for PR #50951 review (GeometryCache.h AppendData, the critical
+// finding): with the geometry cache ENABLED, loading a segment containing one
+// corrupt WKB row used the throwing Geometry ctor inside
+// SimpleGeometryCache::AppendData, so LoadFieldData -> LoadGeometryCache
+// failed the ENTIRE segment load -- exactly the row shape the placeholder-MBR
+// write paths deliberately keep. Now the corrupt row is cached as an invalid
+// entry; the load succeeds and the cache branch of the filter macros skips the
+// row (res=false) instead of tripping its former non-null assert.
+TEST_F(RTreeIndexTest, GIS_CacheOn_CorruptRow_LoadsAndQueries) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    GeometryCacheFlagGuard cache_on(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 40;
+    const int kBad = 7;
+    auto full_ds = DataGen(schema, N);
+    auto sealed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    auto wkbs = MakeOriginWkbsWithOneCorruptRow(N, kBad);
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+
+    int64_t seg_id = -1;
+    // The critical assertion: the load itself must tolerate the corrupt row.
+    ASSERT_NO_THROW({ sealed->LoadFieldData(load_info); });
+    seg_id = sealed->get_segment_id();
+
+    // Query through the cache branch of the filter macros (cache is enabled
+    // and populated by the load above).
+    auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        "POINT(0 0)");
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gis_expr);
+    BitsetType bits;
+    ASSERT_NO_THROW(
+        { bits = ExecuteQueryExpr(plan, sealed.get(), N, MAX_TIMESTAMP); });
+    ASSERT_EQ(bits.size(), static_cast<size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(bool(bits[i]), i != kBad) << "row " << i;
+    }
+
+    sealed.reset();
+    milvus::exec::SimpleGeometryCacheManager::Instance().RemoveSegmentCaches(
+        nullptr, seg_id);
+}
+
+// Regression for PR #50951 review (RTreeIndex::AddGeometry nullability): a row
+// whose valid_data says VALID but whose WKB payload is empty must be indexed
+// as a non-null placeholder row -- exactly how the sealed
+// bulk_load_from_field_data path (is_valid first, then payload) classifies it
+// -- not pushed into null_offset_. Before the fix AddGeometry inferred
+// nullness from wkb_data.empty(), so ST_ISNOTNULL / Count() disagreed between
+// growing and sealed for such a row.
+TEST_F(RTreeIndexTest, AddGeometryClassifiesNullByValidityNotPayload) {
+    field_meta_.field_schema.set_nullable(true);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    rtree.AddGeometry(CreatePointWKB(1.0, 1.0), 0, true);
+    // Valid row, empty payload -> placeholder MBR, non-null.
+    rtree.AddGeometry(std::string(), 1, true);
+    // Genuinely null row -> null_offset_.
+    rtree.AddGeometry(std::string(), 2, false);
+
+    EXPECT_EQ(rtree.Count(), 3);
+
+    auto is_not_null = rtree.IsNotNull();
+    ASSERT_EQ(is_not_null.size(), 3u);
+    EXPECT_TRUE(is_not_null[0]);
+    EXPECT_TRUE(is_not_null[1]) << "valid empty-payload row must be non-null";
+    EXPECT_FALSE(is_not_null[2]);
+
+    auto is_null = rtree.IsNull();
+    ASSERT_EQ(is_null.size(), 3u);
+    EXPECT_FALSE(is_null[0]);
+    EXPECT_FALSE(is_null[1]);
+    EXPECT_TRUE(is_null[2]);
+}
+
+// Exercises the growing-segment path where a single writer keeps inserting
+// geometries (RTreeIndex::AddGeometry) while reader threads concurrently call
+// Count() and QueryCandidates(). Before the locking fix these read total row
+// counts / null_offset_ / wrapper_ and the boost rtree size without holding
+// any lock, racing the incremental inserts. Run under ASAN/TSAN this asserts
+// the accesses are now properly synchronized; it must also not crash and must
+// converge to the expected final count.
+TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    // Seed one geometry so wrapper_ is published before readers start querying
+    // (QueryCandidates asserts a non-null wrapper).
+    rtree.AddGeometry(CreatePointWKB(0.0, 0.0), 0, true);
+
+    constexpr int kRows = 4000;
+    std::atomic<bool> stop{false};
+    std::atomic<int> reader_iters{0};
+
+    auto reader = [&]() {
+        auto ctx = GEOS_init_r();
+        // A box covering the inserted points [0, kRows] x [0, kRows].
+        milvus::Geometry query_geom(
+            ctx,
+            "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 -1))");
+        while (!stop.load(std::memory_order_relaxed)) {
+            volatile int64_t c = rtree.Count();
+            (void)c;
+            std::vector<int64_t> candidates;
+            rtree.QueryCandidates(
+                ::milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                query_geom,
+                candidates);
+            reader_iters.fetch_add(1, std::memory_order_relaxed);
+        }
+        GEOS_finish_r(ctx);
+    };
+
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 4; ++t) {
+        readers.emplace_back(reader);
+    }
+
+    // Single writer, mirroring the per-segment serialized insert pipeline.
+    for (int i = 1; i <= kRows; ++i) {
+        if (i % 7 == 0) {
+            // Interleave null geometries (exercises the null_offset_ path).
+            rtree.AddGeometry(std::string(), i, false);
+        } else {
+            rtree.AddGeometry(
+                CreatePointWKB(static_cast<double>(i), static_cast<double>(i)),
+                i,
+                true);
+        }
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& th : readers) {
+        th.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+    // Final count = seeded row 0 plus kRows incremental rows.
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kRows + 1));
+}
+
+// Multiple concurrent writers building the same growing index. This exercises
+// IndexingRecord::AppendingIndex's documented "concurrent, reentrant" contract
+// as defense-in-depth: production currently serializes inserts per growing
+// segment (one flowgraph consumer per vchannel), so this shape is not driven
+// by production today -- the test pins the class-level contract so a future
+// caller change fails here instead of in release. Several threads race on the
+// first-time wrapper_ initialization and then keep inserting. Run under
+// ASAN/TSAN this asserts the lazy init is idempotent and
+// wrapper_/total_num_rows_/null_offset_ are never touched unsynchronized.
+TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriter) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int kWriters = 6;
+    constexpr int kPerWriter = 1000;
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            // Spin so every writer hits the first AddGeometry at ~the same time
+            // and they race on the lazy wrapper_ initialization.
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            for (int j = 0; j < kPerWriter; ++j) {
+                int64_t off = static_cast<int64_t>(w) * kPerWriter + j;
+                if (j % 5 == 0) {
+                    // null geometry
+                    rtree.AddGeometry(std::string(), off, false);
+                } else {
+                    rtree.AddGeometry(CreatePointWKB(static_cast<double>(off),
+                                                     static_cast<double>(off)),
+                                      off,
+                                      true);
+                }
+            }
+        });
+    }
+
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 2; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                volatile int64_t c = rtree.Count();  // safe before/after init
+                (void)c;
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    // Every row (null + non-null, disjoint offsets) must be accounted for once.
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kWriters * kPerWriter));
+}
+
+// Regression for the IsNull()/IsNotNull() heap out-of-bounds write on the
+// concurrent multi-writer growing index. Writers assign offsets round-robin so
+// null_offset_ is appended in NON-monotonic order (i.e. unsorted), and each
+// writer may publish a high offset while lower offsets are still in flight, so
+// null_offset_ transiently holds values >= Count(). Readers hammer IsNull()/
+// IsNotNull() throughout ingestion: with the old std::lower_bound shortcut over
+// unsorted data those offsets escaped the bound and wrote past the bitset (a
+// silent OOB in release builds; caught here under ASAN). The final bitsets must
+// also match the exact null / non-null partition.
+TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriterIsNullBounds) {
+    field_meta_.field_schema.set_nullable(true);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int kWriters = 6;
+    constexpr int kTotal = 6000;  // divisible by kWriters
+    // Row is null iff (offset % 3 == 0). Deterministic, independent of thread
+    // scheduling, so the final counts are exact.
+    auto is_null_row = [](int64_t off) { return off % 3 == 0; };
+
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+    std::atomic<int64_t> reader_iters{0};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            // Round-robin offsets: writer w owns w, w+kWriters, w+2*kWriters...
+            // so concurrent writers append null_offset_ out of order.
+            for (int64_t off = w; off < kTotal; off += kWriters) {
+                if (is_null_row(off)) {
+                    rtree.AddGeometry(std::string(), off, false);
+                } else {
+                    rtree.AddGeometry(CreatePointWKB(static_cast<double>(off),
+                                                     static_cast<double>(off)),
+                                      off,
+                                      true);
+                }
+            }
+        });
+    }
+
+    // Readers concurrently drive the previously-unguarded null bitmap paths.
+    // The point is to run IsNull()/IsNotNull() against the growing index while
+    // null_offset_ is unsorted and mid-flight: under ASAN the old lower_bound
+    // shortcut faulted here. We intentionally do NOT cross-check the two
+    // results against each other, because IsNull() and IsNotNull() each take
+    // an independent Count() snapshot and a concurrent writer can grow the row
+    // count between the two calls (so their sizes legitimately differ by the
+    // rows added in between). Per-snapshot correctness is asserted after join.
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 3; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                auto is_null = rtree.IsNull();
+                auto is_not_null = rtree.IsNotNull();
+                // Each result is self-consistent: no set bit lies outside its
+                // own length (the invariant the OOB fix restores).
+                EXPECT_LE(is_null.count(), is_null.size());
+                EXPECT_LE(is_not_null.count(), is_not_null.size());
+                reader_iters.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kTotal));
+
+    int64_t expected_nulls = 0;
+    for (int64_t off = 0; off < kTotal; ++off) {
+        if (is_null_row(off)) {
+            ++expected_nulls;
+        }
+    }
+    auto final_null = rtree.IsNull();
+    auto final_not_null = rtree.IsNotNull();
+    EXPECT_EQ(final_null.count(), expected_nulls);
+    EXPECT_EQ(final_not_null.count(), kTotal - expected_nulls);
+    // Every offset must land in exactly one of the two bitsets.
+    for (int64_t off = 0; off < kTotal; ++off) {
+        EXPECT_EQ(final_null[off], is_null_row(off)) << "offset " << off;
+        EXPECT_EQ(final_not_null[off], !is_null_row(off)) << "offset " << off;
+    }
 }

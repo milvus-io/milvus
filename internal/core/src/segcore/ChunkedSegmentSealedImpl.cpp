@@ -7865,7 +7865,7 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
     FieldId field_id, const std::shared_ptr<ChunkedColumnInterface>& column) {
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
@@ -7878,14 +7878,21 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 
             // Add each string view to the geometry cache
             for (size_t i = 0; i < string_views.size(); ++i) {
-                if (valid_data.empty() || valid_data[i]) {
+                // Guard valid_data[i] like FieldIndexing.cpp's accessor does:
+                // nothing here establishes that valid_data spans every view,
+                // so an unchecked index is an out-of-bounds read that would
+                // desynchronize the cache's nullness from the segment. Rows
+                // beyond the span are classified NULL, matching the index
+                // side.
+                if (valid_data.empty() ||
+                    (i < valid_data.size() && valid_data[i])) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data.data(), wkb_data.size());
+                    geometry_cache->AppendData(wkb_data.data(),
+                                               wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendData(nullptr, 0);
                 }
             }
         }
@@ -7896,8 +7903,13 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
             "{} geometries",
             get_segment_id(),
             field_id.get(),
-            geometry_cache.Size());
+            geometry_cache->Size());
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to load geometry cache for segment {} field {}: {}",

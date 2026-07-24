@@ -33,27 +33,70 @@ MakeCacheKey(int64_t segment_id, FieldId field_id) {
     return std::to_string(segment_id) + "_" + std::to_string(field_id.get());
 }
 
-// Vector-based Geometry cache that maintains original field data order
+// Vector-based Geometry cache that maintains original field data order.
+//
+// The cache owns its own GEOS context: every cached Geometry is built and
+// destroyed with ctx_, so the cache is fully self-contained and its lifetime
+// is independent of the segment that populated it. Combined with the manager
+// handing out shared_ptr<SimpleGeometryCache>, an in-flight query keeps the
+// cache (and its context) alive even if the owning segment is dropped and
+// RemoveSegmentCaches() runs concurrently.
 class SimpleGeometryCache {
  public:
-    // Append WKB data during field loading
+    SimpleGeometryCache() : ctx_(GEOS_init_r()) {
+        AssertInfo(ctx_ != nullptr,
+                   "Failed to initialize GEOS context for geometry cache");
+    }
+
+    ~SimpleGeometryCache() {
+        // Destroy the cached geometries (each calls GEOSGeom_destroy_r(ctx_,
+        // ...)) while ctx_ is still alive, then release the context.
+        {
+            std::lock_guard<std::shared_mutex> lock(mutex_);
+            geometries_.clear();
+        }
+        if (ctx_ != nullptr) {
+            GEOS_finish_r(ctx_);
+            ctx_ = nullptr;
+        }
+    }
+
+    // The cache owns a GEOS context, so it is neither copyable nor movable.
+    SimpleGeometryCache(const SimpleGeometryCache&) = delete;
+    SimpleGeometryCache&
+    operator=(const SimpleGeometryCache&) = delete;
+
+    // Append WKB data during field loading.
+    //
+    // A row with corrupt (unparseable) WKB is appended as an INVALID entry --
+    // GetByOffsetUnsafe() returns nullptr for it and every reader skips it --
+    // instead of throwing. Throwing here would make a single corrupt row fail
+    // the whole segment load whenever the geometry cache is enabled (the write
+    // paths deliberately keep such rows: add_geometry / bulk_load index a
+    // placeholder MBR rather than dropping them, so they DO reach the cache).
+    // The entry must still be appended: the cache is addressed by absolute
+    // segment offset, so dropping it would shift every later row. A transient
+    // resource failure (reader allocation) still throws a retriable system
+    // error via TryParseFromWkb -- that is not bad data. See PR #50951 review.
     void
-    AppendData(GEOSContextHandle_t ctx, const char* wkb_data, size_t size) {
+    AppendData(const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);
 
         if (size == 0 || wkb_data == nullptr) {
             // Handle null/empty geometry - add invalid geometry
             geometries_.emplace_back();
-        } else {
-            try {
-                // Create geometry with cache's context
-                geometries_.emplace_back(ctx, wkb_data, size);
-            } catch (const std::exception& e) {
-                ThrowInfo(UnexpectedError,
-                          "Failed to construct geometry from WKB data: {}",
-                          e.what());
-            }
+            return;
         }
+        Geometry geometry;
+        if (!geometry.TryParseFromWkb(ctx_, wkb_data, size)) {
+            LOG_WARN(
+                "unparseable WKB at cache offset {}; caching an invalid "
+                "placeholder entry, readers will skip it",
+                geometries_.size());
+            geometries_.emplace_back();
+            return;
+        }
+        geometries_.push_back(std::move(geometry));
     }
 
     // Get shared lock for batch operations (RAII)
@@ -90,6 +133,15 @@ class SimpleGeometryCache {
         return geometries_.size();
     }
 
+    // Get total number of loaded geometries without locking (use with
+    // AcquireReadLock). Calling Size() while already holding the read lock
+    // would recursively acquire the non-reentrant shared_mutex -- UB, and a
+    // real deadlock once a writer is queued on this writer-preferring mutex.
+    size_t
+    SizeUnsafe() const {
+        return geometries_.size();
+    }
+
     // Check if cache is loaded
     bool
     IsLoaded() const {
@@ -98,6 +150,9 @@ class SimpleGeometryCache {
     }
 
  private:
+    // ctx_ is declared first so it is destroyed last (after geometries_),
+    // guaranteeing the Geometry destructors still see a live context.
+    GEOSContextHandle_t ctx_{nullptr};  // Context owned by this cache
     mutable std::shared_mutex mutex_;   // For read/write operations
     std::vector<Geometry> geometries_;  // Direct storage of Geometry objects
 };
@@ -113,28 +168,29 @@ class SimpleGeometryCacheManager {
 
     SimpleGeometryCacheManager() = default;
 
-    SimpleGeometryCache&
+    // Returns a shared_ptr so callers keep the cache alive for the duration of
+    // their use even if RemoveCache/RemoveSegmentCaches drops it concurrently.
+    std::shared_ptr<SimpleGeometryCache>
     GetOrCreateCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto key = MakeCacheKey(segment_id, field_id);
         auto it = caches_.find(key);
         if (it != caches_.end()) {
-            return *(it->second);
+            return it->second;
         }
 
-        auto cache = std::make_unique<SimpleGeometryCache>();
-        auto* cache_ptr = cache.get();
-        caches_.emplace(key, std::move(cache));
-        return *cache_ptr;
+        auto cache = std::make_shared<SimpleGeometryCache>();
+        caches_.emplace(key, cache);
+        return cache;
     }
 
-    SimpleGeometryCache*
+    std::shared_ptr<SimpleGeometryCache>
     GetCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto key = MakeCacheKey(segment_id, field_id);
         auto it = caches_.find(key);
         if (it != caches_.end()) {
-            return it->second.get();
+            return it->second;
         }
         return nullptr;
     }
@@ -189,7 +245,7 @@ class SimpleGeometryCacheManager {
     operator=(const SimpleGeometryCacheManager&) = delete;
 
     mutable std::mutex mutex_;
-    std::unordered_map<std::string, std::unique_ptr<SimpleGeometryCache>>
+    std::unordered_map<std::string, std::shared_ptr<SimpleGeometryCache>>
         caches_;
 };
 

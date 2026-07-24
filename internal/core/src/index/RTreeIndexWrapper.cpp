@@ -62,18 +62,51 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     AssertInfo(is_build_mode_, "Cannot add geometry in load mode");
 
+    // Index a deterministic placeholder MBR for a row whose WKB payload is
+    // genuinely unparseable (empty or corrupt DATA), without dropping it. The
+    // R-tree is only a coarse filter and exact refinement tolerates the
+    // placeholder (Geometry::TryParseFromWkb -> skip) in every configuration,
+    // so a placeholder never yields a wrong result -- but dropping the row
+    // would permanently desynchronize the index row count from the segment row
+    // count, which then trips the coarse-bitmap bounds guard in
+    // EvalForIndexSegment on EVERY subsequent geometry query against this
+    // segment. This mirrors the empty-geometry handling below and bulk_load.
+    //
+    // This is ONLY for bad data. A transient resource failure (GEOS context /
+    // reader allocation) on a perfectly valid geometry must NOT take this path:
+    // a (0,0) placeholder would permanently mis-locate a good row, silently
+    // dropping it from every query that does not cover the origin. Those cases
+    // throw instead, so the insert fails and can be retried. See PR #50951.
+    //
+    // Tradeoff: Point(0, 0) is a legal coordinate (Null Island), so any query
+    // whose bounding box covers the origin pulls every placeholder row in this
+    // segment into the candidate set and pays exact refinement for it (which
+    // then discards the row). World-scale bbox queries almost always cover the
+    // origin, so segments with many empty/corrupt geometries make such queries
+    // proportionally more expensive. Correctness is unaffected.
+    auto index_placeholder_mbr = [&]() {
+        Value val(Box(Point(0, 0), Point(0, 0)), row_offset);
+        values_.push_back(val);
+        rtree_.insert(val);
+    };
+
     // Parse WKB data using GEOS for consistency
     GEOSContextHandle_t ctx = GEOS_init_r();
     if (ctx == nullptr) {
-        LOG_ERROR("Failed to initialize GEOS context for row {}", row_offset);
-        return;
+        // Transient resource failure on a valid geometry -- fail the insert so
+        // it can be retried, rather than permanently mis-indexing a good row.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to initialize GEOS context for row {}",
+                  row_offset);
     }
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR("Failed to create GEOS WKB reader for row {}", row_offset);
-        return;
+        // Transient resource failure -- see above; throw rather than placeholder.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to create GEOS WKB reader for row {}",
+                  row_offset);
     }
 
     GEOSGeometry* geom = GEOSWKBReader_read_r(ctx, reader, wkb_data, len);
@@ -81,13 +114,25 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     if (geom == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR("Failed to parse WKB data for row {}", row_offset);
+        LOG_ERROR(
+            "Failed to parse WKB data for row {}; indexing a placeholder MBR "
+            "to keep the index row count consistent",
+            row_offset);
+        index_placeholder_mbr();
         return;
     }
 
-    // Get bounding box
-    double minX, minY, maxX, maxY;
-    get_bounding_box(geom, ctx, minX, minY, maxX, maxY);
+    // Get bounding box. On failure (e.g. empty geometry) keep a deterministic
+    // placeholder MBR and still index the row: the R-tree is only a coarse
+    // filter, the exact predicate refines it out, and dropping the row here
+    // would desynchronize the index row count from the segment row count.
+    double minX = 0, minY = 0, maxX = 0, maxY = 0;
+    if (!get_bounding_box(geom, ctx, minX, minY, maxX, maxY)) {
+        LOG_WARN(
+            "geometry at row {} has no computable envelope (empty?); indexing "
+            "with a placeholder MBR, exact refinement will filter it",
+            row_offset);
+    }
 
     // Create Boost box and insert
     Box box(Point(minX, minY), Point(maxX, maxY));
@@ -111,23 +156,38 @@ RTreeIndexWrapper::bulk_load_from_field_data(
 
     AssertInfo(is_build_mode_, "Cannot bulk load in load mode");
 
-    // Initialize GEOS context for bulk operations
+    // Initialize GEOS context for bulk operations. A transient allocation
+    // failure here would otherwise silently drop EVERY row from the index --
+    // throw so the build fails and can be retried instead.
     GEOSContextHandle_t ctx = GEOS_init_r();
     if (ctx == nullptr) {
-        LOG_ERROR("Failed to initialize GEOS context for bulk load");
-        return;
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to initialize GEOS context for bulk load");
     }
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR("Failed to create GEOS WKB reader for bulk load");
-        return;
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to create GEOS WKB reader for bulk load");
     }
 
+    // NOTE: non-null rows with an empty or unparseable WKB payload are indexed
+    // with a deterministic placeholder MBR (like the growing add_geometry
+    // path), NOT dropped. Growing and sealed now agree -- neither write path
+    // drops a row -- so the index row count stays in lockstep with the segment
+    // rows on both, and exact refinement tolerates the placeholder
+    // (Geometry::TryParseFromWkb -> skip) in every configuration, cache on or
+    // off. A corrupt/empty row can never satisfy exact refinement, so the
+    // placeholder is always refined out and correctness is unaffected; the only
+    // cost is that an origin-covering query pays refinement for it (see the
+    // add_geometry tradeoff note). Genuinely null rows are still skipped below.
     std::vector<Value> local_values;
     local_values.reserve(1024);
     int64_t absolute_offset = 0;
+    const auto index_placeholder = [&](int64_t offset) {
+        local_values.emplace_back(Box(Point(0, 0), Point(0, 0)), offset);
+    };
     for (const auto& fd : field_datas) {
         const auto n = fd->get_num_rows();
         const bool is_nullable_effective = nullable || fd->IsNullable();
@@ -138,6 +198,7 @@ RTreeIndexWrapper::bulk_load_from_field_data(
             const auto* wkb_str =
                 static_cast<const std::string*>(fd->RawValue(i));
             if (wkb_str == nullptr || wkb_str->empty()) {
+                index_placeholder(absolute_offset);
                 continue;
             }
 
@@ -147,11 +208,20 @@ RTreeIndexWrapper::bulk_load_from_field_data(
                 reinterpret_cast<const unsigned char*>(wkb_str->data()),
                 wkb_str->size());
             if (geom == nullptr) {
+                index_placeholder(absolute_offset);
                 continue;
             }
 
-            double minX, minY, maxX, maxY;
-            get_bounding_box(geom, ctx, minX, minY, maxX, maxY);
+            // See add_geometry(): keep a deterministic placeholder MBR for a
+            // geometry without a computable envelope so the row stays indexed
+            // and the row count remains consistent.
+            double minX = 0, minY = 0, maxX = 0, maxY = 0;
+            if (!get_bounding_box(geom, ctx, minX, minY, maxX, maxY)) {
+                LOG_WARN(
+                    "geometry at row {} has no computable envelope (empty?); "
+                    "indexing with a placeholder MBR",
+                    absolute_offset);
+            }
             GEOSGeom_destroy_r(ctx, geom);
 
             Box box(Point(minX, minY), Point(maxX, maxY));
@@ -256,9 +326,32 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
                                     std::vector<int64_t>& candidate_offsets) {
     candidate_offsets.clear();
 
-    // Get bounding box of query geometry
+    // Get bounding box of query geometry. An empty/degenerate query geometry
+    // has no envelope. For the spatial predicates (Intersects / Within /
+    // Contains / Touches / Overlaps / Crosses) it intersects nothing, so there
+    // are no candidates. ST_Equals is different: an empty query geometry must
+    // still match empty FIELD geometries, which this index stores with a
+    // placeholder MBR (see add_geometry) -- returning zero candidates for
+    // Equals would be a false negative versus the un-indexed data path, where
+    // GEOSEquals(empty, empty) is true. So for Equals, fall back to the full
+    // candidate set and let exact refinement keep only the true matches.
+    //
+    // NOTE: this fallback is an INTENTIONAL full scan. A single
+    // ST_Equals(field, 'POLYGON EMPTY') degenerates into an exact-refinement
+    // pass over every indexed row of the segment. That cost is accepted to
+    // preserve correctness; do not "optimize" the branch away without an
+    // alternative way to find placeholder-MBR rows.
     double minX, minY, maxX, maxY;
-    get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY);
+    if (!get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY)) {
+        if (op == proto::plan::GISFunctionFilterExpr_GISOp_Equals) {
+            std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
+            candidate_offsets.reserve(rtree_.size());
+            for (const auto& v : rtree_) {
+                candidate_offsets.push_back(v.second);
+            }
+        }
+        return;
+    }
 
     // Create query box
     Box query_box(Point(minX, minY), Point(maxX, maxY));
@@ -280,7 +373,7 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
               static_cast<int>(op));
 }
 
-void
+bool
 RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
                                     GEOSContextHandle_t ctx,
                                     double& minX,
@@ -290,19 +383,30 @@ RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
     AssertInfo(geom != nullptr, "Geometry is null");
     AssertInfo(ctx != nullptr, "GEOS context is null");
 
-    GEOSGeom_getXMin_r(ctx, geom, &minX);
-    GEOSGeom_getXMax_r(ctx, geom, &maxX);
-    GEOSGeom_getYMin_r(ctx, geom, &minY);
-    GEOSGeom_getYMax_r(ctx, geom, &maxY);
+    // GEOSGeom_get{X,Y}{Min,Max}_r return 0 on failure (e.g. empty geometry)
+    // and leave the output untouched; using such uninitialized coordinates
+    // would insert a garbage MBR into the R-tree. Report failure instead.
+    if (GEOSGeom_getXMin_r(ctx, geom, &minX) == 0 ||
+        GEOSGeom_getXMax_r(ctx, geom, &maxX) == 0 ||
+        GEOSGeom_getYMin_r(ctx, geom, &minY) == 0 ||
+        GEOSGeom_getYMax_r(ctx, geom, &maxY) == 0) {
+        return false;
+    }
+    return true;
 }
 
 int64_t
 RTreeIndexWrapper::count() const {
+    // rtree_ is mutated by add_geometry()/bulk_load_from_field_data() under a
+    // write lock; reading its size concurrently must take the shared lock too,
+    // otherwise a growing-segment search races with incremental inserts.
+    std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
     return static_cast<int64_t>(rtree_.size());
 }
 
 int64_t
 RTreeIndexWrapper::ByteSize() const {
+    std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
     int64_t total = 0;
 
     // values_: vector<Value> where Value = std::pair<Box, int64_t>
