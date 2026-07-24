@@ -22,11 +22,9 @@
 #include <functional>
 #include <future>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
-#include "cachinglayer/Utils.h"
 #include "common/Channel.h"
 #include "common/FieldData.h"
 #include "common/GroupChunk.h"
@@ -103,10 +101,6 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
 // ---- Cell-batch loading ----
 
-// Load-time readers use one process-wide transient memory budget, so all
-// translators backed by that budget must share one MCL overhead group.
-constexpr const char* kLoadTransientOverheadGroup = "LoadTransientOverhead";
-
 constexpr int64_t kDefaultFieldDataLoadBatchTargetBytes =
     DEFAULT_FIELD_MAX_MEMORY_LIMIT / 4;
 
@@ -127,20 +121,6 @@ SetFieldDataLoadBatchTargetBytes(int64_t bytes);
 
 void
 SetFieldDataReadWindowBytes(int64_t bytes);
-
-int64_t
-LoadTransientPoolUpperBound(size_t max_task_overhead_bytes);
-
-// Process-wide upper bound enforced by the configured load transient budget.
-// A single oversized task can exceed the budget and therefore supplies the
-// lower bound. Callers must not register a shared cap when the budget is zero.
-int64_t
-LoadTransientSharedOverheadUpperBound(size_t max_task_overhead_bytes);
-
-milvus::cachinglayer::ResourceUsage
-FieldDataLoadingOverheadUpperBound(
-    int64_t max_memory_overhead,
-    std::optional<int64_t> max_file_overhead = std::nullopt);
 
 // A cell specification: identifies a cell's location within a specific file.
 struct CellSpec {

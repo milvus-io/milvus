@@ -36,6 +36,7 @@
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/LoadOverheadGroup.h"
 #include "storage/ThreadPools.h"
 
 using namespace milvus::segcore;
@@ -215,156 +216,28 @@ TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
     EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(), 8 * MB);
 }
 
-TEST(FieldDataLoadingOverheadUpperBound, UsesPoolBoundWhenBudgetDisabled) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
-    auto old_capacity = budget.CapacityBytes();
-    auto old_batch_target = FieldDataLoadBatchTargetBytes();
-    auto& high_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-    auto& low_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
-    auto old_high_max = high_pool.GetMaxThreadNum();
-    auto old_low_max = low_pool.GetMaxThreadNum();
-    auto cleanup = folly::makeGuard([&budget,
-                                     old_capacity,
-                                     old_batch_target,
-                                     &high_pool,
-                                     &low_pool,
-                                     old_high_max,
-                                     old_low_max]() {
-        budget.SetCapacityBytes(old_capacity);
-        SetFieldDataLoadBatchTargetBytes(old_batch_target);
-        high_pool.Resize(old_high_max);
-        low_pool.Resize(old_low_max);
+TEST(LoadMemoryOverheadGroupTest, KeepsHandleAcrossPolicySwitches) {
+    auto& owner = milvus::storage::LoadMemoryOverheadGroup::GetInstance();
+    auto workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto budget_bytes =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+            .CapacityBytes();
+    auto cleanup = folly::makeGuard([&owner, workers, budget_bytes]() {
+        EXPECT_TRUE(owner.UpdateBudgetBytes(budget_bytes));
+        EXPECT_TRUE(owner.UpdateExecutorWorkers(workers));
     });
 
-    budget.SetCapacityBytes(0);
-    SetFieldDataLoadBatchTargetBytes(64);
-    auto high_load_tasks = std::max<size_t>(2, high_pool.GetThreadNum());
-    auto low_load_tasks = std::max<size_t>(3, low_pool.GetThreadNum());
-    high_pool.Resize(static_cast<int>(high_load_tasks));
-    low_pool.Resize(static_cast<int>(low_load_tasks));
-    auto max_load_tasks = high_load_tasks + low_load_tasks;
+    EXPECT_TRUE(owner.UpdateExecutorWorkers(workers));
+    EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/512));
+    auto group = owner.GetOrCreate(workers);
+    ASSERT_NE(group, nullptr);
 
-    auto upper_bound =
-        FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/128);
+    EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/0));
+    EXPECT_TRUE(owner.UpdateExecutorWorkers(/*workers=*/8));
+    EXPECT_EQ(group, owner.GetOrCreate(/*executor_workers=*/8));
 
-    EXPECT_EQ(upper_bound.memory_bytes, max_load_tasks * 128);
-    EXPECT_EQ(upper_bound.file_bytes, 0);
-
-    auto mmap_upper_bound = FieldDataLoadingOverheadUpperBound(
-        /*max_memory_overhead=*/128,
-        /*max_file_overhead=*/std::optional<int64_t>{256});
-
-    EXPECT_EQ(mmap_upper_bound.memory_bytes, max_load_tasks * 128);
-    EXPECT_EQ(mmap_upper_bound.file_bytes, max_load_tasks * 256);
-}
-
-TEST(FieldDataLoadingOverheadUpperBound, UsesBudgetWithMaxOverheadFloor) {
-    constexpr int64_t MB = 1 << 20;
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
-    auto old_capacity = budget.CapacityBytes();
-    auto cleanup = folly::makeGuard(
-        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
-
-    budget.SetCapacityBytes(8 * MB);
-
-    auto memory_only =
-        FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/16 * MB);
-    EXPECT_EQ(memory_only.memory_bytes, 16 * MB);
-    EXPECT_EQ(memory_only.file_bytes, 0);
-
-    auto mmap_smaller_overhead = FieldDataLoadingOverheadUpperBound(
-        /*max_memory_overhead=*/4 * MB, std::optional<int64_t>{2 * MB});
-    EXPECT_EQ(mmap_smaller_overhead.memory_bytes, 8 * MB);
-    EXPECT_EQ(mmap_smaller_overhead.file_bytes, 8 * MB);
-
-    auto mmap_larger_file_overhead = FieldDataLoadingOverheadUpperBound(
-        /*max_memory_overhead=*/4 * MB, std::optional<int64_t>{32 * MB});
-    EXPECT_EQ(mmap_larger_file_overhead.memory_bytes, 8 * MB);
-    EXPECT_EQ(mmap_larger_file_overhead.file_bytes, 32 * MB);
-}
-
-TEST(LoadTransientSharedOverheadUpperBound, UsesBudgetAndSingleTaskBounds) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
-    auto old_capacity = budget.CapacityBytes();
-    auto cleanup =
-        folly::makeGuard([&]() { budget.SetCapacityBytes(old_capacity); });
-    constexpr size_t task_overhead = 128;
-
-    budget.SetCapacityBytes(512);
-    EXPECT_EQ(LoadTransientSharedOverheadUpperBound(task_overhead), 512);
-
-    budget.SetCapacityBytes(1024);
-    EXPECT_EQ(LoadTransientSharedOverheadUpperBound(task_overhead), 1024);
-
-    budget.SetCapacityBytes(64);
-    EXPECT_EQ(LoadTransientSharedOverheadUpperBound(task_overhead), 128);
-}
-
-TEST(LoadTransientPoolUpperBound, UsesLiveWorkersDuringShrink) {
-    auto& high_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-    auto& low_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
-    auto old_high_max = high_pool.GetMaxThreadNum();
-    auto old_low_max = low_pool.GetMaxThreadNum();
-    auto old_thread_limit = milvus::THREAD_POOL_MAX_THREADS_SIZE.load();
-    auto pool_cleanup = folly::makeGuard([&]() {
-        milvus::SetThreadPoolMaxThreadsSize(old_thread_limit);
-        high_pool.Resize(old_high_max);
-        low_pool.Resize(old_low_max);
-    });
-
-    milvus::SetThreadPoolMaxThreadsSize(
-        std::max(old_thread_limit, static_cast<int>(3)));
-    high_pool.Resize(3);
-    low_pool.Resize(1);
-
-    std::mutex started_mu;
-    std::condition_variable started_cv;
-    size_t started = 0;
-    std::promise<void> release;
-    auto release_future = release.get_future().share();
-    std::vector<std::future<void>> blockers;
-    auto blocker_cleanup = folly::makeGuard([&]() {
-        release.set_value();
-        for (auto& blocker : blockers) {
-            blocker.get();
-        }
-    });
-
-    for (size_t i = 0; i < 3; ++i) {
-        blockers.push_back(high_pool.Submit([&]() {
-            {
-                std::lock_guard<std::mutex> lock(started_mu);
-                ++started;
-            }
-            started_cv.notify_one();
-            release_future.wait();
-        }));
-    }
-
-    {
-        std::unique_lock<std::mutex> lock(started_mu);
-        ASSERT_TRUE(started_cv.wait_for(
-            lock, std::chrono::seconds(2), [&]() { return started == 3; }));
-    }
-
-    high_pool.Resize(1);
-    auto effective_high =
-        std::max(high_pool.GetMaxThreadNum(), high_pool.GetThreadNum());
-    auto effective_low =
-        std::max(low_pool.GetMaxThreadNum(), low_pool.GetThreadNum());
-    ASSERT_GT(effective_high, high_pool.GetMaxThreadNum());
-
-    constexpr size_t task_overhead = 128;
-    EXPECT_EQ(
-        LoadTransientPoolUpperBound(task_overhead),
-        static_cast<int64_t>((effective_high + effective_low) * task_overhead));
+    EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/1024));
+    EXPECT_EQ(group, owner.GetOrCreate(/*executor_workers=*/8));
 }
 
 // ---- LoadCellBatchAsync tests ----

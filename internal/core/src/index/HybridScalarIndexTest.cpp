@@ -56,8 +56,8 @@
 #include "storage/PayloadReader.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
+#include "storage/LoadOverheadGroup.h"
 #include "storage/PluginLoader.h"
-#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -828,25 +828,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
-    auto& high_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-    auto& low_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
-    auto old_high_max = high_pool.GetMaxThreadNum();
-    auto old_low_max = low_pool.GetMaxThreadNum();
-    auto cleanup = folly::makeGuard([&budget,
-                                     old_capacity,
-                                     &high_pool,
-                                     &low_pool,
-                                     old_high_max,
-                                     old_low_max]() {
-        budget.SetCapacityBytes(old_capacity);
-        high_pool.Resize(old_high_max);
-        low_pool.Resize(old_low_max);
-    });
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
     budget.SetCapacityBytes(0);
-    high_pool.Resize(2);
-    low_pool.Resize(3);
+    auto memory_group =
+        storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
+            milvus::ThreadPools::GetLoadExecutorWorkers());
 
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
@@ -892,8 +879,18 @@ TYPED_TEST_P(HybridIndexTestInverted,
         ctx,
         std::move(config));
 
-    EXPECT_FALSE(translator.meta()->loading_overhead.has_value());
     auto max_task_overhead = storage::PlainEntryFileStreamTaskTransientBytes();
+    ASSERT_TRUE(translator.meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(translator.meta()->loading_overhead_config->memory.has_value());
+    EXPECT_EQ(translator.meta()->loading_overhead_config->memory->group,
+              memory_group);
+    ASSERT_TRUE(
+        translator.meta()
+            ->loading_overhead_config->memory->max_runtime_unit.has_value());
+    EXPECT_EQ(
+        *translator.meta()->loading_overhead_config->memory->max_runtime_unit,
+        max_task_overhead);
+    EXPECT_FALSE(translator.meta()->loading_overhead_config->file.has_value());
     auto [loaded_resource, loading_overhead] =
         translator.estimated_byte_size_of_cell(0);
     EXPECT_EQ(loaded_resource,
@@ -910,12 +907,20 @@ TYPED_TEST_P(HybridIndexTestInverted,
                             ctx,
                             std::move(budgeted_config));
 
-    ASSERT_TRUE(budgeted_translator.meta()->loading_overhead.has_value());
     ASSERT_TRUE(
-        budgeted_translator.meta()->loading_overhead->memory.has_value());
+        budgeted_translator.meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(budgeted_translator.meta()
+                    ->loading_overhead_config->memory.has_value());
     EXPECT_FALSE(
-        budgeted_translator.meta()->loading_overhead->file.has_value());
-    EXPECT_EQ(budgeted_translator.meta()->loading_overhead->memory->upper_bound,
+        budgeted_translator.meta()->loading_overhead_config->file.has_value());
+    EXPECT_EQ(
+        budgeted_translator.meta()->loading_overhead_config->memory->group,
+        memory_group);
+    ASSERT_TRUE(
+        budgeted_translator.meta()
+            ->loading_overhead_config->memory->max_runtime_unit.has_value());
+    EXPECT_EQ(*budgeted_translator.meta()
+                   ->loading_overhead_config->memory->max_runtime_unit,
               max_task_overhead);
 
     budget.SetCapacityBytes(0);
@@ -932,7 +937,15 @@ TYPED_TEST_P(HybridIndexTestInverted,
                                  ctx,
                                  std::move(plugin_loaded_config));
 
-    EXPECT_FALSE(plugin_loaded_translator.meta()->loading_overhead.has_value());
+    ASSERT_TRUE(
+        plugin_loaded_translator.meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(plugin_loaded_translator.meta()
+                    ->loading_overhead_config->memory.has_value());
+    EXPECT_EQ(
+        plugin_loaded_translator.meta()->loading_overhead_config->memory->group,
+        memory_group);
+    EXPECT_FALSE(plugin_loaded_translator.meta()
+                     ->loading_overhead_config->file.has_value());
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,

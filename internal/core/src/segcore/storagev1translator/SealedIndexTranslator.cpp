@@ -1,6 +1,7 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -20,8 +21,20 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/LoadOverheadGroup.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
+
+namespace {
+
+int64_t
+PolicyBytes(size_t bytes) {
+    return static_cast<int64_t>(std::min(
+        bytes, static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+}
+
+}  // namespace
 
 SealedIndexTranslator::SealedIndexTranslator(
     milvus::index::CreateIndexInfo index_info,
@@ -79,9 +92,9 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
-    // TODO: Recompute scalar V3 stream estimates and the registered loading
-    // overhead upper bound when refreshable load-pool sizes grow. CacheSlot
-    // snapshots both at translator construction and reuses them on reload.
+    // TODO: Recompute scalar V3 stream estimates when refreshable load-pool
+    // sizes grow. CacheSlot snapshots the estimate at translator construction
+    // and reuses it on reload.
     std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
     load_resource_request_ = EstimateLoadResource(&stream_load_info);
 
@@ -92,27 +105,18 @@ SealedIndexTranslator::SealedIndexTranslator(
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
-        auto budget_capacity =
-            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                .CapacityBytes();
-        // With no runtime budget there is no truthful process-wide stream
-        // buffer cap. Leave the group unregistered so MCL reserves each
-        // concurrently loading slot's estimated overhead independently.
-        if (budget_capacity != 0) {
-            auto max_task_overhead =
-                stream_load_info->encrypted
-                    ? stream_load_info->max_task_transient_bytes
-                    : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
-            auto memory_upper_bound =
-                milvus::segcore::LoadTransientSharedOverheadUpperBound(
-                    max_task_overhead);
-            meta_.loading_overhead =
-                milvus::cachinglayer::LoadingOverheadConfig{
-                    milvus::cachinglayer::LoadingOverheadDimensionConfig{
-                        memory_upper_bound,
-                        milvus::segcore::kLoadTransientOverheadGroup},
-                    std::nullopt};
-        }
+        auto max_task_overhead =
+            stream_load_info->encrypted
+                ? stream_load_info->max_task_transient_bytes
+                : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
+        auto memory_group =
+            milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
+                milvus::ThreadPools::GetLoadExecutorWorkers());
+        meta_.loading_overhead_config =
+            milvus::cachinglayer::LoadingOverheadConfig{
+                milvus::cachinglayer::LoadingOverheadGroupBinding{
+                    std::move(memory_group), PolicyBytes(max_task_overhead)},
+                std::nullopt};
     }
 }
 

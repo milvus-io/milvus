@@ -35,6 +35,9 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LoadOverheadGroup.h"
+#include "storage/ThreadPools.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -284,18 +287,37 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     auto use_mmap = GetParam();
     auto translator = MakeTranslator(/*cg_index=*/0, use_mmap);
 
-    ASSERT_TRUE(translator->meta()->loading_overhead.has_value());
-    ASSERT_TRUE(translator->meta()->loading_overhead->memory.has_value());
-    EXPECT_EQ(translator->meta()->loading_overhead->memory->group,
-              milvus::segcore::kLoadTransientOverheadGroup);
-    EXPECT_GT(translator->meta()->loading_overhead->memory->upper_bound, 0);
+    auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto memory_group =
+        milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
+            executor_workers);
+    ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(
+        translator->meta()->loading_overhead_config->memory.has_value());
+    EXPECT_EQ(translator->meta()->loading_overhead_config->memory->group,
+              memory_group);
+    ASSERT_TRUE(
+        translator->meta()
+            ->loading_overhead_config->memory->max_runtime_unit.has_value());
+    EXPECT_GE(
+        *translator->meta()->loading_overhead_config->memory->max_runtime_unit,
+        FieldDataLoadBatchTargetBytes());
     if (use_mmap) {
-        ASSERT_TRUE(translator->meta()->loading_overhead->file.has_value());
-        EXPECT_EQ(translator->meta()->loading_overhead->file->group,
-                  milvus::segcore::kLoadTransientOverheadGroup);
-        EXPECT_GT(translator->meta()->loading_overhead->file->upper_bound, 0);
+        ASSERT_TRUE(
+            translator->meta()->loading_overhead_config->file.has_value());
+        EXPECT_EQ(
+            translator->meta()->loading_overhead_config->file->group,
+            milvus::storage::LoadFileOverheadGroup::GetInstance().GetOrCreate(
+                executor_workers));
+        ASSERT_TRUE(
+            translator->meta()
+                ->loading_overhead_config->file->max_runtime_unit.has_value());
+        EXPECT_GE(*translator->meta()
+                       ->loading_overhead_config->file->max_runtime_unit,
+                  FieldDataLoadBatchTargetBytes());
     } else {
-        EXPECT_FALSE(translator->meta()->loading_overhead->file.has_value());
+        EXPECT_FALSE(
+            translator->meta()->loading_overhead_config->file.has_value());
     }
 
     // Verify scalar group field metas

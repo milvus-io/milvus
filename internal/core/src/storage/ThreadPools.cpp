@@ -23,13 +23,30 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "storage/LoadOverheadGroup.h"
 #include "storage/ThreadPool.h"
 
 namespace milvus {
 
+namespace {
+
+bool
+UpdateLoadOverheadGroups(int64_t executor_workers) {
+    auto memory_updated =
+        storage::LoadMemoryOverheadGroup::GetInstance().UpdateExecutorWorkers(
+            executor_workers);
+    auto file_updated =
+        storage::LoadFileOverheadGroup::GetInstance().UpdateExecutorWorkers(
+            executor_workers);
+    return memory_updated && file_updated;
+}
+
+}  // namespace
+
 std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
 std::shared_mutex ThreadPools::mutex_;
+std::mutex ThreadPools::resize_mutex_;
 
 void
 ThreadPools::ShutDown() {
@@ -109,19 +126,60 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
 void
 ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
                               float ratio) {
+    std::lock_guard<std::mutex> resize_lock(resize_mutex_);
     int size = static_cast<int>(std::round(milvus::CPU_NUM * ratio));
     if (size < 1) {
         LOG_ERROR("Failed to resize threadPool, size:{}", size);
         return;
     }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    auto iter = thread_pool_map.find(priority);
-    if (iter == thread_pool_map.end()) {
-        LOG_ERROR("Failed to find threadPool, priority:{}", priority);
+    auto is_load_pool = priority == ThreadPoolPriority::HIGH ||
+                        priority == ThreadPoolPriority::LOW;
+    ThreadPool* pool = nullptr;
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        auto iter = thread_pool_map.find(priority);
+        if (iter == thread_pool_map.end()) {
+            LOG_ERROR("Failed to find threadPool, priority:{}", priority);
+            return;
+        }
+        pool = iter->second.get();
+    }
+    size = ClampThreadPoolMaxThreads(size);
+    auto old_size = pool->GetMaxThreadNum();
+    auto old_load_workers =
+        is_load_pool ? GetLoadExecutorWorkers() : int64_t{0};
+    auto new_load_workers =
+        is_load_pool ? old_load_workers - static_cast<int64_t>(old_size) + size
+                     : old_load_workers;
+    if (new_load_workers > old_load_workers &&
+        !UpdateLoadOverheadGroups(new_load_workers)) {
+        LOG_ERROR(
+            "Failed to expand threadPool because the load overhead group "
+            "update failed, priority:{}, size:{}",
+            priority,
+            size);
         return;
     }
-    iter->second->Resize(size);
+
+    pool->Resize(size);
+
+    if (is_load_pool && new_load_workers <= old_load_workers &&
+        !UpdateLoadOverheadGroups(new_load_workers)) {
+        LOG_ERROR(
+            "Failed to update load overhead groups after resizing "
+            "threadPool, priority:{}, size:{}",
+            priority,
+            size);
+    }
     LOG_INFO("Resized threadPool priority:{}, size:{}", priority, size);
+}
+
+int64_t
+ThreadPools::GetLoadExecutorWorkers() {
+    auto& high = GetThreadPool(ThreadPoolPriority::HIGH);
+    auto& low = GetThreadPool(ThreadPoolPriority::LOW);
+    return static_cast<int64_t>(high.GetMaxThreadNum()) +
+           static_cast<int64_t>(low.GetMaxThreadNum());
 }
 
 }  // namespace milvus

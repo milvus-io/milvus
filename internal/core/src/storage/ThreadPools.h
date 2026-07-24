@@ -52,6 +52,9 @@ class ThreadPools {
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
+    static int64_t
+    GetLoadExecutorWorkers();
+
     ~ThreadPools() {
         ShutDown();
     }
@@ -74,6 +77,7 @@ class ThreadPools {
     static std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
         thread_pool_map;
     static std::shared_mutex mutex_;
+    static std::mutex resize_mutex_;
 };
 
 }  // namespace milvus

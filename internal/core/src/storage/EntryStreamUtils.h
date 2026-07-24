@@ -31,6 +31,7 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
+#include "storage/LoadOverheadGroup.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::storage {
@@ -164,9 +165,20 @@ class TransientMemoryBudget {
 
     void
     SetCapacityBytes(size_t bytes) {
+        std::lock_guard<std::mutex> update_lock(capacity_update_mutex_);
+        auto old_capacity = CapacityBytes();
+        auto expanding =
+            old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
+        auto& overhead_group = LoadMemoryOverheadGroup::GetInstance();
+        if (expanding && !overhead_group.UpdateBudgetBytes(bytes)) {
+            return;
+        }
         {
             std::lock_guard<std::mutex> lock(mu_);
             capacity_bytes_ = bytes;
+        }
+        if (!expanding) {
+            overhead_group.UpdateBudgetBytes(bytes);
         }
         cv_.notify_all();
     }
@@ -201,6 +213,7 @@ class TransientMemoryBudget {
                bytes <= capacity_bytes - inflight_bytes_;
     }
 
+    std::mutex capacity_update_mutex_;
     mutable std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};

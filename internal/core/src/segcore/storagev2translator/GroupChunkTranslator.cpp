@@ -50,8 +50,10 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "storage/KeyRetriever.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/KeyRetriever.h"
+#include "storage/LoadOverheadGroup.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -215,27 +217,31 @@ GroupChunkTranslator::GroupChunkTranslator(
         num_cells,
         cell_target_size_bytes);
 
-    // Set loading overhead config to cap total transient memory reservation.
+    // Bind loading overhead to the runtime limiter used by this translator.
     if (!meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
         auto max_overhead_size = loading_overhead_bytes(max_cell_sz);
-        auto upper_bound = milvus::segcore::FieldDataLoadingOverheadUpperBound(
-            max_overhead_size,
-            use_mmap_ ? std::optional<int64_t>{max_cell_sz} : std::nullopt);
-        // Keep MCL reservation aligned with the process-wide transient load
-        // budget rather than multiplying it by translator type.
-        auto group = milvus::segcore::kLoadTransientOverheadGroup;
-        meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            milvus::cachinglayer::LoadingOverheadDimensionConfig{
-                upper_bound.memory_bytes, group},
-            use_mmap_
-                ? std::optional<
-                      milvus::cachinglayer::
-                          LoadingOverheadDimensionConfig>{{upper_bound
-                                                               .file_bytes,
-                                                           group}}
-                : std::nullopt};
+        auto max_memory_runtime_unit =
+            std::max(FieldDataLoadBatchTargetBytes(), max_overhead_size);
+        auto max_file_runtime_unit =
+            std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
+        auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+        auto memory_group =
+            milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
+                executor_workers);
+        meta_.loading_overhead_config =
+            milvus::cachinglayer::LoadingOverheadConfig{
+                milvus::cachinglayer::LoadingOverheadGroupBinding{
+                    std::move(memory_group), max_memory_runtime_unit},
+                use_mmap_
+                    ? std::make_optional(
+                          milvus::cachinglayer::LoadingOverheadGroupBinding{
+                              milvus::storage::LoadFileOverheadGroup::
+                                  GetInstance()
+                                      .GetOrCreate(executor_workers),
+                              max_file_runtime_unit})
+                    : std::nullopt};
     }
 }
 

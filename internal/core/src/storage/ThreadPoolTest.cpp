@@ -20,8 +20,11 @@
 #include <string>
 #include <system_error>
 
+#include <folly/ScopeGuard.h>
 #include "gtest/gtest.h"
+#include "storage/LoadOverheadGroup.h"
 #include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus {
 
@@ -139,6 +142,28 @@ TEST_F(ThreadPoolTest, DynamicMaxThreadsSizeUpdate) {
     SetThreadPoolMaxThreadsSize(8);
     pool.Resize(20);
     EXPECT_EQ(pool.GetMaxThreadNum(), 8);
+}
+
+TEST_F(ThreadPoolTest, LoadFileOverheadGroupIsLazyAndStable) {
+    auto& file_owner = storage::LoadFileOverheadGroup::GetInstance();
+    auto& memory_owner = storage::LoadMemoryOverheadGroup::GetInstance();
+    auto executor_workers = ThreadPools::GetLoadExecutorWorkers();
+    auto cleanup = folly::makeGuard([&file_owner, executor_workers]() {
+        EXPECT_TRUE(file_owner.UpdateExecutorWorkers(executor_workers));
+    });
+
+    EXPECT_TRUE(file_owner.UpdateExecutorWorkers(/*workers=*/4));
+    auto file_group = file_owner.GetOrCreate(/*executor_workers=*/4);
+    auto same_file_group = file_owner.GetOrCreate(/*executor_workers=*/4);
+    auto memory_group = memory_owner.GetOrCreate(executor_workers);
+
+    ASSERT_NE(file_group, nullptr);
+    EXPECT_EQ(file_group, same_file_group);
+    ASSERT_NE(memory_group, nullptr);
+    EXPECT_NE(file_group, memory_group);
+
+    EXPECT_TRUE(file_owner.UpdateExecutorWorkers(/*workers=*/8));
+    EXPECT_EQ(file_group, file_owner.GetOrCreate(/*executor_workers=*/8));
 }
 
 TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {
