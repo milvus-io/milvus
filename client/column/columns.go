@@ -94,16 +94,54 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	creator func(string, []T) COL,
 	nullableCreator func(string, []T, []bool, ...ColumnOption[T]) (NCOL, error),
 ) (Column, error) {
-	if end < 0 {
-		end = len(data)
+	logicalLen := len(data)
+	if validData != nil {
+		logicalLen = len(validData)
 	}
-	data = data[start:end]
-	if len(validData) > 0 {
-		validData = validData[start:end]
-		ncol, err := nullableCreator(name, data, validData, WithSparseNullableMode[T](true))
-		return ncol, err
+	if start < 0 {
+		start = 0
+	}
+	if start > logicalLen {
+		start = logicalLen
+	}
+	if end < 0 || end > logicalLen {
+		end = logicalLen
+	}
+	if start > end {
+		start = end
 	}
 
+	if validData != nil {
+		validCount := countValid(validData)
+		sparseMode := false
+		switch len(data) {
+		case logicalLen:
+			sparseMode = true
+		case validCount:
+		default:
+			return nil, fmt.Errorf("scalar field %q payload row count %d does not match logical row count %d or valid count %d",
+				name, len(data), logicalLen, validCount)
+		}
+
+		selectedValidData := validData[start:end]
+		if sparseMode {
+			data = data[start:end]
+		} else {
+			valueStart := countValid(validData[:start])
+			valueEnd := valueStart + countValid(selectedValidData)
+			data = data[valueStart:valueEnd]
+		}
+		ncol, err := nullableCreator(name, data, selectedValidData, WithSparseNullableMode[T](sparseMode))
+		if err != nil {
+			return nil, err
+		}
+		// An empty nullable slice has no validity bits, but it must retain the
+		// nullable schema state for its parent struct array.
+		ncol.SetNullable(true)
+		return ncol, ncol.ValidateNullable()
+	}
+
+	data = data[start:end]
 	return creator(name, data), nil
 }
 
@@ -171,23 +209,17 @@ func parseStructArrayData(fieldName string, structArray *schemapb.StructArrayFie
 		}
 		fields = append(fields, field)
 	}
-	return NewColumnStructArray(fieldName, fields), nil
+	column := NewColumnStructArray(fieldName, fields)
+	if err := column.ValidateNullable(); err != nil {
+		return nil, errors.Wrapf(err, "invalid struct array %q", fieldName)
+	}
+	return column, nil
 }
 
 // parseVectorArrayData converts schemapb.VectorArray (per-row list of vectors) into the
 // matching ColumnXxxVectorArray. Used for ArrayOfVector sub-fields of struct arrays.
-func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end int) (Column, error) {
+func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, validData []bool, begin, end int) (Column, error) {
 	rows := va.GetData()
-	if end < 0 || end > len(rows) {
-		end = len(rows)
-	}
-	if begin < 0 {
-		begin = 0
-	}
-	if begin > end {
-		begin = end
-	}
-	rows = rows[begin:end]
 	// VectorArray.Dim may be 0 in server search responses; fall back to inner VectorField.Dim.
 	dim := int(va.GetDim())
 	if dim == 0 {
@@ -202,6 +234,64 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end
 		return nil, fmt.Errorf("vector array %q has unknown dim", fieldName)
 	}
 
+	nullable := validData != nil
+	sparseMode := false
+	logicalLen := len(rows)
+	if nullable {
+		logicalLen = len(validData)
+		switch len(rows) {
+		case logicalLen:
+			// Query results are row-dense and keep an empty placeholder for null rows.
+			sparseMode = true
+		case countValid(validData):
+			// Insert FieldData keeps only valid payload rows.
+			sparseMode = false
+		default:
+			return nil, fmt.Errorf("vector array %q payload row count %d does not match logical row count %d or valid count %d",
+				fieldName, len(rows), logicalLen, countValid(validData))
+		}
+	}
+	if begin < 0 {
+		begin = 0
+	}
+	if begin > logicalLen {
+		begin = logicalLen
+	}
+	if end < 0 || end > logicalLen {
+		end = logicalLen
+	}
+	if begin > end {
+		begin = end
+	}
+	selectedValidData := validData
+	if nullable {
+		selectedValidData = validData[begin:end]
+		if sparseMode {
+			rows = rows[begin:end]
+		} else {
+			valueBegin := countValid(validData[:begin])
+			valueEnd := valueBegin + countValid(selectedValidData)
+			rows = rows[valueBegin:valueEnd]
+		}
+	} else {
+		rows = rows[begin:end]
+	}
+	finish := func(column Column) (Column, error) {
+		if !nullable {
+			return column, nil
+		}
+		vectorColumn, ok := column.(interface {
+			setNullableData([]bool, bool) error
+		})
+		if !ok {
+			return nil, fmt.Errorf("vector array %q column does not support nullable data", fieldName)
+		}
+		if err := vectorColumn.setNullableData(selectedValidData, sparseMode); err != nil {
+			return nil, errors.Wrapf(err, "invalid vector array %q nullable data", fieldName)
+		}
+		return column, nil
+	}
+
 	switch va.GetElementType() {
 	case schemapb.DataType_FloatVector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim, func(vf *schemapb.VectorField) []float32 {
@@ -214,7 +304,7 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end
 		if err != nil {
 			return nil, err
 		}
-		return NewColumnFloatVectorArray(fieldName, dim, out), nil
+		return finish(NewColumnFloatVectorArray(fieldName, dim, out))
 
 	case schemapb.DataType_Float16Vector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim*2, func(vf *schemapb.VectorField) []byte {
@@ -223,7 +313,7 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end
 		if err != nil {
 			return nil, err
 		}
-		return NewColumnFloat16VectorArray(fieldName, dim, out), nil
+		return finish(NewColumnFloat16VectorArray(fieldName, dim, out))
 
 	case schemapb.DataType_BFloat16Vector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim*2, func(vf *schemapb.VectorField) []byte {
@@ -232,7 +322,7 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end
 		if err != nil {
 			return nil, err
 		}
-		return NewColumnBFloat16VectorArray(fieldName, dim, out), nil
+		return finish(NewColumnBFloat16VectorArray(fieldName, dim, out))
 
 	case schemapb.DataType_BinaryVector:
 		if dim%8 != 0 {
@@ -244,7 +334,7 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end
 		if err != nil {
 			return nil, err
 		}
-		return NewColumnBinaryVectorArray(fieldName, dim, out), nil
+		return finish(NewColumnBinaryVectorArray(fieldName, dim, out))
 
 	case schemapb.DataType_Int8Vector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim, func(vf *schemapb.VectorField) []byte {
@@ -259,7 +349,7 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end
 		if err != nil {
 			return nil, err
 		}
-		return NewColumnInt8VectorArray(fieldName, dim, out), nil
+		return finish(NewColumnInt8VectorArray(fieldName, dim, out))
 
 	default:
 		return nil, fmt.Errorf("unsupported vector array element type %s", va.GetElementType())
@@ -366,7 +456,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		if va == nil {
 			return nil, errFieldDataTypeNotMatch
 		}
-		return parseVectorArrayData(fd.GetFieldName(), va, begin, end)
+		return parseVectorArrayData(fd.GetFieldName(), va, validData, begin, end)
 
 	case schemapb.DataType_JSON:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetJsonData().GetData(), begin, end, validData, NewColumnJSONBytes, NewNullableColumnJSONBytes)

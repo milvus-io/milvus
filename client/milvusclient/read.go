@@ -141,7 +141,36 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	schemaFieldSet := typeutil.NewSet(lo.Map(sch.Fields, func(f *entity.Field, _ int) string {
 		return f.Name
 	})...)
+	schemaFields := make(map[string]*entity.Field, len(sch.Fields))
+	for _, field := range sch.Fields {
+		schemaFields[field.Name] = field
+	}
 	dynamicNames := outputSet.Complement(schemaFieldSet)
+	structOutputParents := make(map[string]string)
+	structOutputSelections := make(map[string]map[string]struct{})
+	for _, field := range sch.Fields {
+		if field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct || field.StructSchema == nil {
+			continue
+		}
+		_, parentRequested := outputSet[field.Name]
+		for _, subField := range field.StructSchema.Fields {
+			outputName := field.Name + "[" + subField.Name + "]"
+			if _, requested := outputSet[outputName]; !requested {
+				continue
+			}
+			delete(dynamicNames, outputName)
+			structOutputParents[outputName] = field.Name
+			if parentRequested {
+				continue
+			}
+			selection := structOutputSelections[field.Name]
+			if selection == nil {
+				selection = make(map[string]struct{})
+				structOutputSelections[field.Name] = selection
+			}
+			selection[subField.Name] = struct{}{}
+		}
+	}
 
 	columns := make([]column.Column, 0, len(outputFields))
 	var dynamicColumn *column.ColumnJSONBytes
@@ -149,6 +178,12 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 		col, err := column.FieldDataColumn(fieldData, from, to)
 		if err != nil {
 			return nil, err
+		}
+		if field := schemaFields[fieldData.GetFieldName()]; field != nil && field.Nullable && !col.Nullable() {
+			col.SetNullable(true)
+			if err := col.ValidateNullable(); err != nil {
+				return nil, errors.Wrapf(err, "restore nullable state for field %q", fieldData.GetFieldName())
+			}
 		}
 
 		// if output data contains dynamic json, setup dynamicColumn
@@ -170,6 +205,32 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 
 		columns = append(columns, col)
 	}
+	if len(fieldDataList) == 0 {
+		seen := make(map[string]struct{}, len(outputFields))
+		for _, fieldName := range outputFields {
+			parentName := fieldName
+			if name, ok := structOutputParents[fieldName]; ok {
+				parentName = name
+			}
+			if _, ok := seen[parentName]; ok {
+				continue
+			}
+			seen[parentName] = struct{}{}
+
+			field := schemaFields[parentName]
+			if field == nil || field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
+				continue
+			}
+			col, err := newEmptyStructArrayColumn(field, structOutputSelections[parentName])
+			if err != nil {
+				return nil, err
+			}
+			columns = append(columns, col)
+		}
+		if sch.EnableDynamicField && len(dynamicNames) > 0 {
+			dynamicColumn = column.NewColumnJSONBytes("", nil)
+		}
+	}
 
 	// extra name found and not json output
 	if len(dynamicNames) > 0 && dynamicColumn == nil {
@@ -186,6 +247,32 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	}
 
 	return columns, nil
+}
+
+func newEmptyStructArrayColumn(field *entity.Field, selectedSubFields map[string]struct{}) (column.Column, error) {
+	if field.StructSchema == nil {
+		return nil, errors.Newf("struct array field %q has no struct schema", field.Name)
+	}
+
+	subColumns := make([]column.Column, 0, len(field.StructSchema.Fields))
+	for _, subField := range field.StructSchema.Fields {
+		if selectedSubFields != nil {
+			if _, ok := selectedSubFields[subField.Name]; !ok {
+				continue
+			}
+		}
+		subColumn, err := newStructSubColumn(subField)
+		if err != nil {
+			return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+		}
+		subColumns = append(subColumns, subColumn)
+	}
+	col := column.NewColumnStructArray(field.Name, subColumns)
+	col.SetNullable(field.Nullable)
+	if err := col.ValidateNullable(); err != nil {
+		return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+	}
+	return col, nil
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
@@ -213,7 +300,11 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 			return err
 		}
 
-		columns, err := c.parseSearchResult(collection.Schema, resp.GetOutputFields(), resp.GetFieldsData(), 0, 0, -1)
+		outputFields := resp.GetOutputFields()
+		if len(outputFields) == 0 {
+			outputFields = req.GetOutputFields()
+		}
+		columns, err := c.parseSearchResult(collection.Schema, outputFields, resp.GetFieldsData(), 0, 0, -1)
 		if err != nil {
 			return err
 		}

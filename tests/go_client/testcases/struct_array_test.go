@@ -159,6 +159,314 @@ func TestStructArrayInsertBasic(t *testing.T) {
 	require.EqualValues(t, structArrayTestNb, res.InsertCount)
 }
 
+func createStructArrayMutationCollection(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	suffix string,
+	dim int,
+	nullable bool,
+) string {
+	t.Helper()
+
+	collName := common.GenRandomString(hp.StructArrayPrefix+suffix, 6)
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim))).
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("normal_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim))).
+		WithField(entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(100).
+			WithStructSchema(structSchema).
+			WithNullable(nullable))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+	return collName
+}
+
+func loadStructArrayMutationCollection(t *testing.T, ctx CtxT, mc MC, collName string) {
+	t.Helper()
+
+	_, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "normal_vector",
+		index.NewHNSWIndex(entity.COSINE, 16, 200)))
+	common.CheckErr(t, err, true)
+	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "clips[embedding]",
+		index.NewHNSWIndex(entity.MaxSimCosine, 16, 200)))
+	common.CheckErr(t, err, true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+}
+
+func TestStructArrayVectorSliceAndRollbackRemainAppendable(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const dim = 8
+	collName := createStructArrayMutationCollection(t, ctx, mc, "_slice_rollback", dim, false)
+	clips := column.NewColumnStructArray("clips", []column.Column{
+		column.NewColumnFloatVectorArray("embedding", dim, nil),
+		column.NewColumnVarCharArray("label", nil),
+	})
+	require.NoError(t, clips.AppendValue(map[string]any{
+		"embedding": [][]float32{hp.RandFloatVector(dim)},
+		"label":     []string{"before_slice"},
+	}))
+
+	clips = clips.Slice(0, -1)
+	require.NoError(t, clips.AppendValue(map[string]any{
+		"embedding": [][]float32{hp.RandFloatVector(dim)},
+		"label":     []string{"after_slice"},
+	}))
+	require.Error(t, clips.AppendValue(map[string]any{
+		"embedding": [][]float32{hp.RandFloatVector(dim)},
+		"label":     42,
+	}))
+	require.NoError(t, clips.AppendValue(map[string]any{
+		"embedding": [][]float32{hp.RandFloatVector(dim)},
+		"label":     []string{"after_rollback"},
+	}))
+	require.Equal(t, 3, clips.Len())
+
+	res, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(
+			column.NewColumnInt64("id", []int64{0, 1, 2}),
+			column.NewColumnFloatVector("normal_vector", dim, [][]float32{
+				hp.RandFloatVector(dim),
+				hp.RandFloatVector(dim),
+				hp.RandFloatVector(dim),
+			}),
+			clips,
+		))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 3, res.InsertCount)
+
+	loadStructArrayMutationCollection(t, ctx, mc, collName)
+	result, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id >= 0").
+		WithOutputFields("id", "clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 3, result.ResultCount)
+
+	wantLabels := map[int64]string{0: "before_slice", 1: "after_slice", 2: "after_rollback"}
+	ids := result.GetColumn("id")
+	queriedClips := result.GetColumn("clips")
+	for i := 0; i < result.ResultCount; i++ {
+		id, err := ids.GetAsInt64(i)
+		require.NoError(t, err)
+		value, err := queriedClips.Get(i)
+		require.NoError(t, err)
+		row := value.(map[string]any)
+		require.Equal(t, []string{wantLabels[id]}, row["label"])
+		require.Len(t, row["embedding"].([]entity.FloatVector), 1)
+	}
+}
+
+func TestStructArrayAppendNullFailureRemainsRecoverable(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const dim = 8
+	collName := createStructArrayMutationCollection(t, ctx, mc, "_append_null", dim, true)
+	embedding := column.NewColumnFloatVectorArray("embedding", dim, nil)
+	embedding.SetNullable(true)
+	clips := column.NewColumnStructArray("clips", []column.Column{
+		embedding,
+		column.NewColumnVarCharArray("label", nil),
+	})
+
+	require.Error(t, clips.AppendNull())
+	var rowCount int
+	require.NotPanics(t, func() {
+		rowCount = clips.Len()
+	})
+	require.Zero(t, rowCount)
+
+	clips.SetNullable(true)
+	require.NoError(t, clips.AppendNull())
+	require.NoError(t, clips.AppendValue(map[string]any{
+		"embedding": [][]float32{hp.RandFloatVector(dim)},
+		"label":     []string{"valid_after_failure"},
+	}))
+	require.Equal(t, 2, clips.Len())
+	require.NoError(t, clips.ValidateNullable())
+
+	res, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(
+			column.NewColumnInt64("id", []int64{0, 1}),
+			column.NewColumnFloatVector("normal_vector", dim, [][]float32{
+				hp.RandFloatVector(dim),
+				hp.RandFloatVector(dim),
+			}),
+			clips,
+		))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 2, res.InsertCount)
+
+	loadStructArrayMutationCollection(t, ctx, mc, collName)
+	nullResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 0").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, nullResult.ResultCount)
+	value, err := nullResult.GetColumn("clips").Get(0)
+	require.NoError(t, err)
+	require.Nil(t, value)
+
+	validResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 1").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, validResult.ResultCount)
+	value, err = validResult.GetColumn("clips").Get(0)
+	require.NoError(t, err)
+	require.Equal(t, []string{"valid_after_failure"}, value.(map[string]any)["label"])
+}
+
+// TestStructArrayNullableInsertNil ports test_embedding_list_field_nullable_insert_none_supported.
+func TestStructArrayNullableInsertNil(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	dim := 8
+	collName := common.GenRandomString(hp.StructArrayPrefix+"_nullable", 6)
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim))).
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("normal_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)).WithNullable(true)).
+		WithField(entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(100).
+			WithStructSchema(structSchema).
+			WithNullable(true))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+
+	rows := []map[string]any{
+		nil,
+		{"embedding": [][]float32{hp.RandFloatVector(dim)}, "label": []string{"valid"}},
+	}
+	secondVector := make([]float32, dim)
+	secondVector[1] = 1
+	normalVectors, err := column.NewNullableColumnFloatVector("normal_vector", dim,
+		[][]float32{secondVector}, []bool{false, true})
+	require.NoError(t, err)
+	res, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(column.NewColumnInt64("id", []int64{0, 1}), normalVectors).
+		WithStructArrayColumn("clips", structSchema, rows))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 2, res.InsertCount)
+
+	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "normal_vector",
+		index.NewHNSWIndex(entity.COSINE, 16, 200)))
+	common.CheckErr(t, err, true)
+	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "clips[embedding]",
+		index.NewHNSWIndex(entity.MaxSimCosine, 16, 200)))
+	common.CheckErr(t, err, true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	nullResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 0").WithOutputFields("id", "clips").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, nullResult.ResultCount)
+	clips := nullResult.GetColumn("clips")
+	require.NotNil(t, clips)
+	require.True(t, clips.Nullable())
+	value, err := clips.Get(0)
+	require.NoError(t, err)
+	require.Nil(t, value)
+
+	validResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 1").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, validResult.ResultCount)
+	value, err = validResult.GetColumn("clips").Get(0)
+	require.NoError(t, err)
+	require.NotNil(t, value)
+
+	emptyQueryResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id < 0").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Zero(t, emptyQueryResult.ResultCount)
+	emptyQueryClips := emptyQueryResult.GetColumn("clips")
+	require.NotNil(t, emptyQueryClips)
+	require.True(t, emptyQueryClips.Nullable())
+	require.Zero(t, emptyQueryClips.Len())
+	require.NoError(t, emptyQueryClips.ValidateNullable())
+
+	emptySubFieldQueryResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id < 0").WithOutputFields("clips[label]").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Zero(t, emptySubFieldQueryResult.ResultCount)
+	emptySubFieldQueryClips := emptySubFieldQueryResult.GetColumn("clips")
+	require.NotNil(t, emptySubFieldQueryClips)
+	require.True(t, emptySubFieldQueryClips.Nullable())
+	require.Zero(t, emptySubFieldQueryClips.Len())
+	require.NoError(t, emptySubFieldQueryClips.ValidateNullable())
+	require.Len(t, emptySubFieldQueryClips.FieldData().GetStructArrays().GetFields(), 1)
+	require.Equal(t, "label", emptySubFieldQueryClips.FieldData().GetStructArrays().GetFields()[0].GetFieldName())
+
+	// A null vector produces an empty result set while a valid vector produces a
+	// non-empty one. The empty slice must retain every struct sub-column's
+	// nullable state.
+	emptySearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{0})).
+		WithANNSField("normal_vector").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, emptySearchResults, 1)
+	require.NoError(t, emptySearchResults[0].Err)
+	require.Zero(t, emptySearchResults[0].ResultCount)
+	emptyClips := emptySearchResults[0].GetColumn("clips")
+	require.NotNil(t, emptyClips)
+	require.True(t, emptyClips.Nullable())
+	require.Zero(t, emptyClips.Len())
+
+	emptySubFieldSearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{0})).
+		WithANNSField("normal_vector").
+		WithOutputFields("clips[label]").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, emptySubFieldSearchResults, 1)
+	require.NoError(t, emptySubFieldSearchResults[0].Err)
+	require.Zero(t, emptySubFieldSearchResults[0].ResultCount)
+	emptySubFieldSearchClips := emptySubFieldSearchResults[0].GetColumn("clips")
+	require.NotNil(t, emptySubFieldSearchClips)
+	require.True(t, emptySubFieldSearchClips.Nullable())
+	require.Zero(t, emptySubFieldSearchClips.Len())
+	require.Len(t, emptySubFieldSearchClips.FieldData().GetStructArrays().GetFields(), 1)
+	require.Equal(t, "label", emptySubFieldSearchClips.FieldData().GetStructArrays().GetFields()[0].GetFieldName())
+
+	validSearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{1})).
+		WithANNSField("normal_vector").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, validSearchResults, 1)
+	require.NoError(t, validSearchResults[0].Err)
+	require.Greater(t, validSearchResults[0].ResultCount, 0)
+}
+
 // TestStructArrayCreateEmbListHNSWIndexCosine ports test_create_emb_list_hnsw_index_cosine.
 func TestStructArrayCreateEmbListHNSWIndexCosine(t *testing.T) {
 	runEmbListHNSWIndex(t, entity.MaxSimCosine)
