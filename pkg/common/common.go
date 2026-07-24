@@ -875,6 +875,24 @@ func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, cl
 	return idStart | int64(reversed), idEnd | int64(reversed), nil
 }
 
+// AllocAutoIDN is the int64 counterpart of AllocAutoID. It allocates n contiguous
+// ids in a single logical range via allocFunc (which itself takes an int64 count,
+// e.g. datacoord's allocator.AllocN), so callers can request more than
+// math.MaxUint32 ids at once. The returned [begin, end) carries the clusterID bits
+// in its high bits, identical to AllocAutoID.
+func AllocAutoIDN(allocFunc func(int64) (int64, int64, error), n int64, clusterID uint64) (int64, int64, error) {
+	if n <= 0 {
+		return 0, 0, nil
+	}
+	idStart, idEnd, err := allocFunc(n)
+	if err != nil {
+		return 0, 0, err
+	}
+	// right shift by 1 to preserve sign bit
+	reversed := bits.Reverse64(clusterID) >> 1
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
 func GetCollectionAllowInsertNonBM25FunctionOutputs(kvs []*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
 		if kv.Key == CollectionAllowInsertNonBM25FunctionOutputs {

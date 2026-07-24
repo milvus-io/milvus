@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -66,9 +67,13 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		ChannelNames:   vchannels,
 		Schema:         body.GetSchema(),
 		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
+			// so both clusters derive identical autoID primary keys.
 			return &internalpb.ImportFile{
-				Id:    file.GetId(),
-				Paths: file.GetPaths(),
+				Id:        file.GetId(),
+				Paths:     file.GetPaths(),
+				PkIdBegin: file.GetPkIdRange().GetBegin(),
+				PkIdEnd:   file.GetPkIdRange().GetEnd(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
@@ -189,6 +194,35 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
 		return merr.Wrap(err, "failed to validate import request")
+	}
+
+	// Deterministic cross-cluster autoID: only for non-backup, non-L0 autoID imports
+	// on a replicating cluster. The primary allocates a per-file PK range once and
+	// ships it on the replicated ImportMsg so the secondary derives identical primary
+	// keys instead of allocating its own. Backup imports keep their embedded PKs
+	// (UnsetAutoID) and L0 imports carry no autoID PKs, so both are skipped. A schema
+	// without a resolvable primary key is left to normal validation. Non-replicating
+	// imports keep the legacy zero-IO broadcast and local autoID allocation.
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		// On an indeterminate replication status, assign anyway: a false "not
+		// replicating" here would silently reintroduce cross-cluster PK divergence,
+		// whereas an unnecessary assignment only wastes a little ID space.
+		replicating, repErr := s.isReplicatingClusterNow(ctx)
+		if repErr != nil || replicating {
+			if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+				s.allocator.AllocN,
+				Params.CommonCfg.ClusterID.GetAsUint64(),
+			); err != nil {
+				return merr.Wrap(err, "failed to assign per-file PK ranges")
+			}
+			for i := range msgFiles {
+				msgFiles[i].PkIdRange = &commonpb.IDRange{
+					Begin: files[i].GetPkIdBegin(),
+					End:   files[i].GetPkIdEnd(),
+				}
+			}
+		}
 	}
 
 	// Get database name from collection metadata via broker
