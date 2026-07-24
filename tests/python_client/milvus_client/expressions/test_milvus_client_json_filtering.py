@@ -496,23 +496,7 @@ class TestJsonFilteringIndexedUnknownSemantics(JsonFilteringUnknownMixin, TestMi
                     (f'not ({json_field}["a"] > 2)', [4]),
                 ],
             ),
-            (
-                "stl_sort_double",
-                [
-                    {
-                        "index_name": "idx_json_a_stl_sort_double",
-                        "index_type": "STL_SORT",
-                        "params": {"json_cast_type": "DOUBLE", "json_path": f"{json_field}['a']"},
-                    }
-                ],
-                [
-                    (f'{json_field}["a"] == 2', [4]),
-                    (f'{json_field}["a"] > 2', [5]),
-                    (f'{json_field}["a"] != 2', [5]),
-                    (f'{json_field}["a"] not in [2]', [5]),
-                    (f'not ({json_field}["a"] > 2)', [4]),
-                ],
-            ),
+            # stl_sort_double removed: STL_SORT on a JSON path requires scalar index engine v4; 3.0 uses v3 (#51745)
             (
                 "inverted_varchar",
                 [

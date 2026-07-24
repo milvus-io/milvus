@@ -38,15 +38,12 @@ default_int32_field_name = ct.default_int32_field_name
 default_int32_value = ct.default_int32_value
 
 # Valid (index_type, json_cast_type) combinations for JSON path index
+# STL_SORT/BITMAP on a JSON path require scalar index engine v4; 3.0 uses v3 (#51745)
 _json_path_index_params = [
     ("INVERTED", "BOOL"),
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "VARCHAR"),
     ("INVERTED", "JSON"),
-    ("STL_SORT", "DOUBLE"),
-    ("STL_SORT", "VARCHAR"),
-    ("BITMAP", "BOOL"),
-    ("BITMAP", "VARCHAR"),
 ]
 
 
