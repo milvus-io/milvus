@@ -290,9 +290,15 @@ class SegmentExpr : public Expr {
     MoveCursor() override {
         // when we specify input, do not maintain states
         if (!has_offset_input_) {
-            // CanUseIndex excludes ngram index and this is true even ngram index is used as ExecNgramMatch
-            // uses data cursor.
-            if (SegmentExpr::CanUseIndex()) {
+            const auto next_data_global_pos =
+                current_data_global_pos_ +
+                std::min(batch_size_, active_count_ - current_data_global_pos_);
+            if (use_json_stats_) {
+                current_data_global_pos_ += std::min(
+                    batch_size_, active_count_ - current_data_global_pos_);
+                // CanUseIndex excludes ngram index and this is true even ngram index is used as ExecNgramMatch
+                // uses data cursor.
+            } else if (SegmentExpr::CanUseIndex()) {
                 MoveCursorForIndex();
                 if (segment_->HasFieldData(field_id_)) {
                     MoveCursorForData();
@@ -300,6 +306,11 @@ class SegmentExpr : public Expr {
             } else {
                 MoveCursorForData();
             }
+            // Conjunct short-circuiting can move an expression before its
+            // first Eval determines that JSON stats will be used. Keep the
+            // logical row cursor aligned even when raw field data is absent.
+            current_data_global_pos_ =
+                std::max(current_data_global_pos_, next_data_global_pos);
         }
     }
 
@@ -319,6 +330,10 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
+        if (use_json_stats_) {
+            return std::min(batch_size_,
+                            active_count_ - current_data_global_pos_);
+        }
         auto current_chunk = SegmentExpr::CanUseIndex() && use_index_
                                  ? current_index_chunk_
                                  : current_data_chunk_;
@@ -669,7 +684,7 @@ class SegmentExpr : public Expr {
         const ValTypes&... values) {
         int64_t processed_size = 0;
         if constexpr (std::is_same_v<T, std::string_view> ||
-                      std::is_same_v<T, Json>) {
+                      std::is_same_v<T, Json> || std::is_same_v<T, ArrayView>) {
             if (segment_->type() == SegmentType::Sealed) {
                 return ProcessChunkForSealedSeg<T, NeedSegmentOffsets>(
                     func, skip_func, res, valid_res, values...);
@@ -1441,6 +1456,12 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    bool
+    PinnedJsonIndexIsFlat() const {
+        return field_type_ == DataType::JSON && !pinned_index_.empty() &&
+               dynamic_cast<const index::JsonFlatIndex*>(
+                   pinned_index_[0].get()) != nullptr;
+    }
     template <typename T>
     bool
     CanUseIndexForOp(OpType op) const {
@@ -1508,7 +1529,8 @@ class SegmentExpr : public Expr {
     bool
     CanUseJsonStats(EvalCtx& context,
                     FieldId field_id,
-                    const std::vector<std::string>& nested_path) const {
+                    const std::vector<std::string>& nested_path,
+                    bool support_offset_input = false) {
         // if path contains integer, we can't use json stats such as "a.1.b", "a.1",
         // because we can't know the integer is a key or a array indice
         auto path_contains_integer = [](const std::vector<std::string>& path) {
@@ -1522,8 +1544,14 @@ class SegmentExpr : public Expr {
 
         // if path is empty, json stats can not know key name,
         // so we can't use json shredding data
-        return PlanUseJsonStats(context) && HasJsonStats(field_id) &&
-               !nested_path.empty() && !path_contains_integer(nested_path);
+        const auto can_use = PlanUseJsonStats(context) &&
+                             HasJsonStats(field_id) && !nested_path.empty() &&
+                             !path_contains_integer(nested_path) &&
+                             (support_offset_input || !has_offset_input_);
+        if (can_use) {
+            use_json_stats_ = true;
+        }
+        return can_use;
     }
 
     virtual bool
@@ -1531,6 +1559,29 @@ class SegmentExpr : public Expr {
         return false;
     };
 
+    VectorPtr
+    GatherCachedResultByOffsets(const TargetBitmap& cached_res,
+                                const TargetBitmap& cached_valid_res,
+                                const OffsetVector& offsets) const {
+        AssertInfo(cached_res.size() == cached_valid_res.size(),
+                   "cached result and validity sizes differ: {} vs {}",
+                   cached_res.size(),
+                   cached_valid_res.size());
+        TargetBitmap result(offsets.size(), false);
+        TargetBitmap valid_result(offsets.size(), false);
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            const auto offset = offsets[i];
+            AssertInfo(
+                offset >= 0 && static_cast<size_t>(offset) < cached_res.size(),
+                "offset {} is outside cached result size {}",
+                offset,
+                cached_res.size());
+            result[i] = cached_res[offset];
+            valid_result[i] = cached_valid_res[offset];
+        }
+        return std::make_shared<ColumnVector>(std::move(result),
+                                              std::move(valid_result));
+    }
     VectorPtr
     MoveOrSliceBitmap(TargetBitmap& cached_res,
                       TargetBitmap& cached_valid_res,
@@ -1560,6 +1611,9 @@ class SegmentExpr : public Expr {
     // sometimes need to skip index and using raw data
     // default true means use index as much as possible
     bool use_index_{true};
+    // JSON stats produces a full-segment bitmap and advances by global row
+    // position even when raw JSON data is not loaded.
+    bool use_json_stats_{false};
     // used for reducing cache miss latency in tiered storage
     bool prefetched_{false};
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};

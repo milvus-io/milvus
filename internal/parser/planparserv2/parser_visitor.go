@@ -218,6 +218,31 @@ func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	return nil
 }
 
+// contextualizeEmptyArrayLiteral assigns the element type of a whole ARRAY
+// column to an inline empty array literal. Unlike a non-empty literal, [] has
+// no element from which the parser can infer a type. The field provides that
+// missing context for equality comparisons without relaxing comparisons on
+// ARRAY elements or JSON paths.
+func contextualizeEmptyArrayLiteral(literal, field *ExprWithType) {
+	if literal == nil || field == nil || literal.dataType != schemapb.DataType_Array {
+		return
+	}
+	valueExpr := literal.expr.GetValueExpr()
+	if valueExpr == nil || isTemplateExpr(valueExpr) {
+		return
+	}
+	array := valueExpr.GetValue().GetArrayVal()
+	if array == nil || len(array.GetArray()) != 0 || array.GetElementType() != schemapb.DataType_None {
+		return
+	}
+	columnInfo := toColumnInfo(field)
+	if columnInfo == nil || columnInfo.GetDataType() != schemapb.DataType_Array ||
+		len(columnInfo.GetNestedPath()) != 0 {
+		return
+	}
+	array.ElementType = columnInfo.GetElementType()
+}
+
 // VisitAddSub translates expr to arithmetic plan.
 func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	var err error
@@ -408,6 +433,10 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		return err
 	}
 
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	contextualizeEmptyArrayLiteral(leftExpr, rightExpr)
+	contextualizeEmptyArrayLiteral(rightExpr, leftExpr)
+
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
@@ -428,8 +457,6 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		}
 		return ret
 	}
-
-	leftExpr, rightExpr := getExpr(left), getExpr(right)
 
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
 	if err != nil {

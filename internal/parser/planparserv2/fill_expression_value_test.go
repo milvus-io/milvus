@@ -71,6 +71,9 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
+			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -107,9 +110,6 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
 			}},
-			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
-				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
-			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -117,6 +117,34 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
+}
+
+func (s *FillExpressionValueSuite) TestEmptyArrayComparisonNormalization() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyArray := generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{})
+
+	testcases := []struct {
+		expr string
+		op   planpb.OpType
+	}{
+		{expr: `ArrayField == {empty}`, op: planpb.OpType_Equal},
+		{expr: `{empty} == ArrayField`, op: planpb.OpType_Equal},
+		{expr: `ArrayField != {empty}`, op: planpb.OpType_NotEqual},
+		{expr: `{empty} != ArrayField`, op: planpb.OpType_NotEqual},
+	}
+	for _, testcase := range testcases {
+		s.Run(testcase.expr, func() {
+			expr, err := ParseExpr(schemaH, testcase.expr, map[string]*schemapb.TemplateValue{
+				"empty": emptyArray,
+			})
+			s.NoError(err)
+			arrayLength := expr.GetBinaryArithOpEvalRangeExpr()
+			s.NotNil(arrayLength)
+			s.Equal(planpb.ArithOpType_ArrayLength, arrayLength.GetArithOp())
+			s.Equal(testcase.op, arrayLength.GetOp())
+			s.Equal(int64(0), arrayLength.GetValue().GetInt64Val())
+		})
+	}
 }
 
 func (s *FillExpressionValueSuite) TestUnaryRange() {

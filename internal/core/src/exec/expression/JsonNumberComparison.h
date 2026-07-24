@@ -33,6 +33,23 @@ IsInt64SafeForJsonDoubleIndex(int64_t value) {
            value < kFirstNonInjectiveInteger;
 }
 
+inline bool
+JsonNumericBoundRequiresPreciseInt64Comparison(
+    const proto::plan::GenericValue& bound) {
+    if (bound.has_int64_val()) {
+        return !IsInt64SafeForJsonDoubleIndex(bound.int64_val());
+    }
+    if (!bound.has_float_val() || !std::isfinite(bound.float_val())) {
+        return false;
+    }
+
+    constexpr double kFirstNonInjectiveInteger = 0x1p53;
+    constexpr double kInt64Magnitude = 0x1p63;
+    const auto value = bound.float_val();
+    return (value >= kFirstNonInjectiveInteger && value <= kInt64Magnitude) ||
+           (value <= -kFirstNonInjectiveInteger && value >= -kInt64Magnitude);
+}
+
 inline int
 CompareInt64ToDouble(int64_t lhs, double rhs) {
     constexpr double kInt64Lower = -0x1p63;
@@ -151,6 +168,19 @@ CompareJsonNumberToBound(const simdjson::ondemand::number& number,
         return std::nullopt;
     }
     return CompareJsonNumberToBound(number.get_double(), bound);
+}
+
+// JSON stats and typed JSON indexes store uint64 values as double. Preserve
+// that established behavior while comparing int64 JSON values exactly.
+inline std::optional<int>
+CompareJsonNumberToBoundWithUint64DoubleFallback(
+    const simdjson::ondemand::number& number,
+    const proto::plan::GenericValue& bound) {
+    if (number.is_uint64()) {
+        return CompareJsonNumberToBound(
+            static_cast<double>(number.get_uint64()), bound);
+    }
+    return CompareJsonNumberToBound(number, bound);
 }
 
 inline bool

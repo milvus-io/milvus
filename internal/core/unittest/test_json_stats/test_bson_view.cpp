@@ -62,6 +62,62 @@ TEST_F(BsonViewTest, ParseAsValueAtOffsetTest) {
     EXPECT_EQ(string_val.value(), "test string");
 }
 
+TEST_F(BsonViewTest, ParseAsNumberAtOffsetTest) {
+    bsoncxx::builder::basic::document doc;
+    doc.append(bsoncxx::builder::basic::kvp("i32", int32_t{42}));
+    doc.append(bsoncxx::builder::basic::kvp("i64", int64_t{9007199254740993}));
+    doc.append(bsoncxx::builder::basic::kvp("dbl", 3.14159));
+    doc.append(bsoncxx::builder::basic::kvp("str", "not a number"));
+
+    BsonView view(doc.view().data(), doc.view().length());
+    const auto offsets = BsonBuilder::ExtractBsonKeyOffsets(doc.view());
+
+    auto int32_value = view.ParseAsNumberAtOffset(offsets[0].second);
+    ASSERT_TRUE(int32_value.has_value());
+    ASSERT_TRUE(std::holds_alternative<int64_t>(*int32_value));
+    EXPECT_EQ(std::get<int64_t>(*int32_value), 42);
+
+    auto int64_value = view.ParseAsNumberAtOffset(offsets[1].second);
+    ASSERT_TRUE(int64_value.has_value());
+    ASSERT_TRUE(std::holds_alternative<int64_t>(*int64_value));
+    EXPECT_EQ(std::get<int64_t>(*int64_value), 9007199254740993);
+
+    auto double_value = view.ParseAsNumberAtOffset(offsets[2].second);
+    ASSERT_TRUE(double_value.has_value());
+    ASSERT_TRUE(std::holds_alternative<double>(*double_value));
+    EXPECT_DOUBLE_EQ(std::get<double>(*double_value), 3.14159);
+
+    EXPECT_FALSE(view.ParseAsNumberAtOffset(offsets[3].second).has_value());
+}
+
+TEST_F(BsonViewTest, ParseAsNumberAtOffsetRejectsMalformedBson) {
+    const auto expect_unexpected_error = [](const std::vector<uint8_t>& data) {
+        BsonView view(data);
+        try {
+            static_cast<void>(view.ParseAsNumberAtOffset(0));
+            FAIL() << "expected malformed BSON to throw";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        }
+    };
+
+    expect_unexpected_error(
+        {static_cast<uint8_t>(bsoncxx::type::k_int32), 'k'});
+    expect_unexpected_error(
+        {static_cast<uint8_t>(bsoncxx::type::k_int32), 'k', '\0', 1, 2, 3});
+    expect_unexpected_error({static_cast<uint8_t>(bsoncxx::type::k_int64),
+                             'k',
+                             '\0',
+                             1,
+                             2,
+                             3,
+                             4,
+                             5,
+                             6,
+                             7});
+    expect_unexpected_error({0x42, '\0'});
+}
+
 TEST_F(BsonViewTest, ParseAsArrayAtOffsetTest) {
     // Test case 1: offset = 0 (whole array)
     {

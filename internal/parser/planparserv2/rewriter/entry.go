@@ -15,6 +15,7 @@ func RewriteExprWithConfig(e *planpb.Expr, optimizeEnabled bool) *planpb.Expr {
 	if e == nil {
 		return nil
 	}
+	e = normalizeEmptyArrayComparisons(e)
 	e = normalizeJSONTermExprs(e)
 	v := &visitor{optimizeEnabled: optimizeEnabled}
 	res := v.visitExpr(e)
