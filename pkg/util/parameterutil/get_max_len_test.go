@@ -88,6 +88,8 @@ func TestGetMaxCapacity(t *testing.T) {
 		}
 		_, err := GetMaxCapacity(f)
 		assert.Error(t, err)
+		// the message must name the parameter that was actually invalid
+		assert.Contains(t, err.Error(), "value of max capacity should be of int")
 	})
 
 	t.Run("normal case", func(t *testing.T) {
