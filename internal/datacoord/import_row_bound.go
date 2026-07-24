@@ -149,6 +149,13 @@ func minRowTextBytes(schema *schemapb.CollectionSchema) (int64, error) {
 		if skip.Contain(field.GetFieldID()) {
 			continue
 		}
+		// A nullable or defaulted field may be omitted entirely from a JSON row
+		// (the reader fills it), contributing 0 bytes. Counting it would overstate
+		// the per-row floor and understate the row count, so skip it to keep this a
+		// true lower bound.
+		if field.GetNullable() || field.GetDefaultValue() != nil {
+			continue
+		}
 		switch field.GetDataType() {
 		case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
 			schemapb.DataType_Int32, schemapb.DataType_Int64,
