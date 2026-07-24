@@ -1222,6 +1222,48 @@ TEST_F(RTreeIndexTest, AddGeometryClassifiesNullByValidityNotPayload) {
     EXPECT_TRUE(is_null[2]);
 }
 
+// Regression for PR #50951 review (round D0c953a6533): a batch retried after
+// a mid-batch retriable failure re-drives rows that already committed, so
+// AddGeometry must be idempotent per offset on BOTH paths -- the R-Tree entry
+// path and the null_offset_ path. Duplicates inflate Count() past the segment
+// row space (indexed_count = wrapper count + null count overtakes
+// total_num_rows_), which oversizes every row-addressed bitmap.
+TEST_F(RTreeIndexTest, RetriedAddGeometryIsIdempotentPerOffset) {
+    field_meta_.field_schema.set_nullable(true);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    // First attempt: rows 0 (valid), 1 (null) commit, then the batch "fails".
+    rtree.AddGeometry(CreatePointWKB(1.0, 1.0), 0, true);
+    rtree.AddGeometry(std::string(), 1, false);
+    ASSERT_EQ(rtree.Count(), 2);
+
+    // Retry re-drives the whole batch and completes rows 2 (valid), 3 (null).
+    rtree.AddGeometry(CreatePointWKB(1.0, 1.0), 0, true);
+    rtree.AddGeometry(std::string(), 1, false);
+    rtree.AddGeometry(CreatePointWKB(2.0, 2.0), 2, true);
+    rtree.AddGeometry(std::string(), 3, false);
+
+    // Count() reports the row space exactly: no duplicated entry or null
+    // offset survives the retry.
+    EXPECT_EQ(rtree.Count(), 4);
+
+    auto is_null = rtree.IsNull();
+    ASSERT_EQ(is_null.size(), 4u);
+    EXPECT_FALSE(is_null[0]);
+    EXPECT_TRUE(is_null[1]);
+    EXPECT_FALSE(is_null[2]);
+    EXPECT_TRUE(is_null[3]);
+
+    auto is_not_null = rtree.IsNotNull();
+    ASSERT_EQ(is_not_null.size(), 4u);
+    EXPECT_TRUE(is_not_null[0]);
+    EXPECT_FALSE(is_not_null[1]);
+    EXPECT_TRUE(is_not_null[2]);
+    EXPECT_FALSE(is_not_null[3]);
+}
+
 // Exercises the growing-segment path where a single writer keeps inserting
 // geometries (RTreeIndex::AddGeometry) while reader threads concurrently call
 // Count() and QueryCandidates(). Before the locking fix these read total row

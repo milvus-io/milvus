@@ -562,14 +562,16 @@ RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
     }
     AssertInfo(wrapper != nullptr, "R-Tree index wrapper is null");
 
-    // Create GEOS context and ensure it's properly released. InitGEOSContext
-    // throws a retriable MemAllocateFailed on OOM instead of handing a null
-    // context to query_candidates.
-    GEOSContextHandle_t ctx = InitGEOSContext("query_candidates");
+    // Scoped GEOS context: InitGEOSContext throws a retriable
+    // MemAllocateFailed on OOM instead of handing a null context to
+    // query_candidates, and the RAII guard releases the context even when
+    // query_candidates throws (e.g. candidate_offsets growth hitting
+    // bad_alloc, or an AssertInfo on the query geometry) -- a trailing
+    // GEOS_finish_r would leak once per failed query.
+    ScopedGeosResources geos("query_candidates");
 
     wrapper->query_candidates(
-        op, query_geometry.GetGeometry(), ctx, candidate_offsets);
-    GEOS_finish_r(ctx);
+        op, query_geometry.GetGeometry(), geos.ctx, candidate_offsets);
 }
 
 template <typename T>
@@ -706,9 +708,23 @@ RTreeIndex<T>::AddGeometry(const std::string& wkb_data,
 
         LOG_DEBUG("Added geometry at row offset {}", row_offset);
     } else {
-        // Handle null geometry
+        // Handle null geometry. Idempotent per offset: a batch retried after
+        // a mid-batch retriable failure (bad_alloc -> MemAllocateFailed in
+        // the segcore caller) re-drives rows that already committed, and a
+        // duplicated null offset would inflate Count() past the segment row
+        // space. The dedup set may throw first (nothing mutated yet); the
+        // vector push_back rolls the marker back with a noexcept erase.
         std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
-        null_offset_.push_back(static_cast<size_t>(row_offset));
+        auto [marker, inserted] =
+            null_offset_dedup_.insert(static_cast<size_t>(row_offset));
+        if (inserted) {
+            try {
+                null_offset_.push_back(static_cast<size_t>(row_offset));
+            } catch (...) {
+                null_offset_dedup_.erase(marker);
+                throw;
+            }
+        }
 
         // Update total row count
         if (row_offset >= total_num_rows_) {

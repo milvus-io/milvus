@@ -21,6 +21,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "common/EasyAssert.h"
@@ -251,5 +252,11 @@ class RTreeIndex : public ScalarIndex<T> {
     // Track null rows to support IsNull/IsNotNull just like other scalar indexes
     folly::SharedMutexWritePriority mutex_{};
     std::vector<size_t> null_offset_;
+    // Growing-path (AddGeometry) dedup companion for null_offset_, guarded by
+    // mutex_: a retried batch must not append the same null offset twice --
+    // duplicates inflate Count() past the segment row space. The sealed
+    // build/load paths populate null_offset_ directly (single-shot, no retry
+    // re-append) and do not maintain this set.
+    std::unordered_set<size_t> null_offset_dedup_;
 };
 }  // namespace milvus::index

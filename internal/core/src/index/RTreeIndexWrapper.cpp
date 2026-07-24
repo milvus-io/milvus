@@ -39,49 +39,6 @@
 
 namespace milvus::index {
 
-namespace {
-// RAII holder for the GEOS resources the write paths keep alive across
-// container operations. values_.push_back / rtree_.insert /
-// local_values.emplace_back can throw std::bad_alloc, which the segcore
-// callers now translate into a retriable MemAllocateFailed -- so the batch
-// is retried, and any context/reader/geometry released only by trailing
-// cleanup calls would leak once per attempt, compounding the very OOM being
-// retried. Destruction order matters: geometry and reader must be destroyed
-// while the context is still alive.
-struct ScopedGeosResources {
-    GEOSContextHandle_t ctx{nullptr};
-    GEOSWKBReader* reader{nullptr};
-    GEOSGeometry* geom{nullptr};
-
-    explicit ScopedGeosResources(const char* purpose)
-        : ctx(InitGEOSContext(purpose)) {
-    }
-    ScopedGeosResources(const ScopedGeosResources&) = delete;
-    ScopedGeosResources&
-    operator=(const ScopedGeosResources&) = delete;
-
-    ~ScopedGeosResources() {
-        release_geom();
-        if (reader != nullptr) {
-            GEOSWKBReader_destroy_r(ctx, reader);
-            reader = nullptr;
-        }
-        if (ctx != nullptr) {
-            GEOS_finish_r(ctx);
-            ctx = nullptr;
-        }
-    }
-
-    void
-    release_geom() {
-        if (geom != nullptr) {
-            GEOSGeom_destroy_r(ctx, geom);
-            geom = nullptr;
-        }
-    }
-};
-}  // namespace
-
 RTreeIndexWrapper::RTreeIndexWrapper(std::string& path, bool is_build_mode)
     : index_path_(path), is_build_mode_(is_build_mode) {
     if (is_build_mode_) {
@@ -96,6 +53,36 @@ RTreeIndexWrapper::RTreeIndexWrapper(std::string& path, bool is_build_mode)
 }
 
 RTreeIndexWrapper::~RTreeIndexWrapper() = default;
+
+void
+RTreeIndexWrapper::insert_value_locked(const Box& box, int64_t row_offset) {
+    // Idempotent skip: this offset already committed on a previous (partially
+    // failed, now retried) attempt.
+    if (written_offsets_.find(row_offset) != written_offsets_.end()) {
+        return;
+    }
+    // Commit order is chosen so every failure point unwinds with only
+    // noexcept rollbacks:
+    //   1. marker insert may throw (bad_alloc) -- nothing else mutated yet;
+    //   2. values_.push_back may throw -- roll back the marker (erase by
+    //      iterator, noexcept);
+    //   3. rtree_.insert may throw -- roll back values_ (pop_back, noexcept)
+    //      and the marker.
+    auto marker = written_offsets_.insert(row_offset).first;
+    try {
+        Value val(box, row_offset);
+        values_.push_back(val);
+        try {
+            rtree_.insert(val);
+        } catch (...) {
+            values_.pop_back();
+            throw;
+        }
+    } catch (...) {
+        written_offsets_.erase(marker);
+        throw;
+    }
+}
 
 void
 RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
@@ -129,9 +116,7 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     // origin, so segments with many empty/corrupt geometries make such queries
     // proportionally more expensive. Correctness is unaffected.
     auto index_placeholder_mbr = [&]() {
-        Value val(Box(Point(0, 0), Point(0, 0)), row_offset);
-        values_.push_back(val);
-        rtree_.insert(val);
+        insert_value_locked(Box(Point(0, 0), Point(0, 0)), row_offset);
     };
 
     // Parse WKB data using GEOS for consistency. InitGEOSContext throws a
@@ -180,11 +165,8 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     // before the (potentially throwing) container ops.
     geos.release_geom();
 
-    // Create Boost box and insert
-    Box box(Point(minX, minY), Point(maxX, maxY));
-    Value val(box, row_offset);
-    values_.push_back(val);
-    rtree_.insert(val);
+    // Create Boost box and insert (idempotent per offset, all-or-nothing)
+    insert_value_locked(Box(Point(minX, minY), Point(maxX, maxY)), row_offset);
 }
 
 // No IDataStream; bulk-load implemented directly for Boost R-tree
@@ -274,8 +256,13 @@ RTreeIndexWrapper::bulk_load_from_field_data(
         }
     }
 
+    // Publish transactionally: build the tree from the staged values FIRST
+    // (its bulk ctor can throw bad_alloc), then install both structures with
+    // non-throwing swap/move -- a failed attempt leaves values_/rtree_
+    // untouched, so the retried bulk load starts from a consistent state.
+    RTree new_tree(local_values.begin(), local_values.end());
     values_.swap(local_values);
-    rtree_ = RTree(values_.begin(), values_.end());
+    rtree_ = std::move(new_tree);
     LOG_INFO("R-Tree bulk load (Boost) completed with {} entries",
              values_.size());
 }

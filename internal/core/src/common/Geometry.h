@@ -71,6 +71,49 @@ InitGEOSContext(const char* purpose) {
 }
 
 /**
+ * RAII holder for a GEOS context and the reader/geometry commonly held with
+ * it. Any code path that can throw between GEOS_init_r and GEOS_finish_r --
+ * a std::bad_alloc from a container op (now translated to a retriable error
+ * and retried, so a leak repeats once per attempt and compounds the OOM), a
+ * throwing Geometry constructor, an AssertInfo -- must hold its resources
+ * here instead of relying on trailing cleanup calls. Destruction order
+ * matters: geometry and reader are destroyed while the context is still
+ * alive. See PR #50951 review.
+ */
+struct ScopedGeosResources {
+    GEOSContextHandle_t ctx{nullptr};
+    GEOSWKBReader* reader{nullptr};
+    GEOSGeometry* geom{nullptr};
+
+    explicit ScopedGeosResources(const char* purpose)
+        : ctx(InitGEOSContext(purpose)) {
+    }
+    ScopedGeosResources(const ScopedGeosResources&) = delete;
+    ScopedGeosResources&
+    operator=(const ScopedGeosResources&) = delete;
+
+    ~ScopedGeosResources() {
+        release_geom();
+        if (reader != nullptr) {
+            GEOSWKBReader_destroy_r(ctx, reader);
+            reader = nullptr;
+        }
+        if (ctx != nullptr) {
+            GEOS_finish_r(ctx);
+            ctx = nullptr;
+        }
+    }
+
+    void
+    release_geom() {
+        if (geom != nullptr) {
+            GEOSGeom_destroy_r(ctx, geom);
+            geom = nullptr;
+        }
+    }
+};
+
+/**
  * Get a thread-local GEOS context handle for thread-safe operations.
  *
  * GEOS context handles are NOT thread-safe - concurrent operations on the same
