@@ -451,6 +451,9 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
+    std::pair<bool, std::string>
+    CollectionWarmupPolicy(bool is_vector, bool is_index) const;
+
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
