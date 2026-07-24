@@ -5260,6 +5260,7 @@ type dataCoordConfig struct {
 
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
+	IndexStorePathVersion               ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -5980,6 +5981,17 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
+
+	p.IndexStorePathVersion = ParamItem{
+		Key:          "dataCoord.index.storePathVersion",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Object storage layout for newly built segment index files. 0: index_files/{buildID}/{indexVersion}/{partitionID}/{segmentID}, 1: index_v1/{collectionID}/{partitionID}/{segmentID}/{buildID}/{indexVersion}.
+Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
+Layout 1 is additionally gated on every QueryNode having been upgraded, so setting this to 1 in a mixed-version cluster still builds layout 0 until the upgrade finishes.`,
+		Export: true,
+	}
+	p.IndexStorePathVersion.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
