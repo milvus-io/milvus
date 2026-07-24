@@ -90,9 +90,12 @@ type Loader interface {
 	// GetChunkManager returns the chunk manager for remote storage access.
 	GetChunkManager() storage.ChunkManager
 
-	// ReopenSegments update segment data according to new load info.
+	// ReopenSegments update segment data according to new load info. schema is the
+	// reopened segments' data schema, passed explicitly so a reopen decodes its data
+	// at a version-ahead schema without touching the served Collection schema.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
+		schema *schemapb.CollectionSchema,
 	) error
 }
 
@@ -2443,6 +2446,7 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
+	schema *schemapb.CollectionSchema,
 ) error {
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
@@ -2464,12 +2468,21 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			mlog.Warn(context.TODO(), "failed to reopen segment, segment not loaded", mlog.Int64("segmentID", info.GetSegmentID()))
 			continue
 		}
-		collection := loader.manager.Collection.Get(info.GetCollectionID())
-		if collection != nil {
-			configureUseTakeForOutput(info, collection.Schema())
+		// Configure output with the SAME schema the segment will decode with (see
+		// LocalSegment.Reopen: the newer of the request's schema and the served one),
+		// otherwise a version-ahead reopen would decode with V2 but configure output
+		// from V1.
+		effectiveSchema := schema
+		if collection := loader.manager.Collection.Get(info.GetCollectionID()); collection != nil {
+			if served := collection.Schema(); effectiveSchema == nil || served.GetVersion() > effectiveSchema.GetVersion() {
+				effectiveSchema = served
+			}
+		}
+		if effectiveSchema != nil {
+			configureUseTakeForOutput(info, effectiveSchema)
 		}
 
-		err := segment.Reopen(ctx, info)
+		err := segment.Reopen(ctx, info, schema)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))
 			return err

@@ -537,6 +537,18 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 		mlog.String("loadScope", req.GetLoadScope().String()),
 	)
 
+	// Refresh the delegator's collection index meta after reopen (search-plan
+	// HasField). Reopen does not advance the served schema and the UpdateVersion sync
+	// path carries no index info, so this is the delegator's only path to the reopened
+	// index. Skip an empty list so an index-less reopen cannot clobber existing meta.
+	if len(req.GetIndexInfoList()) > 0 {
+		if err := sd.collectionManager.UpdateIndexMeta(req.GetCollectionID(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema())); err != nil {
+			log.Warn(ctx, "failed to update collection index meta after reopen", mlog.Err(err))
+			return err
+		}
+	}
+
 	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
 	for _, info := range req.GetInfos() {
 		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
@@ -692,13 +704,19 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug(ctx, "work loads segments done")
 
+	// A reopen must NOT advance the delegator's served schema or register runners here:
+	// those arrive via the stream UpdateSchema (served schema + idfOracle + function
+	// runners), which is the #50989/#51062 load-wins fix. Reopen DOES refresh the index
+	// meta (handleReopenPostLoad -> Collection.UpdateIndexMeta, so search-plan HasField
+	// sees newly-indexed fields) and backfill BM25 stats into the oracle — neither
+	// advances the served schema.
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		return sd.handleReopenPostLoad(ctx, req)
+	}
+
 	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
 		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
 		return err
-	}
-
-	if req.GetLoadScope() == querypb.LoadScope_Reopen {
-		return sd.handleReopenPostLoad(ctx, req)
 	}
 
 	return sd.withPostLoadLimit(ctx, func() error {
@@ -742,9 +760,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug(ctx, "load delete...")
-		// loadStreamDelete now handles distribution add atomically in Phase 3
+		// loadStreamDelete now handles distribution add atomically in Phase 3.
+		// The in-flight load fence key is the load's carried schema.Version.
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+			entries, uint64(req.GetSchema().GetVersion()))
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -775,11 +794,17 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
+// addDistributionIfSchemaVersionOK fences an in-flight load against a schema
+// change that landed while it was running. The fence key is the load's carried
+// schema.Version, the single monotonic schema version. A load whose
+// schema.Version is older than the delegator's current served schema version
+// started before the latest schema update and must be rejected so it cannot
+// publish stale-schema segments.
+func (sd *shardDelegator) addDistributionIfSchemaVersionOK(loadSchemaVersion uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if schemaBarrierTs < sd.schemaBarrierTs {
-		return merr.WrapErrServiceInternal("schema barrier changed")
+	if loadSchemaVersion < sd.servedSchemaVersion {
+		return merr.WrapErrServiceInternal("schema version changed")
 	}
 
 	// alter distribution
@@ -994,7 +1019,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
-	schemaBarrierTs uint64,
+	loadSchemaVersion uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
@@ -1124,7 +1149,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			// Atomically add to distribution while still holding RLock, so no
 			// ProcessDelete can run between "deletes applied" and "segment
 			// visible".
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaVersionOK(loadSchemaVersion, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
@@ -1160,7 +1185,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
 				)
 			}
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaVersionOK(loadSchemaVersion, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}

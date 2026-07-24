@@ -685,14 +685,17 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
-	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
+	// Alter properties to set ttl field broadcasts a schema snapshot, so it MUST
+	// bump schema.Version: schema.Version is now the single monotonic version
+	// QueryNode/segcore gate on, and a same-version snapshot would be dropped as a
+	// no-op so the ttl_field would never refresh at runtime.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {

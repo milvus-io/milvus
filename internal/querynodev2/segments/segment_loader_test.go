@@ -746,7 +746,8 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
-	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	suite.schema.Version = 1
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema))
 
 	msgLength := 100
 	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
@@ -953,7 +954,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.ExternalField = pkField.GetName()
-	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	suite.schema.Version = 1
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema))
 
 	sourceDeltaPath := "s3://source-bucket/files/insert_log/1/_delta/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
@@ -1032,7 +1034,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestLegacyL0
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.ExternalField = pkField.GetName()
-	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	suite.schema.Version = 1
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema))
 
 	sourceDeltaPath := "s3://source-bucket/files/delta_log/1/2/3/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
