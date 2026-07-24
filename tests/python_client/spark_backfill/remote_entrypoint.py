@@ -132,7 +132,7 @@ def build_spark_command(
         "--conf",
         "spark.driver.userClassPathFirst=true",
         "--conf",
-        "spark.executor.userClassPathFirst=true",
+        "spark.executor.userClassPathFirst=false",
         "--conf",
         "spark.jars.ivy=/tmp/spark-local/ivy",
         "--conf",

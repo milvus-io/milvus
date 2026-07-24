@@ -125,9 +125,12 @@ class BackfillCase:
         extra_arguments: Sequence[str] = (),
     ) -> tuple[SparkJobResult, str]:
         result_uri = result_uri or self.result_uri(case_id)
+        snapshot_path = self.snapshot_location
+        if "://" not in snapshot_path:
+            snapshot_path = f"s3a://{self.settings.minio_bucket}/{snapshot_path.lstrip('/')}"
         arguments = build_backfill_arguments(
             parquet_path=parquet_uri,
-            snapshot_path=self.snapshot_location,
+            snapshot_path=snapshot_path,
             result_path=result_uri,
             s3_endpoint=self.settings.spark_minio_endpoint,
             s3_bucket=self.settings.minio_bucket,
@@ -170,6 +173,8 @@ class BackfillCase:
             "fs.bucket_name": self.settings.minio_bucket,
             "fs.root_path": self.root_path,
             "fs.use_ssl": "false",
+            "fs.use_virtual_host": "false",
+            "fs.region": "us-east-1",
         }
         spec = {
             "options": options,
