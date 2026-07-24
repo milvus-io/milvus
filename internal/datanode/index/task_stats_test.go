@@ -125,7 +125,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager)
+		}, manager, s.mockChunkManager, nil)
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -177,7 +177,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager)
+		}, manager, s.mockChunkManager, nil)
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -207,13 +207,19 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			JSONStatsShreddingRatio:      0.3,
 			JSONStatsWriteBatchSize:      81920,
 		}
-		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "")
+		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "", nil)
 
 		s.Equal(storage.StorageV2, params.StorageVersion)
 		s.NotNil(params.SegmentInsertFiles)
+		s.Nil(params.GetStoragePluginContext())
 	})
 
 	s.Run("test external source spec params", func() {
+		pluginContext := &indexcgopb.StoragePluginContext{
+			EncryptionZoneId: 17,
+			CollectionId:     2,
+			EncryptionKey:    "unsafe-key",
+		}
 		req := &workerpb.CreateStatsRequest{
 			TaskID:                    1,
 			CollectionID:              2,
@@ -222,6 +228,7 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			TaskVersion:               5,
 			CurrentScalarIndexVersion: int32(1),
 			StorageVersion:            storage.StorageV3,
+			ManifestPath:              "manifest-path",
 			InsertLogs:                []*datapb.FieldBinlog{},
 			StorageConfig:             &indexpb.StorageConfig{RootPath: "/test/path"},
 			Schema: &schemapb.CollectionSchema{
@@ -230,11 +237,80 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			},
 		}
 
-		params := buildIndexParams(req, nil, nil, &indexcgopb.StorageConfig{}, nil, "")
+		params := buildIndexParams(req, nil, nil, &indexcgopb.StorageConfig{}, nil, "stats-base-path", pluginContext)
 
 		s.Equal(req.GetSchema().GetExternalSource(), params.GetExternalSource())
 		s.Equal(req.GetSchema().GetExternalSpec(), params.GetExternalSpec())
+		s.Equal(req.GetManifestPath(), params.GetManifest())
+		s.Equal("stats-base-path", params.GetStatsBasePath())
+		s.Equal(pluginContext, params.GetStoragePluginContext())
 	})
+}
+
+func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
+	const fieldID = int64(101)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     s.collectionID,
+		EncryptionKey:    "unsafe-key",
+	}
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:       s.clusterID,
+		TaskID:          100,
+		CollectionID:    s.collectionID,
+		PartitionID:     s.partitionID,
+		TargetSegmentID: 102,
+		TaskVersion:     1,
+		NumRows:         10,
+		StorageVersion:  storage.StorageV2,
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    s.T().TempDir(),
+			StorageType: "local",
+		},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "json",
+				DataType: schemapb.DataType_JSON,
+			},
+		}},
+		InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+	}
+	manager := NewTaskManager(ctx)
+	manager.LoadOrStoreStatsTask(s.clusterID, req.GetTaskID(), &StatsTaskInfo{})
+	task := NewStatsTask(ctx, cancel, req, manager, nil, pluginContext)
+
+	var captured *indexcgopb.BuildIndexInfo
+	buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+			captured = info
+			return &indexcgowrapper.JSONKeyStatsResult{
+				MemSize: 10,
+				Files:   map[string]int64{"json-stats": 10},
+			}, nil
+		}).Build()
+	defer buildMock.UnPatch()
+
+	err := task.createJSONKeyStats(
+		ctx,
+		req.GetStorageConfig(),
+		req.GetCollectionID(),
+		req.GetPartitionID(),
+		req.GetTargetSegmentID(),
+		req.GetTaskVersion(),
+		req.GetTaskID(),
+		common.JSONStatsDataFormatVersion,
+		req.GetInsertLogs(),
+		256,
+		0.3,
+		81920,
+	)
+	s.Require().NoError(err)
+	s.Require().NotNil(captured)
+	s.Equal(pluginContext, captured.GetStoragePluginContext())
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
@@ -332,7 +408,7 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -385,7 +461,7 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
