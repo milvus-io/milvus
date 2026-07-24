@@ -595,15 +595,16 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 	}
 }
 
-// nextMilvusTableTargetOnlyFieldID returns the first field ID above all source
-// snapshot IDs so target-only fields cannot collide with source columns.
+// nextMilvusTableTargetOnlyFieldID returns the first field ID above the
+// historical high-water mark of every provided schema.
 func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int64 {
 	next := int64(StartOfUserFieldID)
 	for _, schema := range schemas {
-		for _, field := range schema.GetFields() {
-			if field.GetFieldID() >= next {
-				next = field.GetFieldID() + 1
-			}
+		if schema == nil {
+			continue
+		}
+		if candidate := maxAssignedFieldIDFromSchema(schema) + 1; candidate > next {
+			next = candidate
 		}
 	}
 	return next

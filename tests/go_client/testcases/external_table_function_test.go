@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -474,10 +475,7 @@ func TestExternalTableBM25Function(t *testing.T) {
 	if err != nil {
 		t.Skipf("MinIO unavailable: %v", err)
 	}
-	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
-	if err != nil || !exists {
-		t.Skipf("MinIO bucket %q not accessible", minioCfg.bucket)
-	}
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
 
 	collName := common.GenRandomString("ext_bm25", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
@@ -704,10 +702,7 @@ func TestExternalTableMinHashFunction(t *testing.T) {
 	if err != nil {
 		t.Skipf("MinIO unavailable: %v", err)
 	}
-	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
-	if err != nil || !exists {
-		t.Skipf("MinIO bucket %q not accessible", minioCfg.bucket)
-	}
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
 
 	collName := common.GenRandomString("ext_minhash", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
@@ -882,6 +877,216 @@ func generateDocParquetBytes(numRows int64, startID int64, phrases []string) ([]
 	return buf.Bytes(), nil
 }
 
+// requireExternalQueryField verifies that a query can read a refreshed external field.
+func requireExternalQueryField(t *testing.T, ctx context.Context, mc *base.MilvusClient, collName string, fieldName string) {
+	t.Helper()
+	res, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 5").
+		WithOutputFields(fieldName))
+	common.CheckErr(t, err, true)
+	require.Greater(t, res.Len(), 0)
+	require.NotNil(t, res.GetColumn(fieldName))
+}
+
+// requireExternalQueryFieldMissing verifies that a dropped external field is hidden.
+func requireExternalQueryFieldMissing(t *testing.T, ctx context.Context, mc *base.MilvusClient, collName string, fieldName string) {
+	t.Helper()
+	_, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 5").
+		WithOutputFields(fieldName))
+	require.Error(t, err)
+}
+
+// requireExternalSearchHits verifies that an external vector field can return results.
+func requireExternalSearchHits(
+	t *testing.T,
+	ctx context.Context,
+	mc *base.MilvusClient,
+	collName string,
+	annsField string,
+	query entity.Vector,
+) {
+	t.Helper()
+	res, err := mc.Search(ctx, client.NewSearchOption(collName, 5, []entity.Vector{query}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField(annsField).
+		WithOutputFields("id"))
+	common.CheckErr(t, err, true)
+	require.Greater(t, len(res), 0)
+	require.Greater(t, res[0].Len(), 0)
+}
+
+// requireExternalSearchError verifies that a dropped vector field is no longer searchable.
+func requireExternalSearchError(
+	t *testing.T,
+	ctx context.Context,
+	mc *base.MilvusClient,
+	collName string,
+	annsField string,
+	query entity.Vector,
+) {
+	t.Helper()
+	_, err := mc.Search(ctx, client.NewSearchOption(collName, 5, []entity.Vector{query}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField(annsField).
+		WithOutputFields("id"))
+	require.Error(t, err)
+}
+
+func schemaFieldNames(schema *entity.Schema) map[string]struct{} {
+	names := make(map[string]struct{}, len(schema.Fields))
+	for _, field := range schema.Fields {
+		names[field.Name] = struct{}{}
+	}
+	return names
+}
+
+func schemaFunctionNames(schema *entity.Schema) map[string]struct{} {
+	names := make(map[string]struct{}, len(schema.Functions))
+	for _, function := range schema.Functions {
+		names[function.Name] = struct{}{}
+	}
+	return names
+}
+
+type schemaEvolutionFunctionState struct {
+	ctx       context.Context
+	mc        *base.MilvusClient
+	collName  string
+	totalRows int64
+}
+
+type schemaEvolutionFunctionCase struct {
+	collectionPrefix      string
+	numFiles              int
+	rowsPerFile           int64
+	sourceFieldName       string
+	sourceExternalField   string
+	makeData              func(rowsPerFile int64, startID int64) ([]byte, error)
+	afterInitialRefresh   func(t *testing.T, state schemaEvolutionFunctionState)
+	addFunction           func(t *testing.T, state schemaEvolutionFunctionState) (functionName string, outputFieldName string)
+	beforeFunctionRefresh func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string)
+	afterFunctionRefresh  func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string)
+	afterDropFunction     func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string)
+}
+
+func refreshSchemaEvolutionCollection(t *testing.T, state schemaEvolutionFunctionState) {
+	t.Helper()
+	refreshResult, err := state.mc.RefreshExternalCollection(state.ctx,
+		client.NewRefreshExternalCollectionOption(state.collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, state.ctx, state.mc, refreshResult.JobID, entity.RefreshStateCompleted)
+}
+
+func loadSchemaEvolutionCollection(t *testing.T, state schemaEvolutionFunctionState) {
+	t.Helper()
+	loadTask, err := state.mc.LoadCollection(state.ctx, client.NewLoadCollectionOption(state.collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(state.ctx), true)
+}
+
+func releaseSchemaEvolutionCollection(t *testing.T, state schemaEvolutionFunctionState) {
+	t.Helper()
+	err := state.mc.ReleaseCollection(state.ctx, client.NewReleaseCollectionOption(state.collName))
+	common.CheckErr(t, err, true)
+}
+
+func runExternalTableSchemaEvolutionFunctionTest(t *testing.T, tc schemaEvolutionFunctionCase) {
+	t.Helper()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	if err != nil {
+		t.Skipf("MinIO unavailable: %v", err)
+	}
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString(tc.collectionPrefix, 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+	for i := 0; i < tc.numFiles; i++ {
+		data, err := tc.makeData(tc.rowsPerFile, int64(i)*tc.rowsPerFile)
+		require.NoError(t, err)
+		key := fmt.Sprintf("%s/data%d.parquet", extPath, i)
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket, key,
+			bytes.NewReader(data), int64(len(data)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).
+			WithExternalField("id")).
+		WithField(entity.NewField().WithName(tc.sourceFieldName).WithDataType(entity.FieldTypeVarChar).
+			WithMaxLength(1024).WithExternalField(tc.sourceExternalField).
+			WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})).
+		WithField(entity.NewField().WithName("seed_sparse").WithDataType(entity.FieldTypeSparseVector)).
+		WithFunction(entity.NewFunction().WithName("seed_bm25_fn").
+			WithInputFields(tc.sourceFieldName).WithOutputFields("seed_sparse").WithType(entity.FunctionTypeBM25))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	state := schemaEvolutionFunctionState{
+		ctx:       ctx,
+		mc:        mc,
+		collName:  collName,
+		totalRows: int64(tc.numFiles) * tc.rowsPerFile,
+	}
+	refreshSchemaEvolutionCollection(t, state)
+	if tc.afterInitialRefresh != nil {
+		tc.afterInitialRefresh(t, state)
+	}
+
+	functionName, outputFieldName := tc.addFunction(t, state)
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	fieldNames := schemaFieldNames(coll.Schema)
+	require.Contains(t, fieldNames, "seed_sparse")
+	require.Contains(t, fieldNames, outputFieldName)
+	functionNames := schemaFunctionNames(coll.Schema)
+	require.Contains(t, functionNames, "seed_bm25_fn")
+	require.Contains(t, functionNames, functionName)
+
+	if tc.beforeFunctionRefresh != nil {
+		tc.beforeFunctionRefresh(t, state, outputFieldName)
+	}
+	refreshSchemaEvolutionCollection(t, state)
+	if tc.afterFunctionRefresh != nil {
+		tc.afterFunctionRefresh(t, state, outputFieldName)
+	}
+	releaseSchemaEvolutionCollection(t, state)
+
+	err = mc.AlterCollectionSchema(ctx,
+		client.NewAlterCollectionSchemaDropFunctionOption(collName, functionName))
+	common.CheckErr(t, err, true)
+
+	coll, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	fieldNames = schemaFieldNames(coll.Schema)
+	require.Contains(t, fieldNames, "seed_sparse")
+	require.NotContains(t, fieldNames, outputFieldName)
+	functionNames = schemaFunctionNames(coll.Schema)
+	require.Contains(t, functionNames, "seed_bm25_fn")
+	require.NotContains(t, functionNames, functionName)
+
+	if tc.afterDropFunction != nil {
+		tc.afterDropFunction(t, state, outputFieldName)
+	}
+}
+
 // TestExternalTableTextEmbeddingFunction verifies TextEmbedding function output
 // on an external collection: refresh streams docs through the configured TEI
 // service, index + load bring it online, and a vector search with the same
@@ -895,10 +1100,7 @@ func TestExternalTableTextEmbeddingFunction(t *testing.T) {
 	if err != nil {
 		t.Skipf("MinIO unavailable: %v", err)
 	}
-	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
-	if err != nil || !exists {
-		t.Skipf("MinIO bucket %q not accessible", minioCfg.bucket)
-	}
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
 
 	phrases := []string{
 		"machine learning models process large datasets",
@@ -1064,4 +1266,548 @@ teiRefreshDone:
 		denseCol.Len(), len(denseCol.Data()[0]))
 
 	t.Log("TextEmbedding E2E passed: create, refresh, index, load, search")
+}
+
+func TestExternalTableSchemaEvolutionBM25(t *testing.T) {
+	runExternalTableSchemaEvolutionFunctionTest(t, schemaEvolutionFunctionCase{
+		collectionPrefix:    "ext_schema_evo",
+		numFiles:            1,
+		rowsPerFile:         3000,
+		sourceFieldName:     "text",
+		sourceExternalField: "text_en",
+		makeData:            generateTextMatchParquetBytes,
+		afterInitialRefresh: func(t *testing.T, state schemaEvolutionFunctionState) {
+			categoryField := entity.NewField().WithName("category").WithDataType(entity.FieldTypeVarChar).
+				WithMaxLength(1024).WithExternalField("text_zh").WithNullable(true)
+			err := state.mc.AlterCollectionSchema(state.ctx,
+				client.NewAlterCollectionSchemaAddFieldOption(state.collName, categoryField))
+			common.CheckErr(t, err, true)
+
+			coll, err := state.mc.DescribeCollection(state.ctx, client.NewDescribeCollectionOption(state.collName))
+			common.CheckErr(t, err, true)
+			fieldNames := schemaFieldNames(coll.Schema)
+			require.Contains(t, fieldNames, "category")
+			require.Contains(t, fieldNames, "text")
+
+			refreshSchemaEvolutionCollection(t, state)
+		},
+		addFunction: func(t *testing.T, state schemaEvolutionFunctionState) (string, string) {
+			bm25Field := entity.NewField().WithName("bm25_sparse").WithDataType(entity.FieldTypeSparseVector)
+			bm25Field.IndexParams = index.NewSparseInvertedIndex(entity.BM25, 0.1).Params()
+			bm25Fn := entity.NewFunction().WithName("bm25_fn").
+				WithInputFields("text").WithOutputFields("bm25_sparse").WithType(entity.FunctionTypeBM25)
+			err := state.mc.AlterCollectionSchema(state.ctx,
+				client.NewAlterCollectionSchemaAddFunctionOption(state.collName, bm25Fn, bm25Field))
+			common.CheckErr(t, err, true)
+			return "bm25_fn", "bm25_sparse"
+		},
+		afterFunctionRefresh: func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string) {
+			sparseIdx := index.NewSparseInvertedIndex(entity.BM25, 0.1)
+			idxTask, err := state.mc.CreateIndex(state.ctx,
+				client.NewCreateIndexOption(state.collName, "seed_sparse", sparseIdx))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, idxTask.Await(state.ctx), true)
+			idxTask, err = state.mc.CreateIndex(state.ctx,
+				client.NewCreateIndexOption(state.collName, outputFieldName, sparseIdx))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, idxTask.Await(state.ctx), true)
+
+			loadSchemaEvolutionCollection(t, state)
+			res, err := state.mc.Search(state.ctx, client.NewSearchOption(state.collName, 5,
+				[]entity.Vector{entity.Text("machine learning")}).
+				WithANNSField(outputFieldName).
+				WithOutputFields("id"))
+			common.CheckErr(t, err, true)
+			require.Greater(t, len(res), 0)
+			require.Greater(t, res[0].Len(), 0)
+		},
+		afterDropFunction: func(t *testing.T, state schemaEvolutionFunctionState, _ string) {
+			err := state.mc.AlterCollectionSchema(state.ctx,
+				client.NewAlterCollectionSchemaDropFieldOption(state.collName, "category"))
+			common.CheckErr(t, err, true)
+			coll, err := state.mc.DescribeCollection(state.ctx, client.NewDescribeCollectionOption(state.collName))
+			common.CheckErr(t, err, true)
+			fieldNames := schemaFieldNames(coll.Schema)
+			require.NotContains(t, fieldNames, "category")
+			require.Contains(t, fieldNames, "text")
+		},
+	})
+}
+
+func TestExternalTableSchemaEvolutionMinHash(t *testing.T) {
+	const numHashes = 16
+	const mhDim = numHashes * 32
+
+	queries := []struct {
+		text        string
+		expectedMod int64
+	}{
+		{"the quick brown fox jumps over the lazy dog today", 0},
+		{"machine learning models process large datasets efficiently", 1},
+		{"vector databases store and search high dimensional embeddings", 2},
+		{"distributed systems handle concurrent requests at massive scale", 3},
+		{"natural language processing enables text understanding widely", 4},
+	}
+	runExternalTableSchemaEvolutionFunctionTest(t, schemaEvolutionFunctionCase{
+		collectionPrefix:    "ext_schema_evo_mh",
+		numFiles:            5,
+		rowsPerFile:         1000,
+		sourceFieldName:     "doc",
+		sourceExternalField: "doc",
+		makeData:            generateMinHashParquetBytes,
+		afterInitialRefresh: func(t *testing.T, state schemaEvolutionFunctionState) {
+			stats, err := state.mc.GetCollectionStats(state.ctx,
+				client.NewGetCollectionStatsOption(state.collName))
+			common.CheckErr(t, err, true)
+			rc, _ := strconv.ParseInt(stats["row_count"], 10, 64)
+			require.Equal(t, state.totalRows, rc)
+
+			sparseIdx := index.NewSparseInvertedIndex(entity.BM25, 0.1)
+			idxTask, err := state.mc.CreateIndex(state.ctx,
+				client.NewCreateIndexOption(state.collName, "seed_sparse", sparseIdx))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, idxTask.Await(state.ctx), true)
+
+			loadSchemaEvolutionCollection(t, state)
+			requireExternalSearchHits(t, state.ctx, state.mc, state.collName,
+				"seed_sparse", entity.Text("machine learning"))
+		},
+		addFunction: func(t *testing.T, state schemaEvolutionFunctionState) (string, string) {
+			mhField := entity.NewField().WithName("mh_sig").WithDataType(entity.FieldTypeBinaryVector).
+				WithDim(mhDim)
+			mhField.IndexParams = index.NewMinHashLSHIndex(entity.JACCARD, 4).WithRawData(true).Params()
+			mhFn := entity.NewFunction().WithName("mh_fn").
+				WithInputFields("doc").WithOutputFields("mh_sig").
+				WithType(entity.FunctionTypeMinHash).
+				WithParam("num_hashes", strconv.Itoa(numHashes)).
+				WithParam("shingle_size", "3")
+			err := state.mc.AlterCollectionSchema(state.ctx,
+				client.NewAlterCollectionSchemaAddFunctionOption(state.collName, mhFn, mhField))
+			common.CheckErr(t, err, true)
+			return "mh_fn", "mh_sig"
+		},
+		beforeFunctionRefresh: func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string) {
+			requireExternalSearchHits(t, state.ctx, state.mc, state.collName,
+				"seed_sparse", entity.Text("machine learning"))
+			requireExternalSearchError(t, state.ctx, state.mc, state.collName, outputFieldName,
+				entity.Text(queries[0].text))
+		},
+		afterFunctionRefresh: func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string) {
+			mhIdx := index.NewMinHashLSHIndex(entity.JACCARD, 4).WithRawData(true)
+			idxTask, err := state.mc.CreateIndex(state.ctx,
+				client.NewCreateIndexOption(state.collName, outputFieldName, mhIdx))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, idxTask.Await(state.ctx), true)
+
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				for _, q := range queries {
+					res, err := state.mc.Search(state.ctx, client.NewSearchOption(state.collName, 10,
+						[]entity.Vector{entity.Text(q.text)}).
+						WithANNSField(outputFieldName).
+						WithOutputFields("id"))
+					require.NoError(c, err)
+					require.NotEmpty(c, res, "MinHash search %q returned no hits", q.text)
+					require.NotZero(c, res[0].Len(), "MinHash search %q returned no hits", q.text)
+					hits := res[0]
+					idCol, ok := hits.GetColumn("id").(*column.ColumnInt64)
+					require.True(c, ok, "MinHash search %q missing id output", q.text)
+					matched := 0
+					for i := 0; i < hits.Len(); i++ {
+						if idCol.Data()[i]%int64(len(queries)) == q.expectedMod {
+							matched++
+						}
+					}
+					require.GreaterOrEqual(c, matched, hits.Len()/2+1,
+						"MinHash %q: only %d/%d hits in class %d",
+						q.text, matched, hits.Len(), q.expectedMod)
+				}
+			}, 120*time.Second, 3*time.Second)
+
+			takeRes, err := state.mc.Search(state.ctx, client.NewSearchOption(state.collName, 5,
+				[]entity.Vector{entity.Text(queries[0].text)}).
+				WithANNSField(outputFieldName).
+				WithOutputFields("id", outputFieldName))
+			common.CheckErr(t, err, true)
+			require.Greater(t, len(takeRes), 0)
+			sigCol, ok := takeRes[0].GetColumn(outputFieldName).(*column.ColumnBinaryVector)
+			require.True(t, ok, "%s output column must be present", outputFieldName)
+			require.Equal(t, takeRes[0].Len(), sigCol.Len())
+			require.Greater(t, len(sigCol.Data()), 0)
+		},
+		afterDropFunction: func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string) {
+			loadSchemaEvolutionCollection(t, state)
+			requireExternalSearchHits(t, state.ctx, state.mc, state.collName,
+				"seed_sparse", entity.Text("machine learning"))
+			requireExternalSearchError(t, state.ctx, state.mc, state.collName, outputFieldName,
+				entity.Text(queries[0].text))
+			releaseSchemaEvolutionCollection(t, state)
+
+			refreshSchemaEvolutionCollection(t, state)
+			loadSchemaEvolutionCollection(t, state)
+			requireExternalSearchHits(t, state.ctx, state.mc, state.collName,
+				"seed_sparse", entity.Text("machine learning"))
+			requireExternalSearchError(t, state.ctx, state.mc, state.collName, outputFieldName,
+				entity.Text(queries[0].text))
+			releaseSchemaEvolutionCollection(t, state)
+		},
+	})
+}
+
+func TestExternalTableSchemaEvolutionTextEmbedding(t *testing.T) {
+	phrases := []string{
+		"machine learning models process large datasets",
+		"vector databases store high dimensional embeddings",
+		"distributed systems handle concurrent requests",
+		"natural language processing enables text understanding",
+		"cloud computing provides elastic infrastructure",
+	}
+	teiEndpoint := hp.GetTEIEndpoint()
+	teiEmbeddings, err := hp.CallTEIDirectly(teiEndpoint, phrases)
+	if err != nil {
+		t.Skipf("Skip TextEmbedding schema evolution test: TEI endpoint %s unavailable: %v", teiEndpoint, err)
+	}
+	require.Len(t, teiEmbeddings, len(phrases))
+
+	dim := hp.GetTEIModelDim()
+	require.Equal(t, dim, len(teiEmbeddings[0]), "TEI embedding dimension should match test config")
+
+	runExternalTableSchemaEvolutionFunctionTest(t, schemaEvolutionFunctionCase{
+		collectionPrefix:    "ext_schema_evo_tei",
+		numFiles:            5,
+		rowsPerFile:         200,
+		sourceFieldName:     "doc",
+		sourceExternalField: "doc",
+		makeData: func(rowsPerFile int64, startID int64) ([]byte, error) {
+			return generateDocParquetBytes(rowsPerFile, startID, phrases)
+		},
+		afterInitialRefresh: func(t *testing.T, state schemaEvolutionFunctionState) {
+			stats, err := state.mc.GetCollectionStats(state.ctx,
+				client.NewGetCollectionStatsOption(state.collName))
+			common.CheckErr(t, err, true)
+			rc, _ := strconv.ParseInt(stats["row_count"], 10, 64)
+			require.Equal(t, state.totalRows, rc)
+		},
+		addFunction: func(t *testing.T, state schemaEvolutionFunctionState) (string, string) {
+			denseField := entity.NewField().WithName("dense").WithDataType(entity.FieldTypeFloatVector).
+				WithDim(int64(dim))
+			denseField.IndexParams = index.NewFlatIndex(entity.L2).Params()
+			teiFn := entity.NewFunction().WithName("tei_fn").
+				WithInputFields("doc").WithOutputFields("dense").
+				WithType(entity.FunctionTypeTextEmbedding).
+				WithParam("provider", "TEI").
+				WithParam("endpoint", teiEndpoint)
+			err := state.mc.AlterCollectionSchema(state.ctx,
+				client.NewAlterCollectionSchemaAddFunctionOption(state.collName, teiFn, denseField))
+			common.CheckErr(t, err, true)
+			return "tei_fn", "dense"
+		},
+		afterFunctionRefresh: func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string) {
+			sparseIdx := index.NewSparseInvertedIndex(entity.BM25, 0.1)
+			idxTask, err := state.mc.CreateIndex(state.ctx,
+				client.NewCreateIndexOption(state.collName, "seed_sparse", sparseIdx))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, idxTask.Await(state.ctx), true)
+			idxTask, err = state.mc.CreateIndex(state.ctx,
+				client.NewCreateIndexOption(state.collName, outputFieldName, index.NewFlatIndex(entity.L2)))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, idxTask.Await(state.ctx), true)
+
+			loadSchemaEvolutionCollection(t, state)
+			numClasses := int64(len(phrases))
+			for classID, phrase := range phrases {
+				res, err := state.mc.Search(state.ctx, client.NewSearchOption(state.collName, 10,
+					[]entity.Vector{entity.Text(phrase)}).
+					WithANNSField(outputFieldName).
+					WithOutputFields("id"))
+				common.CheckErr(t, err, true)
+				require.Greater(t, len(res), 0)
+				hits := res[0]
+				require.Greater(t, hits.Len(), 0)
+				idCol, ok := hits.GetColumn("id").(*column.ColumnInt64)
+				require.True(t, ok)
+				matched := 0
+				for i := 0; i < hits.Len(); i++ {
+					if idCol.Data()[i]%numClasses == int64(classID) {
+						matched++
+					}
+				}
+				minMatched := hits.Len() / int(numClasses)
+				if minMatched < 1 {
+					minMatched = 1
+				}
+				require.GreaterOrEqualf(t, matched, minMatched,
+					"TextEmbedding %q: only %d/%d hits in class %d", phrase, matched, hits.Len(), classID)
+			}
+
+			takeRes, err := state.mc.Search(state.ctx, client.NewSearchOption(state.collName, 5,
+				[]entity.Vector{entity.Text(phrases[0])}).
+				WithANNSField(outputFieldName).
+				WithOutputFields("id", outputFieldName))
+			common.CheckErr(t, err, true)
+			require.Greater(t, len(takeRes), 0)
+			denseCol, ok := takeRes[0].GetColumn(outputFieldName).(*column.ColumnFloatVector)
+			require.True(t, ok, "%s output column must be present", outputFieldName)
+			require.Equal(t, takeRes[0].Len(), denseCol.Len())
+			require.Greater(t, len(denseCol.Data()), 0)
+			require.Equal(t, dim, len(denseCol.Data()[0]))
+			idCol := takeRes[0].GetColumn("id").(*column.ColumnInt64)
+			matchedDense := 0
+			for i := 0; i < denseCol.Len(); i++ {
+				if idCol.Data()[i]%int64(len(phrases)) != 0 {
+					continue
+				}
+				got := denseCol.Data()[i]
+				require.Greater(t, hp.CosineSimilarity(got, teiEmbeddings[0]), float32(0.99),
+					"row %d (id=%d) should carry the TEI embedding for %q", i, idCol.Data()[i], phrases[0])
+				matchedDense++
+			}
+			require.Greater(t, matchedDense, 0, "take() should return at least one hit for %q", phrases[0])
+		},
+		afterDropFunction: func(t *testing.T, state schemaEvolutionFunctionState, outputFieldName string) {
+			loadSchemaEvolutionCollection(t, state)
+			requireExternalSearchHits(t, state.ctx, state.mc, state.collName,
+				"seed_sparse", entity.Text("machine learning"))
+			requireExternalSearchError(t, state.ctx, state.mc, state.collName,
+				outputFieldName, entity.Text(phrases[0]))
+			releaseSchemaEvolutionCollection(t, state)
+		},
+	})
+}
+
+func TestExternalTableLoadedAddFieldQueryAcrossRefresh(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	if err != nil {
+		t.Skipf("MinIO unavailable: %v", err)
+	}
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_schema_loaded", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+	data, err := generateTextMatchParquetBytes(1000, 0)
+	require.NoError(t, err)
+	key := fmt.Sprintf("%s/data.parquet", extPath)
+	_, err = minioClient.PutObject(ctx, minioCfg.bucket, key,
+		bytes.NewReader(data), int64(len(data)),
+		miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).
+			WithMaxLength(1024).WithExternalField("text_en").
+			WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})).
+		WithField(entity.NewField().WithName("seed_sparse").WithDataType(entity.FieldTypeSparseVector)).
+		WithFunction(entity.NewFunction().WithName("seed_bm25_fn").
+			WithInputFields("text").WithOutputFields("seed_sparse").WithType(entity.FunctionTypeBM25))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refreshResult, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshResult.JobID, entity.RefreshStateCompleted)
+
+	sparseIdx := index.NewSparseInvertedIndex(entity.BM25, 0.1)
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "seed_sparse", sparseIdx))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, idxTask.Await(ctx), true)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	categoryField := entity.NewField().WithName("category").WithDataType(entity.FieldTypeVarChar).
+		WithMaxLength(1024).WithExternalField("text_zh").WithNullable(true)
+	err = mc.AlterCollectionSchema(ctx, client.NewAlterCollectionSchemaAddFieldOption(collName, categoryField))
+	common.CheckErr(t, err, true)
+
+	_, err = mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 5").
+		WithOutputFields("id"))
+	common.CheckErr(t, err, true)
+
+	requireExternalQueryFieldMissing(t, ctx, mc, collName, "category")
+
+	refreshResult, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshResult.JobID, entity.RefreshStateCompleted)
+
+	err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := mc.Query(ctx, client.NewQueryOption(collName).
+			WithConsistencyLevel(entity.ClStrong).
+			WithFilter("id < 5").
+			WithOutputFields("category"))
+		require.NoError(c, err)
+		require.NotNil(c, res.GetColumn("category"), "category output column is missing")
+	}, 90*time.Second, 2*time.Second)
+
+	err = mc.AlterCollectionSchema(ctx, client.NewAlterCollectionSchemaDropFieldOption(collName, "category"))
+	common.CheckErr(t, err, true)
+
+	requireExternalQueryField(t, ctx, mc, collName, "id")
+	requireExternalQueryFieldMissing(t, ctx, mc, collName, "category")
+
+	refreshResult, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshResult.JobID, entity.RefreshStateCompleted)
+
+	requireExternalQueryField(t, ctx, mc, collName, "id")
+	requireExternalQueryFieldMissing(t, ctx, mc, collName, "category")
+
+	err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
+	common.CheckErr(t, err, true)
+}
+
+func TestExternalTableLoadedBM25QueryAcrossRefresh(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	if err != nil {
+		t.Skipf("MinIO unavailable: %v", err)
+	}
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_loaded_bm25", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+	data, err := generateParquetBytes(externalDataSchemaMulti, 1000, 0, testVecDim)
+	require.NoError(t, err)
+	key := fmt.Sprintf("%s/data.parquet", extPath)
+	_, err = minioClient.PutObject(ctx, minioCfg.bucket, key,
+		bytes.NewReader(data), int64(len(data)),
+		miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).
+			WithMaxLength(1024).WithExternalField("varchar_val").
+			WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})).
+		WithField(entity.NewField().WithName("dense").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refreshResult, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshResult.JobID, entity.RefreshStateCompleted)
+
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "dense", index.NewFlatIndex(entity.L2)))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, idxTask.Await(ctx), true)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	queryDense := entity.FloatVector([]float32{0, 1, 2, 3})
+	searchDense := func() error {
+		res, err := mc.Search(ctx, client.NewSearchOption(collName, 5, []entity.Vector{queryDense}).
+			WithConsistencyLevel(entity.ClStrong).
+			WithANNSField("dense").
+			WithOutputFields("id"))
+		if err != nil {
+			return err
+		}
+		if len(res) == 0 || res[0].Len() == 0 {
+			return fmt.Errorf("dense search returned no hits")
+		}
+		return nil
+	}
+	common.CheckErr(t, searchDense(), true)
+
+	bm25Field := entity.NewField().WithName("bm25_sparse").WithDataType(entity.FieldTypeSparseVector)
+	sparseIdx := index.NewSparseInvertedIndex(entity.BM25, 0.1)
+	bm25Field.IndexParams = sparseIdx.Params()
+	bm25Fn := entity.NewFunction().WithName("bm25_fn").
+		WithInputFields("text").WithOutputFields("bm25_sparse").WithType(entity.FunctionTypeBM25)
+	err = mc.AlterCollectionSchema(ctx,
+		client.NewAlterCollectionSchemaAddFunctionOption(collName, bm25Fn, bm25Field))
+	common.CheckErr(t, err, true)
+
+	common.CheckErr(t, searchDense(), true)
+
+	refreshResult, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshResult.JobID, entity.RefreshStateCompleted)
+
+	idxTask, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "bm25_sparse", sparseIdx))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, idxTask.Await(ctx), true)
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := mc.Search(ctx, client.NewSearchOption(collName, 5, []entity.Vector{entity.Text("str_0001")}).
+			WithConsistencyLevel(entity.ClStrong).
+			WithANNSField("bm25_sparse").
+			WithOutputFields("id"))
+		require.NoError(c, err)
+		require.NotEmpty(c, res, "BM25 search returned no hits")
+		require.NotZero(c, res[0].Len(), "BM25 search returned no hits")
+	}, 120*time.Second, 3*time.Second)
+
+	err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	err = mc.AlterCollectionSchema(ctx,
+		client.NewAlterCollectionSchemaDropFunctionOption(collName, "bm25_fn"))
+	common.CheckErr(t, err, true)
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	fieldNames := schemaFieldNames(coll.Schema)
+	require.Contains(t, fieldNames, "dense")
+	require.NotContains(t, fieldNames, "bm25_sparse")
+	functionNames := schemaFunctionNames(coll.Schema)
+	require.NotContains(t, functionNames, "bm25_fn")
+
+	loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+	common.CheckErr(t, searchDense(), true)
+	requireExternalSearchError(t, ctx, mc, collName, "bm25_sparse", entity.Text("str_0001"))
+	err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	refreshResult, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshResult.JobID, entity.RefreshStateCompleted)
+
+	loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+	common.CheckErr(t, searchDense(), true)
+	requireExternalSearchError(t, ctx, mc, collName, "bm25_sparse", entity.Text("str_0001"))
+	err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
+	common.CheckErr(t, err, true)
 }

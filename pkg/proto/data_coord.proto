@@ -1571,6 +1571,7 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  int32 schema_version = 13;     // Collection schema version used when the refresh job was submitted
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
@@ -1600,6 +1601,7 @@ message ExternalCollectionRefreshTask {
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
   repeated SegmentInfo updated_segments = 16;  // Segment upsert payload produced by this task result
   bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
+  int32 schema_version = 19;  // Collection schema version copied from the parent refresh job
 }
 
 message GetRefreshExternalCollectionProgressResponse {

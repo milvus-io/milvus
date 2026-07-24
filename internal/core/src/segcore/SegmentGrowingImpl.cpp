@@ -2771,10 +2771,19 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto schema_snapshot = schema_;
     auto group_has_live_field = [&](int64_t group_index) {
         for (const auto& column : column_groups->at(group_index)->columns) {
-            // An untranslatable column name is a broken manifest and throws
-            // (same contract as the sealed loader).
+            // An untranslatable column name is a broken manifest and throws.
             auto field_id = schema_snapshot->ResolveColumnFieldId(column);
-            if (schema_snapshot->has_field(field_id)) {
+            if (!field_id.has_value()) {
+                if (schema_snapshot->is_external_collection()) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "external column '{}' not found in schema",
+                              column);
+                }
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "column '{}' is not a valid field id",
+                          column);
+            }
+            if (schema_snapshot->has_field(field_id.value())) {
                 return true;
             }
         }
