@@ -169,10 +169,10 @@ func (m *windowManager) persistPChannelWindowMeta(
 					})) {
 						return nil, nil
 					}
-					return nil, errors.Errorf("pchannel window meta advanced while persisting generation %d", persistedChunk.generation)
+					return nil, merr.WrapErrServiceInternalMsg("pchannel window meta advanced while persisting generation %d", persistedChunk.generation)
 				}
 				if current.LatestGeneration+1 != persistedChunk.generation {
-					return nil, errors.Errorf("pchannel window meta latest generation %d does not precede persisted generation %d", current.LatestGeneration, persistedChunk.generation)
+					return nil, merr.WrapErrServiceInternalMsg("pchannel window meta latest generation %d does not precede persisted generation %d", current.LatestGeneration, persistedChunk.generation)
 				}
 			}
 
