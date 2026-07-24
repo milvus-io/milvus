@@ -1496,6 +1496,8 @@ type MinioConfig struct {
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
+
+	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1569,6 +1571,16 @@ The default value applies to MinIO or S3 service that started with the default d
 		Export:       true,
 	}
 	p.UseSSL.Init(base.mgr)
+
+	p.DisableAWSChunkedEncoding = ParamItem{
+		Key:          "minio.disableAWSChunkedEncoding",
+		Version:      "2.6.20",
+		DefaultValue: "false",
+		Doc: `When enabled, PutObject requests use UNSIGNED-PAYLOAD to support S3-compatible endpoints that are incompatible with AWS chunked encoding.
+HTTPS is recommended because payload integrity is then protected by TLS rather than a signed payload hash.`,
+		Export: false,
+	}
+	p.DisableAWSChunkedEncoding.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
 		Key:          "minio.ssl.tlsCACert",
