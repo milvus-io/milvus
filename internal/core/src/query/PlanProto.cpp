@@ -953,10 +953,33 @@ ProtoParser::RetrievePlanNodeFromProto(
     return plan_node;
 }
 
+// A plan may carry a large bloom_match filter_blob (up to 128 MiB). Expanding it
+// via ShortDebugString() octal-escapes every non-printable byte (~4x blow-up), so
+// a full dump could allocate a multi-hundred-MiB string per debug log and OOM
+// under concurrent plan creation. Elide the dump for oversized plans, logging
+// only the serialized size. Gated on VLOG_IS_ON so the ByteSizeLong() proto
+// walk costs nothing on the per-request path when debug logging is off.
+static constexpr size_t kMaxPlanDebugBytes = 4096;
+
+static void
+LogPlanProtoDebug(const char* what,
+                  const proto::plan::PlanNode& plan_node_proto) {
+    if (!VLOG_IS_ON(GLOG_DEBUG)) {
+        return;
+    }
+    if (const auto size = plan_node_proto.ByteSizeLong();
+        size <= kMaxPlanDebugBytes) {
+        LOG_DEBUG("create {} plan from proto: {}",
+                  what,
+                  plan_node_proto.ShortDebugString());
+    } else {
+        LOG_DEBUG("create {} plan from proto: <{} bytes, elided>", what, size);
+    }
+}
+
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
-    LOG_DEBUG("create search plan from proto: {}",
-              plan_node_proto.ShortDebugString());
+    LogPlanProtoDebug("search", plan_node_proto);
     auto plan = std::make_unique<Plan>(schema);
 
     auto plan_node = PlanNodeFromProto(plan_node_proto);
@@ -980,8 +1003,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
-    LOG_DEBUG("create retrieve plan from proto: {}",
-              plan_node_proto.ShortDebugString());
+    LogPlanProtoDebug("retrieve", plan_node_proto);
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
@@ -1105,6 +1127,34 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto predicate = this->ParseExprs(expr_pb.predicate());
     return std::make_shared<expr::MatchExpr>(
         struct_name, match_type, count, predicate);
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseBloomFilterExprs(
+    const proto::plan::BloomFilterExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    // bloom_match supports scalar INT8/16/32/64, VARCHAR, and JSON paths
+    // (design doc 20260707). The request content picks the field, so an
+    // unsupported type is an input error.
+    switch (data_type) {
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::VARCHAR:
+        case DataType::JSON:
+            break;
+        default:
+            ThrowInfo(ExprInvalid,
+                      "bloom_match does not support field data type: {}",
+                      data_type);
+    }
+    return std::make_shared<expr::BloomFilterExpr>(
+        expr::ColumnInfo(column_info), expr_pb.filter_blob());
 }
 
 expr::TypedExprPtr
@@ -1389,6 +1439,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kMatchExpr: {
             result = ParseMatchExprs(expr_pb.match_expr());
+            break;
+        }
+        case ppe::kBloomFilterExpr: {
+            result = ParseBloomFilterExprs(expr_pb.bloom_filter_expr());
             break;
         }
         default: {

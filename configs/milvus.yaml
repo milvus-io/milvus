@@ -363,6 +363,8 @@ proxy:
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
+  maxBloomFilterSize: 33554432 # The maximum byte size of the SBBF body in a client pre-built bloom_match filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-request memory/network amplification. Must not exceed the MBF1 format cap (128 MiB); the default admits ~24M int64 members at the default FPR while staying under the default gRPC receive limit.
+  maxBloomFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of bloom-bearing expression plans in one Search, HybridSearch, or Query request. The proxy checks the assembled plans before proto.Marshal, so repeated references to one bloom_match template value and Bloom filters across hybrid sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false

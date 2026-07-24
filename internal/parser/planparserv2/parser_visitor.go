@@ -1340,6 +1340,11 @@ func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
+	if functionName == BloomMatchFunctionName {
+		// bloom_match is compiled on the proxy into a BloomFilterExpr carrying a
+		// pre-built bloom filter blob instead of a generic CallExpr.
+		return v.visitBloomMatch(ctx)
+	}
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
 	for _, param := range ctx.AllExpr() {
@@ -1763,6 +1768,11 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			Expr: &planpb.Expr_RandomSampleExpr{
 				RandomSampleExpr: randomSampleExpr,
 			},
+			// The wrapper must carry the predicate's template flag, or the
+			// top-level IsTemplate short-circuit skips FillExpressionValue and
+			// an unfilled placeholder (e.g. a deferred bloom_match) fans out
+			// to QueryNodes. Mirrors the element_filter branch below.
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 		}
 	} else if isElementFilterExpr(rightExpr) {
 		// Similar to RandomSampleExpr, extract doc-level predicate
@@ -2915,6 +2925,18 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 		return merr.WrapErrParameterInvalidMsg("invalid element expression: %s", ctx.Expr().GetText())
 	}
 
+	// bloom_match is not supported inside an element_filter element expression:
+	// element_filter evaluates the sub-expression per ELEMENT, feeding global
+	// element IDs where PhyBloomFilterExpr expects scalar-field row offsets —
+	// which would read the wrong row, go out of bounds, or assert. The legal
+	// doc-level combination bloom_match(field, {bf}) && element_filter(...) is
+	// unaffected: that bloom_match is a sibling of element_filter, not inside
+	// its element expression. Mirrors the MATCH_* guard in parseMatchExpr.
+	if hasBloomFilterExpr(exprWithType.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"bloom_match is not supported inside element_filter element expressions")
+	}
+
 	// Build ElementFilterExpr proto
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -3005,6 +3027,17 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	predicateExpr := getExpr(predicate)
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+
+	// bloom_match is not supported inside a MATCH_* element predicate. Its
+	// one-sided error (false positives) is only safe for monotonic
+	// aggregations; MATCH_MOST / MATCH_EXACT bound the hit count from above, so
+	// a false positive would wrongly drop a true row (row-level false
+	// negative), breaking the never-miss-a-member guarantee. Reject rather than
+	// ship a per-MatchType error-semantics matrix.
+	if hasBloomFilterExpr(predicateExpr.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"bloom_match is not supported inside %s element predicates", funcName)
 	}
 
 	// Build MatchExpr proto

@@ -9,7 +9,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -839,7 +838,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-	t.SerializedExprPlan, err = proto.Marshal(t.plan)
+	t.SerializedExprPlan, _, err = marshalPlanWithBloomFilterSizeLimit(t.plan, 0)
 	if err != nil {
 		return err
 	}

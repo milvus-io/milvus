@@ -201,6 +201,23 @@ class Expr : public std::enable_shared_from_this<Expr> {
     MarkNullRejecting() {
     }
 
+    // Whether this expression's result may be cached by ExprResCacheManager.
+    // Cacheability PROPAGATES from children: a composite expression is cacheable
+    // only if every child is. An expression whose cache key (derived from
+    // ToString()) cannot safely and cheaply capture its identity overrides this
+    // to false — e.g. bloom_match, whose slim key cannot distinguish two distinct
+    // multi-MiB blobs — so any predicate that contains it is excluded from the
+    // FilterBitsNode result cache and can never reuse another query's bitmap.
+    virtual bool
+    IsCacheable() const {
+        for (const auto& input : inputs_) {
+            if (input && !input->IsCacheable()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     virtual bool
     CanUseNestedIndex() const {
         return false;
@@ -307,8 +324,12 @@ class SegmentExpr : public Expr {
         // (TextIndex/PkIndex/JsonStats) and the RawData path never pay for a
         // PinCells() cold fetch under tiered storage.
 
-        // if index not include raw data, also need load data
-        if (segment_->HasFieldData(field_id_)) {
+        // Snapshot field-data availability together with num_data_chunk_.
+        // Execution-path selection may happen later, after a concurrent
+        // reopen/load publishes a different segment state; both decisions must
+        // observe the same construction-time view.
+        has_field_data_at_init_ = segment_->HasFieldData(field_id_);
+        if (has_field_data_at_init_) {
             if (segment_->is_chunked()) {
                 num_data_chunk_ = segment_->num_chunk_data(field_id_);
             } else {
@@ -2606,6 +2627,13 @@ class SegmentExpr : public Expr {
     // the pin, num_index_chunk_ == pinned_index_.size() always.
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
     bool pinned_index_initialized_{false};
+
+    // Snapshot of segment_->HasFieldData(field_id_) taken at construction, so
+    // that execution-path selection observes a stable view even if a concurrent
+    // reopen/load publishes a different segment state later. Consumed by
+    // expressions (e.g. bloom_match) that must fail closed when raw field data
+    // is unavailable and no cheap per-row index reverse lookup exists.
+    bool has_field_data_at_init_{false};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};

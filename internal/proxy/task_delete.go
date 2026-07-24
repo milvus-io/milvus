@@ -346,6 +346,12 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
+	// bloom_match has false positives; a delete driven by it would remove rows
+	// outside the user's set (see design doc 20260707-bloom-filter-expression).
+	if planparserv2.PlanContainsBloomFilter(dr.plan) {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bloom_match is approximate and cannot be used in delete expressions"))
+	}
+
 	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
 	partName := dr.req.GetPartitionName()

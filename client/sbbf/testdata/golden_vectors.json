@@ -1,0 +1,1670 @@
+{
+  "description": "Milvus MBF1 / parquet SBBF (XXH64 seed=0) golden vectors. int64 values are decimal strings hashed as 8-byte little-endian; string values are hashed as raw UTF-8 bytes. blob_hex is the full MBF1 envelope. See sbbf_test.go for the schema.",
+  "cases": [
+    {
+      "name": "small_int64_set",
+      "n": 8,
+      "fpr": 0.001,
+      "int_values": [
+        "-9223372036854775808",
+        "-1",
+        "0",
+        "1",
+        "2",
+        "42",
+        "1000000007",
+        "9223372036854775807"
+      ],
+      "string_values": [],
+      "blob_hex": "4d424631010001000800000000000000fca9f1d24d62503f01000000000000000117100a804845062834804200440612100448a40680089c4040542838410046",
+      "probes": [
+        {
+          "kind": "int64",
+          "int64": "-9223372036854775808",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "-1",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "0",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "42",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1000000007",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "9223372036854775807",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "3",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "7",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "-2",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "123456789",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "9999",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "-9223372036854775807",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "9223372036854775806",
+          "member": false,
+          "expect": false
+        }
+      ]
+    },
+    {
+      "name": "small_string_set",
+      "n": 7,
+      "fpr": 0.001,
+      "int_values": [],
+      "string_values": [
+        "",
+        "a",
+        "milvus",
+        "bloom",
+        "日本語",
+        "🚀🚀",
+        "hello world"
+      ],
+      "blob_hex": "4d424631010001000700000000000000fca9f1d24d62503f010000000000000010002c24010e020492110042181000b08a40860000284209010114a8015410c0",
+      "probes": [
+        {
+          "kind": "string",
+          "string": "",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "a",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "milvus",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "bloom",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "日本語",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "🚀🚀",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "hello world",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "b",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "milvusx",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "Bloom",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "hell",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "世界",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": " ",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "hello  world",
+          "member": false,
+          "expect": false
+        }
+      ]
+    },
+    {
+      "name": "mixed_int_string_fpr01",
+      "n": 200,
+      "fpr": 0.01,
+      "int_values": [
+        "0",
+        "2654435760",
+        "10617743042",
+        "23889921846",
+        "42470972172",
+        "66360894020",
+        "95559687390",
+        "130067352282",
+        "169883888696",
+        "215009296632",
+        "265443576090",
+        "321186727070",
+        "382238749572",
+        "448599643596",
+        "520269409142",
+        "597248046210",
+        "679535554800",
+        "767131934912",
+        "860037186546",
+        "958251309702",
+        "1061774304380",
+        "1170606170580",
+        "1284746908302",
+        "1404196517546",
+        "1528954998312",
+        "1659022350600",
+        "1794398574410",
+        "1935083669742",
+        "2081077636596",
+        "2232380474972",
+        "2388992184870",
+        "2550912766290",
+        "2718142219232",
+        "2890680543696",
+        "3068527739682",
+        "3251683807190",
+        "3440148746220",
+        "3633922556772",
+        "3833005238846",
+        "4037396792442",
+        "4247097217560",
+        "4462106514200",
+        "4682424682362",
+        "4908051722046",
+        "5138987633252",
+        "5375232415980",
+        "5616786070230",
+        "5863648596002",
+        "6115819993296",
+        "6373300262112",
+        "6636089402450",
+        "6904187414310",
+        "7177594297692",
+        "7456310052596",
+        "7740334679022",
+        "8029668176970",
+        "8324310546440",
+        "8624261787432",
+        "8929521899946",
+        "9240090883982",
+        "9555968739540",
+        "9877155466620",
+        "10203651065222",
+        "10535455535346",
+        "10872568876992",
+        "11214991090160",
+        "11562722174850",
+        "11915762131062",
+        "12274110958796",
+        "12637768658052",
+        "13006735228830",
+        "13381010671130",
+        "13760594984952",
+        "14145488170296",
+        "14535690227162",
+        "14931201155550",
+        "15332020955460",
+        "15738149626892",
+        "16149587169846",
+        "16566333584322",
+        "16988388870320",
+        "17415753027840",
+        "17848426056882",
+        "18286407957446",
+        "18729698729532",
+        "19178298373140",
+        "19632206888270",
+        "20091424274922",
+        "20555950533096",
+        "21025785662792",
+        "21500929664010",
+        "21981382536750",
+        "22467144281012",
+        "22958214896796",
+        "23454594384102",
+        "23956282742930",
+        "24463279973280",
+        "24975586075152",
+        "25493201048546",
+        "26016124893462"
+      ],
+      "string_values": [
+        "key-000",
+        "key-001",
+        "key-002",
+        "key-003",
+        "key-004",
+        "key-005",
+        "key-006",
+        "key-007",
+        "key-008",
+        "key-009",
+        "key-010",
+        "key-011",
+        "key-012",
+        "key-013",
+        "key-014",
+        "key-015",
+        "key-016",
+        "key-017",
+        "key-018",
+        "key-019",
+        "key-020",
+        "key-021",
+        "key-022",
+        "key-023",
+        "key-024",
+        "key-025",
+        "key-026",
+        "key-027",
+        "key-028",
+        "key-029",
+        "key-030",
+        "key-031",
+        "key-032",
+        "key-033",
+        "key-034",
+        "key-035",
+        "key-036",
+        "key-037",
+        "key-038",
+        "key-039",
+        "key-040",
+        "key-041",
+        "key-042",
+        "key-043",
+        "key-044",
+        "key-045",
+        "key-046",
+        "key-047",
+        "key-048",
+        "key-049",
+        "key-050",
+        "key-051",
+        "key-052",
+        "key-053",
+        "key-054",
+        "key-055",
+        "key-056",
+        "key-057",
+        "key-058",
+        "key-059",
+        "key-060",
+        "key-061",
+        "key-062",
+        "key-063",
+        "key-064",
+        "key-065",
+        "key-066",
+        "key-067",
+        "key-068",
+        "key-069",
+        "key-070",
+        "key-071",
+        "key-072",
+        "key-073",
+        "key-074",
+        "key-075",
+        "key-076",
+        "key-077",
+        "key-078",
+        "key-079",
+        "key-080",
+        "key-081",
+        "key-082",
+        "key-083",
+        "key-084",
+        "key-085",
+        "key-086",
+        "key-087",
+        "key-088",
+        "key-089",
+        "key-090",
+        "key-091",
+        "key-092",
+        "key-093",
+        "key-094",
+        "key-095",
+        "key-096",
+        "key-097",
+        "key-098",
+        "key-099"
+      ],
+      "blob_hex": "4d42463101000100c8000000000000007b14ae47e17a843f08000000000000008b0e5453af3c940cc35a82ae1ae35d40adb67448579c407a6e23b083dadec8a1c7ceaacd948e57ad6d3e27897d93bc037eafc435718477d4c854779ed2f6c42f3a4dd247eedd533a3f66c8d0e982a37a06b873747ed53da91ee72d64b299bb5a0e8c939c2e0811f6de0f6981d534735812e62d5c6e0be23bcbd8e95430cdb4ceddf73cda2fbdb73bfb6f4bb7b7cc9effb6617f57677bbdecbbbf1eadee9b89fbe1abbe8af846956ebbd05f86b94a3aa9e1c9e84afa126753305a564ec2613ca31a750a8244f1241dc6a515f04cf56332c0ed70190e3397c00c8a3e1a091de1e2f5dadf3dd41effa96f276c5d3b89353d37b9dbf0c536a2ee3aae1eb7a3a57987",
+      "probes": [
+        {
+          "kind": "int64",
+          "int64": "0",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2654435760",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "10617743042",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "23889921846",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "42470972172",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "66360894020",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "95559687390",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "130067352282",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "169883888696",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "215009296632",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "265443576090",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "321186727070",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "382238749572",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "448599643596",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "520269409142",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "597248046210",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "679535554800",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "767131934912",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "860037186546",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "958251309702",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1061774304380",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1170606170580",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1284746908302",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1404196517546",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1528954998312",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1659022350600",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1794398574410",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "1935083669742",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2081077636596",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2232380474972",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2388992184870",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2550912766290",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2718142219232",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "2890680543696",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "3068527739682",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "3251683807190",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "3440148746220",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "3633922556772",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "3833005238846",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "4037396792442",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "4247097217560",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "4462106514200",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "4682424682362",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "4908051722046",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "5138987633252",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "5375232415980",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "5616786070230",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "5863648596002",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "6115819993296",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "6373300262112",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "6636089402450",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "6904187414310",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "7177594297692",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "7456310052596",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "7740334679022",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "8029668176970",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "8324310546440",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "8624261787432",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "8929521899946",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "9240090883982",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "9555968739540",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "9877155466620",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "10203651065222",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "10535455535346",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "10872568876992",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "11214991090160",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "11562722174850",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "11915762131062",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "12274110958796",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "12637768658052",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "13006735228830",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "13381010671130",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "13760594984952",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "14145488170296",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "14535690227162",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "14931201155550",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "15332020955460",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "15738149626892",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "16149587169846",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "16566333584322",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "16988388870320",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "17415753027840",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "17848426056882",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "18286407957446",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "18729698729532",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "19178298373140",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "19632206888270",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "20091424274922",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "20555950533096",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "21025785662792",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "21500929664010",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "21981382536750",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "22467144281012",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "22958214896796",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "23454594384102",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "23956282742930",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "24463279973280",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "24975586075152",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "25493201048546",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "26016124893462",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-000",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-001",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-002",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-003",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-004",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-005",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-006",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-007",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-008",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-009",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-010",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-011",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-012",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-013",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-014",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-015",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-016",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-017",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-018",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-019",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-020",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-021",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-022",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-023",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-024",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-025",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-026",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-027",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-028",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-029",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-030",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-031",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-032",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-033",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-034",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-035",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-036",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-037",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-038",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-039",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-040",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-041",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-042",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-043",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-044",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-045",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-046",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-047",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-048",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-049",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-050",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-051",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-052",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-053",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-054",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-055",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-056",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-057",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-058",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-059",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-060",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-061",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-062",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-063",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-064",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-065",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-066",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-067",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-068",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-069",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-070",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-071",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-072",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-073",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-074",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-075",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-076",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-077",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-078",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-079",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-080",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-081",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-082",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-083",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-084",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-085",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-086",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-087",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-088",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-089",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-090",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-091",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-092",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-093",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-094",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-095",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-096",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-097",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-098",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "string",
+          "string": "key-099",
+          "member": true,
+          "expect": true
+        },
+        {
+          "kind": "int64",
+          "int64": "-12345",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "17",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "int64",
+          "int64": "999999999999",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "key-100",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "key-999",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "KEY-000",
+          "member": false,
+          "expect": false
+        },
+        {
+          "kind": "string",
+          "string": "absent",
+          "member": false,
+          "expect": false
+        }
+      ]
+    }
+  ]
+}

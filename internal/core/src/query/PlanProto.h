@@ -121,6 +121,9 @@ class ProtoParser {
     ParseMatchExprs(const proto::plan::MatchExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseBloomFilterExprs(const proto::plan::BloomFilterExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
     void
