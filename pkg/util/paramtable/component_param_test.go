@@ -203,7 +203,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("query node storage v2 async load config", func(t *testing.T) {
-		item := params.QueryNodeCfg.StorageV2EnableAsyncLoad
+		item := &params.QueryNodeCfg.StorageV2EnableAsyncLoad
 		t.Cleanup(func() {
 			params.Reset(item.Key)
 		})
