@@ -33,6 +33,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -349,6 +350,11 @@ VerifyNullableElementFullScanLogicalCount(
 
 class OffsetsEvalCorrectnessTest : public ::testing::Test {
  protected:
+    // SegcoreConfig members are process-global (inline static), so the
+    // "copy + set_chunk_rows" below actually mutates every later test in
+    // the process; restore the defaults when this fixture goes away.
+    ScopedSegcoreConfigRestore config_restore_;
+
     void
     SetUp() override {
         schema_ = std::make_shared<Schema>();
@@ -854,6 +860,9 @@ TEST(OffsetsEvalNullableElementTest,
     schema->set_primary_field_id(pk_fid);
 
     auto dataset = DataGen(schema, kRowCount, 600, 0, 1, kArrayLength);
+    // SegcoreConfig members are process-global (inline static): the copy
+    // below does not isolate set_chunk_rows, so restore on scope exit.
+    ScopedSegcoreConfigRestore config_restore;
     SegcoreConfig config = SegcoreConfig::default_config();
     config.set_chunk_rows(kChunkRows);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
@@ -883,6 +892,9 @@ TEST(OffsetsEvalNullableElementTest,
     schema->set_primary_field_id(pk_fid);
 
     auto dataset = DataGen(schema, kRowCount, 650, 0, 1, kArrayLength);
+    // SegcoreConfig members are process-global (inline static): the copy
+    // below does not isolate set_chunk_rows, so restore on scope exit.
+    ScopedSegcoreConfigRestore config_restore;
     SegcoreConfig config = SegcoreConfig::default_config();
     config.set_chunk_rows(kChunkRows);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
