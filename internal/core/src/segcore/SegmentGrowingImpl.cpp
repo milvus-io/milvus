@@ -2723,7 +2723,7 @@ SegmentGrowingImpl::FillAbsentFields() {
             if (field_meta.is_nullable() &&
                 insert_record_.is_data_exist(field_id) &&
                 insert_record_.is_valid_data_exist(field_id) &&
-                insert_record_.get_valid_data(field_id)->get_data().empty()) {
+                insert_record_.get_valid_data(field_id)->empty()) {
                 fill_empty_field(field_meta);
                 EnsureArrayOffsetsForStructField(field_meta,
                                                  insert_record_.row_count());
