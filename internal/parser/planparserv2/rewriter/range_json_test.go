@@ -86,7 +86,64 @@ func TestRewrite_JSON_NestedPath_NonNullable_ContradictionsKeepPredicate(t *test
 	}
 }
 
-func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteBlocked(t *testing.T) {
+func TestRewrite_JSON_RootValue_DynamicTypeKeepsThreeValuedPredicates(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	for _, exprStr := range []string{
+		`JSONField in [1, 2] or JSONField != 1`,
+		`JSONField in [1, 2] and JSONField == 3`,
+		`JSONField > 100 and JSONField < 50`,
+		`not (JSONField > 100 and JSONField < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr),
+			"JSON type mismatch can be UNKNOWN, so the predicate must not fold to false: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr),
+			"JSON type mismatch can be UNKNOWN, so the predicate must not fold to true: %s", exprStr)
+	}
+}
+
+func TestRewrite_JSON_InWithRangeUsesLiteralType(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`JSONField["v"] in [1, 2, 3] and JSONField["v"] >= 2`, nil)
+	require.NoError(t, err)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 2)
+	require.Equal(t, []int64{2, 3}, []int64{
+		term.GetValues()[0].GetInt64Val(),
+		term.GetValues()[1].GetInt64Val(),
+	})
+}
+
+func TestRewrite_JSON_InWithRangePreservesLargeInt64Precision(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`JSONField["v"] in [9007199254740992, 9007199254740993] and JSONField["v"] >= 9007199254740993`, nil)
+	require.NoError(t, err)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 1)
+	require.Equal(t, int64(9007199254740993), term.GetValues()[0].GetInt64Val())
+}
+
+func TestRewrite_JSON_InWithRangeTypeMismatchSkipsOptimization(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`JSONField["v"] in [1, 2] and JSONField["v"] >= "2"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr.GetBinaryExpr())
+	require.NotNil(t, findTermExpr(expr))
+	require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_GreaterEqual))
+}
+
+func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteAllowed(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
 	for _, exprStr := range []string{
@@ -96,13 +153,13 @@ func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteBlocked(t *testing.T) {
 		expr, err := parser.ParseExpr(helper, exprStr, nil)
 		require.NoError(t, err, exprStr)
 		require.NotNil(t, expr, exprStr)
-		unary := expr.GetUnaryExpr()
-		require.NotNil(t, unary, "scalar JSON missing-path NOT must remain explicit: %s", exprStr)
-		require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp(), exprStr)
+		unaryRange := expr.GetUnaryRangeExpr()
+		require.NotNil(t, unaryRange, "scalar JSON NOT equality should become !=: %s", exprStr)
+		require.Equal(t, planpb.OpType_NotEqual, unaryRange.GetOp(), exprStr)
 	}
 }
 
-func TestRewrite_JSON_NestedPath_ArrayNotEqualRewriteBlocked(t *testing.T) {
+func TestRewrite_JSON_NestedPath_ArrayNotEqualRewriteAllowed(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
 	for _, exprStr := range []string{
@@ -112,9 +169,9 @@ func TestRewrite_JSON_NestedPath_ArrayNotEqualRewriteBlocked(t *testing.T) {
 		expr, err := parser.ParseExpr(helper, exprStr, nil)
 		require.NoError(t, err, exprStr)
 		require.NotNil(t, expr, exprStr)
-		unary := expr.GetUnaryExpr()
-		require.NotNil(t, unary, "array-valued JSON missing-path NOT must remain explicit: %s", exprStr)
-		require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp(), exprStr)
+		unaryRange := expr.GetUnaryRangeExpr()
+		require.NotNil(t, unaryRange, "array-valued JSON NOT equality should become !=: %s", exprStr)
+		require.Equal(t, planpb.OpType_NotEqual, unaryRange.GetOp(), exprStr)
 	}
 }
 
@@ -140,6 +197,65 @@ func TestRewrite_JSON_Int_AND_Strengthen(t *testing.T) {
 	// Verify column info
 	require.Equal(t, schemapb.DataType_JSON, ure.GetColumnInfo().GetDataType())
 	require.Equal(t, []string{"price"}, ure.GetColumnInfo().GetNestedPath())
+}
+
+func TestRewrite_JSON_IntRangePreservesLargeInt64Precision(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	for _, exprStr := range []string{
+		`JSONField["v"] >= 9007199254740992 and JSONField["v"] >= 9007199254740993`,
+		`JSONField["v"] >= 9007199254740993 and JSONField["v"] >= 9007199254740992`,
+		`JSONField["v"] >= 9007199254740992.0 and JSONField["v"] >= 9007199254740993`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		unaryRange := expr.GetUnaryRangeExpr()
+		require.NotNil(t, unaryRange, exprStr)
+		require.Equal(t, planpb.OpType_GreaterEqual, unaryRange.GetOp(), exprStr)
+		require.Equal(t, int64(9007199254740993), unaryRange.GetValue().GetInt64Val(), exprStr)
+	}
+}
+
+func TestRewrite_JSON_IntOrRangePreservesLargeInt64Precision(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	for _, exprStr := range []string{
+		`JSONField["v"] >= 9007199254740993 or JSONField["v"] >= 9007199254740992`,
+		`JSONField["v"] >= 9007199254740992 or JSONField["v"] >= 9007199254740993`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		unaryRange := expr.GetUnaryRangeExpr()
+		require.NotNil(t, unaryRange, exprStr)
+		require.Equal(t, planpb.OpType_GreaterEqual, unaryRange.GetOp(), exprStr)
+		require.Equal(t, int64(9007199254740992), unaryRange.GetValue().GetInt64Val(), exprStr)
+	}
+}
+
+func TestRewrite_JSON_AndBinaryRangesPreservesLargeInt64Precision(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+	expr, err := parser.ParseExpr(helper,
+		`(JSONField["v"] >= 9007199254740992 and JSONField["v"] <= 9007199254740996) and `+
+			`(JSONField["v"] >= 9007199254740993 and JSONField["v"] <= 9007199254740995)`, nil)
+	require.NoError(t, err)
+
+	binaryRange := expr.GetBinaryRangeExpr()
+	require.NotNil(t, binaryRange)
+	require.Equal(t, int64(9007199254740993), binaryRange.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(9007199254740995), binaryRange.GetUpperValue().GetInt64Val())
+}
+
+func TestRewrite_JSON_OrBinaryRangesPreservesLargeInt64Precision(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+	expr, err := parser.ParseExpr(helper,
+		`(JSONField["v"] >= 9007199254740993 and JSONField["v"] <= 9007199254740995) or `+
+			`(JSONField["v"] >= 9007199254740992 and JSONField["v"] <= 9007199254740996)`, nil)
+	require.NoError(t, err)
+
+	binaryRange := expr.GetBinaryRangeExpr()
+	require.NotNil(t, binaryRange)
+	require.Equal(t, int64(9007199254740992), binaryRange.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(9007199254740996), binaryRange.GetUpperValue().GetInt64Val())
 }
 
 // Test JSON field with int comparison - AND to BinaryRange

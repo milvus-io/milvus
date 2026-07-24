@@ -15,9 +15,12 @@
 // limitations under the License.
 
 #include "BinaryRangeExpr.h"
+
 #include <utility>
+#include <variant>
 
 #include "common/ScopedTimer.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "query/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
 namespace milvus {
@@ -73,6 +76,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            const auto field_id = expr_->column_.field_id_;
             auto lower_type = expr_->lower_val_.val_case();
             auto upper_type = expr_->upper_val_.val_case();
             // For numeric types, if either bound is float, use double for both.
@@ -86,10 +90,30 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       proto::plan::GenericValue::ValCase::kFloatVal) &&
                  (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
                   upper_type == proto::plan::GenericValue::ValCase::kFloatVal));
+            const auto requires_precise_int64_comparison =
+                is_numeric && (JsonNumericBoundRequiresPreciseInt64Comparison(
+                                   expr_->lower_val_) ||
+                               JsonNumericBoundRequiresPreciseInt64Comparison(
+                                   expr_->upper_val_));
+            const auto can_use_json_stats = CanUseJsonStats(
+                context, field_id, expr_->column_.nested_path_, true);
+            auto can_use_index =
+                !can_use_json_stats && !requires_precise_int64_comparison &&
+                SegmentExpr::CanUseIndex() &&
+                (!has_offset_input_ || !PinnedJsonIndexIsFlat());
+            if (can_use_index &&
+                lower_type == proto::plan::GenericValue::ValCase::kStringVal) {
+                auto* string_index =
+                    dynamic_cast<const index::ScalarIndex<std::string>*>(
+                        pinned_index_[0].get());
+                can_use_index = !PinnedJsonIndexIsFlat() &&
+                                string_index != nullptr &&
+                                string_index->GetIndexType() !=
+                                    index::ScalarIndexType::NGRAM;
+            }
 
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (can_use_index) {
                 if (is_numeric) {
-                    // Convert both bounds to double for index path
                     proto::plan::GenericValue double_lower_val;
                     if (lower_type ==
                         proto::plan::GenericValue::ValCase::kInt64Val) {
@@ -113,17 +137,24 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     upper_arg_.SetValue<double>(double_upper_val);
                     arg_inited_ = true;
 
-                    result = ExecRangeVisitorImplForIndex<double>();
+                    result = ExecRangeVisitorImplForIndex<double>(input);
                 } else if (lower_type ==
                            proto::plan::GenericValue::ValCase::kStringVal) {
-                    result = ExecRangeVisitorImplForJson<std::string>(context);
+                    result = ExecRangeVisitorImplForIndex<std::string>(input);
                 } else {
                     ThrowInfo(
                         DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     lower_type));
                 }
+            } else if (!can_use_json_stats &&
+                       requires_precise_int64_comparison) {
+                SetNotUseIndex();
+                result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
             } else {
+                if (!can_use_json_stats && SegmentExpr::CanUseIndex()) {
+                    SetNotUseIndex();
+                }
                 if (is_numeric && use_double) {
                     // Use double when either bound is float
                     result = ExecRangeVisitorImplForJson<double>(context);
@@ -177,6 +208,100 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
+}
+
+VectorPtr
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
+    EvalCtx& context) {
+    const auto& bitmap_input = context.get_bitmap_input();
+    auto* input = context.get_offset_input();
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto lower_bound = expr_->lower_val_;
+    auto upper_bound = expr_->upper_val_;
+    const auto lower_inclusive = expr_->lower_inclusive_;
+    const auto upper_inclusive = expr_->upper_inclusive_;
+
+    size_t processed_cursor = 0;
+    auto execute_sub_batch =
+        [
+            pointer,
+            lower_bound,
+            upper_bound,
+            lower_inclusive,
+            upper_inclusive,
+            &bitmap_input,
+            &processed_cursor
+        ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+        const bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
+            auto number = data[offset].at_numeric(pointer);
+            if (number.error()) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            auto lower_comparison =
+                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
+                                                                 lower_bound);
+            auto upper_comparison =
+                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
+                                                                 upper_bound);
+            if (!lower_comparison.has_value() ||
+                !upper_comparison.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            const auto lower_matches = lower_inclusive ? *lower_comparison >= 0
+                                                       : *lower_comparison > 0;
+            const auto upper_matches = upper_inclusive ? *upper_comparison <= 0
+                                                       : *upper_comparison < 0;
+            res[i] = lower_matches && upper_matches;
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
 }
 
 template <typename T>
@@ -257,7 +382,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
 
 template <typename T>
 VectorPtr
-PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
@@ -272,12 +397,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     HighPrecisionType val2;
     bool lower_inclusive = false;
     bool upper_inclusive = false;
-    if (auto res =
-            PreCheckOverflow<T>(val1, val2, lower_inclusive, upper_inclusive)) {
+    if (auto res = PreCheckOverflow<T>(
+            val1, val2, lower_inclusive, upper_inclusive, input)) {
         return res;
     }
 
-    auto real_batch_size = GetNextBatchSize();
+    auto real_batch_size =
+        input != nullptr ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -289,6 +415,36 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         BinaryRangeIndexFunc<T> func;
         return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
     };
+    if (input != nullptr) {
+        if (cached_full_index_res_ == nullptr) {
+            TargetBitmap full_result;
+            TargetBitmap full_valid_result;
+            for (size_t i = 0; i < num_index_chunk_; ++i) {
+                auto index_result = GetIndexPtrForChunk<IndexInnerType>(i);
+                auto* index_ptr = index_result.index_ptr;
+                AssertInfo(index_ptr != nullptr, "invalid scalar index type");
+                auto chunk_result = execute_sub_batch(index_ptr, val1, val2);
+                auto chunk_valid_result = index_ptr->IsNotNull();
+                AssertInfo(chunk_result.size() == chunk_valid_result.size(),
+                           "index result and validity sizes differ: {} vs {}",
+                           chunk_result.size(),
+                           chunk_valid_result.size());
+                full_result.append(chunk_result);
+                full_valid_result.append(chunk_valid_result);
+            }
+            cached_full_index_res_ =
+                std::make_shared<TargetBitmap>(std::move(full_result));
+            cached_full_index_valid_res_ =
+                std::make_shared<TargetBitmap>(std::move(full_valid_result));
+            AssertInfo(cached_full_index_res_->size() ==
+                           static_cast<size_t>(active_count_),
+                       "index range result size {} does not match row count {}",
+                       cached_full_index_res_->size(),
+                       active_count_);
+        }
+        return GatherCachedResultByOffsets(
+            *cached_full_index_res_, *cached_full_index_valid_res_, *input);
+    }
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val1, val2);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -456,12 +612,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (CanUseJsonStats(context, field_id, expr_->column_.nested_path_, true)) {
         milvus::ScopedTimer timer(
             "binary_range_json_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
-        return ExecRangeVisitorImplForJsonStats<ValueType>();
+        return ExecRangeVisitorImplForJsonStats<ValueType>(input);
     }
 
     milvus::ScopedTimer timer(
@@ -596,21 +751,28 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
 
 template <typename ValueType>
 VectorPtr
-PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
+    OffsetVector* input) {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    auto real_batch_size = GetNextBatchSize();
+    auto real_batch_size =
+        input != nullptr
+            ? input->size()
+            : std::min(batch_size_, active_count_ - current_data_global_pos_);
     if (real_batch_size == 0) {
         return nullptr;
     }
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
-    // Use GetValueWithCastNumber to handle mixed int64/float types safely.
-    // This allows int64 values to be cast to double when ValueType is double.
-    ValueType val1 = GetValueWithCastNumber<ValueType>(expr_->lower_val_);
-    ValueType val2 = GetValueWithCastNumber<ValueType>(expr_->upper_val_);
+    std::optional<ValueType> val1;
+    std::optional<ValueType> val2;
+    if constexpr (!std::is_same_v<GetType, int64_t> &&
+                  !std::is_same_v<GetType, double>) {
+        val1.emplace(GetValueWithCastNumber<ValueType>(expr_->lower_val_));
+        val2.emplace(GetValueWithCastNumber<ValueType>(expr_->upper_val_));
+    }
 
     if (cached_index_chunk_id_ != 0 &&
         segment_->type() == SegmentType::Sealed) {
@@ -627,6 +789,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
 
         // process shredding data
+        const auto& lower_bound = expr_->lower_val_;
+        const auto& upper_bound = expr_->upper_val_;
         auto try_execute = [&](milvus::index::JSONType json_type,
                                auto GetType) {
             auto target_field = index->GetShreddingField(pointer, json_type);
@@ -636,29 +800,51 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 TargetBitmapView target_res_view(target_res);
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
-                auto shredding_executor =
-                    [val1, val2, lower_inclusive, upper_inclusive](
-                        const ColType* src,
-                        const bool* valid,
-                        size_t size,
-                        TargetBitmapView res,
-                        TargetBitmapView valid_res) {
-                        for (size_t i = 0; i < size; ++i) {
-                            if (valid != nullptr && !valid[i]) {
-                                res[i] = valid_res[i] = false;
+                auto shredding_executor = [val1,
+                                           val2,
+                                           lower_inclusive,
+                                           upper_inclusive,
+                                           &lower_bound,
+                                           &upper_bound](
+                                              const ColType* src,
+                                              const bool* valid,
+                                              size_t size,
+                                              TargetBitmapView res,
+                                              TargetBitmapView valid_res) {
+                    for (size_t i = 0; i < size; ++i) {
+                        if (valid != nullptr && !valid[i]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if constexpr (std::is_same_v<ColType, int64_t> ||
+                                      std::is_same_v<ColType, double>) {
+                            auto lower_comparison =
+                                CompareJsonNumberToBound(src[i], lower_bound);
+                            auto upper_comparison =
+                                CompareJsonNumberToBound(src[i], upper_bound);
+                            if (!lower_comparison.has_value() ||
+                                !upper_comparison.has_value()) {
+                                res[i] = false;
                                 continue;
                             }
-                            if (lower_inclusive && upper_inclusive) {
-                                res[i] = src[i] >= val1 && src[i] <= val2;
-                            } else if (lower_inclusive && !upper_inclusive) {
-                                res[i] = src[i] >= val1 && src[i] < val2;
-                            } else if (!lower_inclusive && upper_inclusive) {
-                                res[i] = src[i] > val1 && src[i] <= val2;
-                            } else {
-                                res[i] = src[i] > val1 && src[i] < val2;
-                            }
+                            const auto lower_matches =
+                                lower_inclusive ? *lower_comparison >= 0
+                                                : *lower_comparison > 0;
+                            const auto upper_matches =
+                                upper_inclusive ? *upper_comparison <= 0
+                                                : *upper_comparison < 0;
+                            res[i] = lower_matches && upper_matches;
+                        } else if (lower_inclusive && upper_inclusive) {
+                            res[i] = src[i] >= *val1 && src[i] <= *val2;
+                        } else if (lower_inclusive && !upper_inclusive) {
+                            res[i] = src[i] >= *val1 && src[i] < *val2;
+                        } else if (!lower_inclusive && upper_inclusive) {
+                            res[i] = src[i] > *val1 && src[i] <= *val2;
+                        } else {
+                            res[i] = src[i] > *val1 && src[i] < *val2;
                         }
-                    };
+                    }
+                };
                 index->ExecutorForShreddingData<ColType>(op_ctx_,
                                                          target_field,
                                                          shredding_executor,
@@ -701,6 +887,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                                 val2,
                                 lower_inclusive,
                                 upper_inclusive,
+                                &lower_bound,
+                                &upper_bound,
                                 &res_view,
                                 &valid_res_view](milvus::BsonView bson,
                                                  uint32_t row_id,
@@ -711,32 +899,42 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
             };
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
-                auto val = bson.ParseAsValueAtOffset<double>(value_offset);
-                if (!val.has_value()) {
+                auto number = bson.ParseAsNumberAtOffset(value_offset);
+                if (!number.has_value()) {
                     return;
                 }
-                if (lower_inclusive && upper_inclusive) {
-                    set_known(val.value() >= val1 && val.value() <= val2);
-                } else if (lower_inclusive && !upper_inclusive) {
-                    set_known(val.value() >= val1 && val.value() < val2);
-                } else if (!lower_inclusive && upper_inclusive) {
-                    set_known(val.value() > val1 && val.value() <= val2);
-                } else {
-                    set_known(val.value() > val1 && val.value() < val2);
+                auto [lower_comparison, upper_comparison] = std::visit(
+                    [&lower_bound, &upper_bound](auto value) {
+                        return std::make_pair(
+                            CompareJsonNumberToBound(value, lower_bound),
+                            CompareJsonNumberToBound(value, upper_bound));
+                    },
+                    *number);
+                if (!lower_comparison.has_value() ||
+                    !upper_comparison.has_value()) {
+                    set_known(false);
+                    return;
                 }
+                const auto lower_matches = lower_inclusive
+                                               ? *lower_comparison >= 0
+                                               : *lower_comparison > 0;
+                const auto upper_matches = upper_inclusive
+                                               ? *upper_comparison <= 0
+                                               : *upper_comparison < 0;
+                set_known(lower_matches && upper_matches);
             } else {
                 auto val = bson.ParseAsValueAtOffset<GetType>(value_offset);
                 if (!val.has_value()) {
                     return;
                 }
                 if (lower_inclusive && upper_inclusive) {
-                    set_known(val.value() >= val1 && val.value() <= val2);
+                    set_known(val.value() >= *val1 && val.value() <= *val2);
                 } else if (lower_inclusive && !upper_inclusive) {
-                    set_known(val.value() >= val1 && val.value() < val2);
+                    set_known(val.value() >= *val1 && val.value() < *val2);
                 } else if (!lower_inclusive && upper_inclusive) {
-                    set_known(val.value() > val1 && val.value() <= val2);
+                    set_known(val.value() > *val1 && val.value() <= *val2);
                 } else {
-                    set_known(val.value() > val1 && val.value() < val2);
+                    set_known(val.value() > *val1 && val.value() < *val2);
                 }
             }
         };
@@ -750,6 +948,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
         cached_index_chunk_id_ = 0;
     }
 
+    if (input != nullptr) {
+        return GatherCachedResultByOffsets(
+            *cached_index_chunk_res_, *cached_index_chunk_valid_res_, *input);
+    }
     auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
                                  *cached_index_chunk_valid_res_,
                                  current_data_global_pos_,

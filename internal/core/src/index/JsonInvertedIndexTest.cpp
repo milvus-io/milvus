@@ -77,6 +77,18 @@ struct FileSliceSizeGuard {
     int64_t old_slice_size_;
 };
 
+struct ExprBatchSizeGuard {
+    explicit ExprBatchSizeGuard(int64_t batch_size)
+        : old_batch_size_(EXEC_EVAL_EXPR_BATCH_SIZE.exchange(batch_size)) {
+    }
+
+    ~ExprBatchSizeGuard() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(old_batch_size_);
+    }
+
+    int64_t old_batch_size_;
+};
+
 struct LoadedJsonOffsetStats {
     int64_t count;
     int64_t exists_count;
@@ -227,6 +239,7 @@ TEST(JsonIndexTest, TestJSONErrRecorder) {
 }
 
 TEST(JsonIndexTest, TestJsonContains) {
+    ExprBatchSizeGuard batch_size_guard(8);
     std::vector<std::string> json_raw_data = {
         R"(1)",
         R"("a simple string")",
@@ -251,6 +264,8 @@ TEST(JsonIndexTest, TestJsonContains) {
         R"({"a": ["x", "y"]})",
         R"({"a": [{"nested": true}, {"nested": false}]})",
         R"({"a": []})",
+        R"({"a": [0, 2, 3]})",
+        R"({"a": [{"b": 1}, 2.0, 3.0, "4", true, [1, 3.0], null]})",
     };
 
     auto json_path = "/a";
@@ -308,6 +323,11 @@ TEST(JsonIndexTest, TestJsonContains) {
     value.set_int64_val(1);
     test_cases.push_back(std::make_tuple(value, std::vector<int64_t>{17, 18}));
 
+    proto::plan::GenericValue value2;
+    value2.set_int64_val(2);
+    test_cases.push_back(
+        std::make_tuple(value2, std::vector<int64_t>{17, 18, 23, 24}));
+
     // proto::plan::GenericValue value2;
     // value2.set_bool_val(true);
     // test_cases.push_back(std::make_tuple(value2, std::vector<int64_t>{8}));
@@ -317,12 +337,13 @@ TEST(JsonIndexTest, TestJsonContains) {
     // test_cases.push_back(std::make_tuple(value3, std::vector<int64_t>{9}));
 
     for (auto& test_case : test_cases) {
+        auto query_value = std::get<0>(test_case);
         auto expr = std::make_shared<expr::JsonContainsExpr>(
             expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
             proto::plan::JSONContainsExpr_JSONOp::
                 JSONContainsExpr_JSONOp_Contains,
             true,
-            std::vector<proto::plan::GenericValue>{value});
+            std::vector<proto::plan::GenericValue>{query_value});
 
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
@@ -336,6 +357,24 @@ TEST(JsonIndexTest, TestJsonContains) {
             EXPECT_TRUE(result[id]);
         }
     }
+
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("4");
+    auto mixed_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        false,
+        std::vector<proto::plan::GenericValue>{int_value, string_value});
+    auto mixed_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
+    auto mixed_result = query::ExecuteQueryExpr(
+        mixed_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(mixed_result.count(), 3);
+    EXPECT_TRUE(mixed_result[17]);
+    EXPECT_TRUE(mixed_result[18]);
+    EXPECT_TRUE(mixed_result[24]);
 }
 
 TEST(JsonIndexTest, TestJsonCast) {

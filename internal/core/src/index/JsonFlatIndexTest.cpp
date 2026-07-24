@@ -43,6 +43,22 @@
 using namespace milvus;
 
 namespace milvus::test {
+namespace {
+
+struct ExprBatchSizeGuard {
+    explicit ExprBatchSizeGuard(int64_t batch_size)
+        : old_batch_size_(EXEC_EVAL_EXPR_BATCH_SIZE.exchange(batch_size)) {
+    }
+
+    ~ExprBatchSizeGuard() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(old_batch_size_);
+    }
+
+    int64_t old_batch_size_;
+};
+
+}  // namespace
+
 struct ChunkManagerWrapper {
     ChunkManagerWrapper(storage::ChunkManagerPtr cm) : cm_(cm) {
     }
@@ -844,6 +860,64 @@ TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
     EXPECT_EQ(final.count(), 2);
     EXPECT_TRUE(final[0]);
     EXPECT_TRUE(final[13]);
+}
+
+TEST_F(JsonFlatIndexExprTest, JSONArrayEqualityFallsBackToRawData) {
+    proto::plan::GenericValue value;
+    auto* array = value.mutable_array_val();
+    array->set_same_type(true);
+    array->add_array()->set_string_val("a");
+    array->add_array()->set_string_val("b");
+
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::Equal,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+
+    EXPECT_EQ(final.count(), 1);
+    EXPECT_TRUE(final[6]);
+}
+
+TEST_F(JsonFlatIndexExprTest,
+       JSONContainsMixedAndArrayLiteralsFallBackToRawData) {
+    ExprBatchSizeGuard batch_size_guard(7);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("a");
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+
+    auto mixed_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        false,
+        std::vector<proto::plan::GenericValue>{string_value, int_value});
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 1);
+    EXPECT_TRUE(final[6]);
+
+    proto::plan::GenericValue array_value;
+    auto* array = array_value.mutable_array_val();
+    array->set_same_type(true);
+    array->add_array()->set_string_val("a");
+    array->add_array()->set_string_val("b");
+    auto array_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{array_value});
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, array_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 0);
 }
 
 TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {

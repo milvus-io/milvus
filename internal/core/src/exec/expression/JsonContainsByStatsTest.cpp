@@ -12,13 +12,21 @@
 #include <arrow/builder.h>
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "common/Consts.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/BinaryRangeExpr.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "index/json_stats/JsonKeyStats.h"
@@ -161,6 +169,96 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     return slot;
 }
 
+struct ExprBatchEvalResult {
+    std::vector<int64_t> batch_sizes;
+    ColumnVectorPtr result;
+};
+
+class ExprBatchSizeGuard {
+ public:
+    explicit ExprBatchSizeGuard(int64_t batch_size)
+        : old_batch_size_(EXEC_EVAL_EXPR_BATCH_SIZE.exchange(batch_size)) {
+    }
+
+    ~ExprBatchSizeGuard() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(old_batch_size_);
+    }
+
+ private:
+    int64_t old_batch_size_;
+};
+
+ExprBatchEvalResult
+EvalExprInBatches(const expr::TypedExprPtr& logical_expr,
+                  const segcore::SegmentInternalInterface* segment,
+                  int64_t active_count) {
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(query_context.get());
+    auto compiled =
+        exec::CompileExpressions({logical_expr}, &exec_context, {}, false);
+    AssertInfo(compiled.size() == 1,
+               "expected one compiled expression, got {}",
+               compiled.size());
+
+    exec::EvalCtx eval_context(&exec_context);
+    ExprBatchEvalResult evaluation;
+    TargetBitmap combined_result;
+    TargetBitmap combined_validity;
+    int64_t processed_rows = 0;
+    while (processed_rows < active_count) {
+        VectorPtr result;
+        compiled[0]->Eval(eval_context, result);
+        AssertInfo(result != nullptr,
+                   "expression evaluation stopped after {} of {} rows",
+                   processed_rows,
+                   active_count);
+        auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+        AssertInfo(column != nullptr && column->IsBitmap(),
+                   "expected bitmap column result");
+        const auto batch_size = column->size();
+        AssertInfo(
+            batch_size > 0 && processed_rows + batch_size <= active_count,
+            "invalid expression batch size {} after {} of {} rows",
+            batch_size,
+            processed_rows,
+            active_count);
+        evaluation.batch_sizes.push_back(batch_size);
+        combined_result.append(
+            TargetBitmapView(column->GetRawData(), batch_size));
+        combined_validity.append(
+            TargetBitmapView(column->GetValidRawData(), batch_size));
+        processed_rows += batch_size;
+    }
+    evaluation.result = std::make_shared<ColumnVector>(
+        std::move(combined_result), std::move(combined_validity));
+    return evaluation;
+}
+
+ColumnVectorPtr
+EvalExprOnce(const expr::TypedExprPtr& logical_expr,
+             const segcore::SegmentInternalInterface* segment,
+             int64_t active_count,
+             exec::OffsetVector* offsets = nullptr) {
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(query_context.get());
+    auto compiled =
+        exec::CompileExpressions({logical_expr}, &exec_context, {}, false);
+    AssertInfo(compiled.size() == 1,
+               "expected one compiled expression, got {}",
+               compiled.size());
+
+    exec::EvalCtx eval_context(&exec_context);
+    eval_context.set_offset_input(offsets);
+    VectorPtr result;
+    compiled[0]->Eval(eval_context, result);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    AssertInfo(column != nullptr && column->IsBitmap(),
+               "expected bitmap column result");
+    return column;
+}
+
 }  // namespace
 
 TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
@@ -263,6 +361,52 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     }
 }
 
+TEST(JsonContainsByStatsTest, EmptyElementsAdvanceWithoutRawJson) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> json_raw_data(8, R"({"a": [1, 2]})");
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1002,
+                                          2002,
+                                          3002,
+                                          json_fid.get(),
+                                          5002,
+                                          1);
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadJsonStats(json_fid, stats);
+    ASSERT_FALSE(segment->HasFieldData(json_fid));
+
+    for (const auto op : {
+             proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+             proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+         }) {
+        auto contains_expr = std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+            op,
+            true,
+            std::vector<proto::plan::GenericValue>{});
+
+        ExprBatchSizeGuard batch_size_guard(3);
+        auto batches = EvalExprInBatches(
+            contains_expr, segment.get(), json_raw_data.size());
+        EXPECT_EQ(batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+
+        TargetBitmapView values(batches.result->GetRawData(),
+                                batches.result->size());
+        TargetBitmapView validity(batches.result->GetValidRawData(),
+                                  batches.result->size());
+        for (size_t i = 0; i < batches.result->size(); ++i) {
+            EXPECT_EQ(values[i],
+                      op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll)
+                << "row " << i;
+            EXPECT_TRUE(validity[i]) << "row " << i;
+        }
+    }
+}
+
 TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
@@ -332,4 +476,288 @@ TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     EXPECT_TRUE(result[6]);
     EXPECT_FALSE(result[7]);
     EXPECT_EQ(result.count(), 2);
+}
+
+TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto gate_fid = schema->AddDebugField("gate", DataType::INT64);
+
+    const std::vector<std::string> json_raw_data = {
+        R"({"n": 1.0, "s": "alpha", "i": 9007199254740992, "u": 9223372036854775809, "rare": 1.0, "sparse_i": 9007199254740992})",
+        R"({"n": 2.0, "s": "beta", "i": 9007199254740993, "rare": "not-a-number", "sparse_i": 9007199254740993})",
+        R"({"n": 3.5, "s": "gamma", "i": 9007199254740994})",
+        R"({"n": "2", "s": 2, "i": "9007199254740993"})",
+        R"({"other": 0})",
+        R"({"n": null, "s": null, "i": null})",
+        R"({"n": 4.0, "s": "delta", "i": 1})",
+        R"({"n": 5.0, "s": "epsilon", "i": 2})",
+    };
+    const std::vector<uint8_t> valid_data{0b01111111};
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1203,
+                                          2203,
+                                          3203,
+                                          json_fid.get(),
+                                          5203,
+                                          1,
+                                          &valid_data);
+    auto stats_segment = segcore::CreateSealedSegment(schema);
+    stats_segment->LoadJsonStats(json_fid, stats);
+    auto pinned_stats = stats_segment->GetJsonStats(nullptr, json_fid);
+    ASSERT_NE(pinned_stats.get(), nullptr);
+    EXPECT_FALSE(pinned_stats.get()
+                     ->GetShreddingField(milvus::index::JsonPointer({"n"}),
+                                         JSONType::DOUBLE)
+                     .empty());
+    EXPECT_FALSE(pinned_stats.get()
+                     ->GetShreddingField(milvus::index::JsonPointer({"s"}),
+                                         JSONType::STRING)
+                     .empty());
+    EXPECT_FALSE(pinned_stats.get()
+                     ->GetShreddingField(milvus::index::JsonPointer({"i"}),
+                                         JSONType::INT64)
+                     .empty());
+    EXPECT_TRUE(pinned_stats.get()
+                    ->GetShreddingField(milvus::index::JsonPointer({"rare"}),
+                                        JSONType::DOUBLE)
+                    .empty());
+    EXPECT_TRUE(pinned_stats.get()
+                    ->GetShreddingField(milvus::index::JsonPointer({"rare"}),
+                                        JSONType::STRING)
+                    .empty());
+    EXPECT_TRUE(
+        pinned_stats.get()
+            ->GetShreddingField(milvus::index::JsonPointer({"sparse_i"}),
+                                JSONType::INT64)
+            .empty());
+    auto raw_segment = segcore::CreateSealedSegment(schema);
+
+    auto make_json_field = [&] {
+        auto field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(json_raw_data, valid_data));
+        return field;
+    };
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto stats_load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm);
+    stats_segment->LoadFieldData(stats_load_info);
+    stats_segment->DropFieldData(json_fid);
+    ASSERT_FALSE(stats_segment->HasFieldData(json_fid));
+    auto raw_load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm);
+    raw_segment->LoadFieldData(raw_load_info);
+
+    std::vector<int64_t> gate_values = {0, 1, 2, 3, 4, 5, 6, 7};
+    auto gate_field =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    gate_field->FillFieldData(gate_values.data(), gate_values.size());
+    auto gate_load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, gate_fid.get(), {gate_field}, cm);
+    stats_segment->LoadFieldData(gate_load_info);
+    raw_segment->LoadFieldData(gate_load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr,
+                        const segcore::SegmentInternalInterface* segment,
+                        exec::OffsetVector* offsets = nullptr) {
+        return EvalExprOnce(
+            filter_expr, segment, json_raw_data.size(), offsets);
+    };
+    auto expect_same = [](const ColumnVectorPtr& raw,
+                          const ColumnVectorPtr& shredded) {
+        ASSERT_EQ(raw->size(), shredded->size());
+        TargetBitmapView raw_result(raw->GetRawData(), raw->size());
+        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
+        TargetBitmapView shredded_result(shredded->GetRawData(),
+                                         shredded->size());
+        TargetBitmapView shredded_valid(shredded->GetValidRawData(),
+                                        shredded->size());
+        for (size_t i = 0; i < raw->size(); ++i) {
+            EXPECT_EQ(shredded_valid[i], raw_valid[i]) << "row " << i;
+            EXPECT_EQ(shredded_result[i], raw_result[i]) << "row " << i;
+        }
+    };
+    auto expect_batched_same = [&](const expr::TypedExprPtr& filter_expr) {
+        ExprBatchSizeGuard batch_size_guard(3);
+        auto raw_batches = EvalExprInBatches(
+            filter_expr, raw_segment.get(), json_raw_data.size());
+        auto stats_batches = EvalExprInBatches(
+            filter_expr, stats_segment.get(), json_raw_data.size());
+        EXPECT_EQ(raw_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        EXPECT_EQ(stats_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        expect_same(raw_batches.result, stats_batches.result);
+    };
+
+    proto::plan::GenericValue number_lower;
+    number_lower.set_int64_val(2);
+    proto::plan::GenericValue number_upper;
+    number_upper.set_float_val(4.0);
+    auto number_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
+        number_lower,
+        number_upper,
+        true,
+        true);
+    expect_same(evaluate(number_expr, raw_segment.get()),
+                evaluate(number_expr, stats_segment.get()));
+    exec::OffsetVector offsets = {7, 2, 4, 1, 3, 5, 6, 0, 2};
+    expect_same(evaluate(number_expr, raw_segment.get(), &offsets),
+                evaluate(number_expr, stats_segment.get(), &offsets));
+    expect_batched_same(number_expr);
+
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
+        proto::plan::OpType::GreaterEqual,
+        number_lower,
+        std::vector<proto::plan::GenericValue>());
+    {
+        ExprBatchSizeGuard batch_size_guard(3);
+        auto raw_batches = EvalExprInBatches(
+            unary_expr, raw_segment.get(), json_raw_data.size());
+        auto stats_batches = EvalExprInBatches(
+            unary_expr, stats_segment.get(), json_raw_data.size());
+        EXPECT_EQ(raw_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        EXPECT_EQ(stats_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        expect_same(raw_batches.result, stats_batches.result);
+    }
+
+    proto::plan::GenericValue gate_lower;
+    gate_lower.set_int64_val(3);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(gate_fid, DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        gate_lower,
+        std::vector<proto::plan::GenericValue>());
+    auto conjunct_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, gate_expr, unary_expr);
+    {
+        ExprBatchSizeGuard batch_size_guard(3);
+        auto raw_batches = EvalExprInBatches(
+            conjunct_expr, raw_segment.get(), json_raw_data.size());
+        auto stats_batches = EvalExprInBatches(
+            conjunct_expr, stats_segment.get(), json_raw_data.size());
+        EXPECT_EQ(raw_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        EXPECT_EQ(stats_batches.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+        expect_same(raw_batches.result, stats_batches.result);
+    }
+
+    proto::plan::GenericValue string_lower;
+    string_lower.set_string_val("beta");
+    proto::plan::GenericValue string_upper;
+    string_upper.set_string_val("gamma");
+    auto string_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"s"}),
+        string_lower,
+        string_upper,
+        true,
+        false);
+    expect_same(evaluate(string_expr, raw_segment.get()),
+                evaluate(string_expr, stats_segment.get()));
+    expect_same(evaluate(string_expr, raw_segment.get(), &offsets),
+                evaluate(string_expr, stats_segment.get(), &offsets));
+    expect_batched_same(string_expr);
+
+    proto::plan::GenericValue precise_lower;
+    precise_lower.set_float_val(9007199254740992.0);
+    proto::plan::GenericValue precise_upper;
+    precise_upper.set_float_val(9007199254740994.0);
+    auto precise_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"i"}),
+        precise_lower,
+        precise_upper,
+        false,
+        false);
+    auto raw_precise = evaluate(precise_expr, raw_segment.get());
+    auto shredded_precise = evaluate(precise_expr, stats_segment.get());
+    expect_same(raw_precise, shredded_precise);
+    expect_same(evaluate(precise_expr, raw_segment.get(), &offsets),
+                evaluate(precise_expr, stats_segment.get(), &offsets));
+    TargetBitmapView precise_result(raw_precise->GetRawData(),
+                                    raw_precise->size());
+    TargetBitmapView precise_valid(raw_precise->GetValidRawData(),
+                                   raw_precise->size());
+    EXPECT_TRUE(precise_valid[1]);
+    EXPECT_TRUE(precise_result[1]);
+
+    proto::plan::GenericValue sparse_lower;
+    sparse_lower.set_float_val(9007199254740992.0);
+    proto::plan::GenericValue sparse_upper;
+    sparse_upper.set_float_val(9007199254740994.0);
+    auto sparse_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"sparse_i"}),
+        sparse_lower,
+        sparse_upper,
+        false,
+        false);
+    auto raw_sparse = evaluate(sparse_expr, raw_segment.get());
+    auto stats_sparse = evaluate(sparse_expr, stats_segment.get());
+    expect_same(raw_sparse, stats_sparse);
+    expect_same(evaluate(sparse_expr, raw_segment.get(), &offsets),
+                evaluate(sparse_expr, stats_segment.get(), &offsets));
+    expect_batched_same(sparse_expr);
+    TargetBitmapView sparse_result(raw_sparse->GetRawData(),
+                                   raw_sparse->size());
+    TargetBitmapView sparse_valid(raw_sparse->GetValidRawData(),
+                                  raw_sparse->size());
+    for (size_t i = 0; i < raw_sparse->size(); ++i) {
+        EXPECT_EQ(sparse_valid[i], i < 2) << "row " << i;
+        EXPECT_EQ(sparse_result[i], i == 1) << "row " << i;
+    }
+
+    proto::plan::GenericValue uint64_double;
+    uint64_double.set_float_val(9223372036854775808.0);
+    auto uint64_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"u"}),
+        uint64_double,
+        uint64_double,
+        true,
+        true);
+    auto raw_uint64 = evaluate(uint64_expr, raw_segment.get());
+    auto stats_uint64 = evaluate(uint64_expr, stats_segment.get());
+    expect_same(raw_uint64, stats_uint64);
+    expect_same(evaluate(uint64_expr, raw_segment.get(), &offsets),
+                evaluate(uint64_expr, stats_segment.get(), &offsets));
+    TargetBitmapView uint64_result(raw_uint64->GetRawData(),
+                                   raw_uint64->size());
+    TargetBitmapView uint64_valid(raw_uint64->GetValidRawData(),
+                                  raw_uint64->size());
+    EXPECT_TRUE(uint64_valid[0]);
+    EXPECT_TRUE(uint64_result[0]);
+
+    proto::plan::GenericValue nan_lower;
+    nan_lower.set_float_val(std::numeric_limits<double>::quiet_NaN());
+    proto::plan::GenericValue nan_upper;
+    nan_upper.set_float_val(10.0);
+    auto expect_nan_range_matches_raw =
+        [&](const std::string& path,
+            const std::vector<size_t>& known_numeric_rows) {
+            auto nan_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, {path}),
+                nan_lower,
+                nan_upper,
+                true,
+                true);
+            auto raw_nan = evaluate(nan_expr, raw_segment.get());
+            auto stats_nan = evaluate(nan_expr, stats_segment.get());
+            expect_same(raw_nan, stats_nan);
+
+            TargetBitmapView result(raw_nan->GetRawData(), raw_nan->size());
+            TargetBitmapView valid(raw_nan->GetValidRawData(), raw_nan->size());
+            for (size_t i = 0; i < raw_nan->size(); ++i) {
+                EXPECT_FALSE(result[i]) << "path " << path << ", row " << i;
+                const auto is_known_numeric =
+                    std::find(known_numeric_rows.begin(),
+                              known_numeric_rows.end(),
+                              i) != known_numeric_rows.end();
+                EXPECT_EQ(valid[i], is_known_numeric)
+                    << "path " << path << ", row " << i;
+            }
+        };
+    expect_nan_range_matches_raw("n", {0, 1, 2, 6});
+    expect_nan_range_matches_raw("rare", {0});
 }

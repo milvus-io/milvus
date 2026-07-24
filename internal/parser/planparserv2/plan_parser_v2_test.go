@@ -730,6 +730,48 @@ func TestExpr_BinaryRange(t *testing.T) {
 	}
 }
 
+func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for name, exprStr := range map[string]string{
+		"range":         `9007199254740992.0 <= A < 9007199254740993`,
+		"reverse range": `9007199254740993 > A >= 9007199254740992.0`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			expr, err := ParseExpr(helper, exprStr, nil)
+			require.NoError(t, err)
+
+			binaryRange := expr.GetBinaryRangeExpr()
+			require.NotNil(t, binaryRange)
+			assert.IsType(t, &planpb.GenericValue_FloatVal{}, binaryRange.GetLowerValue().GetVal())
+			assert.Equal(t, float64(9007199254740992), binaryRange.GetLowerValue().GetFloatVal())
+			assert.IsType(t, &planpb.GenericValue_Int64Val{}, binaryRange.GetUpperValue().GetVal())
+			assert.Equal(t, int64(9007199254740993), binaryRange.GetUpperValue().GetInt64Val())
+			assert.True(t, binaryRange.GetLowerInclusive())
+			assert.False(t, binaryRange.GetUpperInclusive())
+		})
+	}
+
+	for name, exprStr := range map[string]string{
+		"range lower greater than upper":         `9007199254740994.0 <= A < 9007199254740993`,
+		"reverse range lower greater than upper": `9007199254740993 > A >= 9007199254740994.0`,
+		"equal bounds with open upper":           `9007199254740992.0 <= A < 9007199254740992`,
+		"equal bounds with open lower":           `9007199254740992.0 < A <= 9007199254740992`,
+		"same-type strings in reverse order":     `"z" <= A < "a"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseExpr(helper, exprStr, nil)
+			assert.Error(t, err)
+		})
+	}
+
+	// Bounds with different JSON dynamic types have no parser-level ordering.
+	// Their runtime type semantics are evaluated by segcore.
+	assertValidExpr(t, helper, `1 <= A < "z"`)
+}
+
 func TestExpr_castValue(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
@@ -1697,6 +1739,12 @@ func Test_ArrayExpr(t *testing.T) {
 
 	exprs := []string{
 		`ArrayField == [1,2,3,4]`,
+		`ArrayField != [1,2,3,4]`,
+		`[1,2,3,4] == ArrayField`,
+		`ArrayField == []`,
+		`ArrayField != []`,
+		`[] == ArrayField`,
+		`[] != ArrayField`,
 		`ArrayField[0] == 1`,
 		`ArrayField[0] > 1`,
 		`1 < ArrayField[0] < 3`,
@@ -1759,7 +1807,6 @@ func Test_ArrayExpr(t *testing.T) {
 		`ArrayField[] == 1`,
 		`A[] == 1`,
 		`ArrayField[0] + ArrayField[1] == 1`,
-		`ArrayField == []`,
 	}
 	for _, expr = range invalidExprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1770,6 +1817,52 @@ func Test_ArrayExpr(t *testing.T) {
 		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
+}
+
+func Test_EmptyArrayComparisonNormalization(t *testing.T) {
+	schema := newTestSchema(true)
+	for _, field := range schema.GetFields() {
+		if field.GetName() == "ArrayField" {
+			field.Nullable = true
+		}
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	testcases := []struct {
+		expr string
+		op   planpb.OpType
+	}{
+		{expr: `ArrayField == []`, op: planpb.OpType_Equal},
+		{expr: `[] == ArrayField`, op: planpb.OpType_Equal},
+		{expr: `ArrayField != []`, op: planpb.OpType_NotEqual},
+		{expr: `[] != ArrayField`, op: planpb.OpType_NotEqual},
+		{expr: `StringArrayField == []`, op: planpb.OpType_Equal},
+	}
+	for _, testcase := range testcases {
+		t.Run(testcase.expr, func(t *testing.T) {
+			expr, err := ParseExpr(helper, testcase.expr, nil)
+			require.NoError(t, err)
+			arrayLength := expr.GetBinaryArithOpEvalRangeExpr()
+			require.NotNil(t, arrayLength)
+			require.Equal(t, planpb.ArithOpType_ArrayLength, arrayLength.GetArithOp())
+			require.Equal(t, testcase.op, arrayLength.GetOp())
+			require.Equal(t, int64(0), arrayLength.GetValue().GetInt64Val())
+			require.Empty(t, arrayLength.GetColumnInfo().GetNestedPath())
+			if testcase.expr == `ArrayField == []` {
+				require.True(t, arrayLength.GetColumnInfo().GetNullable())
+			}
+		})
+	}
+
+	_, err = ParseExpr(helper, `ArrayField[0] == []`, nil)
+	require.Error(t, err)
+	_, err = ParseExpr(helper, `ArrayField > []`, nil)
+	require.Error(t, err)
+
+	jsonExpr, err := ParseExpr(helper, `JSONField["array"] == []`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, jsonExpr.GetUnaryRangeExpr(), "JSON array comparison must not be rewritten as ARRAY length")
 }
 
 func Test_ArrayLength(t *testing.T) {

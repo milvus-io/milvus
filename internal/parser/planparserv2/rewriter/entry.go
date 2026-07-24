@@ -15,6 +15,8 @@ func RewriteExprWithConfig(e *planpb.Expr, optimizeEnabled bool) *planpb.Expr {
 	if e == nil {
 		return nil
 	}
+	e = normalizeEmptyArrayComparisons(e)
+	e = normalizeJSONTermExprs(e)
 	v := &visitor{optimizeEnabled: optimizeEnabled}
 	res := v.visitExpr(e)
 	if out, ok := res.(*planpb.Expr); ok && out != nil {
@@ -111,12 +113,12 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 			sortTermValues(te)
 			col := te.GetColumnInfo()
 			if v.optimizeEnabled && effectiveDataType(col) == schemapb.DataType_Bool {
-				if !canFoldBoolDomainToConstant(col) && boolValuesCoverDomain(te.GetValues()) {
+				if !canFoldPredicateToBoolConstant(col) && boolValuesCoverDomain(te.GetValues()) {
 					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
 				}
 				// Let other bool NOT IN flow through to visitTermExpr for bool-specific optimization.
 			} else if col != nil && len(te.GetValues()) == 1 {
-				if hasMissingPathNotEqualSemantics(col, te.GetValues()...) {
+				if !canRewriteNotEqual(col, te.GetValues()[0]) {
 					return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: te}})
 				}
 				// Single-value NOT IN → != (avoids SIMD setup overhead for trivial case)
@@ -149,7 +151,7 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 		// NOT (col == val) → col != val
 		// Handles: bool NOT IN [true] → != true, bool NOT IN [false] → != false
 		if ure := child.GetUnaryRangeExpr(); ure != nil && ure.GetOp() == planpb.OpType_Equal {
-			if hasMissingPathNotEqualSemantics(ure.GetColumnInfo(), ure.GetValue()) {
+			if !canRewriteNotEqual(ure.GetColumnInfo(), ure.GetValue()) {
 				return &planpb.Expr{
 					Expr: &planpb.Expr_UnaryExpr{
 						UnaryExpr: &planpb.UnaryExpr{
@@ -187,7 +189,7 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 		values := expr.GetValues()
 		if allBoolVals(values) {
 			if boolValuesCoverDomain(values) {
-				if !canFoldBoolDomainToConstant(expr.GetColumnInfo()) {
+				if !canFoldPredicateToBoolConstant(expr.GetColumnInfo()) {
 					return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
 				}
 				return newAlwaysTrueExpr()
