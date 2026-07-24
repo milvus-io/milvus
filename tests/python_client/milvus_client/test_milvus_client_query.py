@@ -4745,10 +4745,10 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
 
 # Valid (index_type, json_cast_type) combinations for JSON path index
 # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool", "ARRAY_DOUBLE"])
+# STL_SORT/BITMAP on a JSON path require scalar index engine v4; 3.0 uses v3 (#51745)
 _json_path_index_params_query = [
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "ARRAY_DOUBLE"),
-    ("STL_SORT", "DOUBLE"),
 ]
 
 

@@ -744,15 +744,12 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
+# STL_SORT/BITMAP on a JSON path require scalar index engine v4; 3.0 uses v3 (#51745)
 _json_path_index_params_invalid = [
     ("INVERTED", "BOOL"),
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "VARCHAR"),
     ("INVERTED", "JSON"),
-    ("STL_SORT", "DOUBLE"),
-    ("STL_SORT", "VARCHAR"),
-    ("BITMAP", "BOOL"),
-    ("BITMAP", "VARCHAR"),
 ]
 
 
@@ -787,7 +784,8 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     def supported_json_cast_type(self, json_index_params):
         yield json_index_params[1]
 
-    @pytest.fixture(scope="function", params=["INVERTED", "STL_SORT"])
+    # STL_SORT on a JSON path require scalar index engine v4; 3.0 uses v3 (#51745)
+    @pytest.fixture(scope="function", params=["INVERTED"])
     def supported_double_scalar_index(self, request):
         """Index types that support DOUBLE cast type. Use for tests that
         hardcode json_cast_type to 'double'."""
@@ -1167,15 +1165,12 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                           check_task=CheckTasks.err_res, check_items=error)
 
 
+# STL_SORT/BITMAP on a JSON path require scalar index engine v4; 3.0 uses v3 (#51745)
 _json_path_index_params_valid = [
     ("INVERTED", "BOOL"),
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "VARCHAR"),
     ("INVERTED", "JSON"),
-    ("STL_SORT", "DOUBLE"),
-    ("STL_SORT", "VARCHAR"),
-    ("BITMAP", "BOOL"),
-    ("BITMAP", "VARCHAR"),
 ]
 
 
