@@ -76,10 +76,17 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatches) {
         ASSERT_NE(metrics, nullptr);
         EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::BOOLEAN);
 
-        std::vector<Metrics> query_true = {true, false};
-        std::vector<Metrics> query_false = {false, true};
-        EXPECT_TRUE(metrics->CanSkipIn(query_true));
-        EXPECT_FALSE(metrics->CanSkipIn(query_false));
+        // Chunk is all-false. CanSkipIn takes the IN-list as a value list
+        // (each entry is one queried value), so a chunk can be skipped only
+        // when none of the listed values can be present.
+        std::vector<Metrics> in_true = {true};  // IN(true): absent -> skip
+        std::vector<Metrics> in_false = {
+            false};  // IN(false): present -> no skip
+        std::vector<Metrics> in_both = {true,
+                                        false};  // false present -> no skip
+        EXPECT_TRUE(metrics->CanSkipIn(in_true));
+        EXPECT_FALSE(metrics->CanSkipIn(in_false));
+        EXPECT_FALSE(metrics->CanSkipIn(in_both));
     }
 
     // INT8
@@ -341,10 +348,15 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromChunk) {
         ASSERT_NE(metrics, nullptr);
         EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::BOOLEAN);
 
-        std::vector<Metrics> query_true = {true, false};
-        std::vector<Metrics> query_false = {false, true};
-        EXPECT_FALSE(metrics->CanSkipIn(query_true));
-        EXPECT_TRUE(metrics->CanSkipIn(query_false));
+        // Chunk is all-true. CanSkipIn takes the IN-list as a value list, so a
+        // chunk can be skipped only when none of the listed values is present.
+        std::vector<Metrics> in_true = {true};  // IN(true): present -> no skip
+        std::vector<Metrics> in_false = {false};  // IN(false): absent -> skip
+        std::vector<Metrics> in_both = {true,
+                                        false};  // true present -> no skip
+        EXPECT_FALSE(metrics->CanSkipIn(in_true));
+        EXPECT_TRUE(metrics->CanSkipIn(in_false));
+        EXPECT_FALSE(metrics->CanSkipIn(in_both));
     }
 
     // INT8

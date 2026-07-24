@@ -20,6 +20,7 @@
 
 #include "arrow/array/array_primitive.h"
 #include "common/Span.h"
+#include "log/Log.h"
 #include "parquet/types.h"
 
 namespace milvus::index {
@@ -28,57 +29,88 @@ std::unique_ptr<FieldChunkMetrics>
 SkipIndexStatsBuilder::Build(
     DataType data_type,
     const std::shared_ptr<parquet::Statistics>& statistic) const {
+    // A row group can carry a statistics object (is_stats_set()==true) that
+    // still has no usable min/max: an all-null row group records only
+    // null_count, and Arrow omits min/max for a float row group that contains
+    // NaN (its ordering is undefined). Reading min()/max() in that state
+    // returns unset/garbage bounds, which would let the skip check prune a cell
+    // that actually holds matching rows. Treat "no min/max" as "no metric" so
+    // the chunk is never skipped (conservative, no false negative).
+    if (statistic == nullptr || !statistic->HasMinMax()) {
+        return std::make_unique<NoneFieldChunkMetrics>();
+    }
     std::unique_ptr<FieldChunkMetrics> chunk_metrics;
     switch (data_type) {
         case DataType::INT8: {
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int8_t>(statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int8_t>>(
-                info.min_, info.max_, nullptr);
+                info->min_, info->max_, nullptr);
             break;
         }
         case milvus::DataType::INT16: {
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int16_t>(statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int16_t>>(
-                info.min_, info.max_, nullptr);
+                info->min_, info->max_, nullptr);
             break;
         }
         case milvus::DataType::INT32: {
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int32_t>(statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int32_t>>(
-                info.min_, info.max_, nullptr);
+                info->min_, info->max_, nullptr);
             break;
         }
         case milvus::DataType::INT64: {
             auto info =
                 ProcessFieldMetrics<parquet::Int64Type, int64_t>(statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int64_t>>(
-                info.min_, info.max_, nullptr);
+                info->min_, info->max_, nullptr);
             break;
         }
         case milvus::DataType::FLOAT: {
             auto info =
                 ProcessFieldMetrics<parquet::FloatType, float>(statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<FloatFieldChunkMetrics<float>>(
-                info.min_, info.max_);
+                info->min_, info->max_);
             break;
         }
         case milvus::DataType::DOUBLE: {
             auto info =
                 ProcessFieldMetrics<parquet::DoubleType, double>(statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<FloatFieldChunkMetrics<double>>(
-                info.min_, info.max_);
+                info->min_, info->max_);
             break;
         }
         case milvus::DataType::VARCHAR: {
             auto info =
                 ProcessFieldMetrics<parquet::ByteArrayType, std::string>(
                     statistic);
+            if (!info.has_value()) {
+                break;
+            }
             chunk_metrics = std::make_unique<StringFieldChunkMetrics>(
-                std::string(info.min_),
-                std::string(info.max_),
+                std::string(info->min_),
+                std::string(info->max_),
                 nullptr,
                 nullptr);
             break;
@@ -87,6 +119,18 @@ SkipIndexStatsBuilder::Build(
             chunk_metrics = std::make_unique<NoneFieldChunkMetrics>();
             break;
         }
+    }
+    if (chunk_metrics == nullptr) {
+        // The typed-statistics cast failed: the footer's physical type does
+        // not match what `data_type` requires (mismatched or corrupt footer).
+        // Degrade exactly like the missing-min/max case above: NONE metrics
+        // never skip, so the chunk stays readable (no false negative).
+        LOG_WARN(
+            "[skipindex] parquet statistics physical type {} does not match "
+            "expected data type {}; building NONE metrics (never skips)",
+            parquet::TypeToString(statistic->physical_type()),
+            GetDataTypeName(data_type));
+        chunk_metrics = std::make_unique<NoneFieldChunkMetrics>();
     }
     return chunk_metrics;
 }
