@@ -309,18 +309,19 @@ ManifestGroupTranslator::get_cells(
         static_cast<size_t>(pool.GetMaxThreadNum() *
                             milvus::segcore::kChannelCapacityMultiplier));
 
+    // No finalize_cell: batch tasks on the shared load thread pool only
+    // perform IO/decode and push raw Arrow tables. The CPU-heavy chunk
+    // building (NormalizeArrowForChunkWriter + create_group_chunk) runs on
+    // this (caller) thread in the pop loop below, so the shared load pool
+    // never turns into a fleet of CPU-bound threads that can starve the Go
+    // runtime (etcd keepalive) under container CPU quotas. See #48060.
     auto load_futures = milvus::segcore::LoadCellBatchAsync(
         ctx,
         std::move(cell_specs),
         std::move(factory),
         channel,
         FieldDataLoadBatchSplitTargetBytes(),
-        load_priority_,
-        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               int64_t cid) {
-            return load_group_chunk(
-                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
-        });
+        load_priority_);
 
     LOG_INFO(
         "[StorageV2] translator {} submits {} batch tasks for manifest "
@@ -329,7 +330,7 @@ ManifestGroupTranslator::get_cells(
         load_futures.size(),
         column_group_index_);
 
-    // Pop loop — batch tasks finalize cells before pushing.
+    // Pop loop — finalize each cell on this thread as it arrives.
     std::unordered_map<milvus::cachinglayer::cid_t,
                        std::unique_ptr<milvus::GroupChunk>>
         completed_cells;
@@ -341,12 +342,15 @@ ManifestGroupTranslator::get_cells(
             try {
                 CheckCancellation(
                     ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
-                AssertInfo(cell_data->chunk != nullptr,
-                           "[StorageV2] translator {} cell {} is not "
-                           "finalized by batch task",
+                AssertInfo(!cell_data->tables.empty(),
+                           "[StorageV2] translator {} cell {} has no loaded "
+                           "tables",
                            key_,
                            cell_data->cid);
-                completed_cells[cell_data->cid] = std::move(cell_data->chunk);
+                auto cell_cid =
+                    static_cast<milvus::cachinglayer::cid_t>(cell_data->cid);
+                completed_cells[cell_cid] =
+                    load_group_chunk(cell_data->tables, cell_cid);
                 milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
             } catch (...) {
                 milvus::segcore::ReleaseCellLoadResultBudget(cell_data);

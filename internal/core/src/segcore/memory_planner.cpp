@@ -433,8 +433,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    BatchReaderFactory reader_factory,
                    std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority,
-                   CellFinalizeFunc finalize_cell) {
+                   milvus::proto::common::LoadPriority priority) {
     if (cell_specs.empty()) {
         channel->close();
         return {};
@@ -529,8 +528,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
-    auto shared_finalizer =
-        std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
 
     std::vector<std::future<void>> futures;
     futures.reserve(batches.size());
@@ -548,7 +545,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                           read_parallelism,
                                           channel,
                                           remaining,
-                                          shared_finalizer,
                                           op_ctx]() {
             auto task_guard = folly::makeGuard([&channel, &remaining]() {
                 if (remaining->fetch_sub(1) == 1) {
@@ -606,15 +602,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                         std::move(all_tables[table_offset + i]));
                 }
                 table_offset += cell.rg_count;
-                if (*shared_finalizer) {
-                    cell_result->chunk =
-                        (*shared_finalizer)(cell_result->tables, cell.cid);
-                    ReleaseCellLoadResultBudget(cell_result);
-                    transferred_budget_bytes += cell_budget_bytes;
-                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    channel->push(std::move(cell_result));
-                    continue;
-                }
                 channel->push(std::move(cell_result));
                 transferred_budget_bytes += cell_budget_bytes;
             }
@@ -663,13 +650,15 @@ MakeChunkReaderFactory(
                           int64_t rg_offset,
                           int64_t total_rg_count,
                           int64_t /*reader_memory_limit*/,
-                          uint64_t /*read_parallelism*/)
+                          uint64_t read_parallelism)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         std::vector<int64_t> rg_indices(total_rg_count);
         std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
         ARROW_ASSIGN_OR_RAISE(
             auto batches,
-            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
+            chunk_reader->get_chunks(
+                rg_indices,
+                std::max<size_t>(static_cast<size_t>(read_parallelism), 1)));
         std::vector<std::shared_ptr<arrow::Table>> tables;
         tables.reserve(batches.size());
         for (auto& batch : batches) {

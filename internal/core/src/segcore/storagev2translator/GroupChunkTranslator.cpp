@@ -356,20 +356,15 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
-    auto finalize_cell =
-        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               int64_t cid) {
-            return load_group_chunk(
-                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
-        };
+    // No finalize_cell: keep the shared load thread pool IO/decode-only and
+    // build chunks on the caller thread in the pop loop. See #48060.
     auto load_futures = milvus::segcore::LoadCellBatchAsync(
         ctx,
         std::move(cell_specs),
         std::move(factory),
         channel,
         FieldDataLoadBatchSplitTargetBytes(),
-        load_priority_,
-        std::move(finalize_cell));
+        load_priority_);
 
     LOG_INFO(
         "[StorageV2] translator {} submits {} batch tasks for column group {}",
@@ -377,7 +372,7 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         load_futures.size(),
         column_group_info_.field_id);
 
-    // Pop loop — batch tasks finalize cells before pushing.
+    // Pop loop — finalize each cell on this thread as it arrives.
     std::unordered_map<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>
         completed_cells;
     completed_cells.reserve(cids.size());
@@ -388,12 +383,15 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
             try {
                 CheckCancellation(
                     ctx, segment_id_, "GroupChunkTranslator::get_cells()");
-                AssertInfo(cell_data->chunk != nullptr,
-                           "[StorageV2] translator {} cell {} is not "
-                           "finalized by batch task",
+                AssertInfo(!cell_data->tables.empty(),
+                           "[StorageV2] translator {} cell {} has no loaded "
+                           "tables",
                            key_,
                            cell_data->cid);
-                completed_cells[cell_data->cid] = std::move(cell_data->chunk);
+                auto cell_cid =
+                    static_cast<milvus::cachinglayer::cid_t>(cell_data->cid);
+                completed_cells[cell_cid] =
+                    load_group_chunk(cell_data->tables, cell_cid);
                 milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
             } catch (...) {
                 milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
