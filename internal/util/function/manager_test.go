@@ -749,12 +749,19 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T)
 
 	schema := newBM25SignatureTestSchema()
 	closeStarted := make(chan struct{})
+	// The manager may build (and immediately discard) more than one runner for
+	// the same key under a concurrent re-init, and every built runner shares
+	// this closeStarted channel. Guard the close with a shared Once so a second
+	// runner's Close does not close an already-closed channel (which panicked
+	// and made this test flaky under -race in ci-v2/build-ut-cov).
+	var closeStartedOnce sync.Once
 	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
 		runner, err := newTestFunctionRunner(schema, fn)
 		if err != nil {
 			return nil, err
 		}
 		runner.closeStarted = closeStarted
+		runner.closeStartedOnce = &closeStartedOnce
 		return runner, nil
 	})
 	require.NoError(t, manager.Alloc(1, "v1", schema))
@@ -1620,7 +1627,11 @@ type testFunctionRunner struct {
 	closed       atomic.Int32
 	closeOnce    sync.Once
 	closeStarted chan struct{}
-	releaseClose chan struct{}
+	// closeStartedOnce, when set, guards close(closeStarted) across runner
+	// instances that share the same closeStarted channel. It falls back to the
+	// per-instance closeOnce when nil.
+	closeStartedOnce *sync.Once
+	releaseClose     chan struct{}
 }
 
 func newTestFunctionRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (*testFunctionRunner, error) {
@@ -1689,9 +1700,12 @@ func (r *testFunctionRunner) GetInputFields() []*schemapb.FieldSchema {
 
 func (r *testFunctionRunner) Close() {
 	if r.closeStarted != nil {
-		r.closeOnce.Do(func() {
-			close(r.closeStarted)
-		})
+		markCloseStarted := func() { close(r.closeStarted) }
+		if r.closeStartedOnce != nil {
+			r.closeStartedOnce.Do(markCloseStarted)
+		} else {
+			r.closeOnce.Do(markCloseStarted)
+		}
 	}
 	if r.releaseClose != nil {
 		<-r.releaseClose
