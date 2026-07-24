@@ -69,12 +69,23 @@ func (s *SingleflightSuite) TestDoChan() {
 	}
 }
 
-func (s *SingleflightSuite) TestDoChanDoesNotRetainGoroutinePerWaiter() {
+func (s *SingleflightSuite) TestDoChanKeepsTypedResult() {
+	sf := Singleflight[int]{}
+	result := <-sf.DoChan("test_dochan_typed", func() (int, error) {
+		return 42, nil
+	})
+
+	var value int = result.Val
+	s.Equal(42, value)
+	s.NoError(result.Err)
+}
+
+func (s *SingleflightSuite) TestDoChanRawDoesNotRetainGoroutinePerWaiter() {
 	sf := Singleflight[any]{}
 	started := make(chan struct{})
 	release := make(chan struct{})
 
-	first := sf.DoChan("test_dochan_goroutines", func() (any, error) {
+	first := sf.DoChanRaw("test_dochan_goroutines", func() (any, error) {
 		close(started)
 		<-release
 		return struct{}{}, nil
@@ -84,7 +95,7 @@ func (s *SingleflightSuite) TestDoChanDoesNotRetainGoroutinePerWaiter() {
 	baseline := runtime.NumGoroutine()
 	const waiters = 2000
 	for i := 0; i < waiters; i++ {
-		_ = sf.DoChan("test_dochan_goroutines", func() (any, error) {
+		_ = sf.DoChanRaw("test_dochan_goroutines", func() (any, error) {
 			s.FailNow("singleflight callback unexpectedly ran twice")
 			return nil, nil
 		})
