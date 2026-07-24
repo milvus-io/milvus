@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -414,6 +415,65 @@ func TestBuildTextIndexesForSegment_NoEnableMatchFields(t *testing.T) {
 	got, err := buildTextIndexesForSegment(context.Background(), args)
 	assert.NoError(t, err)
 	assert.Empty(t, got)
+}
+
+func TestBuildTextIndexesForSegment_PropagatesPluginContext(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	const collectionID = int64(7001)
+	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 17,
+		CollectionId:     collectionID,
+		EncryptionKey:    "unsafe-key",
+	}
+
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).To(
+		func(context []*commonpb.KeyValuePair, gotCollectionID int64) (*indexcgopb.StoragePluginContext, error) {
+			require.Equal(t, requestContext, context)
+			require.Equal(t, collectionID, gotCollectionID)
+			return pluginContext, nil
+		}).Build()
+	defer parseMock.UnPatch()
+
+	captured, cleanup := mockCreateTextIndexCGO(map[string]int64{"text-index": 10})
+	defer cleanup()
+
+	got, err := buildTextIndexesForSegment(context.Background(), buildTextIndexArgs{
+		plan: &datapb.CompactionPlan{
+			PlanID:        1,
+			Schema:        textMatchSchema(101),
+			PluginContext: requestContext,
+		},
+		compactionParams: compaction.GenParams(),
+		collectionID:     collectionID,
+		partitionID:      7002,
+		segmentID:        7003,
+		taskID:           1,
+		storageVersion:   storage.StorageV2,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.NotNil(t, captured.info)
+	require.Equal(t, pluginContext, captured.info.GetStoragePluginContext())
+}
+
+func TestBuildTextIndexesForSegment_PropagatesPluginContextError(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
+	defer parseMock.UnPatch()
+
+	_, err := buildTextIndexesForSegment(context.Background(), buildTextIndexArgs{
+		plan:             &datapb.CompactionPlan{PlanID: 1, Schema: textMatchSchema(101)},
+		compactionParams: compaction.GenParams(),
+		collectionID:     1,
+		partitionID:      2,
+		segmentID:        3,
+		taskID:           1,
+		storageVersion:   storage.StorageV2,
+	})
+	require.ErrorIs(t, err, assert.AnError)
 }
 
 // TestSortCompaction_createTextIndex_ForwardsPassedManifest guards the fix that

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -89,6 +90,10 @@ func buildTextIndexesForSegment(ctx context.Context, args buildTextIndexArgs) (m
 	if err != nil {
 		return nil, err
 	}
+	pluginContext, err := hookutil.GetCPluginContext(args.plan.GetPluginContext(), args.collectionID)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		mu            sync.Mutex
@@ -123,6 +128,9 @@ func buildTextIndexesForSegment(ctx context.Context, args buildTextIndexArgs) (m
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(args.plan.GetCurrentScalarIndexVersion()),
 				StorageVersion:            args.storageVersion,
 				Manifest:                  args.manifest,
+			}
+			if pluginContext != nil {
+				buildIndexParams.StoragePluginContext = pluginContext
 			}
 
 			if args.storageVersion == storage.StorageV2 {
