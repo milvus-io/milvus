@@ -36,6 +36,15 @@ type EmptyReq struct{}
 
 func (req *EmptyReq) GetDbName() string { return "" }
 
+type FileResourceReq struct {
+	Name string `json:"name" binding:"required"`
+	Path string `json:"path" binding:"required"`
+}
+
+type FileResourceNameReq struct {
+	Name string `json:"name" binding:"required"`
+}
+
 type DatabaseReq struct {
 	DbName string `json:"dbName"`
 }
