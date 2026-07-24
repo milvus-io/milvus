@@ -608,7 +608,17 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 	}
 
 	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
-	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
+	// A reopen backfills pre-DDL segments and carries a possibly version-ahead
+	// schema. It must refresh index meta and reserve an APPLIED segcore version
+	// for the reopened segments, but must NOT advance the served collection schema
+	// (that would make the later stream UpdateSchema a no-op and skip the derived-
+	// state rebuild — the #50989/#51062 load-wins race). All other scopes advance
+	// served as before.
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		if err := sd.collectionManager.ReserveAppliedSchemaForReopen(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
+			return err
+		}
+	} else if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
 		return err
 	}
 	sd.collectionManager.Unref(req.GetCollectionID(), 1)
