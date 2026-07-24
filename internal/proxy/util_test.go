@@ -6869,14 +6869,23 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 }
 
 func TestFailMetricLabel(t *testing.T) {
+	assertLabels := func(wantCause string, err error) {
+		t.Helper()
+		status, cause := failMetricLabel(err)
+		// Every failure keeps the coarse status a pre-2.6.19 dashboard queries;
+		// only the cause tells the parties apart.
+		assert.Equal(t, metrics.FailLabel, status)
+		assert.Equal(t, wantCause, cause)
+	}
+
 	// untyped / nil errors must take the conservative system bucket
-	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(nil))
-	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(errors.New("plain error")))
-	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(merr.WrapErrServiceInternalMsg("internal failure")))
+	assertLabels(metrics.CauseSystem, nil)
+	assertLabels(metrics.CauseSystem, errors.New("plain error"))
+	assertLabels(metrics.CauseSystem, merr.WrapErrServiceInternalMsg("internal failure"))
 	// input-classified merr errors go to the user bucket, also through wrapping
-	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.WrapErrParameterInvalidMsg("bad parameter")))
-	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.Wrap(merr.WrapErrParameterInvalidMsg("bad parameter"), "context")))
+	assertLabels(metrics.CauseUser, merr.WrapErrParameterInvalidMsg("bad parameter"))
+	assertLabels(metrics.CauseUser, merr.Wrap(merr.WrapErrParameterInvalidMsg("bad parameter"), "context"))
 	// client cancellation is neither party's failure
-	assert.Equal(t, metrics.CancelLabel, failMetricLabel(context.Canceled))
-	assert.Equal(t, metrics.CancelLabel, failMetricLabel(errors.Wrap(context.Canceled, "rpc aborted")))
+	assertLabels(metrics.CauseCancel, context.Canceled)
+	assertLabels(metrics.CauseCancel, errors.Wrap(context.Canceled, "rpc aborted"))
 }

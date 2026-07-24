@@ -42,6 +42,7 @@ type ServiceInterceptor[Req Request, Resp Response] interface {
 type serviceProviderMetricError struct {
 	err    error
 	status string
+	cause  string
 }
 
 func (e *serviceProviderMetricError) Error() string {
@@ -52,14 +53,14 @@ func (e *serviceProviderMetricError) Unwrap() error {
 	return e.err
 }
 
-func withServiceProviderMetric(err error, status string) error {
-	return &serviceProviderMetricError{err: err, status: status}
+func withServiceProviderMetric(err error, status string, cause string) error {
+	return &serviceProviderMetricError{err: err, status: status, cause: cause}
 }
 
-func serviceCallMetricLabel(err error) string {
+func serviceCallMetricLabel(err error) (status string, cause string) {
 	var metricErr *serviceProviderMetricError
 	if errors.As(err, &metricErr) {
-		return metricErr.status
+		return metricErr.status, metricErr.cause
 	}
 	return failMetricLabel(err)
 }
@@ -112,7 +113,7 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	dbName := request.GetDbName()
 	collectionName := request.GetCollectionName()
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.TotalLabel, dbName, collectionName).Inc()
+		metrics.TotalLabel, metrics.CauseNA, dbName, collectionName).Inc()
 	defer func() {
 		metrics.ProxyReqLatency.WithLabelValues(nodeID, i.method).
 			Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -120,30 +121,30 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 
 	resp, err := i.onCall(ctx, request)
 	if err != nil {
-		status := serviceCallMetricLabel(err)
+		status, cause := serviceCallMetricLabel(err)
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, dbName, collectionName).Inc()
+			status, cause, dbName, collectionName).Inc()
 		return i.onError(err)
 	}
 
 	if i.onResponse != nil && merr.Ok(resp.GetStatus()) {
 		if err := i.onResponse(resp); err != nil {
-			status := serviceCallMetricLabel(err)
+			status, cause := serviceCallMetricLabel(err)
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-				status, dbName, collectionName).Inc()
+				status, cause, dbName, collectionName).Inc()
 			return i.onError(err)
 		}
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		status := failMetricLabel(merr.Error(resp.GetStatus()))
+		status, cause := failMetricLabel(merr.Error(resp.GetStatus()))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, dbName, collectionName).Inc()
+			status, cause, dbName, collectionName).Inc()
 		return resp, nil
 	}
 
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.SuccessLabel, dbName, collectionName).Inc()
+		metrics.SuccessLabel, metrics.CauseNA, dbName, collectionName).Inc()
 
 	return resp, nil
 }
@@ -375,7 +376,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		log.Warn(ctx, "DescribeCollection failed to enqueue",
 			mlog.Err(err))
 
-		return nil, withServiceProviderMetric(err, metrics.AbandonLabel)
+		return nil, withServiceProviderMetric(err, metrics.AbandonLabel, metrics.CauseNA)
 	}
 
 	log.Debug(ctx, "DescribeCollection enqueued",
