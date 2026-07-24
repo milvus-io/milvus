@@ -38,10 +38,13 @@ type sealWorker struct {
 
 // NotifySealSegment is used to notify the seal worker to seal the segment.
 func (m *sealWorker) NotifySealSegment(segmentID int64, sealPolicy policy.SealPolicy) {
-	go func() {
-		// we should async notify the seal worker to avoid blocking the caller.
-		m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}
-	}()
+	// Keep notification bounded and non-blocking. Capacity and binlog policies
+	// are retriggered by later allocation or sync events, with time policies as
+	// a backstop for inactive segments.
+	select {
+	case m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}:
+	default:
+	}
 }
 
 // NotifyGrowingBytes is used to notify the seal worker to seal the segment when the total size exceeds the threshold.
