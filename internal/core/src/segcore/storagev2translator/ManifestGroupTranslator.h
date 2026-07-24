@@ -30,6 +30,7 @@
 #include "arrow/table.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
+#include "common/ChunkTarget.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
@@ -37,6 +38,7 @@
 #include "common/protobuf_utils.h"
 #include "milvus-storage/reader.h"
 #include "pb/common.pb.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -59,6 +61,7 @@ class ManifestGroupTranslator
      * @param column_group_index Index of the column group within the segment
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
+     * @param projected_columns Physical column names projected by chunk_reader
      * @param use_mmap Whether to use memory mapping for data loading
      * @param mmap_populate Whether to populate data into memory mapping
      * @param mmap_dir_path Directory path for memory mapping
@@ -71,6 +74,7 @@ class ManifestGroupTranslator
         int64_t column_group_index,
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const std::vector<std::string>& projected_columns,
         bool use_mmap,
         bool mmap_populate,
         const std::string& mmap_dir_path,
@@ -80,7 +84,10 @@ class ManifestGroupTranslator
         const std::string& warmup_policy,
         const std::string& cache_key_suffix = "",
         int64_t fallback_bytes_per_row = 0,
-        std::string shard = "");
+        std::string shard = "",
+        MmapChunkWritebackMode writeback_mode =
+            MmapChunkWritebackMode::Disabled,
+        bool enable_async_load = false);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -171,6 +178,18 @@ class ManifestGroupTranslator
     }
 
  private:
+    using CellResult = std::pair<milvus::cachinglayer::cid_t,
+                                 std::unique_ptr<milvus::GroupChunk>>;
+
+    std::vector<CellResult>
+    get_cells_legacy(milvus::OpContext* ctx,
+                     const std::vector<milvus::cachinglayer::cid_t>& cids,
+                     std::vector<milvus::segcore::CellSpec> cell_specs);
+
+    std::vector<CellResult>
+    get_cells_async(milvus::OpContext* ctx,
+                    std::vector<milvus::segcore::CellSpec> cell_specs);
+
     /**
      * @brief Load a cell from multiple Arrow Tables
      *
@@ -200,8 +219,10 @@ class ManifestGroupTranslator
     bool mmap_populate_;
     bool has_array_field_{false};
     std::string mmap_dir_path_;
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+    bool enable_async_load_{false};
 };
 
 }  // namespace milvus::segcore::storagev2translator

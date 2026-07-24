@@ -15,10 +15,13 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -31,9 +34,11 @@
 #include "common/Types.h"
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "milvus-storage/common/extend_status.h"
 #include "pb/common.pb.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -41,6 +46,154 @@
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::segcore::storagev2translator;
+
+class ColumnEstimateUnavailableChunkReader
+    : public milvus_storage::api::ChunkReader {
+ public:
+    explicit ColumnEstimateUnavailableChunkReader(
+        std::unique_ptr<milvus_storage::api::ChunkReader> delegate,
+        bool total_estimate_available = true)
+        : delegate_(std::move(delegate)),
+          total_estimate_available_(total_estimate_available) {
+    }
+
+    size_t
+    total_number_of_chunks() const override {
+        return delegate_->total_number_of_chunks();
+    }
+
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>& row_indices) override {
+        return delegate_->get_chunk_indices(row_indices);
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t chunk_index) override {
+        return delegate_->get_chunk(chunk_index);
+    }
+
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>& chunk_indices,
+               size_t parallelism) override {
+        return delegate_->get_chunks(chunk_indices, parallelism);
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        if (!total_estimate_available_) {
+            return arrow::Status::NotImplemented(
+                "total estimate unavailable for last-resort test");
+        }
+        return delegate_->get_chunk_estimated_size();
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string&) override {
+        return arrow::Status::NotImplemented(
+            "column estimate unavailable for fallback test");
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return arrow::Status::NotImplemented(
+            "column estimate unavailable for fallback test");
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        return delegate_->get_chunk_rows();
+    }
+
+ private:
+    std::unique_ptr<milvus_storage::api::ChunkReader> delegate_;
+    bool total_estimate_available_;
+};
+
+namespace {
+
+class CountingChunkReader : public milvus_storage::api::ChunkReader {
+ public:
+    explicit CountingChunkReader(
+        std::shared_ptr<milvus_storage::api::ChunkReader> inner)
+        : inner_(std::move(inner)) {
+    }
+
+    size_t
+    total_number_of_chunks() const override {
+        return inner_->total_number_of_chunks();
+    }
+
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>& row_indices) override {
+        return inner_->get_chunk_indices(row_indices);
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t chunk_index) override {
+        return inner_->get_chunk(chunk_index);
+    }
+
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>& chunk_indices,
+               size_t parallelism) override {
+        sync_calls_.fetch_add(1);
+        return inner_->get_chunks(chunk_indices, parallelism);
+    }
+
+    folly::SemiFuture<
+        arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>
+    get_chunks_async(const std::vector<int64_t>& chunk_indices,
+                     size_t parallelism) override {
+        async_calls_.fetch_add(1);
+        return inner_->get_chunks_async(chunk_indices, parallelism);
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        return inner_->get_chunk_estimated_size();
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string& field_name) override {
+        return inner_->get_chunk_column_estimated_size(field_name);
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return inner_->get_chunk_column_estimated_size();
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        if (!chunk_rows_status_.ok()) {
+            return chunk_rows_status_;
+        }
+        return inner_->get_chunk_rows();
+    }
+
+    size_t
+    SyncCalls() const {
+        return sync_calls_.load();
+    }
+
+    size_t
+    AsyncCalls() const {
+        return async_calls_.load();
+    }
+
+    void
+    SetChunkRowsStatus(arrow::Status status) {
+        chunk_rows_status_ = std::move(status);
+    }
+
+ private:
+    std::shared_ptr<milvus_storage::api::ChunkReader> inner_;
+    std::atomic<size_t> sync_calls_{0};
+    std::atomic<size_t> async_calls_{0};
+    arrow::Status chunk_rows_status_;
+};
+
+}  // namespace
 
 class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
     void
@@ -63,8 +216,14 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
 
     // Helper to create a ManifestGroupTranslator for a given column group
     std::unique_ptr<ManifestGroupTranslator>
-    MakeTranslator(int64_t cg_index, bool use_mmap) {
-        auto chunk_reader = test_data_->CreateChunkReader(cg_index);
+    MakeTranslator(int64_t cg_index,
+                   bool use_mmap,
+                   bool enable_async_load = false,
+                   std::shared_ptr<milvus_storage::api::ChunkReader>
+                       chunk_reader = nullptr) {
+        if (chunk_reader == nullptr) {
+            chunk_reader = test_data_->CreateChunkReader(cg_index);
+        }
         auto field_metas = test_data_->GetFieldMetas(cg_index);
         return std::make_unique<ManifestGroupTranslator>(
             segment_id_,
@@ -72,13 +231,19 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             cg_index,
             std::move(chunk_reader),
             field_metas,
+            test_data_->GetColumnGroups()->at(cg_index)->columns,
             use_mmap,
             /*mmap_populate=*/true,
             mmap_dir_,
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
             /*eager_load=*/true,
-            /*warmup_policy=*/"");
+            /*warmup_policy=*/"",
+            /*cache_key_suffix=*/"",
+            /*fallback_bytes_per_row=*/0,
+            /*shard=*/"",
+            MmapChunkWritebackMode::Disabled,
+            enable_async_load);
     }
 
     SchemaPtr schema_;
@@ -112,7 +277,8 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     auto num_cells = translator->num_cells();
     auto chunk_reader = test_data_->CreateChunkReader(0);
     auto expected_num_chunks = chunk_reader->total_number_of_chunks();
-    auto row_group_sizes = chunk_reader->get_chunk_size().ValueOrDie();
+    auto row_group_sizes =
+        chunk_reader->get_chunk_estimated_size().ValueOrDie();
     auto rgs_per_cell =
         ComputeRowGroupsPerCell(row_group_sizes, GetCellTargetSizeBytes());
     auto expected_num_cells =
@@ -245,6 +411,307 @@ TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
     }
 }
 
+TEST_P(ManifestGroupTranslatorTest,
+       TestProjectedColumnUsesProjectedEstimatedSize) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    ASSERT_GT(column_group->columns.size(), 1);
+
+    const auto& projected_column = column_group->columns.front();
+    auto needed_columns = std::make_shared<std::vector<std::string>>(
+        std::initializer_list<std::string>{projected_column});
+    auto chunk_reader = test_data_->CreateChunkReader(0, needed_columns);
+
+    auto projected_sizes_result =
+        chunk_reader->get_chunk_column_estimated_size(projected_column);
+    ASSERT_TRUE(projected_sizes_result.ok())
+        << projected_sizes_result.status().ToString();
+    const auto& projected_sizes = projected_sizes_result.ValueOrDie();
+
+    auto total_sizes_result = chunk_reader->get_chunk_estimated_size();
+    ASSERT_TRUE(total_sizes_result.ok())
+        << total_sizes_result.status().ToString();
+    const auto& total_sizes = total_sizes_result.ValueOrDie();
+    ASSERT_EQ(projected_sizes.size(), total_sizes.size());
+
+    uint64_t projected_total = 0;
+    uint64_t total = 0;
+    for (size_t i = 0; i < projected_sizes.size(); ++i) {
+        projected_total += projected_sizes[i];
+        total += total_sizes[i];
+    }
+    ASSERT_LT(projected_total, total);
+
+    auto all_field_metas = test_data_->GetFieldMetas(0);
+    auto projected_field_id = FieldId(std::stoll(projected_column));
+    std::unordered_map<FieldId, FieldMeta> projected_field_metas;
+    projected_field_metas.emplace(projected_field_id,
+                                  all_field_metas.at(projected_field_id));
+
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        projected_field_metas,
+        *needed_columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        projected_field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/false,
+        /*warmup_policy=*/"",
+        projected_column);
+
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(projected_sizes, GetCellTargetSizeBytes());
+    std::vector<int64_t> expected_cell_sizes;
+    for (size_t start = 0; start < projected_sizes.size();
+         start += rgs_per_cell) {
+        const auto end = std::min(start + rgs_per_cell, projected_sizes.size());
+        int64_t cell_size = 0;
+        for (size_t i = start; i < end; ++i) {
+            cell_size += static_cast<int64_t>(projected_sizes[i]);
+        }
+        expected_cell_sizes.push_back(cell_size);
+    }
+
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    EXPECT_EQ(meta->chunk_memory_size_, expected_cell_sizes);
+}
+
+TEST_P(ManifestGroupTranslatorTest,
+       TestProjectedColumnEstimateTakesPrecedenceOverFallback) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    ASSERT_GT(column_group->columns.size(), 1);
+
+    const auto& projected_column = column_group->columns.front();
+    auto needed_columns = std::make_shared<std::vector<std::string>>(
+        std::initializer_list<std::string>{projected_column});
+    auto chunk_reader = test_data_->CreateChunkReader(0, needed_columns);
+
+    auto projected_sizes_result =
+        chunk_reader->get_chunk_column_estimated_size(projected_column);
+    ASSERT_TRUE(projected_sizes_result.ok())
+        << projected_sizes_result.status().ToString();
+    const auto& projected_sizes = projected_sizes_result.ValueOrDie();
+
+    constexpr int64_t kFallbackBytesPerRow = 8 * 1024;
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(projected_sizes, GetCellTargetSizeBytes());
+
+    std::vector<int64_t> expected_cell_sizes;
+    for (size_t start = 0; start < projected_sizes.size();
+         start += rgs_per_cell) {
+        const auto end = std::min(start + rgs_per_cell, projected_sizes.size());
+        int64_t cell_size = 0;
+        for (size_t i = start; i < end; ++i) {
+            cell_size += static_cast<int64_t>(projected_sizes[i]);
+        }
+        expected_cell_sizes.push_back(cell_size);
+    }
+
+    auto all_field_metas = test_data_->GetFieldMetas(0);
+    auto projected_field_id = FieldId(std::stoll(projected_column));
+    std::unordered_map<FieldId, FieldMeta> projected_field_metas;
+    projected_field_metas.emplace(projected_field_id,
+                                  all_field_metas.at(projected_field_id));
+
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        projected_field_metas,
+        *needed_columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        projected_field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/false,
+        /*warmup_policy=*/"",
+        projected_column + "_fallback",
+        kFallbackBytesPerRow);
+
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    EXPECT_EQ(meta->chunk_memory_size_, expected_cell_sizes);
+}
+
+TEST_P(ManifestGroupTranslatorTest,
+       TestProjectedColumnEstimateErrorUsesSampledFallback) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    ASSERT_GT(column_group->columns.size(), 1);
+
+    const auto& projected_column = column_group->columns.front();
+    auto needed_columns = std::make_shared<std::vector<std::string>>(
+        std::initializer_list<std::string>{projected_column});
+    auto delegate = test_data_->CreateChunkReader(0, needed_columns);
+
+    auto row_group_rows_result = delegate->get_chunk_rows();
+    ASSERT_TRUE(row_group_rows_result.ok())
+        << row_group_rows_result.status().ToString();
+    const auto& row_group_rows = row_group_rows_result.ValueOrDie();
+    ASSERT_GT(row_group_rows.size(), 1);
+
+    constexpr int64_t kFallbackBytesPerRow = 8 * 1024;
+    std::vector<int64_t> fallback_row_group_sizes;
+    fallback_row_group_sizes.reserve(row_group_rows.size());
+    for (auto rows : row_group_rows) {
+        fallback_row_group_sizes.push_back(static_cast<int64_t>(rows) *
+                                           kFallbackBytesPerRow);
+    }
+    auto rgs_per_cell = ComputeRowGroupsPerCell(fallback_row_group_sizes,
+                                                GetCellTargetSizeBytes());
+
+    std::vector<int64_t> expected_cell_sizes;
+    for (size_t start = 0; start < fallback_row_group_sizes.size();
+         start += rgs_per_cell) {
+        const auto end =
+            std::min(start + rgs_per_cell, fallback_row_group_sizes.size());
+        int64_t cell_size = 0;
+        for (size_t i = start; i < end; ++i) {
+            cell_size += fallback_row_group_sizes[i];
+        }
+        expected_cell_sizes.push_back(cell_size);
+    }
+
+    auto all_field_metas = test_data_->GetFieldMetas(0);
+    auto projected_field_id = FieldId(std::stoll(projected_column));
+    std::unordered_map<FieldId, FieldMeta> projected_field_metas;
+    projected_field_metas.emplace(projected_field_id,
+                                  all_field_metas.at(projected_field_id));
+
+    auto chunk_reader = std::make_unique<ColumnEstimateUnavailableChunkReader>(
+        std::move(delegate));
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        projected_field_metas,
+        *needed_columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        projected_field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/false,
+        /*warmup_policy=*/"",
+        projected_column + "_fallback_unavailable",
+        kFallbackBytesPerRow);
+
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    EXPECT_EQ(meta->chunk_memory_size_, expected_cell_sizes);
+}
+
+TEST_P(ManifestGroupTranslatorTest,
+       TestProjectedColumnEstimateErrorUsesTotalEstimateWithoutSample) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    ASSERT_GT(column_group->columns.size(), 1);
+
+    const auto& projected_column = column_group->columns.front();
+    auto needed_columns = std::make_shared<std::vector<std::string>>(
+        std::initializer_list<std::string>{projected_column});
+    auto delegate = test_data_->CreateChunkReader(0, needed_columns);
+
+    auto total_sizes_result = delegate->get_chunk_estimated_size();
+    ASSERT_TRUE(total_sizes_result.ok())
+        << total_sizes_result.status().ToString();
+    const auto& total_sizes = total_sizes_result.ValueOrDie();
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(total_sizes, GetCellTargetSizeBytes());
+
+    std::vector<int64_t> expected_cell_sizes;
+    for (size_t start = 0; start < total_sizes.size(); start += rgs_per_cell) {
+        const auto end = std::min(start + rgs_per_cell, total_sizes.size());
+        int64_t cell_size = 0;
+        for (size_t i = start; i < end; ++i) {
+            cell_size += static_cast<int64_t>(total_sizes[i]);
+        }
+        expected_cell_sizes.push_back(cell_size);
+    }
+
+    auto all_field_metas = test_data_->GetFieldMetas(0);
+    auto projected_field_id = FieldId(std::stoll(projected_column));
+    std::unordered_map<FieldId, FieldMeta> projected_field_metas;
+    projected_field_metas.emplace(projected_field_id,
+                                  all_field_metas.at(projected_field_id));
+
+    auto chunk_reader = std::make_unique<ColumnEstimateUnavailableChunkReader>(
+        std::move(delegate));
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        projected_field_metas,
+        *needed_columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        projected_field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/false,
+        /*warmup_policy=*/"",
+        projected_column + "_total_fallback");
+
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    EXPECT_EQ(meta->chunk_memory_size_, expected_cell_sizes);
+}
+
+TEST_P(ManifestGroupTranslatorTest,
+       TestUnavailableEstimatesUseLastResortPerRow) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    ASSERT_GT(column_group->columns.size(), 1);
+
+    const auto& projected_column = column_group->columns.front();
+    auto needed_columns = std::make_shared<std::vector<std::string>>(
+        std::initializer_list<std::string>{projected_column});
+    auto delegate = test_data_->CreateChunkReader(0, needed_columns);
+
+    auto row_group_rows_result = delegate->get_chunk_rows();
+    ASSERT_TRUE(row_group_rows_result.ok())
+        << row_group_rows_result.status().ToString();
+    const auto& row_group_rows = row_group_rows_result.ValueOrDie();
+
+    constexpr int64_t kLastResortBytesPerRow = 4096;
+    std::vector<int64_t> expected_cell_sizes;
+    expected_cell_sizes.reserve(row_group_rows.size());
+    for (auto rows : row_group_rows) {
+        expected_cell_sizes.push_back(static_cast<int64_t>(rows) *
+                                      kLastResortBytesPerRow);
+    }
+
+    auto all_field_metas = test_data_->GetFieldMetas(0);
+    auto projected_field_id = FieldId(std::stoll(projected_column));
+    std::unordered_map<FieldId, FieldMeta> projected_field_metas;
+    projected_field_metas.emplace(projected_field_id,
+                                  all_field_metas.at(projected_field_id));
+
+    auto chunk_reader = std::make_unique<ColumnEstimateUnavailableChunkReader>(
+        std::move(delegate),
+        /*total_estimate_available=*/false);
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        projected_field_metas,
+        *needed_columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        projected_field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/false,
+        /*warmup_policy=*/"",
+        projected_column + "_last_resort");
+
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    EXPECT_EQ(meta->chunk_memory_size_, expected_cell_sizes);
+}
+
 // Test get_cells with cids in reverse order to verify order preservation.
 TEST_P(ManifestGroupTranslatorTest, TestGetCellsOrderPreservation) {
     auto use_mmap = GetParam();
@@ -275,6 +742,74 @@ TEST_P(ManifestGroupTranslatorTest, TestGetCellsOrderPreservation) {
         for (size_t i = 0; i < subset_cells.size(); ++i) {
             EXPECT_EQ(subset_cells[i].first, subset_cids[i]);
         }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
+    auto use_mmap = GetParam();
+    auto sync_translator = MakeTranslator(0, use_mmap, false);
+    auto async_translator = MakeTranslator(0, use_mmap, true);
+    ASSERT_EQ(sync_translator->num_cells(), async_translator->num_cells());
+
+    std::vector<milvus::cachinglayer::cid_t> cids(sync_translator->num_cells());
+    std::iota(cids.begin(), cids.end(), 0);
+    std::reverse(cids.begin(), cids.end());
+
+    auto sync_cells = sync_translator->get_cells(nullptr, cids);
+    auto async_cells = async_translator->get_cells(nullptr, cids);
+    ASSERT_EQ(sync_cells.size(), async_cells.size());
+    for (size_t i = 0; i < sync_cells.size(); ++i) {
+        EXPECT_EQ(sync_cells[i].first, async_cells[i].first);
+        const auto& sync_chunks = sync_cells[i].second->GetChunks();
+        const auto& async_chunks = async_cells[i].second->GetChunks();
+        ASSERT_EQ(sync_chunks.size(), async_chunks.size());
+        for (const auto& [field_id, sync_chunk] : sync_chunks) {
+            auto it = async_chunks.find(field_id);
+            ASSERT_NE(it, async_chunks.end());
+            const auto& async_chunk = it->second;
+            ASSERT_EQ(sync_chunk->RowNums(), async_chunk->RowNums());
+            ASSERT_EQ(sync_chunk->Size(), async_chunk->Size());
+            EXPECT_EQ(std::memcmp(sync_chunk->RawData(),
+                                  async_chunk->RawData(),
+                                  sync_chunk->Size()),
+                      0);
+        }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
+    SetStorageV2AsyncLoadEnabled(false);
+    auto sync_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto sync_translator =
+        MakeTranslator(0, GetParam(), StorageV2AsyncLoadEnabled(), sync_reader);
+    SetStorageV2AsyncLoadEnabled(true);
+    sync_translator->get_cells(nullptr, {0});
+    EXPECT_GT(sync_reader->SyncCalls(), 0);
+    EXPECT_EQ(sync_reader->AsyncCalls(), 0);
+
+    auto async_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto async_translator = MakeTranslator(
+        0, GetParam(), StorageV2AsyncLoadEnabled(), async_reader);
+    SetStorageV2AsyncLoadEnabled(false);
+    async_translator->get_cells(nullptr, {0});
+    EXPECT_EQ(async_reader->SyncCalls(), 0);
+    EXPECT_GT(async_reader->AsyncCalls(), 0);
+}
+
+TEST_P(ManifestGroupTranslatorTest, PreservesMetadataStorageError) {
+    auto reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    reader->SetChunkRowsStatus(milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+        "metadata timeout"));
+
+    try {
+        MakeTranslator(0, GetParam(), true, reader);
+        FAIL() << "expected storage metadata error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageTransientError);
     }
 }
 
@@ -350,7 +885,8 @@ TEST_P(ManifestGroupTranslatorTest, TestRowGroupRangesCoverage) {
     EXPECT_EQ(meta->cell_row_group_ranges_.size(), num_cells);
 
     auto chunk_reader = test_data_->CreateChunkReader(0);
-    auto row_group_sizes = chunk_reader->get_chunk_size().ValueOrDie();
+    auto row_group_sizes =
+        chunk_reader->get_chunk_estimated_size().ValueOrDie();
     auto rgs_per_cell =
         ComputeRowGroupsPerCell(row_group_sizes, GetCellTargetSizeBytes());
 

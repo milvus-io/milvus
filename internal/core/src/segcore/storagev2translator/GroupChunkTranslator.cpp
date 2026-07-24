@@ -52,7 +52,6 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -75,7 +74,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     bool mmap_populate,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
-    const std::string& warmup_policy)
+    const std::string& warmup_policy,
+    MmapChunkWritebackMode writeback_mode)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -136,6 +136,7 @@ GroupChunkTranslator::GroupChunkTranslator(
                                        return field.second.get_data_type() ==
                                               DataType::ARRAY;
                                    })),
+      writeback_mode_(writeback_mode),
       load_priority_(load_priority) {
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
@@ -348,11 +349,8 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // Submit cell-batch loading tasks
-    auto& pool = milvus::ThreadPools::GetThreadPool(
-        milvus::PriorityForLoad(load_priority_));
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
-        static_cast<size_t>(pool.GetMaxThreadNum() *
-                            milvus::segcore::kChannelCapacityMultiplier));
+        std::max<size_t>(1, cids.size()));
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
@@ -544,7 +542,8 @@ GroupChunkTranslator::load_group_chunk(
                                     array_vecs,
                                     mmap_populate_,
                                     filepath.string(),
-                                    load_priority_);
+                                    load_priority_,
+                                    writeback_mode_);
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }

@@ -23,7 +23,6 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -47,12 +46,14 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
-#include "storage/ThreadPools.h"
+#include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 #include <atomic>
@@ -68,6 +69,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t column_group_index,
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
+    const std::vector<std::string>& projected_columns,
     bool use_mmap,
     bool mmap_populate,
     const std::string& mmap_dir_path,
@@ -77,7 +79,9 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& warmup_policy,
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
-    std::string shard)
+    std::string shard,
+    MmapChunkWritebackMode writeback_mode,
+    bool enable_async_load)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -129,21 +133,112 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                        return field.second.get_data_type() ==
                                               DataType::ARRAY;
                                    })),
-      load_priority_(load_priority) {
-    auto chunk_size_result = chunk_reader_->get_chunk_size();
-    if (!chunk_size_result.ok()) {
-        throw std::runtime_error(
-            fmt::format("get row group size failed: {}",
-                        chunk_size_result.status().ToString()));
-    }
-    const auto& row_group_sizes = chunk_size_result.ValueOrDie();
-
+      writeback_mode_(writeback_mode),
+      load_priority_(load_priority),
+      enable_async_load_(enable_async_load) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        throw std::runtime_error(fmt::format("get row group rows failed: {}",
-                                             rows_result.status().ToString()));
+        throw milvus_storage::ToSegcoreError(rows_result.status());
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
+
+    enum class SizeEstimateSource {
+        PROJECTED_COLUMNS,
+        SAMPLED_FALLBACK,
+        TOTAL_FALLBACK,
+        LAST_RESORT,
+    };
+
+    std::vector<uint64_t> row_group_sizes(row_group_rows.size(), 0);
+    std::vector<uint64_t> projected_row_group_sizes(row_group_rows.size(), 0);
+    std::string projected_estimate_error;
+    bool projected_estimate_available = !projected_columns.empty();
+    if (!projected_estimate_available) {
+        projected_estimate_error = "projection contains no columns";
+    }
+    for (const auto& column_name : projected_columns) {
+        auto column_size_result =
+            chunk_reader_->get_chunk_column_estimated_size(column_name);
+        if (!column_size_result.ok()) {
+            projected_estimate_available = false;
+            projected_estimate_error =
+                fmt::format("column {}: {}",
+                            column_name,
+                            column_size_result.status().ToString());
+            break;
+        }
+        const auto& column_sizes = column_size_result.ValueOrDie();
+        if (column_sizes.size() != projected_row_group_sizes.size()) {
+            projected_estimate_available = false;
+            projected_estimate_error = fmt::format(
+                "column {} row group count mismatched, expected {}, actual {}",
+                column_name,
+                projected_row_group_sizes.size(),
+                column_sizes.size());
+            break;
+        }
+        for (size_t i = 0; i < projected_row_group_sizes.size(); ++i) {
+            projected_row_group_sizes[i] += column_sizes[i];
+        }
+    }
+
+    SizeEstimateSource size_estimate_source;
+    std::string total_estimate_error;
+    if (projected_estimate_available) {
+        row_group_sizes = std::move(projected_row_group_sizes);
+        size_estimate_source = SizeEstimateSource::PROJECTED_COLUMNS;
+        LOG_DEBUG(
+            "[StorageV2] translator {} uses projected column size estimates "
+            "(columns={}, row_groups={})",
+            key_,
+            projected_columns.size(),
+            row_group_sizes.size());
+    } else if (fallback_bytes_per_row > 0) {
+        const auto fallback = static_cast<uint64_t>(fallback_bytes_per_row);
+        for (size_t i = 0; i < row_group_rows.size(); ++i) {
+            if (row_group_rows[i] >
+                std::numeric_limits<uint64_t>::max() / fallback) {
+                throw std::runtime_error(fmt::format(
+                    "fallback row group size exceeds the uint64_t range, "
+                    "rows {}, bytes per row {}",
+                    row_group_rows[i],
+                    fallback_bytes_per_row));
+            }
+            row_group_sizes[i] = row_group_rows[i] * fallback;
+        }
+        size_estimate_source = SizeEstimateSource::SAMPLED_FALLBACK;
+        LOG_WARN(
+            "[StorageV2] translator {} cannot use projected column size "
+            "estimates ({}); using sampled fallback "
+            "(bytes_per_row={}, row_groups={})",
+            key_,
+            projected_estimate_error,
+            fallback_bytes_per_row,
+            row_group_sizes.size());
+    } else {
+        auto total_size_result = chunk_reader_->get_chunk_estimated_size();
+        if (total_size_result.ok() &&
+            total_size_result.ValueOrDie().size() == row_group_sizes.size()) {
+            row_group_sizes = total_size_result.ValueOrDie();
+            size_estimate_source = SizeEstimateSource::TOTAL_FALLBACK;
+            LOG_WARN(
+                "[StorageV2] translator {} cannot use projected column size "
+                "estimates ({}); using total chunk estimates "
+                "(row_groups={})",
+                key_,
+                projected_estimate_error,
+                row_group_sizes.size());
+        } else {
+            total_estimate_error =
+                total_size_result.ok()
+                    ? fmt::format(
+                          "row group count mismatched, expected {}, actual {}",
+                          row_group_sizes.size(),
+                          total_size_result.ValueOrDie().size())
+                    : total_size_result.status().ToString();
+            size_estimate_source = SizeEstimateSource::LAST_RESORT;
+        }
+    }
 
     // Merge row groups into group chunks(cache cells). Derive row-groups-
     // per-cell from the runtime-configurable target byte size so avg cell
@@ -179,18 +274,11 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             cumulative_rows += static_cast<int64_t>(row_group_rows[i]);
             cell_size += static_cast<int64_t>(row_group_sizes[i]);
         }
-        // External segments (fallback_bytes_per_row > 0): always prefer the
-        // DataNode-sampled Arrow bytes/row over format metadata. The
-        // metadata reports disk/encoded size which varies by format
-        // (parquet=uncompressed column chunk size, iceberg/vortex=often 0)
-        // and is not a reliable proxy for in-memory Arrow buffer size.
-        //
-        // Non-external: use format metadata; only if it reports zero
-        // (e.g. Vortex without size stats) fall back to a 4KB/row
-        // last-resort estimate.
-        if (fallback_bytes_per_row > 0 && cell_rows > 0) {
-            cell_size = cell_rows * fallback_bytes_per_row;
-        } else if (cell_size == 0 && cell_rows > 0) {
+        // A successful metadata estimate, including a known zero, takes
+        // precedence over fallbacks. The 4KB/row last resort is used only
+        // when projected, sampled, and total estimates are all unavailable.
+        if (size_estimate_source == SizeEstimateSource::LAST_RESORT &&
+            cell_rows > 0) {
             constexpr int64_t kLastResortBytesPerRow = 4096;
             cell_size = cell_rows * kLastResortBytesPerRow;
             ++last_resort_cells;
@@ -200,10 +288,13 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     }
     if (last_resort_cells > 0) {
         LOG_WARN(
-            "[StorageV2] translator {}: {}/{} cells had zero memory_size "
-            "from format metadata and no sampled bytes_per_row; using "
-            "4KB/row last-resort estimate",
+            "[StorageV2] translator {} cannot use projected column size "
+            "estimates ({}) or total chunk estimates ({}), and has no "
+            "sampled bytes_per_row; using 4KB/row last-resort estimate for "
+            "{}/{} cells",
             key_,
+            projected_estimate_error,
+            total_estimate_error,
             last_resort_cells,
             num_cells);
     }
@@ -270,10 +361,9 @@ ManifestGroupTranslator::get_cells(
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
 
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::GroupChunk>>>
-        cells;
-    cells.reserve(cids.size());
+    if (cids.empty()) {
+        return {};
+    }
 
     auto max_cid = *std::max_element(cids.begin(), cids.end());
     if (max_cid >= meta_.chunk_memory_size_.size()) {
@@ -299,15 +389,26 @@ ManifestGroupTranslator::get_cells(
              loading_overhead_bytes(meta_.chunk_memory_size_[cid])});
     }
 
+    if (enable_async_load_) {
+        return get_cells_async(ctx, std::move(cell_specs));
+    }
+    return get_cells_legacy(ctx, cids, std::move(cell_specs));
+}
+
+std::vector<ManifestGroupTranslator::CellResult>
+ManifestGroupTranslator::get_cells_legacy(
+    milvus::OpContext* ctx,
+    const std::vector<milvus::cachinglayer::cid_t>& cids,
+    std::vector<milvus::segcore::CellSpec> cell_specs) {
+    std::vector<CellResult> cells;
+    cells.reserve(cids.size());
+
     // Create factory using ChunkReader — reads a batch of row groups at once
     auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
 
     // Submit cell-batch loading tasks
-    auto& pool = milvus::ThreadPools::GetThreadPool(
-        milvus::PriorityForLoad(load_priority_));
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
-        static_cast<size_t>(pool.GetMaxThreadNum() *
-                            milvus::segcore::kChannelCapacityMultiplier));
+        std::max<size_t>(1, cids.size()));
 
     auto load_futures = milvus::segcore::LoadCellBatchAsync(
         ctx,
@@ -394,6 +495,27 @@ ManifestGroupTranslator::get_cells(
     }
 
     return cells;
+}
+
+std::vector<ManifestGroupTranslator::CellResult>
+ManifestGroupTranslator::get_cells_async(
+    milvus::OpContext* ctx, std::vector<milvus::segcore::CellSpec> cell_specs) {
+    AsyncLoadPipelineOptions options{
+        .segment_id = segment_id_,
+        .read_window_bytes = FieldDataReadWindowBytes(),
+        .load_priority = load_priority_,
+    };
+    return LoadCellsAsync(
+               ctx,
+               std::move(cell_specs),
+               chunk_reader_,
+               [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+                      int64_t cid) {
+                   return load_group_chunk(
+                       tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+               },
+               options)
+        .get();
 }
 
 std::unique_ptr<milvus::GroupChunk>
@@ -520,7 +642,8 @@ ManifestGroupTranslator::load_group_chunk(
                                     array_vecs,
                                     mmap_populate_,
                                     filepath.string(),
-                                    load_priority_);
+                                    load_priority_,
+                                    writeback_mode_);
     }
 
     return std::make_unique<milvus::GroupChunk>(chunks);

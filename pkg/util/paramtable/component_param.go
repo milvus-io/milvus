@@ -3620,6 +3620,7 @@ type queryNodeConfig struct {
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
 	MmapPopulate                        ParamItem `refreshable:"false"`
+	MmapWriteback                       ParamItem `refreshable:"false"`
 	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
@@ -3691,6 +3692,7 @@ type queryNodeConfig struct {
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
 	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+	StorageV2EnableAsyncLoad     ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -4463,6 +4465,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	}
 	p.MmapPopulate.Init(base.mgr)
 
+	p.MmapWriteback = ParamItem{
+		Key:          "queryNode.mmap.writeback",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable fdatasync after writing each mmap field data file.",
+		Export:       false,
+	}
+	p.MmapWriteback.Init(base.mgr)
+
 	p.MmapJSONStats = ParamItem{
 		Key:          "queryNode.mmap.jsonShredding",
 		Version:      "2.6.5",
@@ -4917,6 +4928,15 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
+
+	p.StorageV2EnableAsyncLoad = ParamItem{
+		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Temporary rollout switch for async storage v2 field-data loading. Existing translators keep the mode captured at construction.",
+		Export:       false,
+	}
+	p.StorageV2EnableAsyncLoad.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
