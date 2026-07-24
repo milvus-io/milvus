@@ -38,6 +38,7 @@ type Scheduler interface {
 type scheduler struct {
 	manager TaskManager
 
+	futures   map[int64][]*conc.Future[any]
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -45,6 +46,7 @@ type scheduler struct {
 func NewScheduler(manager TaskManager) Scheduler {
 	return &scheduler{
 		manager:   manager,
+		futures:   make(map[int64][]*conc.Future[any]),
 		closeChan: make(chan struct{}),
 	}
 }
@@ -73,6 +75,8 @@ func (s *scheduler) Start() {
 }
 
 func (s *scheduler) scheduleTasks() {
+	s.tryFreeFutures()
+
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].GetTaskID() < tasks[j].GetTaskID()
@@ -87,22 +91,15 @@ func (s *scheduler) scheduleTasks() {
 	})
 	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
-	futures := make(map[int64][]*conc.Future[any])
 	for _, task := range tasks {
-		fs := task.Execute()
-		futures[task.GetTaskID()] = fs
-	}
-
-	for taskID, fs := range futures {
-		err := conc.AwaitAll(fs...)
-		if err != nil {
+		taskID := task.GetTaskID()
+		if _, ok := s.futures[taskID]; ok {
 			continue
 		}
-		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
-		mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
+		s.futures[taskID] = task.Execute()
 	}
 
-	mlog.Info(context.TODO(), "all tasks completed", mlog.Int64s("taskIDs", taskIDs))
+	s.tryFreeFutures()
 }
 
 // Slots returns the used slots for import
@@ -120,15 +117,32 @@ func (s *scheduler) Close() {
 	})
 }
 
-func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
-	for k, fs := range futures {
-		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
-			if f.Done() {
-				_, err := f.Await()
-				return err != nil
-			}
-			return true
-		})
-		futures[k] = fs
+func (s *scheduler) tryFreeFutures() {
+	for taskID, fs := range s.futures {
+		task := s.manager.Get(taskID)
+		if task == nil {
+			delete(s.futures, taskID)
+			continue
+		}
+		if task.GetState() == datapb.ImportTaskStateV2_Failed {
+			delete(s.futures, taskID)
+			mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task)...)
+			continue
+		}
+
+		if lo.SomeBy(fs, func(f *conc.Future[any]) bool {
+			return !f.Done()
+		}) {
+			continue
+		}
+
+		err := conc.AwaitAll(fs...)
+		delete(s.futures, taskID)
+		if err != nil {
+			mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.Err(err))...)
+			continue
+		}
+		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
+		mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
 	}
 }

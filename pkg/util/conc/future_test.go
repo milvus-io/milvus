@@ -47,6 +47,21 @@ func (s *FutureSuite) TestFuture() {
 	s.Equal(10, resultFuture.Value())
 }
 
+func (s *FutureSuite) TestDone() {
+	release := make(chan struct{})
+	future := Go(func() (int, error) {
+		<-release
+		return 1, nil
+	})
+
+	s.False(future.Done())
+	close(release)
+	value, err := future.Await()
+	s.NoError(err)
+	s.Equal(1, value)
+	s.True(future.Done())
+}
+
 func (s *FutureSuite) TestBlockOnAll() {
 	cnt := atomic.NewInt32(0)
 	futures := make([]*Future[struct{}], 10)
