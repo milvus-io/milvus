@@ -25,6 +25,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -526,7 +527,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel, newVersion int64) bool {
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
+	var schema *schemapb.CollectionSchema
+	var schemaBarrierTs uint64
 	var err error
+	metadataInitialized := false
 	for _, d := range collReadyDelegatorList {
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
 		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
@@ -536,7 +540,15 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			return false
 		}
 		// init all the meta information
-		if partitions == nil {
+		if !metadataInitialized {
+			collectionInfo, err := ob.broker.DescribeCollection(ctx, collectionID)
+			if err != nil {
+				mlog.Warn(ctx, "failed to describe collection", mlog.Err(err))
+				return false
+			}
+			schema = collectionInfo.GetSchema()
+			schemaBarrierTs = collectionInfo.GetUpdateTimestamp()
+
 			partitions, err = utils.GetPartitions(ctx, ob.targetMgr, collectionID)
 			if err != nil {
 				mlog.Warn(ctx, "failed to get partitions", mlog.Err(err))
@@ -549,9 +561,10 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 				mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
 				return false
 			}
+			metadataInitialized = true
 		}
 
-		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, partitions, indexInfo) {
+		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo) {
 			return false
 		}
 	}
@@ -559,7 +572,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
-	partitions []int64, indexInfo []*indexpb.IndexInfo,
+	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo,
 ) bool {
 	replicaID := replica.GetID()
 
@@ -577,11 +590,13 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 		ReplicaID:    replicaID,
 		Channel:      LeaderView.Channel,
 		Actions:      []*querypb.SyncAction{action},
+		Schema:       schema,
 		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:      ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
-			CollectionID:  LeaderView.CollectionID,
-			PartitionIDs:  partitions,
-			ResourceGroup: replica.GetResourceGroup(),
+			LoadType:        ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
+			CollectionID:    LeaderView.CollectionID,
+			PartitionIDs:    partitions,
+			ResourceGroup:   replica.GetResourceGroup(),
+			SchemaBarrierTs: schemaBarrierTs,
 		},
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
