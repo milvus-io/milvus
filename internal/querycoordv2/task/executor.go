@@ -794,7 +794,8 @@ func (ex *Executor) getCollectionInfo(ctx context.Context, collectionID int64) (
 	})
 	select {
 	case result := <-ch:
-		return result.Val, result.Err
+		collection, err, _ := conc.UnwrapSingleflightResult[*milvuspb.DescribeCollectionResponse](result)
+		return collection, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
