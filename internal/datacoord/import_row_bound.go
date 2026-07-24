@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	importutilv2common "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -254,4 +255,41 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 	}
 	defer pr.Close()
 	return pr.NumRows(), nil
+}
+
+// assignPKRangesToFiles computes a per-file row upper bound, allocates one
+// contiguous primary-namespace id block sized Σbound via allocN, then writes each
+// file its own contiguous [PkIdBegin, PkIdEnd) slice in the given files order.
+// It is called on the PRIMARY at import broadcast for non-backup autoID imports;
+// the ranges then travel on the replicated ImportMsg so both clusters derive
+// identical primary keys. The layout is bound to each file object, so it survives
+// later file regrouping/reordering.
+func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
+	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile,
+	allocN func(int64) (int64, int64, error), clusterID uint64, cap int64,
+) error {
+	bounds := make([]int64, len(files))
+	var total int64
+	for i, f := range files {
+		b, err := computeFileRowUpperBound(ctx, cm, schema, f, cap)
+		if err != nil {
+			return err
+		}
+		bounds[i] = b
+		total += b
+	}
+	if total == 0 {
+		return nil
+	}
+	begin, _, err := common.AllocAutoIDN(allocN, total, clusterID)
+	if err != nil {
+		return err
+	}
+	cur := begin
+	for i, f := range files {
+		f.PkIdBegin = cur
+		f.PkIdEnd = cur + bounds[i]
+		cur = f.PkIdEnd
+	}
+	return nil
 }
