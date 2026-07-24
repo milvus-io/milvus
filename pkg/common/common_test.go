@@ -284,6 +284,37 @@ func TestAllocAutoID(t *testing.T) {
 	assert.EqualValues(t, 0b0100, end>>60)
 }
 
+func TestAllocAutoIDN(t *testing.T) {
+	// clusterID bits are applied to the high bits, same as AllocAutoID.
+	start, end, err := AllocAutoIDN(func(n int64) (int64, int64, error) {
+		return 100, 100 + n, nil
+	}, 10, 1)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0b0100, start>>60)
+	assert.EqualValues(t, 0b0100, end>>60)
+
+	// A count exceeding math.MaxUint32 is passed through in one allocation
+	// (the uint32 limitation of AllocAutoID does not apply here).
+	bigN := int64(1)<<32 + 1000
+	var got int64
+	s, e, err := AllocAutoIDN(func(n int64) (int64, int64, error) {
+		got = n
+		return 0, n, nil
+	}, bigN, 0) // clusterID 0 => no high bits set
+	assert.NoError(t, err)
+	assert.Equal(t, bigN, got)
+	assert.Equal(t, bigN, e-s)
+
+	// Non-positive count is a no-op and never calls allocFunc.
+	s, e, err = AllocAutoIDN(func(n int64) (int64, int64, error) {
+		t.Fatal("allocFunc must not be called for n<=0")
+		return 0, 0, nil
+	}, 0, 1)
+	assert.NoError(t, err)
+	assert.Zero(t, s)
+	assert.Zero(t, e)
+}
+
 func TestFunctionProperty(t *testing.T) {
 	assert.False(t, GetCollectionAllowInsertNonBM25FunctionOutputs([]*commonpb.KeyValuePair{}))
 	assert.False(t, GetCollectionAllowInsertNonBM25FunctionOutputs(
