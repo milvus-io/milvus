@@ -55,8 +55,8 @@ class PhyColumnExpr : public Expr {
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        auto& schema = segment->get_schema();
-        auto& field_meta = schema[expr_->GetColumn().field_id_];
+        auto schema = segment->get_schema_snapshot();
+        auto& field_meta = (*schema)[expr_->GetColumn().field_id_];
         pinned_index_ = PinIndex(op_ctx_, segment, field_meta);
         is_indexed_ = pinned_index_.size() > 0;
         use_index_data_ =

@@ -170,6 +170,11 @@ class SegmentInterface {
     virtual const Schema&
     get_schema() const = 0;
 
+    virtual SchemaPtr
+    get_schema_snapshot() const {
+        return std::make_shared<Schema>(get_schema());
+    }
+
     virtual int64_t
     get_deleted_count() const = 0;
 
@@ -850,7 +855,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 

@@ -285,12 +285,12 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto& schema = segment_->get_schema();
-        auto& field_meta = schema[field_id_];
+        auto schema = segment_->get_schema_snapshot();
+        auto& field_meta = (*schema)[field_id_];
         field_type_ = field_meta.get_data_type();
 
-        if (schema.get_primary_field_id().has_value() &&
-            schema.get_primary_field_id().value() == field_id_ &&
+        if (schema->get_primary_field_id().has_value() &&
+            schema->get_primary_field_id().value() == field_id_ &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -328,8 +328,8 @@ class SegmentExpr : public Expr {
             return;
         }
         pinned_index_initialized_ = true;
-        auto& schema = segment_->get_schema();
-        auto& field_meta = schema[field_id_];
+        auto schema = segment_->get_schema_snapshot();
+        auto& field_meta = (*schema)[field_id_];
         pinned_index_ = PinIndex(op_ctx_,
                                  segment_,
                                  field_meta,
@@ -2060,8 +2060,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                    auto schema = segment_->get_schema_snapshot();
+                    auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -2134,8 +2134,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                    auto schema = segment_->get_schema_snapshot();
+                    auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
