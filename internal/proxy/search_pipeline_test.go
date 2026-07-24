@@ -2802,6 +2802,159 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 	s.Equal(int64(2*2*10), results.GetResults().AllSearchCount)
 }
 
+func makeInt64FieldData(name string, id int64, values []int64) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: name,
+		FieldId:   id,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
+			},
+		},
+	}
+}
+
+func (s *SearchPipelineSuite) TestRestoreGroupByFieldData() {
+	s.Run("nil data", func() {
+		s.NotPanics(func() { restoreGroupByFieldData(nil) })
+	})
+
+	s.Run("no group-by values is a no-op", func() {
+		data := &schemapb.SearchResultData{FieldsData: []*schemapb.FieldData{makeInt64FieldData("f", 101, []int64{1, 2})}}
+		restoreGroupByFieldData(data)
+		s.Equal([]int64{1, 2}, data.FieldsData[0].GetScalars().GetLongData().GetData())
+	})
+
+	s.Run("restores column matched by field id", func() {
+		data := &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{makeInt64FieldData("f", 101, []int64{66, 66, 66})},
+			GroupByFieldValues: []*schemapb.FieldData{makeInt64FieldData("f", 101, []int64{66001, 66002, 66003})},
+		}
+		restoreGroupByFieldData(data)
+		s.Equal([]int64{66001, 66002, 66003}, data.FieldsData[0].GetScalars().GetLongData().GetData())
+	})
+
+	s.Run("restores column from legacy singular channel", func() {
+		data := &schemapb.SearchResultData{
+			FieldsData:        []*schemapb.FieldData{makeInt64FieldData("f", 101, []int64{66, 66})},
+			GroupByFieldValue: makeInt64FieldData("f", 101, []int64{1, 2}),
+		}
+		restoreGroupByFieldData(data)
+		s.Equal([]int64{1, 2}, data.FieldsData[0].GetScalars().GetLongData().GetData())
+	})
+
+	s.Run("matches by name when field id is unset", func() {
+		data := &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{makeInt64FieldData("f", 101, []int64{66, 66})},
+			GroupByFieldValues: []*schemapb.FieldData{makeInt64FieldData("f", 0, []int64{7, 8})},
+		}
+		restoreGroupByFieldData(data)
+		s.Equal([]int64{7, 8}, data.FieldsData[0].GetScalars().GetLongData().GetData())
+	})
+
+	s.Run("keeps column when types differ (json path group key)", func() {
+		jsonField := &schemapb.FieldData{
+			Type:      schemapb.DataType_JSON,
+			FieldName: "meta",
+			FieldId:   102,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{"k":1}`)}}},
+				},
+			},
+		}
+		data := &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{jsonField},
+			GroupByFieldValues: []*schemapb.FieldData{makeInt64FieldData("meta", 102, []int64{1})},
+		}
+		restoreGroupByFieldData(data)
+		s.Equal([][]byte{[]byte(`{"k":1}`)}, data.FieldsData[0].GetScalars().GetJsonData().GetData())
+	})
+
+	s.Run("other columns stay intact", func() {
+		data := &schemapb.SearchResultData{
+			FieldsData: []*schemapb.FieldData{
+				makeInt64FieldData("other", 105, []int64{9, 9}),
+				makeInt64FieldData("f", 101, []int64{66, 66}),
+			},
+			GroupByFieldValues: []*schemapb.FieldData{makeInt64FieldData("f", 101, []int64{1, 2})},
+		}
+		restoreGroupByFieldData(data)
+		s.Equal([]int64{9, 9}, data.FieldsData[0].GetScalars().GetLongData().GetData())
+		s.Equal([]int64{1, 2}, data.FieldsData[1].GetScalars().GetLongData().GetData())
+	})
+}
+
+// Regression for the duplicate-PK group-by mismatch: the group-by decision is
+// made on the rows returned by search, but requery re-fetches output fields by
+// PK only. When the same PK has multiple physical rows with different group-by
+// values, the requeried row can differ from the searched row and the response
+// would show duplicated group values despite group_size=1. The final result
+// must carry the search-time group-by values.
+func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipeKeepsGroupByFieldValues() {
+	task := getHybridSearchTask("test_collection", [][]string{{"1"}, {"2"}}, []string{"intField"})
+
+	originalReduceFactory := opFactory[hybridSearchReduceOp]
+	originalRerankFactory := opFactory[rerankOp]
+	defer func() {
+		opFactory[hybridSearchReduceOp] = originalReduceFactory
+		opFactory[rerankOp] = originalRerankFactory
+	}()
+
+	opFactory[hybridSearchReduceOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			reduced := []*milvuspb.SearchResults{{
+				Status:  merr.Success(),
+				Results: &schemapb.SearchResultData{},
+			}}
+			return []any{reduced, []string{"IP"}}, nil
+		}), nil
+	}
+
+	// The rerank/group-by stage selected three rows whose search-time group-by
+	// values are distinct.
+	opFactory[rerankOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			return []any{&milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       3,
+					Topks:      []int64{3},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{6, 7, 8}}},
+					},
+					Scores:             []float32{0.9, 0.8, 0.7},
+					GroupByFieldValues: []*schemapb.FieldData{makeInt64FieldData("intField", 101, []int64{66001, 66002, 66003})},
+				},
+			}}, nil
+		}), nil
+	}
+
+	// Requery returns newer duplicate-PK rows whose group-by values collapsed
+	// to a single value.
+	mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
+		FieldsData: []*schemapb.FieldData{
+			makeInt64FieldData("int64", 100, []int64{6, 7, 8}),
+			makeInt64FieldData("intField", 101, []int64{66, 66, 66}),
+		},
+	}, segcore.StorageCost{}, nil).Build()
+	defer mocker.UnPatch()
+
+	pipeline, err := newPipeline(hybridSearchWithRequeryPipe, task)
+	s.Require().NoError(err)
+	s.Require().NoError(pipeline.AddNodes(task, endNode))
+
+	results, _, err := pipeline.Run(context.Background(), s.span, nil, segcore.StorageCost{})
+	s.Require().NoError(err)
+
+	s.Equal([]int64{6, 7, 8}, results.GetResults().GetIds().GetIntId().GetData())
+	s.Require().Len(results.GetResults().GetFieldsData(), 1)
+	s.Equal("intField", results.GetResults().GetFieldsData()[0].GetFieldName())
+	s.Equal([]int64{66001, 66002, 66003}, results.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
 func getHybridSearchTask(collName string, data [][]string, outputFields []string) *searchTask {
 	subReqs := []*milvuspb.SubSearchRequest{}
 	for _, item := range data {
