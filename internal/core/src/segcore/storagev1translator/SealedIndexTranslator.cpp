@@ -4,7 +4,6 @@
 #include <optional>
 #include <utility>
 
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
@@ -80,44 +79,64 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
-    load_resource_request_ = EstimateLoadResource();
+    // TODO: Recompute scalar V3 stream estimates and the registered loading
+    // overhead upper bound when refreshable load-pool sizes grow. CacheSlot
+    // snapshots both at translator construction and reuses them on reload.
+    std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
+    load_resource_request_ = EstimateLoadResource(&stream_load_info);
 
     auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
-        auto budget_capacity = static_cast<int64_t>(
+        AssertInfo(stream_load_info.has_value(),
+                   "missing stream load info for packed scalar V3 index");
+        auto budget_capacity =
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                .CapacityBytes());
-        auto memory_upper_bound =
-            budget_capacity == 0
-                ? milvus::cachinglayer::LoadingOverheadTracker::kUnlimited
-                      .memory_bytes
-                : budget_capacity;
-        auto upper_bound =
-            milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
-        meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            upper_bound, milvus::segcore::kLoadTransientOverheadGroup};
+                .CapacityBytes();
+        // With no runtime budget there is no truthful process-wide stream
+        // buffer cap. Leave the group unregistered so MCL reserves each
+        // concurrently loading slot's estimated overhead independently.
+        if (budget_capacity != 0) {
+            auto max_task_overhead =
+                stream_load_info->encrypted
+                    ? stream_load_info->max_task_transient_bytes
+                    : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
+            auto memory_upper_bound =
+                milvus::segcore::LoadTransientSharedOverheadUpperBound(
+                    max_task_overhead);
+            meta_.loading_overhead =
+                milvus::cachinglayer::LoadingOverheadConfig{
+                    milvus::cachinglayer::LoadingOverheadDimensionConfig{
+                        memory_upper_bound,
+                        milvus::segcore::kLoadTransientOverheadGroup},
+                    std::nullopt};
+        }
     }
 }
 
 LoadResourceRequest
-SealedIndexTranslator::EstimateLoadResource() const {
+SealedIndexTranslator::EstimateLoadResource(
+    std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info)
+    const {
+    auto estimated =
+        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            index_load_info_.field_type,
+            index_load_info_.element_type,
+            index_load_info_.index_engine_version,
+            index_load_info_.index_size,
+            index_load_info_.index_params,
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_load_info_.dim,
+            index_load_info_.index_files,
+            file_manager_context_,
+            stream_load_info);
     if (index_load_info_.load_resource_request.has_value()) {
         return *index_load_info_.load_resource_request;
     }
-    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        index_load_info_.field_type,
-        index_load_info_.element_type,
-        index_load_info_.index_engine_version,
-        index_load_info_.index_size,
-        index_load_info_.index_params,
-        index_load_info_.enable_mmap,
-        index_load_info_.num_rows,
-        index_load_info_.dim,
-        index_load_info_.index_files,
-        file_manager_context_);
+    return estimated;
 }
 
 size_t

@@ -48,6 +48,7 @@
 #include "pb/common.pb.h"
 #include "segcore/Collection.h"
 #include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
@@ -134,6 +135,20 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         schema_->get_field_ids().size(),
         milvus::proto::common::LoadPriority::LOW,
         /* warmup_policy */ "");
+
+    ASSERT_TRUE(translator->meta()->loading_overhead.has_value());
+    ASSERT_TRUE(translator->meta()->loading_overhead->memory.has_value());
+    EXPECT_EQ(translator->meta()->loading_overhead->memory->group,
+              milvus::segcore::kLoadTransientOverheadGroup);
+    EXPECT_GT(translator->meta()->loading_overhead->memory->upper_bound, 0);
+    if (use_mmap) {
+        ASSERT_TRUE(translator->meta()->loading_overhead->file.has_value());
+        EXPECT_EQ(translator->meta()->loading_overhead->file->group,
+                  milvus::segcore::kLoadTransientOverheadGroup);
+        EXPECT_GT(translator->meta()->loading_overhead->file->upper_bound, 0);
+    } else {
+        EXPECT_FALSE(translator->meta()->loading_overhead->file.has_value());
+    }
 
     // num cells - get the expected number from the file directly
     auto reader_result =
