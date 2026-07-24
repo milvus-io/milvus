@@ -602,6 +602,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	var total int64
 	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
 	binlogFileCount := make(map[string]int64)             // map[collectionID]count
+	deltalogAggregates := make(map[string]*deltalogAggregate)
 	coll2DbName := make(map[string]string)
 
 	for _, segment := range segments {
@@ -627,6 +628,13 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
 				binlogFileCount[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
+
+				agg, ok := deltalogAggregates[collIDStr]
+				if !ok {
+					agg = &deltalogAggregate{dbName: coll.DatabaseName}
+					deltalogAggregates[collIDStr] = agg
+				}
+				agg.observe(segment)
 			}
 
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
@@ -670,6 +678,8 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
 		}
 	}
+
+	reportDeltalogMetrics(deltalogAggregates)
 
 	info.TotalBinlogSize = total
 	info.CollectionBinlogSize = collectionBinlogSize
