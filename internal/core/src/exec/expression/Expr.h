@@ -392,8 +392,9 @@ class SegmentExpr : public Expr {
 
     void
     MoveCursorForIndex() {
-        AssertInfo(segment_->type() == SegmentType::Sealed,
-                   "index mode only for sealed segment");
+        // The index cursor is a global row position. This holds for sealed
+        // segments and for growing segments with a segment-level scalar
+        // index (the geometry interim R-Tree, see issue #51237).
         auto size =
             std::min(active_count_ - current_index_chunk_pos_, batch_size_);
 
@@ -1873,18 +1874,61 @@ class SegmentExpr : public Expr {
                 *cached_index_chunk_valid_res_, elem_start, elem_count);
 
             current_index_chunk_pos_ = data_pos + batch_rows;
-        } else if (execute_all_at_once_) {
-            // Fast path: move cached bitmap directly, no copy
+        } else if (execute_all_at_once_ &&
+                   int64_t(cached_index_chunk_res_->size()) == active_count_ &&
+                   int64_t(cached_index_chunk_valid_res_->size()) ==
+                       active_count_) {
+            // Fast path: the cached bitmap lines up exactly with the rows
+            // this query emits, so move it out with no copy. The size guard
+            // keeps this branch under the same invariant as the slicing
+            // branch below: on a growing segment the interim index bitmap
+            // may run ahead of active_count_ under concurrent inserts (see
+            // issue #51237), and moving an oversized bitmap wholesale would
+            // hand downstream more rows than the batch. That case falls
+            // through to the slicing branch, which bounds by active_count_
+            // and asserts coverage.
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
             return std::make_shared<ColumnVector>(
                 std::move(*cached_index_chunk_res_),
                 std::move(*cached_index_chunk_valid_res_));
         } else {
-            // Normal index or row-level result: batch by rows directly
+            // Normal index or row-level result: batch by rows directly.
+            //
+            // Slice by active_count_ for the same reason as
+            // ProcessIndexChunksForValid(): the cached bitmap is
+            // segment-global (a scalar index always has exactly one chunk),
+            // while size_per_chunk_ is the raw-data chunk granularity
+            // (segcore.chunkRows) and is unrelated to it. On a sealed segment
+            // the two agree -- size_per_chunk() == get_row_count() -- which is
+            // why bounding by size_per_chunk_ has not broken yet; today only
+            // sealed segments reach here, because on growing segments
+            // HasIndex() is true only for vector/geometry fields and real
+            // geometry predicates take the dedicated branch in
+            // GISFunctionFilterExpr::EvalForIndexSegment(). The moment a
+            // scalar field gains an interim index on growing, or geometry is
+            // routed through ProcessIndexChunks, size_per_chunk_ would
+            // over-run the bitmap exactly as in issue #51237.
+            //
+            // The old third min term was also subtly wrong on its own: it
+            // clamped against the bitmap's FULL length rather than the length
+            // remaining after data_pos, so a bitmap shorter than the row count
+            // combined with data_pos > 0 made append() read past its end.
+            // Assert coverage instead, mirroring the sibling function.
             auto data_pos = current_index_chunk_pos_;
-            auto size =
-                std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                         int64_t(cached_index_chunk_res_->size()));
+            auto size = std::min(active_count_ - data_pos, batch_size_);
+            AssertInfo(
+                int64_t(cached_index_chunk_res_->size()) >= data_pos + size,
+                "index bitmap covers {} rows, batch needs rows [{}, {})",
+                cached_index_chunk_res_->size(),
+                data_pos,
+                data_pos + size);
+            AssertInfo(
+                int64_t(cached_index_chunk_valid_res_->size()) >=
+                    data_pos + size,
+                "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+                cached_index_chunk_valid_res_->size(),
+                data_pos,
+                data_pos + size);
 
             result.append(*cached_index_chunk_res_, data_pos, size);
             valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
@@ -2132,13 +2176,28 @@ class SegmentExpr : public Expr {
             cached_index_chunk_id_ = 0;
         }
 
-        // Process current batch
+        // Process current batch.
+        //
+        // The cached bitmap is segment-global (a scalar index always has
+        // exactly one chunk), so slice it by the rows visible to this query
+        // (active_count_). Bounding by size_per_chunk_ would be wrong on a
+        // growing segment, where size_per_chunk_ is the raw-data chunk
+        // granularity (segcore.chunkRows) and unrelated to the index bitmap.
+        // A growing segment reaches this path through the geometry interim
+        // R-Tree index; its bitmap may also run ahead of active_count_ under
+        // concurrent inserts, so active_count_ -- not the bitmap size --
+        // decides how many rows to emit. See issue #51237.
         TargetBitmap valid_result;
         valid_result.set();
 
         auto data_pos = current_index_chunk_pos_;
-        auto size = std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                             int64_t(cached_index_chunk_valid_res_->size()));
+        auto size = std::min(active_count_ - data_pos, batch_size_);
+        AssertInfo(
+            int64_t(cached_index_chunk_valid_res_->size()) >= data_pos + size,
+            "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+            cached_index_chunk_valid_res_->size(),
+            data_pos,
+            data_pos + size);
 
         valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
 

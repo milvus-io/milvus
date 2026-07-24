@@ -76,9 +76,16 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     void
     MoveCursor() override {
-        if (segment_->type() == SegmentType::Sealed) {
-            SegmentExpr::MoveCursor();
-        }
+        // Always delegate: when a conjunction short-circuits a batch it
+        // skips this expr via MoveCursor() instead of Eval(), and the
+        // cursors must advance exactly as Eval() would have. The base
+        // handles every segment type -- MoveCursorForIndex() is bounded by
+        // active_count_ on growing (issue #51237) and MoveCursorForData()
+        // mirrors the data-chunk walk of EvalForIndexSegment()'s growing
+        // branch. Gating this to sealed segments left the growing cursors
+        // stranded, so a later active batch re-appended the index bitmap
+        // from row 0 against the conjunction's current row range.
+        SegmentExpr::MoveCursor();
     }
 
  private:
