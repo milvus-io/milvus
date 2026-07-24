@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -44,10 +45,15 @@ type broadcasterScheduler struct {
 func (b *broadcasterScheduler) AddTask(ctx context.Context, task *pendingBroadcastTask) (*types.BroadcastAppendResult, error) {
 	select {
 	case <-b.backgroundTaskNotifier.Context().Done():
-		// We can only check the background context but not the request context here.
-		// Because we want the new incoming task must be delivered to the background task queue
-		// otherwise the broadcaster is closing
-		panic("unreachable: broadcaster is closing when adding new task")
+		// The broadcaster is closing while a task is still being submitted. This is
+		// reachable under concurrent shutdown: broadcastTaskManager.Close cancels the
+		// broadcaster before the ack scheduler, so an in-flight
+		// doForcePromoteFixIncompleteBroadcasts goroutine can still deliver a supplement
+		// task here after the background queue is gone. Returning an error instead of
+		// panicking lets the caller abort gracefully; the task stays incomplete and is
+		// re-driven on the next startup. See #50550 for the sibling fix in
+		// tombstoneScheduler.AddPending.
+		return nil, status.NewOnShutdownError("broadcaster is closing, cannot add new task")
 	case b.pendingChan <- task:
 	}
 

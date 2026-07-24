@@ -771,6 +771,23 @@ func TestSortByControlChannelTimeTick(t *testing.T) {
 	assert.Equal(t, uint64(1), tasks[2].Header().BroadcastID)
 }
 
+func TestBroadcasterSchedulerAddTaskAfterClose(t *testing.T) {
+	// Regression for the shutdown race in the same family as #50550.
+	// broadcastTaskManager.Close cancels the broadcaster (broadcastScheduler.Close)
+	// before the ack scheduler, so an in-flight doForcePromoteFixIncompleteBroadcasts
+	// goroutine can still call broadcastScheduler.AddTask after the broadcaster
+	// background queue is gone. AddTask must return a shutdown error instead of
+	// panicking, because a panic in that background goroutine crashes the whole process.
+	scheduler := newBroadcasterScheduler(nil, mlog.With())
+	scheduler.Close()
+
+	// A nil task is fine here: AddTask returns at the closed-context branch of the
+	// select before it ever touches the task.
+	result, err := scheduler.AddTask(context.Background(), nil)
+	assert.Nil(t, result)
+	assert.Error(t, err)
+}
+
 func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 	t.Run("no_incomplete_tasks", func(t *testing.T) {
 		paramtable.Init()
