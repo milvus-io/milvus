@@ -651,7 +651,7 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 	meta2 := buildHandlerTestMeta(2)
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
-	scheduler := &fakeSegmentLoadScheduler{}
+	scheduler := &fakeNodeScheduler{}
 	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{registerErr: errors.New("register failed")}
 	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
@@ -711,7 +711,7 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 	meta2 := buildHandlerTestMeta(2)
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
-	scheduler := &fakeSegmentLoadScheduler{}
+	scheduler := &fakeNodeScheduler{}
 	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{}
 	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
@@ -766,7 +766,7 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 	meta2 := buildHandlerTestMeta(2)
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
-	scheduler := &fakeSegmentLoadScheduler{}
+	scheduler := &fakeNodeScheduler{}
 	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{}
 	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)

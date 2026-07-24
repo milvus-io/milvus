@@ -30,14 +30,13 @@ func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, 
 	}
 	physicalLoader := NewQueryViewPhysicalSegmentLoader(manager, loader)
 	nodeScheduler := nodescheduler.Get()
-	var watcher qnview.SegmentLoadInfoWatcher
-	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(
+	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithNodeScheduler(
 		nodeScheduler,
-		qnview.NewQueryViewSegmentLoadScheduler(meta, physicalLoader, newQueryViewSegmentResourceEstimator(loader)),
-		watcher,
+		physicalLoader,
+		newQueryViewSegmentResourceEstimator(loader),
 	)
 	if len(watcherFactories) > 0 && watcherFactories[0] != nil {
-		watcher = watcherFactories[0].NewSegmentLoadInfoWatcher(ctx, physicalManager.ApplyLoadInfoSnapshot)
+		watcher := watcherFactories[0].NewSegmentLoadInfoWatcher(ctx, physicalManager.ApplyLoadInfoSnapshot)
 		physicalManager.SetSegmentLoadInfoWatcher(watcher)
 	}
 	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, manager.Collection)
