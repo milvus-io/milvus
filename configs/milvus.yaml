@@ -902,6 +902,7 @@ dataNode:
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
+    maxInflightReadBatches: 1 # The maximum number of inflight read batches. 1 means await for each sync task before keep reading.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.

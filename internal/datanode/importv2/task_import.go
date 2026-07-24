@@ -41,6 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var maxInflightReadBatches = paramtable.Get().DataNodeCfg.ImportMaxInflightReadBatches.GetAsInt() // default 1
+
 type ImportTask struct {
 	*datapb.ImportTaskV2
 	ctx          context.Context
@@ -213,8 +215,13 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 }
 
 func (t *ImportTask) importFile(reader importutilv2.Reader) error {
-	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
+	type pendingBatch struct {
+		futures []*conc.Future[struct{}]
+		tasks   []syncmgr.Task
+	}
+	var pending []pendingBatch
+
 	for {
 		data, err := reader.Read()
 		if err != nil {
@@ -261,12 +268,26 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
-		syncFutures = append(syncFutures, fs...)
-		syncTasks = append(syncTasks, sts...)
+
+		pending = append(pending, pendingBatch{
+			futures: fs,
+			tasks:   sts,
+		})
+		if len(pending) >= maxInflightReadBatches {
+			oldest := pending[0]
+			if err := conc.AwaitAll(oldest.futures...); err != nil {
+				return err
+			}
+			syncTasks = append(syncTasks, oldest.tasks...)
+			pending = pending[1:]
+		}
 	}
-	err := conc.AwaitAll(syncFutures...)
-	if err != nil {
-		return err
+	// Drain remaining batches.
+	for _, p := range pending {
+		if err := conc.AwaitAll(p.futures...); err != nil {
+			return err
+		}
+		syncTasks = append(syncTasks, p.tasks...)
 	}
 	for _, syncTask := range syncTasks {
 		segmentInfo, err := NewImportSegmentInfo(syncTask, t.metaCaches)

@@ -6974,12 +6974,13 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
-	ImportBaseBufferSize        ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
-	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
-	ImportMaxWriteRetryAttempts ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore  ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB        ParamItem `refreshable:"true"`
+	ImportBaseBufferSize         ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize       ParamItem `refreshable:"true"`
+	ImportMemoryLimitPercentage  ParamItem `refreshable:"true"`
+	ImportMaxWriteRetryAttempts  ParamItem `refreshable:"true"`
+	ImportMaxInflightReadBatches ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -7352,6 +7353,16 @@ if this parameter <= 0, will set it as 10`,
 		DefaultValue: "0",
 	}
 	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
+
+	p.ImportMaxInflightReadBatches = ParamItem{
+		Key:          "dataNode.import.maxInflightReadBatches",
+		Version:      "2.6.9",
+		Doc:          "The maximum number of inflight read batches. 1 means await for each sync task before keep reading.",
+		DefaultValue: "1",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportMaxInflightReadBatches.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",

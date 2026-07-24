@@ -440,6 +440,58 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	s.NoError(err)
 }
 
+func (s *SchedulerSuite) TestScheduler_ImportFile_SyncError() {
+	future := conc.Go(func() (struct{}, error) {
+		return struct{}{}, errors.New("mock async sync error")
+	})
+
+	s.syncMgr.EXPECT().
+		SyncDataWithChunkManager(
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).
+		Return(future, nil)
+
+	data, err := testutil.CreateInsertData(s.schema, s.numRows)
+	s.NoError(err)
+
+	s.reader = importutilv2.NewMockReader(s.T())
+	s.reader.EXPECT().
+		Read().
+		Return(data, nil).
+		Once()
+
+	importReq := &datapb.ImportRequest{
+		JobID:        10,
+		TaskID:       11,
+		CollectionID: 12,
+		PartitionIDs: []int64{13},
+		Vchannels:    []string{"v0"},
+		Schema:       s.schema,
+		Files: []*internalpb.ImportFile{
+			{Paths: []string{"dummy.json"}},
+		},
+		Ts: 1000,
+		IDRange: &datapb.IDRange{
+			Begin: 0,
+			End:   int64(s.numRows),
+		},
+		RequestSegments: []*datapb.ImportRequestSegment{
+			{
+				SegmentID:   14,
+				PartitionID: 13,
+				Vchannel:    "v0",
+			},
+		},
+	}
+
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	s.manager.Add(importTask)
+	err = importTask.(*ImportTask).importFile(s.reader)
+	s.Error(err)
+}
+
 func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 	paramtable.Init()
 	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
