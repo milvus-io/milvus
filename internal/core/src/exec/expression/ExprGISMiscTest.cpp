@@ -41,6 +41,7 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
@@ -60,6 +61,7 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
@@ -881,4 +883,191 @@ TEST_P(ExprTest, TestFloatingPointModulo) {
         }
         ASSERT_EQ(final.count(), expected_count);
     }
+}
+
+// Regression for the GIS offset-input contract. PhyGISFunctionFilterExpr slices
+// only by its own batch cursor (GetNextBatchSize) and never reads the
+// offset-input list, but the SegmentExpr base defaults SupportOffsetInput() to
+// true. Left at the default, the native offset-input path (IterativeFilterNode
+// / rescore) would feed a sparse offset list into an Eval that ignores it and
+// return misaligned rows -- a silent wrong-results bug on any GIS predicate
+// reached through iterative filtering. The override must report false so the
+// consumer takes its non-native fallback. This pins the contract so a future
+// change cannot regress it.
+TEST(ExprTest, GISFilterDoesNotSupportOffsetInput) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    const int64_t N = 256;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Compile a bare GIS leaf into its physical expr and inspect the contract.
+    milvus::expr::TypedExprPtr leaf =
+        std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+            proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+            "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))");
+    std::vector<milvus::expr::TypedExprPtr> filters{leaf};
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+    milvus::exec::ExecContext exec_context(query_context.get());
+    milvus::exec::ExprSet expr_set(filters, &exec_context);
+
+    ASSERT_EQ(expr_set.exprs().size(), 1u);
+    EXPECT_FALSE(expr_set.exprs()[0]->SupportOffsetInput());
+}
+
+namespace {
+
+// Build a growing segment where `age` equals the row index and the geometry
+// sits inside the query polygon only for rows [8192, 16384), then evaluate
+// `age >= 8192 AND st_within(geo, ...)`. The first expression batch [0, 8192)
+// leaves the AND with no active rows, so the conjunct skips the GIS
+// expression through MoveCursor(); a skipped batch that does not advance the
+// GIS cursor makes every later batch evaluate the wrong rows.
+void
+RunGrowingConjunctSkipTest(bool with_rtree_index) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto age_fid = schema->AddDebugField("age", DataType::INT64);
+    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    IndexMetaPtr index_meta = nullptr;
+    if (with_rtree_index) {
+        std::map<std::string, std::string> index_params = {
+            {"index_type", "RTREE"}};
+        std::map<std::string, std::string> type_params;
+        FieldIndexMeta geo_index_meta(
+            geo_fid, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_map = {
+            {geo_fid, geo_index_meta}};
+        index_meta =
+            std::make_shared<CollectionIndexMeta>(100000, std::move(field_map));
+    }
+
+    const int64_t N = 20000;  // three expression batches of 8192
+    const int64_t kBatch = 8192;
+    auto raw_data = DataGen(schema, N);
+
+    proto::schema::FieldData* age_field_data = nullptr;
+    proto::schema::FieldData* geo_field_data = nullptr;
+    for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == age_fid.get()) {
+            age_field_data = &fd;
+        } else if (fd.field_id() == geo_fid.get()) {
+            geo_field_data = &fd;
+        }
+    }
+    ASSERT_NE(age_field_data, nullptr);
+    ASSERT_NE(geo_field_data, nullptr);
+
+    auto* age_col =
+        age_field_data->mutable_scalars()->mutable_long_data()->mutable_data();
+    for (int64_t i = 0; i < N; ++i) {
+        age_col->at(i) = i;
+    }
+
+    auto* geo_col = geo_field_data->mutable_scalars()->mutable_geometry_data();
+    geo_col->clear_data();
+    auto ctx = GEOS_init_r();
+    for (int64_t i = 0; i < N; ++i) {
+        const char* wkt = (i >= kBatch && i < 2 * kBatch)
+                              ? "POINT (0.5 0.5)"
+                              : "POINT (100.0 100.0)";
+        Geometry geom(ctx, wkt);
+        geo_col->add_data(geom.to_wkb_string());
+    }
+    GEOS_finish_r(ctx);
+
+    // SegcoreConfig members are process-global (inline static): the copy
+    // below does not isolate the interim-index toggle, so restore on scope
+    // exit instead of leaking it into every later growing-segment test.
+    ScopedSegcoreConfigRestore config_restore;
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_interim_segment_index(with_rtree_index);
+    auto seg = CreateGrowingSegment(schema, index_meta, 1, config);
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    ASSERT_EQ(seg->HasIndex(geo_fid), with_rtree_index);
+
+    {
+        // HasIndex() alone does not guarantee the ScalarIndex exec path —
+        // DetermineExecPath() silently falls back to RawData when the pin
+        // comes up empty (Expr.h). Assert the resolved path directly so the
+        // with_rtree_index variant fails loudly instead of silently
+        // degrading into a duplicate of the raw-data variant.
+        milvus::expr::TypedExprPtr gis_leaf =
+            std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+                milvus::expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+                proto::plan::GISFunctionFilterExpr_GISOp_Within,
+                "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))");
+        std::vector<milvus::expr::TypedExprPtr> leaf_filters{gis_leaf};
+        auto leaf_query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+        milvus::exec::ExecContext leaf_exec_context(leaf_query_context.get());
+        milvus::exec::ExprSet leaf_expr_set(leaf_filters, &leaf_exec_context);
+        ASSERT_EQ(leaf_expr_set.exprs().size(), 1u);
+        auto segment_expr =
+            std::dynamic_pointer_cast<milvus::exec::SegmentExpr>(
+                leaf_expr_set.exprs()[0]);
+        ASSERT_NE(segment_expr, nullptr);
+        ASSERT_EQ(segment_expr->UseIndexCursor(), with_rtree_index)
+            << "GIS expr resolved to the wrong exec path (with_rtree_index: "
+            << with_rtree_index << ")";
+    }
+
+    proto::plan::GenericValue val;
+    val.set_int64_val(kBatch);
+    auto age_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        milvus::expr::ColumnInfo(age_fid, DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        val);
+    auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Within,
+        "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))");
+    auto filter = std::make_shared<milvus::expr::LogicalBinaryExpr>(
+        milvus::expr::LogicalBinaryExpr::OpType::And, age_expr, gis_expr);
+    auto plan = std::make_shared<milvus::plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, filter);
+
+    auto final =
+        milvus::query::ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    for (int64_t i = 0; i < N; ++i) {
+        bool expected = (i >= kBatch && i < 2 * kBatch);
+        ASSERT_EQ(final[i], expected)
+            << "cursor desync at row " << i
+            << " (with_rtree_index: " << with_rtree_index << ")";
+    }
+}
+
+}  // namespace
+
+// Raw-data path: growing segment without any geometry index.
+TEST(ExprTest, GISFilterGrowingConjunctSkipKeepsCursorInSync) {
+    RunGrowingConjunctSkipTest(false);
+}
+
+// Interim-index path: growing segment with an R-Tree interim index, where
+// EvalForIndexSegment advances the global index position together with the
+// data cursor and MoveCursor() must do the same on a skipped batch.
+TEST(ExprTest, GISFilterGrowingIndexConjunctSkipKeepsCursorInSync) {
+    RunGrowingConjunctSkipTest(true);
 }

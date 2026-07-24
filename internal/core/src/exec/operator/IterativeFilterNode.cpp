@@ -117,43 +117,12 @@ PhyIterativeFilterNode::GetOutput() {
     // get bitset of whole segment first
     if (!is_native_supported_) {
         EvalCtx eval_ctx(operator_context_->get_exec_context());
-
-        TargetBitmap valid_bitset;
-        while (num_processed_rows_ < need_process_rows_) {
-            exprs_->Eval(0, 1, true, eval_ctx, results_);
-
-            AssertInfo(
-                results_.size() == 1 && results_[0] != nullptr,
-                "PhyIterativeFilterNode result size should be size one and not "
-                "be nullptr");
-
-            if (auto col_vec =
-                    std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
-                if (col_vec->IsBitmap()) {
-                    auto col_vec_size = col_vec->size();
-                    TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                    bitset.append(view);
-                    TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                                col_vec_size);
-                    valid_bitset.append(valid_view);
-                    num_processed_rows_ += col_vec_size;
-                } else {
-                    ThrowInfo(UnexpectedError,
-                              "PhyIterativeFilterNode result should be bitmap");
-                }
-            } else {
-                ThrowInfo(
-                    UnexpectedError,
-                    "PhyIterativeFilterNode result should be ColumnVector");
-            }
-        }
-        Assert(bitset.size() == need_process_rows_);
-        Assert(valid_bitset.size() == need_process_rows_);
-        // Rows are included below on the data bit alone, so fold UNKNOWN
-        // into FALSE explicitly (data &= valid) instead of relying on the
-        // convention that UNKNOWN rows carry data=0. This is what makes
-        // this operator a null-rejecting consumer by construction.
-        bitset.inplace_and(valid_bitset, need_process_rows_);
+        // Rows are included below on the data bit alone; the helper folds
+        // UNKNOWN into FALSE (data &= valid), which is what makes this
+        // operator a null-rejecting consumer by construction.
+        bitset = EvalExprSetOverAllBatches(
+            *exprs_, eval_ctx, need_process_rows_, "PhyIterativeFilterNode");
+        num_processed_rows_ = need_process_rows_;
     }
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
@@ -260,12 +229,22 @@ PhyIterativeFilterNode::GetOutput() {
                             cached_last_elem = row.row_element_end;
                         }
                         element_to_doc_mapping.push_back({doc_id, elem_idx});
-                        unique_doc_ids.insert(doc_id);
                     }
 
-                    doc_offsets.reserve(unique_doc_ids.size());
-                    for (auto doc_id : unique_doc_ids) {
-                        doc_offsets.emplace_back(static_cast<int32_t>(doc_id));
+                    // The deduplicated doc offsets feed only the native
+                    // offset-input Eval below; the non-native fallback
+                    // indexes the segment-wide bitset by doc id directly
+                    // and never reads eval_offsets.
+                    if (is_native_supported_) {
+                        for (const auto& [doc_id, elem_idx] :
+                             element_to_doc_mapping) {
+                            unique_doc_ids.insert(doc_id);
+                        }
+                        doc_offsets.reserve(unique_doc_ids.size());
+                        for (auto doc_id : unique_doc_ids) {
+                            doc_offsets.emplace_back(
+                                static_cast<int32_t>(doc_id));
+                        }
                     }
                     eval_offsets = &doc_offsets;
                 } else {
@@ -333,8 +312,30 @@ PhyIterativeFilterNode::GetOutput() {
                             }
                         }
                     }
+                } else if (element_level) {
+                    // element_level_ is a property of the placeholder, not of
+                    // the filter expression, so an element-level search whose
+                    // filter cannot consume offset input (text match, GIS)
+                    // legitimately reaches this fallback. The segment-wide
+                    // bitset is indexed by doc offset and already holds the
+                    // verdict for every doc, so no doc_eval_cache is needed --
+                    // map each element back to its doc and test that bit.
+                    for (size_t i = 0; i < offsets.size(); ++i) {
+                        auto [doc_id, elem_idx] = element_to_doc_mapping[i];
+                        if (bitset[doc_id] > 0) {
+                            topk_binsert(search_result,
+                                         nq_index * unity_topk,
+                                         topk,
+                                         large_is_better,
+                                         distances[i],
+                                         doc_id,
+                                         elem_idx);
+                            if (topk == unity_topk) {
+                                break;
+                            }
+                        }
+                    }
                 } else {
-                    Assert(!element_level);
                     for (auto i = 0; i < offsets.size(); ++i) {
                         if (bitset[offsets[i]] > 0) {
                             topk_binsert(search_result,

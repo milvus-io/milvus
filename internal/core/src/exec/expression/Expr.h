@@ -2776,5 +2776,17 @@ class ExprSet {
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context);
 
+// Evaluate expr_set batch by batch until the accumulated result covers
+// total_rows, then fold UNKNOWN (NULL) into FALSE (data &= valid) so a
+// consumer that reads only the data bits is null-rejecting by construction.
+// Shared by the whole-range consumers of expressions that cannot take offset
+// input: PhyIterativeFilterNode's non-native branch and boost scoring's
+// non-native filter fallback. `what` names the caller in error messages.
+TargetBitmap
+EvalExprSetOverAllBatches(ExprSet& expr_set,
+                          EvalCtx& eval_ctx,
+                          int64_t total_rows,
+                          const char* what);
+
 }  //namespace exec
 }  // namespace milvus
