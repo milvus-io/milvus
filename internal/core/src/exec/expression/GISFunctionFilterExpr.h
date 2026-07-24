@@ -20,7 +20,10 @@
 #include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/Geometry.h"
 #include "common/OpContext.h"
+#include "common/PreparedGeometry.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
@@ -33,6 +36,47 @@
 
 namespace milvus {
 namespace exec {
+
+// Evaluate a single GIS predicate using a prepared query geometry against an
+// already-constructed `left` row geometry. This centralizes the prepared
+// predicate semantics — notably the contains/within swap
+// (left.contains(query) == query.within(left)) — so the per-predicate path
+// (PhyGISFunctionFilterExpr::EvalForIndexSegment) and the optimizer's fusion
+// path (PhyGISRefineConjunctExpr) stay in lockstep instead of drifting as new
+// GISOps are added.
+inline bool
+EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
+                      const PreparedGeometry& prepared,
+                      const Geometry& query_geom,
+                      const Geometry& left,
+                      double distance) {
+    switch (op) {
+        case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
+            // Symmetric: prepared.intersects(left) == left.intersects(query)
+            return prepared.intersects(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+            return prepared.touches(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+            return prepared.overlaps(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+            return prepared.crosses(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+            // left.contains(query) == query.within(left)
+            return prepared.within(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Within:
+            // left.within(query) == query.contains(left)
+            return prepared.contains(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+            // No prepared version - fall back to regular geometry.
+            return left.equals(query_geom);
+        case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
+            // Distance-based operation - no prepared version.
+            return left.dwithin(query_geom, distance);
+        default:
+            ThrowInfo(
+                NotImplemented, "unknown GIS op : {}", static_cast<int>(op));
+    }
+}
 
 class PhyGISFunctionFilterExpr : public SegmentExpr {
  public:
@@ -68,6 +112,13 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;
+    }
+
+    // Expose the logical GIS expr so the optimizer can group same-column GIS
+    // predicates into a PhyGISCoarseConjunctExpr / PhyGISRefineConjunctExpr.
+    const std::shared_ptr<const milvus::expr::GISFunctionFilterExpr>&
+    GetGISExpr() const {
+        return expr_;
     }
 
     std::string
