@@ -746,6 +746,156 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 	}
 }
 
+// TestSetJobInfoSortResultManifestHandling covers the shared, non-text/json manifest
+// update branch (sort sub-job). A result built on a non-empty stale base is rejected
+// instead of blindly overwriting a concurrently-committed manifest. A baseless result
+// is adopted (fail-open): sort results carry no base by design (birth commit), and
+// older DataNodes cannot report one, so the CAS is skipped for an empty base.
+func (s *statsTaskSuite) TestSetJobInfoSortResultManifestHandling() {
+	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
+	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
+	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+
+	testCases := []struct {
+		name           string
+		current        string
+		base           string
+		result         string
+		expectManifest string
+		expectCatalog  bool
+		expectErr      error
+	}{
+		{
+			name:           "stale_result_rejected",
+			current:        currentManifest,
+			base:           oldManifest,
+			result:         resultManifest,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			name:           "fresh_result_adopted",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         resultManifest,
+			expectManifest: resultManifest,
+			expectCatalog:  true,
+		},
+		{
+			// A baseless result is adopted (fail-open): birth commit / older worker.
+			name:           "baseless_adopted",
+			current:        currentManifest,
+			base:           "",
+			result:         resultManifest,
+			expectManifest: resultManifest,
+			expectCatalog:  true,
+		},
+		{
+			// True birth: the freshly allocated sort target has no manifest yet.
+			name:           "true_birth_adopted",
+			current:        "",
+			base:           "",
+			result:         resultManifest,
+			expectManifest: resultManifest,
+			expectCatalog:  true,
+		},
+		{
+			// Idempotent replay of an already adopted result: no-op, no error.
+			name:           "baseless_replay_noop",
+			current:        resultManifest,
+			base:           "",
+			result:         resultManifest,
+			expectManifest: resultManifest,
+		},
+		{
+			// Correct base, but the result points at a DIFFERENT segment's manifest.
+			// base==current alone would have adopted it (corrupting the pointer); the
+			// successor check rejects a cross-segment manifest.
+			name:           "cross_segment_result_rejected",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         `{"base_path":"files/insert_log/9/9/9999","ver":3}`,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Correct base, but the result rolls the version backwards on the same
+			// base path — reject rather than regress the segment.
+			name:           "rollback_result_rejected",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         oldManifest,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Baseless (fail-open on the missing base) but the result still moves the
+			// pointer of a materialized segment to another segment's manifest: refuse
+			// even without a base, since we can still see it is not a forward successor.
+			name:           "baseless_cross_segment_rejected",
+			current:        currentManifest,
+			base:           "",
+			result:         `{"base_path":"files/insert_log/9/9/9999","ver":3}`,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Baseless rollback on the same base path: reject.
+			name:           "baseless_rollback_rejected",
+			current:        currentManifest,
+			base:           "",
+			result:         oldManifest,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restore := s.installJSONStatsSegment(testCase.current)
+			defer restore()
+
+			alterSegmentsCount := 0
+			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
+				func(
+					_ *mockeyDataCoordCatalog,
+					_ context.Context,
+					_ []*datapb.SegmentInfo,
+					_ ...metastore.BinlogsIncrement,
+				) error {
+					alterSegmentsCount++
+					return nil
+				}).Build()
+			defer mockAlterSegments.UnPatch()
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+
+			err := s.newSortStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:       s.taskID,
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				Channel:      "ch1",
+				BaseManifest: testCase.base,
+				Manifest:     testCase.result,
+			})
+			if testCase.expectErr != nil {
+				s.ErrorIs(err, testCase.expectErr)
+			} else {
+				s.NoError(err)
+			}
+
+			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(segment)
+			s.Equal(testCase.expectManifest, segment.GetManifestPath())
+			if testCase.expectCatalog {
+				s.Equal(1, alterSegmentsCount)
+			} else {
+				s.Equal(0, alterSegmentsCount)
+			}
+		})
+	}
+}
+
 func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
 	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
@@ -1108,6 +1258,19 @@ func (s *statsTaskSuite) newTextStatsTask() *statsTask {
 		InsertChannel:   "ch1",
 		TaskID:          s.taskID,
 		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+}
+
+func (s *statsTaskSuite) newSortStatsTask() *statsTask {
+	return newStatsTask(&indexpb.StatsTask{
+		CollectionID:    s.collID,
+		PartitionID:     s.partID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.segID,
+		InsertChannel:   "ch1",
+		TaskID:          s.taskID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
 		State:           indexpb.JobState_JobStateInProgress,
 	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 }

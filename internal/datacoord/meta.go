@@ -3231,6 +3231,38 @@ func (m *meta) completeSortCompactionMutation(
 	return []*SegmentInfo{segment}, metricMutation, nil
 }
 
+// validateManifestSuccessor enforces the optimistic-concurrency rule shared by
+// every in-place manifest adoption (schema-bump compaction, external-collection
+// refresh): a result manifest may replace a segment's current manifest only when
+// it is a legal successor. It returns:
+//   - (true, nil)  when result == current: an idempotent replay, nothing changes;
+//   - (false, nil) when base == current AND result is a strictly-forward successor
+//     on the same base path (parseable, higher version) — adopt it;
+//   - (false, err) otherwise — an empty/stale base, a rollback, a different base
+//     path, or an unparsable result — reject and rebuild on the current manifest.
+//
+// Checking only base==current is not enough: a buggy, mixed-version, or corrupt
+// worker could carry the right base yet a result that points at another segment's
+// manifest or an older version, silently corrupting the segment pointer.
+func validateManifestSuccessor(base, current, result string) (isReplay bool, err error) {
+	if result == current {
+		return true, nil
+	}
+	if base == "" || base != current {
+		return false, merr.WrapErrServiceInternalMsg("base manifest %q does not match the current manifest %q", base, current)
+	}
+	cmp, err := packed.CompareManifestPath(result, current)
+	if err != nil {
+		// Preserve the inner code (CompareManifestPath returns a typed merr error)
+		// rather than flattening it into a format string.
+		return false, merr.Wrapf(err, "result manifest %q is not a comparable successor of %q", result, current)
+	}
+	if cmp <= 0 {
+		return false, merr.WrapErrServiceInternalMsg("result manifest %q does not advance the current manifest %q", result, current)
+	}
+	return false, nil
+}
+
 func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
@@ -3307,17 +3339,10 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if baseManifest == "" {
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
 	}
-	if resultManifest != currentManifest {
-		if baseManifest != currentManifest {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
-		}
-		cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
-		if err != nil {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s not comparable with current %s: %v", resultManifest, currentManifest, err)
-		}
-		if cmp <= 0 {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s does not advance current %s", resultManifest, currentManifest)
-		}
+	// Adopt only a legal successor (base==current and result strictly forward on
+	// the same base path, or an idempotent replay). See validateManifestSuccessor.
+	if _, err := validateManifestSuccessor(baseManifest, currentManifest, resultManifest); err != nil {
+		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump manifest adoption rejected: %v", err)
 	}
 
 	// Clone the segment for update

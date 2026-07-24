@@ -5572,3 +5572,39 @@ func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
 	assert.NotNil(t, cp)
 	assert.Equal(t, uint64(300), cp.GetTimestamp())
 }
+
+func TestValidateManifestSuccessor(t *testing.T) {
+	m := packed.MarshalManifestPath
+	cur := m("seg/1", 5)
+
+	t.Run("replay when result equals current", func(t *testing.T) {
+		isReplay, err := validateManifestSuccessor("anything", cur, cur)
+		assert.NoError(t, err)
+		assert.True(t, isReplay)
+	})
+	t.Run("forward successor adopted", func(t *testing.T) {
+		isReplay, err := validateManifestSuccessor(cur, cur, m("seg/1", 6))
+		assert.NoError(t, err)
+		assert.False(t, isReplay)
+	})
+	t.Run("empty base rejected", func(t *testing.T) {
+		_, err := validateManifestSuccessor("", cur, m("seg/1", 6))
+		assert.Error(t, err)
+	})
+	t.Run("stale base rejected", func(t *testing.T) {
+		_, err := validateManifestSuccessor(m("seg/1", 4), cur, m("seg/1", 6))
+		assert.Error(t, err)
+	})
+	t.Run("rollback rejected", func(t *testing.T) {
+		_, err := validateManifestSuccessor(cur, cur, m("seg/1", 4))
+		assert.Error(t, err)
+	})
+	t.Run("different base path rejected", func(t *testing.T) {
+		_, err := validateManifestSuccessor(cur, cur, m("seg/999", 6))
+		assert.Error(t, err)
+	})
+	t.Run("unparseable result rejected", func(t *testing.T) {
+		_, err := validateManifestSuccessor(cur, cur, "not-a-manifest")
+		assert.Error(t, err)
+	})
+}

@@ -98,6 +98,9 @@ func (i *externalCollectionRefreshInspector) inspect() {
 	for _, t := range tasks {
 		switch t.GetState() {
 		case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry:
+			if i.jobIsTerminal(t.GetJobId()) {
+				continue
+			}
 			// Re-enqueue pending tasks (scheduler will deduplicate)
 			i.scheduler.Enqueue(i.wrapTask(t))
 		}
@@ -113,7 +116,27 @@ func (i *externalCollectionRefreshInspector) reloadFromMeta() {
 			t.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
+		if i.jobIsTerminal(t.GetJobId()) {
+			continue
+		}
 		// Enqueue active tasks for processing
 		i.scheduler.Enqueue(i.wrapTask(t))
 	}
+}
+
+// jobIsTerminal reports whether the task's owning job has already reached a
+// terminal state (Finished / Failed). This is the dispatch-time terminal-job
+// guard: UpdateJobStateWithPreApply releases the job lock before
+// resetJobTasksForRetry runs, so a concurrent timeout can drive the job terminal
+// while a stale-manifest reset moves one of its finished tasks back to Init.
+// Without this guard the inspector would enqueue work for an already-terminal
+// job. An unknown job (nil) is not treated as terminal — the guard targets the
+// terminal race specifically, and GC reclaims genuinely orphaned tasks.
+func (i *externalCollectionRefreshInspector) jobIsTerminal(jobID int64) bool {
+	job := i.refreshMeta.GetJob(jobID)
+	if job == nil {
+		return false
+	}
+	return job.GetState() == indexpb.JobState_JobStateFinished ||
+		job.GetState() == indexpb.JobState_JobStateFailed
 }

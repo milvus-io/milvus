@@ -526,6 +526,17 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
 	)
 	baseManifest := st.req.GetManifestPath()
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort {
+		// For a Sort sub-job the result is adopted onto the freshly allocated
+		// TARGET segment, not the origin: it is a birth commit, not an in-place
+		// rewrite. req.ManifestPath is the ORIGIN segment's manifest — stamping
+		// it as the base would make DataCoord's base==current CAS compare across
+		// segments and reject every sort result. Leave the base empty: the sort
+		// target is a birth with no concurrent writer to fence against, so the
+		// coordinator adopts an empty base (fail-open). This is also what keeps
+		// sort results from older DataNodes working across a rolling upgrade.
+		baseManifest = ""
+	}
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -717,6 +728,12 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		jsonKeyIndexStats = make(map[int64]*datapb.JsonKeyStats)
 	)
 	baseManifest := st.req.GetManifestPath()
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort {
+		// Sort results are birth commits onto the fresh TARGET segment; see the
+		// matching comment in createTextIndex. Never stamp the origin's manifest
+		// as the base for a cross-segment adoption.
+		baseManifest = ""
+	}
 
 	eg, egCtx := errgroup.WithContext(ctx)
 

@@ -696,7 +696,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskState(1001, indexpb.JobState_JobStateInProgress, "")
+		_, err = meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
 		assert.Equal(t, indexpb.JobState_JobStateInit, meta.GetTask(1001).GetState())
 	})
@@ -707,7 +707,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskState(1001, indexpb.JobState_JobStateInProgress, "")
+		_, err := meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateInProgress, "")
 		assert.NoError(t, err)
 
 		task := meta.GetTask(1001)
@@ -720,7 +720,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskState(1001, indexpb.JobState_JobStateFailed, "connection timeout")
+		_, err := meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateFailed, "connection timeout")
 		assert.NoError(t, err)
 
 		task := meta.GetTask(1001)
@@ -731,7 +731,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 	t.Run("task_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.UpdateTaskState(9999, indexpb.JobState_JobStateInProgress, "")
+		_, err := meta.UpdateTaskState(9999, 0, indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
 	})
 }
@@ -759,8 +759,9 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		assert.NoError(t, err)
 
 		updatedSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 7}
-		err = meta.UpdateTaskResult(
+		_, err = meta.UpdateTaskResult(
 			1001,
+			0,
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1, 2},
@@ -798,8 +799,9 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskResult(
+		_, err = meta.UpdateTaskResult(
 			1001,
+			0,
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1},
@@ -816,8 +818,9 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 	t.Run("task_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.UpdateTaskResult(
+		_, err := meta.UpdateTaskResult(
 			9999,
+			0,
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1},
@@ -1092,4 +1095,49 @@ func TestExternalCollectionRefreshMeta_AggregateJobStateFromTasks(t *testing.T) 
 			assert.Equal(t, tc.expectedProgress, progress)
 		})
 	}
+}
+
+// TestExternalCollectionRefreshMeta_VersionFencedWrites verifies that
+// attempt-scoped writes are dropped when the persisted task has been
+// re-dispatched under a newer version (expectedVersion != current), while a
+// matching version and the unconditional version 0 both land. This is the
+// coordinator half of the attempt fence: a stale/late Query response from a
+// superseded attempt must not overwrite the current attempt's state.
+func TestExternalCollectionRefreshMeta_VersionFencedWrites(t *testing.T) {
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, Version: 2, State: indexpb.JobState_JobStateInProgress},
+	}
+	meta := createMetaTestRefreshMeta(t, nil, tasks)
+
+	// Stale result from attempt v1 is dropped (task is at v2).
+	applied, err := meta.UpdateTaskResult(1001, 1, indexpb.JobState_JobStateFinished, "", []int64{9}, nil)
+	assert.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+	assert.False(t, meta.GetTask(1001).GetResultReady())
+
+	// Stale state write from v1 is dropped too.
+	applied, err = meta.UpdateTaskState(1001, 1, indexpb.JobState_JobStateFailed, "stale")
+	assert.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+
+	// Stale reset from v1 is dropped.
+	applied, err = meta.ResetTaskForRetry(1001, 1, "stale reset")
+	assert.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+
+	// The current attempt's write (v2) lands.
+	applied, err = meta.UpdateTaskResult(1001, 2, indexpb.JobState_JobStateFinished, "", []int64{9}, nil)
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetTask(1001).GetState())
+	assert.True(t, meta.GetTask(1001).GetResultReady())
+
+	// Unconditional (version 0) job-scoped write always lands (e.g. timeout).
+	applied, err = meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateFailed, "job timeout")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, meta.GetTask(1001).GetState())
 }

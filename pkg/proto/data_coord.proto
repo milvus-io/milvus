@@ -468,6 +468,11 @@ message SegmentInfo {
   // It is populated only on cloned SegmentInfo responses from GetSegmentInfo
   // with includeUnHealthy=true.
   repeated string child_manifest_paths = 37;
+  // base_manifest is set only on an external-collection refresh result segment:
+  // the manifest the worker's in-place column patch was built on. DataCoord
+  // adopts the patch only if this still equals the segment's current manifest
+  // (optimistic-concurrency CAS). Never set on a persisted live segment.
+  string base_manifest = 39;
 }
 
 message SegmentStartPosition {
@@ -1453,6 +1458,12 @@ message RefreshExternalCollectionTaskRequest {
   int64 file_index_end = 13;              // File range end for this task
   int64 partitionID = 14;                 // target partition for manifest path
   int64 target_rows_per_segment = 15;     // target row count for segment organization
+  // task_version fences worker-side attempts of the same taskID. DataCoord
+  // bumps the persisted task version on every dispatch; the DataNode manager
+  // registers the attempt under this version and drops result/state writes
+  // from any older attempt, so a canceled-but-still-running attempt cannot
+  // overwrite the state of a re-dispatched one (ABA race on retry).
+  int64 task_version = 16;
 }
 
 message RefreshExternalCollectionTaskResponse {
