@@ -2867,7 +2867,14 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			return false, merr.Error(rspGT.GetStatus())
 		}
 		return false, nil
-	})
+	}, retry.Attempts(func() uint {
+		a := Params.CommonCfg.InconsistentRequeryMaxAttempts.GetAsUint()
+		if a == 0 {
+			return 1
+		}
+		return a
+	}()),
+		retry.MaxSleepTime(Params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.GetAsDuration(time.Second)))
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	} else if err != nil {
@@ -3117,7 +3124,14 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			return true, merr.Error(rsp.GetStatus())
 		}
 		return false, nil
-	})
+	}, retry.Attempts(func() uint {
+		a := Params.CommonCfg.InconsistentRequeryMaxAttempts.GetAsUint()
+		if a == 0 {
+			return 1
+		}
+		return a
+	}()),
+		retry.MaxSleepTime(Params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.GetAsDuration(time.Second)))
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}

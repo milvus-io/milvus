@@ -360,6 +360,9 @@ type commonConfig struct {
 	QNFileResourceMode        ParamItem `refreshable:"true"`
 	DNFileResourceMode        ParamItem `refreshable:"true"`
 
+	InconsistentRequeryMaxAttempts         ParamItem `refreshable:"true"`
+	InconsistentRequeryMaxSleepTimeSeconds ParamItem `refreshable:"true"`
+
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
 }
@@ -1487,6 +1490,28 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       false,
 	}
 	p.SearchRequeryPolicy.Init(base.mgr)
+
+	p.InconsistentRequeryMaxAttempts = ParamItem{
+		Key:          "common.requery.inconsistentRequeryMaxAttempts",
+		Version:      "3.0.0",
+		DefaultValue: "15",
+		Doc: `the max number of retry attempts for search/hybrid_search when the requery result
+is inconsistent with the ANN search result (error code 2200), which can happen when the
+segment set observed by the two RPCs of a two-phase query drifts (e.g. due to a concurrent
+L0 compaction). This is independent of the generic RPC-level retry count.`,
+		Export: true,
+	}
+	p.InconsistentRequeryMaxAttempts.Init(base.mgr)
+
+	p.InconsistentRequeryMaxSleepTimeSeconds = ParamItem{
+		Key:          "common.requery.inconsistentRequeryMaxSleepTimeSeconds",
+		Version:      "3.0.0",
+		DefaultValue: "20",
+		Doc: `the max backoff sleep time in seconds between retries for the
+common.requery.inconsistentRequeryMaxAttempts retry budget above.`,
+		Export: true,
+	}
+	p.InconsistentRequeryMaxSleepTimeSeconds.Init(base.mgr)
 
 	p.QNFileResourceMode = ParamItem{
 		Key:          "common.fileResource.mode.queryNode",
