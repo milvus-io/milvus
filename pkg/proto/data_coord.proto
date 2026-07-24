@@ -925,7 +925,8 @@ message ImportRequest {
   int64 task_slot = 14;
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
-  bool use_loon_ffi = 17;
+  reserved 17;
+  reserved "use_loon_ffi";
 }
 
 message QueryPreImportRequest {

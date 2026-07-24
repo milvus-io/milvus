@@ -53,12 +53,7 @@ func (policy *storageVersionUpgradePolicy) Enable() bool {
 }
 
 func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
-	targetVersion := storage.StorageV2
-	// Uncomment after stv3 cp to 2.6
-	// if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-	// 	targetVersion = storage.StorageV3
-	// }
-	return targetVersion
+	return storage.StorageV2
 }
 
 func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {

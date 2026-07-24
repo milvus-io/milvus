@@ -343,8 +343,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -367,8 +366,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -428,8 +426,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
