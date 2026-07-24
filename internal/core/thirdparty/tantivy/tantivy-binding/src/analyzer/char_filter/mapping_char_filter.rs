@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json as json;
 
 use super::char_filter::{BoxCharFilter, CharFilter, FilteredText};
@@ -5,7 +7,7 @@ use crate::error::{Result, TantivyBindingError};
 
 #[derive(Clone)]
 pub(crate) struct MappingCharFilter {
-    mappings: Vec<(String, String)>,
+    mappings: HashMap<char, Vec<(String, String)>>,
 }
 
 impl MappingCharFilter {
@@ -34,8 +36,19 @@ impl MappingCharFilter {
             parsed.push(parse_mapping(mapping)?);
         }
 
-        parsed.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-        Ok(MappingCharFilter { mappings: parsed })
+        let mut mappings: HashMap<char, Vec<(String, String)>> = HashMap::new();
+        for (source, target) in parsed {
+            let first_char = source.chars().next().unwrap();
+            mappings
+                .entry(first_char)
+                .or_default()
+                .push((source, target));
+        }
+        for rules in mappings.values_mut() {
+            rules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        }
+
+        Ok(MappingCharFilter { mappings })
     }
 }
 
@@ -45,9 +58,12 @@ impl CharFilter for MappingCharFilter {
         let mut cursor = 0;
 
         while cursor < input.text.len() {
+            let next = input.text[cursor..].chars().next().unwrap();
             if let Some((source, target)) = self
                 .mappings
-                .iter()
+                .get(&next)
+                .into_iter()
+                .flatten()
                 .find(|(source, _)| input.text[cursor..].starts_with(source))
             {
                 replacements.push((cursor, cursor + source.len(), target.clone()));
@@ -55,7 +71,6 @@ impl CharFilter for MappingCharFilter {
                 continue;
             }
 
-            let next = input.text[cursor..].chars().next().unwrap();
             cursor += next.len_utf8();
         }
 
@@ -68,7 +83,7 @@ impl CharFilter for MappingCharFilter {
 }
 
 fn parse_mapping(mapping: &str) -> Result<(String, String)> {
-    let separator = mapping.find("=>").ok_or_else(|| {
+    let separator = find_unescaped_separator(mapping).ok_or_else(|| {
         TantivyBindingError::InvalidArgument(format!(
             "invalid mapping char_filter mapping: {}",
             mapping
@@ -83,13 +98,57 @@ fn parse_mapping(mapping: &str) -> Result<(String, String)> {
         target = target.trim_start();
     }
 
+    let source = unescape_mapping_side(source)?;
+    let target = unescape_mapping_side(target)?;
     if source.is_empty() {
         return Err(TantivyBindingError::InvalidArgument(
             "mapping char_filter source must not be empty".to_string(),
         ));
     }
 
-    Ok((source.to_string(), target.to_string()))
+    Ok((source, target))
+}
+
+fn find_unescaped_separator(mapping: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (offset, ch) in mapping.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if mapping[offset..].starts_with("=>") {
+            return Some(offset);
+        }
+    }
+    None
+}
+
+fn unescape_mapping_side(input: &str) -> Result<String> {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            output.push(ch);
+            continue;
+        }
+
+        let escaped = chars.next().ok_or_else(|| {
+            TantivyBindingError::InvalidArgument(
+                "mapping char_filter escape sequence must not end with backslash".to_string(),
+            )
+        })?;
+        match escaped {
+            'n' => output.push('\n'),
+            'r' => output.push('\r'),
+            't' => output.push('\t'),
+            other => output.push(other),
+        }
+    }
+    Ok(output)
 }
 
 fn has_separator_padding(source: &str, target: &str) -> bool {
@@ -177,5 +236,29 @@ mod tests {
         let output = filter.apply(FilteredText::new("a-b c"));
 
         assert_eq!(output.text, "a b_c");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_supports_escaped_whitespace_and_separator() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["\\t=>\\ ", "\\=\\>=>arrow"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("\t=>"));
+
+        assert_eq!(output.text, " arrow");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_trailing_escape() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>b\\"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+
+        assert!(MappingCharFilter::from_json(&params).is_err());
     }
 }
