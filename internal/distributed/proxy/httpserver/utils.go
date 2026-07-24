@@ -734,21 +734,21 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 								},
 							},
 						}
-				case schemapb.DataType_VarChar, schemapb.DataType_UUID:
-					arr := make([]string, 0)
-					err := json.Unmarshal([]byte(dataString), &arr)
-					if err != nil {
-						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-							" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
-					}
-					reallyData[fieldName] = &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: arr,
+					case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+						arr := make([]string, 0)
+						err := json.Unmarshal([]byte(dataString), &arr)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
+						}
+						reallyData[fieldName] = &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: arr,
+								},
 							},
-						},
+						}
 					}
-				}
 				case schemapb.DataType_JSON:
 					reallyData[fieldName] = []byte(dataString)
 				case schemapb.DataType_Geometry:
@@ -767,11 +767,11 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					reallyData[fieldName] = result
 				case schemapb.DataType_Timestamptz:
 					reallyData[fieldName] = dataString
-			case schemapb.DataType_VarChar, schemapb.DataType_UUID:
-				reallyData[fieldName] = dataString
-			case schemapb.DataType_String:
-				reallyData[fieldName] = dataString
-			default:
+				case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+					reallyData[fieldName] = dataString
+				case schemapb.DataType_String:
+					reallyData[fieldName] = dataString
+				default:
 					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName)
 				}
 			}
@@ -2641,10 +2641,10 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					} else {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 					}
-			case schemapb.DataType_String:
-				row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
-			case schemapb.DataType_VarChar, schemapb.DataType_UUID:
-				row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+				case schemapb.DataType_String:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+				case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
