@@ -2,11 +2,19 @@ package shards
 
 import (
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
+
+type CollectionSchemaInfo struct {
+	VChannel string
+	Schema   *schemapb.CollectionSchema
+}
 
 // CheckIfCollectionCanBeCreated checks if a collection can be created.
 // It returns false if the collection cannot be created.
@@ -48,6 +56,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	partitionIDs := msg.Header().PartitionIds
 	vchannel := msg.VChannel()
 	timetick := msg.TimeTick()
+	schema := msg.MustBody().GetCollectionSchema()
 	logger := m.Logger().With(log.FieldMessage(msg))
 
 	m.mu.Lock()
@@ -58,8 +67,16 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 		return
 	}
 
-	m.collections[collectionID] = newCollectionInfo(vchannel, partitionIDs)
-	for partitionID := range m.collections[collectionID].PartitionIDs {
+	collectionInfo := newCollectionInfo(vchannel, partitionIDs)
+	if schema != nil {
+		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+			Schema:             schema,
+			CheckpointTimeTick: timetick,
+			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+		}
+	}
+	m.collections[collectionID] = collectionInfo
+	for partitionID := range collectionInfo.PartitionIDs {
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		if _, ok := m.partitionManagers[uniqueKey]; ok {
 			logger.Warn("partition already exists", zap.Int64("partitionID", partitionID))
@@ -118,4 +135,21 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	}
 	logger.Info("collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
+}
+
+func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSchemaInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	infos := make(map[int64]CollectionSchemaInfo)
+	for collectionID, collectionInfo := range m.collections {
+		if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
+			continue
+		}
+		infos[collectionID] = CollectionSchemaInfo{
+			VChannel: collectionInfo.VChannel,
+			Schema:   proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema),
+		}
+	}
+	return infos
 }

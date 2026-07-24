@@ -398,7 +398,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	for _, field := range collSchema.Fields {
-		if skipFunction && typeutil.IsBM25FunctionOutputField(field, collSchema) {
+		if skipFunction && isEmbeddingFunctionOutputField(field, collSchema) {
 			continue
 		}
 
@@ -525,6 +525,10 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	return idata, nil
+}
+
+func isEmbeddingFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	return typeutil.IsBM25FunctionOutputField(field, collSchema)
 }
 
 // ColumnBasedInsertMsgToInsertData converts an InsertMsg msg into InsertData based
@@ -883,8 +887,10 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 
 	handleFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
-		if typeutil.IsBM25FunctionOutputField(field, collSchema) {
-			return nil, nil
+		if isEmbeddingFunctionOutputField(field, collSchema) {
+			if _, ok := srcFields[field.GetFieldID()]; !ok {
+				return nil, nil
+			}
 		}
 
 		fieldData, err := getFieldData(field)
@@ -1755,8 +1761,8 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	for _, field := range allFields {
-		// Skip function output fields and system fields
-		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
+		// Skip embedding function output fields and system fields.
+		if isEmbeddingFunctionOutputField(field, schema) || field.GetFieldID() < 100 {
 			continue
 		}
 
