@@ -2203,9 +2203,21 @@ void
 SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 const DataArray* data_array,
                                                 int64_t num_rows) {
+    // ORDERING DEPENDENCY: this appends rows to the TAIL of the cache
+    // (SimpleGeometryCache::AppendData carries no offset), while readers
+    // address the cache by absolute segment offset (GetByOffsetUnsafe).
+    // Tail-append lines up with segment offsets only because Insert() is
+    // serialized per growing segment (one flowgraph consumer per vchannel;
+    // recovery load completes before consumption starts) and rows arrive in
+    // reserved-offset order. Unlike the R-Tree index path -- AddGeometry is
+    // offset-addressed and tolerates any arrival order -- this cache does
+    // NOT support concurrent inserts: interleaved appends would bind
+    // geometries to wrong offsets and silently corrupt query results. If
+    // Insert() ever becomes concurrent per segment, AppendData must take the
+    // reserved offset and place rows at absolute indices.
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
@@ -2218,11 +2230,10 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                 (i < valid_data.size() && valid_data[i])) {
                 // Valid geometry data
                 const auto& wkb_data = geometry_data.data(i);
-                geometry_cache.AppendData(
-                    ctx_, wkb_data.data(), wkb_data.size());
+                geometry_cache->AppendData(wkb_data.data(), wkb_data.size());
             } else {
                 // Null/invalid geometry
-                geometry_cache.AppendData(ctx_, nullptr, 0);
+                geometry_cache->AppendData(nullptr, 0);
             }
         }
 
@@ -2249,7 +2260,7 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
     FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
@@ -2262,11 +2273,11 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                     // Valid geometry data
                     auto wkb_data =
                         static_cast<const std::string*>(data->RawValue(i));
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data->data(), wkb_data->size());
+                    geometry_cache->AppendData(wkb_data->data(),
+                                               wkb_data->size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendData(nullptr, 0);
                 }
             }
         }
