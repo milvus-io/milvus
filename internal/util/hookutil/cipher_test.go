@@ -665,19 +665,10 @@ func (s *CipherSuite) TestWorkerPluginContextRequiresCipherPlugin() {
 	s.Equal(merr.SystemError, merr.GetErrorType(err))
 }
 
-func (s *CipherSuite) TestWorkerPluginContextAllowsPlaintextWithoutCipherPlugin() {
-	s.NoError(RegisterEZsFromPluginContext(nil))
+func (s *CipherSuite) TestRequiredWorkerPluginContextAllowsPlaintextWithoutCipherPlugin() {
 	s.NoError(RegisterRequiredEZsFromPluginContext(nil))
 
-	context, err := GetCPluginContext(nil, 23)
-	s.NoError(err)
-	s.Nil(context)
-
-	context, err = GetRequiredCPluginContext(nil, 23)
-	s.NoError(err)
-	s.Nil(context)
-
-	context, err = GetCPluginContext([]*commonpb.KeyValuePair{{Key: "unrelated", Value: "value"}}, 23)
+	context, err := GetRequiredCPluginContext(nil, 23)
 	s.NoError(err)
 	s.Nil(context)
 
@@ -700,64 +691,6 @@ func (s *CipherSuite) TestWorkerPluginContextWithCipherPlugin() {
 	s.Equal(int64(17), context.GetEncryptionZoneId())
 	s.Equal(int64(23), context.GetCollectionId())
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), context.GetEncryptionKey())
-}
-
-func (s *CipherSuite) TestLegacyPluginContextBehaviorRemainsUnchanged() {
-	pluginContext := []*commonpb.KeyValuePair{{
-		Key:   CipherConfigUnsafeEZK,
-		Value: encodeEZContext(17, []byte("unsafe key")),
-	}}
-
-	s.NoError(RegisterEZsFromPluginContext(pluginContext))
-	context, err := GetCPluginContext(pluginContext, 23)
-	s.NoError(err)
-	s.Nil(context)
-
-	InitTestCipher()
-	const secret = "never-echo-this-key"
-	err = RegisterEZsFromPluginContext([]*commonpb.KeyValuePair{{
-		Key:   CipherConfigUnsafeEZK,
-		Value: secret,
-	}})
-	s.ErrorIs(err, merr.ErrParameterInvalid)
-	s.Equal(merr.InputError, merr.GetErrorType(err))
-
-	context, err = GetCPluginContext([]*commonpb.KeyValuePair{{
-		Key:   CipherConfigUnsafeEZK,
-		Value: secret,
-	}}, 23)
-	s.Nil(context)
-	s.ErrorIs(err, merr.ErrParameterInvalid)
-	s.Equal(merr.InputError, merr.GetErrorType(err))
-
-	legacyContext := []*commonpb.KeyValuePair{{
-		Key:   CipherConfigUnsafeEZK,
-		Value: "17:not-base64",
-	}}
-	s.NoError(RegisterEZsFromPluginContext(legacyContext))
-	context, err = GetCPluginContext(legacyContext, 23)
-	s.NoError(err)
-	s.Equal("not-base64", context.GetEncryptionKey())
-
-	numericContext := []*commonpb.KeyValuePair{{
-		Key:   CipherConfigUnsafeEZK,
-		Value: secret + ":YWJj",
-	}}
-	_, _, decodeErr := decodeEZContext(numericContext[0].GetValue())
-	s.Require().Error(decodeErr)
-
-	err = RegisterEZsFromPluginContext(numericContext)
-	s.Equal(merr.Code(decodeErr), merr.Code(err))
-	s.Equal(merr.IsRetryableErr(decodeErr), merr.IsRetryableErr(err))
-	s.Equal(merr.SystemError, merr.GetErrorType(err))
-	s.NotContains(err.Error(), secret)
-
-	context, err = GetCPluginContext(numericContext, 23)
-	s.Nil(context)
-	s.Equal(merr.Code(decodeErr), merr.Code(err))
-	s.Equal(merr.IsRetryableErr(decodeErr), merr.IsRetryableErr(err))
-	s.Equal(merr.SystemError, merr.GetErrorType(err))
-	s.NotContains(err.Error(), secret)
 }
 
 func (s *CipherSuite) TestRequiredPluginContextClassifiesMalformedWorkerContextAsSystemError() {
@@ -797,7 +730,7 @@ func (s *CipherSuite) TestRequiredPluginContextClassifiesMalformedWorkerContextA
 	s.NotContains(err.Error(), secret)
 }
 
-func (s *CipherSuite) TestRequiredPluginContextPreservesLegacyNumericErrorSemantics() {
+func (s *CipherSuite) TestRequiredPluginContextPreservesNumericErrorSemantics() {
 	InitTestCipher()
 	const secret = "never-echo-this-key"
 	encoded := secret + ":YWJj"
