@@ -2069,6 +2069,17 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 	})
 }
 
+func TestRootCoord_NotifyFileResourceObserverOnProxyChange(t *testing.T) {
+	observer := NewMockFileResourceObserver(t)
+	observer.EXPECT().Notify().Return().Twice()
+
+	c := newTestCore()
+	c.SetFileResourceObserver(observer)
+
+	c.notifyFileResourceObserverOnProxyAdd(nil)
+	c.notifyFileResourceObserverOnProxySnapshot(nil)
+}
+
 func TestRootCoord_ListFileResources(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())

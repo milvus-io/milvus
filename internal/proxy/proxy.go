@@ -80,6 +80,7 @@ type Proxy struct {
 
 	address  string
 	mixCoord types.MixCoordClient
+	factory  dependency.Factory
 
 	simpleLimiter *SimpleLimiter
 
@@ -117,7 +118,7 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
@@ -131,6 +132,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
+		factory:         factory,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
@@ -235,6 +237,13 @@ func (node *Proxy) Init() error {
 	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
+
+	node.factory.Init(paramtable.Get())
+	if err := node.initFileResourceManager(); err != nil {
+		mlog.Warn(node.ctx, "failed to init file resource manager", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
+		return err
+	}
+	mlog.Debug(node.ctx, "init file resource manager done", mlog.String("role", typeutil.ProxyRole))
 
 	if err := InitMetaCache(node.ctx, node.mixCoord); err != nil {
 		mlog.Warn(node.ctx, "failed to init meta cache", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))

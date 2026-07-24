@@ -359,6 +359,7 @@ type commonConfig struct {
 	SearchRequeryPolicy       ParamItem `refreshable:"true"`
 	QNFileResourceMode        ParamItem `refreshable:"true"`
 	DNFileResourceMode        ParamItem `refreshable:"true"`
+	PNFileResourceMode        ParamItem `refreshable:"true"`
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
@@ -1505,6 +1506,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.DNFileResourceMode.Init(base.mgr)
+
+	p.PNFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.proxyNode",
+		Version:      "3.0.0",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for proxy node, options: [sync, close]. Default is sync.",
+		Export:       true,
+	}
+	p.PNFileResourceMode.Init(base.mgr)
 
 	p.GroupByMaxGroups = ParamItem{
 		Key:          "common.groupBy.maxGroups",

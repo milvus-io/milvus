@@ -90,6 +90,16 @@ type ServerSuite struct {
 	ctx     context.Context
 }
 
+type testFileResourceObserver struct {
+	notifyCount int
+}
+
+func (o *testFileResourceObserver) InitQueryCoord(*session.NodeManager, session.Cluster) {}
+
+func (o *testFileResourceObserver) Notify() {
+	o.notifyCount++
+}
+
 func (suite *ServerSuite) SetupSuite() {
 	paramtable.Init()
 	params.GenerateEtcdConfig()
@@ -842,6 +852,8 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 func TestRewatchNodes(t *testing.T) {
 	// Arrange: Create simple server instance
 	server := createSimpleTestServer()
+	observer := &testFileResourceObserver{}
+	server.fileResourceObserver = observer
 
 	// Create test sessions
 	sessions := map[string]*sessionutil.Session{
@@ -891,12 +903,15 @@ func TestRewatchNodes(t *testing.T) {
 	assert.NotNil(t, server.nodeMgr.Get(1001), "Online node should exist")
 	assert.NotNil(t, server.nodeMgr.Get(1002), "Online node should exist")
 	assert.NotNil(t, server.nodeMgr.Get(1003), "Stopping node should exist")
+	assert.Equal(t, 1, observer.notifyCount)
 }
 
 // TestRewatchNodesWithEmptySessions tests rewatchNodes with empty sessions
 func TestRewatchNodesWithEmptySessions(t *testing.T) {
 	// Arrange: Create server with existing nodes
 	server := createSimpleTestServer()
+	observer := &testFileResourceObserver{}
+	server.fileResourceObserver = observer
 
 	// Add some existing nodes
 	server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -927,6 +942,7 @@ func TestRewatchNodesWithEmptySessions(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, server.nodeMgr.Get(1001), "All nodes should be removed when no sessions exist")
 	assert.Nil(t, server.nodeMgr.Get(1002), "All nodes should be removed when no sessions exist")
+	assert.Equal(t, 1, observer.notifyCount)
 }
 
 // TestHandleNodeUpWithMissingNode tests handleNodeUp when node doesn't exist
