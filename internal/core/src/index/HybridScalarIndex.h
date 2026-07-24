@@ -198,6 +198,9 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType
     SelectIndexBuildType(size_t n, const T* values);
 
+    ScalarIndexType
+    SelectIndexTypeByCardinality(size_t cardinality);
+
     BinarySet
     SerializeIndexType();
 
