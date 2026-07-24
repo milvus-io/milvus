@@ -1535,7 +1535,7 @@ class InsertRecordGrowing {
         int64_t size_per_chunk,
         const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr) {
         if (field_meta.is_nullable()) {
-            this->append_valid_data(field_id);
+            this->append_valid_data(field_id, size_per_chunk);
         }
         const milvus::storage::MmapConfig mmap_config =
             storage::MmapManager::GetInstance().GetMmapConfig();
@@ -1781,8 +1781,8 @@ class InsertRecordGrowing {
 
     // append a column of scalar type
     void
-    append_valid_data(FieldId field_id) {
-        auto valid_data = std::make_shared<ThreadSafeValidData>();
+    append_valid_data(FieldId field_id, int64_t size_per_chunk) {
+        auto valid_data = std::make_shared<ThreadSafeValidData>(size_per_chunk);
         std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
         valid_data_.emplace(field_id, std::move(valid_data));
     }
