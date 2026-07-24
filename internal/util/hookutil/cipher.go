@@ -346,42 +346,6 @@ func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
 	return nil
 }
 
-// RegisterRequiredEZsFromPluginContext registers worker-task EZ contexts and
-// requires every supplied cipher context to be usable. Coordinator-produced
-// context failures are system errors, while their existing code and retry
-// behavior are preserved.
-func RegisterRequiredEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
-	if !containsCipherPluginContext(context) {
-		return nil
-	}
-	if !IsClusterEncryptionEnabled() {
-		return merr.WrapErrServiceInternalErr(errCipherPluginMissing, "cannot apply supplied cipher plugin context")
-	}
-
-	for _, value := range context {
-		if value.GetKey() == CipherConfigUnsafeEZK {
-			ezID, encryptionKey, err := decodeRequiredEZContext(value.GetValue())
-			if err != nil {
-				return classifyWorkerCipherContextError(err, "invalid cipher plugin context supplied to worker task")
-			}
-			if err := CreateLocalEZ(ezID, encryptionKey); err != nil {
-				return classifyWorkerCipherContextError(err, "failed to apply cipher plugin context for worker task")
-			}
-		}
-	}
-	return nil
-}
-
-func containsCipherPluginContext(context []*commonpb.KeyValuePair) bool {
-	return lo.ContainsBy(context, func(value *commonpb.KeyValuePair) bool {
-		return value.GetKey() == CipherConfigUnsafeEZK
-	})
-}
-
-func classifyWorkerCipherContextError(err error, message string) error {
-	return merr.WrapErrAsSysError(merr.Wrap(err, message))
-}
-
 // GetCPluginContext gets C++ plugin context from the first CipherConfigUnsafeEZK entry.
 // Used for creating indexcgopb.StoragePluginContext for C++ segcore.
 func GetCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
@@ -405,37 +369,6 @@ func GetCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*i
 	}
 
 	return nil, nil
-}
-
-// GetRequiredCPluginContext returns a C++ worker-task context and requires every
-// supplied cipher context to be usable. Absent context keeps the plaintext path.
-func GetRequiredCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	if !containsCipherPluginContext(context) {
-		return nil, nil
-	}
-	if !IsClusterEncryptionEnabled() {
-		return nil, merr.WrapErrServiceInternalErr(errCipherPluginMissing, "cannot apply supplied cipher plugin context")
-	}
-
-	var pluginContext *indexcgopb.StoragePluginContext
-	for _, value := range context {
-		if value.GetKey() == CipherConfigUnsafeEZK {
-			ezID, encryptionKey, err := decodeRequiredEZContext(value.GetValue())
-			if err != nil {
-				return nil, classifyWorkerCipherContextError(err, "invalid cipher plugin context supplied to worker task")
-			}
-
-			if pluginContext == nil {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					CollectionId:     collectionID,
-					EncryptionZoneId: ezID,
-					EncryptionKey:    encryptionKey,
-				}
-			}
-		}
-	}
-
-	return pluginContext, nil
 }
 
 func GetCPluginContextByEzID(ezID int64) (*indexcgopb.StoragePluginContext, error) {

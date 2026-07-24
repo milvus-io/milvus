@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -143,7 +142,7 @@ func TestCreateTextIndexPropagatesPluginContext(t *testing.T) {
 		EncryptionKey:    "unsafe-key",
 	}
 
-	parseMock := mockey.Mock(hookutil.GetRequiredCPluginContext).To(
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).To(
 		func(got []*commonpb.KeyValuePair, gotCollectionID int64) (*indexcgopb.StoragePluginContext, error) {
 			require.Equal(t, requestContext, got)
 			require.Equal(t, collectionID, gotCollectionID)
@@ -191,9 +190,10 @@ func TestCreateTextIndexPropagatesPluginContext(t *testing.T) {
 	require.EqualValues(t, storage.StorageV3, captured.GetStorageVersion())
 }
 
-func TestCreateTextIndexRejectsPluginContextBeforeBuild(t *testing.T) {
+func TestCreateTextIndexPropagatesPluginContextError(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
-	hookutil.InitTestCipher()
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
+	defer parseMock.UnPatch()
 
 	buildCalled := false
 	buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
@@ -205,14 +205,13 @@ func TestCreateTextIndexRejectsPluginContextBeforeBuild(t *testing.T) {
 
 	params := compaction.GenParams()
 	params.StorageConfig = &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"}
-	const secret = "never-echo-this-key"
 	_, err := createTextIndex(
 		context.Background(),
 		nil,
 		&datapb.CompactionPlan{
 			PlanID:        1,
 			Schema:        textMatchSchema(101),
-			PluginContext: []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: secret}},
+			PluginContext: []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}},
 		},
 		params,
 		storage.StorageV2,
@@ -222,18 +221,14 @@ func TestCreateTextIndexRejectsPluginContextBeforeBuild(t *testing.T) {
 		1,
 		&datapb.CompactionSegment{SegmentID: 3, StorageVersion: storage.StorageV2},
 	)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	require.NotErrorIs(t, err, merr.ErrServiceInternal)
-	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
-	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
-	require.NotContains(t, err.Error(), secret)
+	require.ErrorIs(t, err, assert.AnError)
 	require.False(t, buildCalled)
 }
 
 func TestCreateTextIndexWithoutPluginContext(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 
-	parseMock := mockey.Mock(hookutil.GetRequiredCPluginContext).Return(nil, nil).Build()
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, nil).Build()
 	defer parseMock.UnPatch()
 
 	var captured *indexcgopb.BuildIndexInfo

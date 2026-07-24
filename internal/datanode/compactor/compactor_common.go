@@ -97,7 +97,7 @@ func createTextIndex(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	pluginContext, err := hookutil.GetRequiredCPluginContext(plan.GetPluginContext(), collectionID)
+	pluginContext, err := hookutil.GetCPluginContext(plan.GetPluginContext(), collectionID)
 	if err != nil {
 		return nil, err
 	}

@@ -692,7 +692,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := hookutil.RegisterRequiredEZsFromPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.CompactionV2(ctx, req)
@@ -710,7 +710,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := hookutil.RegisterRequiredEZsFromPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createStatsTask(ctx, req)
@@ -719,7 +719,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := hookutil.RegisterRequiredEZsFromPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)

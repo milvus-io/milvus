@@ -105,7 +105,7 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 		CollectionId:     1,
 		EncryptionKey:    "unsafe-key",
 	}
-	parseMock := mockey.Mock(hookutil.GetRequiredCPluginContext).To(
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).To(
 		func(got []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
 			require.Equal(t, requestContext, got)
 			require.Equal(t, expected.GetCollectionId(), collectionID)
@@ -144,27 +144,23 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 
 func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 	paramtable.Init()
-	hookutil.InitTestCipher()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	node := NewDataNode(ctx)
 	defer node.cancel()
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
+	defer parseMock.UnPatch()
 
 	const taskID = int64(100)
-	const secret = "never-echo-this-key"
 	status, err := node.createAnalyzeTask(ctx, &workerpb.AnalyzeRequest{
-		ClusterID:     "cluster",
-		TaskID:        taskID,
-		CollectionID:  1,
-		PluginContext: []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: secret}},
+		ClusterID:    "cluster",
+		TaskID:       taskID,
+		CollectionID: 1,
 	})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
-	require.ErrorIs(t, taskErr, merr.ErrParameterInvalid)
-	require.Equal(t, merr.Code(merr.ErrParameterInvalid), status.GetCode())
-	require.Equal(t, merr.SystemError, merr.GetErrorType(taskErr))
-	require.NotContains(t, status.GetReason(), secret)
+	require.Error(t, taskErr)
 	require.Nil(t, node.taskManager.GetAnalyzeTaskInfo("cluster", taskID))
 }
 
@@ -182,7 +178,7 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 		CollectionId:     1,
 		EncryptionKey:    "unsafe-key",
 	}
-	parseMock := mockey.Mock(hookutil.GetRequiredCPluginContext).To(
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).To(
 		func(got []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
 			require.Equal(t, requestContext, got)
 			require.Equal(t, expected.GetCollectionId(), collectionID)
@@ -237,27 +233,23 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 
 func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 	paramtable.Init()
-	hookutil.InitTestCipher()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	node := NewDataNode(ctx)
 	defer node.cancel()
+	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
+	defer parseMock.UnPatch()
 
 	const taskID = int64(100)
-	const secret = "never-echo-this-key"
 	status, err := node.createStatsTask(ctx, &workerpb.CreateStatsRequest{
-		ClusterID:     "cluster",
-		TaskID:        taskID,
-		CollectionID:  1,
-		PluginContext: []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: secret}},
+		ClusterID:    "cluster",
+		TaskID:       taskID,
+		CollectionID: 1,
 	})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
-	require.ErrorIs(t, taskErr, merr.ErrParameterInvalid)
-	require.Equal(t, merr.Code(merr.ErrParameterInvalid), status.GetCode())
-	require.Equal(t, merr.SystemError, merr.GetErrorType(taskErr))
-	require.NotContains(t, status.GetReason(), secret)
+	require.Error(t, taskErr)
 	require.Nil(t, node.taskManager.GetStatsTaskInfo("cluster", taskID))
 }
 

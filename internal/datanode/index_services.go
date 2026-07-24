@@ -336,7 +336,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		mlog.Warn(ctx, "receive analyze task with invalid slot, set to 65535", mlog.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 65535
 	}
-	pluginContext, err := hookutil.GetRequiredCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -381,7 +381,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		mlog.Warn(ctx, "receive stats task with invalid slot, set to 64", mlog.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 64
 	}
-	pluginContext, err := hookutil.GetRequiredCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}

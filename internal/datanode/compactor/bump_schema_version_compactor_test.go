@@ -776,8 +776,6 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 	}
 	parsePatch := mockey.Mock(hookutil.GetCPluginContext).To(parseContext).Build()
 	defer parsePatch.UnPatch()
-	requiredParsePatch := mockey.Mock(hookutil.GetRequiredCPluginContext).To(parseContext).Build()
-	defer requiredParsePatch.UnPatch()
 
 	var captured *indexcgopb.BuildIndexInfo
 	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {

@@ -56,30 +56,6 @@ func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 	return ezID, parts[1], nil
 }
 
-func decodeRequiredEZContext(encoded string) (ezID int64, key string, err error) {
-	ezIDValue, key, found := strings.Cut(encoded, ":")
-	if !found || strings.Contains(key, ":") {
-		return 0, "", merr.WrapErrParameterInvalidMsg("invalid EZ context format")
-	}
-
-	ezID, err = strconv.ParseInt(ezIDValue, 10, 64)
-	if err != nil {
-		cause := strconv.ErrSyntax
-		if numErr, ok := err.(*strconv.NumError); ok {
-			cause = numErr.Err
-		}
-		return 0, "", merr.Wrap(cause, "invalid ezID in context")
-	}
-	if key == "" {
-		return 0, "", merr.WrapErrParameterInvalidMsg("empty encryption key in EZ context")
-	}
-	if _, err := base64.StdEncoding.DecodeString(key); err != nil {
-		return 0, "", merr.WrapErrParameterInvalidMsg("invalid encryption key encoding in EZ context")
-	}
-
-	return ezID, key, nil
-}
-
 func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) {
 	for _, property := range properties {
 		if property.Key == common.EncryptionEzIDKey {
