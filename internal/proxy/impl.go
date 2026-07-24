@@ -135,6 +135,17 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
+	// The shard leader cache is keyed by the cluster-unique collection id (issue #51533), so an
+	// alias/collection name is no longer a cache key. Evicting the affected collection id covers
+	// every name/alias that resolves to it; alias repoints and renames don't move a collection's
+	// shard leaders, so for those this is a harmless best-effort refresh. The names argument is
+	// kept only so the call sites (which still pass alias names for the meta-cache path) are
+	// untouched.
+	deprecateShardCaches := func(names ...string) {
+		if collectionID != UniqueID(0) {
+			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
+		}
+	}
 
 	if globalMetaCache != nil {
 		switch msgType {
@@ -142,12 +153,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			// remove collection by name first, otherwise the drop collection remove version will be failed.
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
+				deprecateShardCaches(collectionName)
 			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
 				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+					deprecateShardCaches(name)
 				}
 			}
 			// Invalidate alias cache for alias operations
@@ -162,7 +173,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+					deprecateShardCaches(name)
 				}
 			}
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
@@ -186,7 +197,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+					deprecateShardCaches(name)
 				}
 			}
 			if collectionName != "" {
@@ -198,13 +209,13 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
 				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+					deprecateShardCaches(name)
 				}
 			}
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
+				deprecateShardCaches(collectionName)
 			}
 		}
 	}
