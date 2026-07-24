@@ -123,13 +123,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadSegmentMeta(
         const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
     void
-    DropIndex(const FieldId field_id,
-              milvus::OpContext* op_ctx = nullptr) override;
-    void
-    DropJSONIndex(const FieldId field_id,
-                  const std::string& nested_path,
-                  milvus::OpContext* op_ctx = nullptr) override;
-    void
     DropFieldData(const FieldId field_id) override;
     bool
     HasIndex(FieldId field_id) const override;
