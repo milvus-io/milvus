@@ -1355,3 +1355,62 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
 }
+
+func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
+	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
+
+	// import task whose file carries a primary-allocated PK range
+	importTaskProto := &datapb.ImportTaskV2{
+		JobID:        0,
+		TaskID:       4,
+		CollectionID: 1,
+		SegmentIDs:   []int64{5},
+		FileStats: []*datapb.ImportFileStats{
+			{
+				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PkIdBegin: 5000, PkIdEnd: 5100},
+				TotalRows:  50,
+			},
+		},
+	}
+	var task ImportTask = &importTask{importMeta: importMeta}
+	task.(*importTask).task.Store(importTaskProto)
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+	err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true}})
+	assert.NoError(t, err)
+
+	importReq, err := AssembleImportRequest(task, job, meta, alloc)
+	assert.NoError(t, err)
+	// PK range is carried through to the datanode request, per file.
+	assert.Equal(t, int64(5000), importReq.GetFiles()[0].GetPkIdBegin())
+	assert.Equal(t, int64(5100), importReq.GetFiles()[0].GetPkIdEnd())
+	// logID IDRange is still allocated locally and independently.
+	assert.Greater(t, importReq.GetIDRange().GetEnd(), importReq.GetIDRange().GetBegin())
+}
