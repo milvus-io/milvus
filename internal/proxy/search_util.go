@@ -553,6 +553,15 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		searchParamStr = ""
 	}
 
+	// 4.1 validate nprobe: must be a positive integer if present.
+	// nprobe is an IVF-family search parameter; 0 (or negative) is always invalid and
+	// would otherwise silently yield empty/undefined results without any error.
+	if nprobeRes := gjson.Get(searchParamStr, nprobeKey); nprobeRes.Exists() {
+		if nprobeRes.Int() <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid search parameter '%s': value must be greater than 0, but got %s", nprobeKey, nprobeRes.Raw)
+		}
+	}
+
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
 	var groupByFieldIds []int64
