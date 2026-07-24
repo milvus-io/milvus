@@ -658,18 +658,26 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 //	return canArithmeticDataType(left.dataType, getArrayElementType(right))
 //}
 
-func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, reverse bool) error {
-	if typeutil.IsArrayType(left) {
-		left = leftElement
+type arithField struct {
+	dataType    schemapb.DataType
+	elementType schemapb.DataType
+	name        string
+}
+
+func canArithmetic(left, right arithField, reverse bool) error {
+	leftType, rightType := left.dataType, right.dataType
+	if typeutil.IsArrayType(leftType) {
+		leftType = left.elementType
 	}
-	if typeutil.IsArrayType(right) {
-		right = rightElement
+	if typeutil.IsArrayType(rightType) {
+		rightType = right.elementType
 	}
 	if reverse {
 		left, right = right, left
+		leftType, rightType = rightType, leftType
 	}
-	if !canArithmeticDataType(left, right) {
-		return merr.WrapErrQueryPlanMsg("cannot perform arithmetic between %s field and %s", left.String(), right.String())
+	if !canArithmeticDataType(leftType, rightType) {
+		return merr.WrapErrQueryPlanMsg("cannot perform arithmetic between field '%s' (%s) and field '%s' (%s)", left.name, leftType.String(), right.name, rightType.String())
 	}
 	return nil
 }
@@ -706,15 +714,21 @@ func hexDigit(n uint32) byte {
 	return byte(n-10) + 'a'
 }
 
-func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType) error {
+func checkValidModArith(tokenType planpb.ArithOpType, left, right arithField) error {
 	switch tokenType {
 	case planpb.ArithOpType_Mod:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
+		if !canConvertToIntegerType(left.dataType, left.elementType) {
+			return merr.WrapErrQueryPlanMsg("modulo requires an integer field, but field '%s' is %s", left.name, left.dataType.String())
+		}
+		if !canConvertToIntegerType(right.dataType, right.elementType) {
+			return merr.WrapErrQueryPlanMsg("modulo requires an integer field, but field '%s' is %s", right.name, right.dataType.String())
 		}
 	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
+		if !canConvertToIntegerType(left.dataType, left.elementType) {
+			return merr.WrapErrQueryPlanMsg("bitwise operators require an integer field, but field '%s' is %s", left.name, left.dataType.String())
+		}
+		if !canConvertToIntegerType(right.dataType, right.elementType) {
+			return merr.WrapErrQueryPlanMsg("bitwise operators require an integer field, but field '%s' is %s", right.name, right.dataType.String())
 		}
 	default:
 	}
