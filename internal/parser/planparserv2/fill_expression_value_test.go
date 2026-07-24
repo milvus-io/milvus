@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -71,6 +72,15 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
+			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
+			{`A in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
+			{`ArrayField in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -107,9 +117,6 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
 			}},
-			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
-				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
-			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -117,6 +124,72 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
+}
+
+func (s *FillExpressionValueSuite) TestEmptyTermRejectsUnsupportedTargetTypes() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyTemplate := map[string]*schemapb.TemplateValue{
+		"empty": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+	}
+	targetFields := []string{
+		"BinaryVectorField",
+		"FloatVectorField",
+		"Float16VectorField",
+		"BFloat16VectorField",
+		"SparseFloatVectorField",
+		"Int8VectorField",
+		"ArrayOfVectorField",
+		"GeometryField",
+	}
+	rightHandSides := []struct {
+		name   string
+		value  string
+		params map[string]*schemapb.TemplateValue
+	}{
+		{name: "inline", value: "[]"},
+		{name: "template", value: "{empty}", params: emptyTemplate},
+	}
+
+	for _, field := range targetFields {
+		for _, op := range []string{"in", "not in"} {
+			for _, rhs := range rightHandSides {
+				s.Run(field+"/"+op+"/"+rhs.name, func() {
+					expr, err := ParseExpr(schemaH, field+" "+op+" "+rhs.value, rhs.params)
+					s.Require().Error(err)
+					s.Require().Nil(expr)
+					s.Contains(err.Error(), "term expression is not supported")
+				})
+			}
+		}
+	}
+}
+
+func (s *FillExpressionValueSuite) TestEmptyArrayComparisonNormalization() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyArray := generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{})
+
+	testcases := []struct {
+		expr string
+		op   planpb.OpType
+	}{
+		{expr: `ArrayField == {empty}`, op: planpb.OpType_Equal},
+		{expr: `{empty} == ArrayField`, op: planpb.OpType_Equal},
+		{expr: `ArrayField != {empty}`, op: planpb.OpType_NotEqual},
+		{expr: `{empty} != ArrayField`, op: planpb.OpType_NotEqual},
+	}
+	for _, testcase := range testcases {
+		s.Run(testcase.expr, func() {
+			expr, err := ParseExpr(schemaH, testcase.expr, map[string]*schemapb.TemplateValue{
+				"empty": emptyArray,
+			})
+			s.NoError(err)
+			arrayLength := expr.GetBinaryArithOpEvalRangeExpr()
+			s.NotNil(arrayLength)
+			s.Equal(planpb.ArithOpType_ArrayLength, arrayLength.GetArithOp())
+			s.Equal(testcase.op, arrayLength.GetOp())
+			s.Equal(int64(0), arrayLength.GetValue().GetInt64Val())
+		})
+	}
 }
 
 func (s *FillExpressionValueSuite) TestUnaryRange() {
@@ -792,6 +865,52 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		s.NotNil(bre, "expected BinaryRangeExpr")
 		s.Equal(float64(10.5), bre.GetLowerValue().GetFloatVal())
 		s.Equal(float64(100.5), bre.GetUpperValue().GetFloatVal())
+	})
+
+	s.Run("adjacent mixed bounds above 2^53 should remain valid", func() {
+		expr, err := ParseExpr(schemaH, `{min} <= A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+		s.Require().NoError(err)
+
+		bre := expr.GetBinaryRangeExpr()
+		s.Require().NotNil(bre)
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.Equal(float64(9007199254740992), bre.GetLowerValue().GetFloatVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+		s.Equal(int64(9007199254740993), bre.GetUpperValue().GetInt64Val())
+	})
+
+	s.Run("reverse adjacent mixed bounds above 2^53 should remain valid", func() {
+		expr, err := ParseExpr(schemaH, `{max} > A >= {min}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740992)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+		s.Require().NoError(err)
+
+		bre := expr.GetBinaryRangeExpr()
+		s.Require().NotNil(bre)
+		s.IsType(&planpb.GenericValue_FloatVal{}, bre.GetLowerValue().GetVal())
+		s.IsType(&planpb.GenericValue_Int64Val{}, bre.GetUpperValue().GetVal())
+	})
+
+	s.Run("truly reversed mixed bounds should fail", func() {
+		s.assertInvalidExpr(schemaH, `{min} <= A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(9007199254740994)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(9007199254740993)),
+		})
+	})
+
+	s.Run("NaN and different dynamic types are deferred to execution", func() {
+		s.assertValidExpr(schemaH, `{min} < A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, math.NaN()),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+		})
+		s.assertValidExpr(schemaH, `{min} < A < {max}`, map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_String, "z"),
+		})
 	})
 }
 

@@ -18,16 +18,20 @@
 
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 #include "common/Types.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
+#include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -37,25 +41,40 @@ using namespace milvus::segcore;
 namespace {
 
 std::shared_ptr<milvus::expr::ITypeExpr>
-MakeTstzPlusOneMonthCompare(FieldId tstz_fid,
-                            int64_t compare_us,
-                            bool negated) {
-    proto::plan::Interval interval;
-    interval.set_months(1);
+MakeTstzCompare(FieldId tstz_fid,
+                proto::plan::ArithOpType arith_op,
+                const proto::plan::Interval& interval,
+                proto::plan::OpType compare_op,
+                int64_t compare_us,
+                bool negated = false) {
     proto::plan::GenericValue compare_value;
     compare_value.set_int64_val(compare_us);
     std::shared_ptr<milvus::expr::ITypeExpr> typed_expr =
         std::make_shared<milvus::expr::TimestamptzArithCompareExpr>(
             expr::ColumnInfo(tstz_fid, DataType::TIMESTAMPTZ),
-            proto::plan::ArithOpType::Add,
+            arith_op,
             interval,
-            proto::plan::OpType::LessThan,
+            compare_op,
             compare_value);
     if (negated) {
         typed_expr = std::make_shared<milvus::expr::LogicalUnaryExpr>(
             expr::LogicalUnaryExpr::OpType::LogicalNot, typed_expr);
     }
     return typed_expr;
+}
+
+std::shared_ptr<milvus::expr::ITypeExpr>
+MakeTstzPlusOneMonthCompare(FieldId tstz_fid,
+                            int64_t compare_us,
+                            bool negated) {
+    proto::plan::Interval interval;
+    interval.set_months(1);
+    return MakeTstzCompare(tstz_fid,
+                           proto::plan::ArithOpType::Add,
+                           interval,
+                           proto::plan::OpType::LessThan,
+                           compare_us,
+                           negated);
 }
 
 constexpr int64_t kFarFutureUs = 4102444800LL * 1000000;  // 2100-01-01
@@ -160,6 +179,25 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
         }
     }
 
+    void
+    LoadTimestamptzIndex(const int64_t* values, bool drop_field_data) {
+        auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
+        scalar_index->Build(N, values, tstz_valid_.data());
+
+        LoadIndexInfo load_index_info;
+        load_index_info.field_id = tstz_fid_.get();
+        load_index_info.field_type = DataType::TIMESTAMPTZ;
+        load_index_info.index_params = GenIndexParams(scalar_index.get());
+        load_index_info.cache_index = milvus::CreateTestCacheIndex(
+            "timestamptz", std::move(scalar_index));
+        sealed_->LoadIndex(load_index_info);
+
+        if (drop_field_data) {
+            sealed_->DropFieldData(tstz_fid_);
+            ASSERT_FALSE(sealed_->HasFieldData(tstz_fid_));
+        }
+    }
+
     static constexpr size_t N = 32;
 
     SchemaPtr schema_;
@@ -181,6 +219,86 @@ TEST_F(TimestamptzArithCompareCorrectnessTest,
 
 TEST_F(TimestamptzArithCompareCorrectnessTest, SealedNullSemantics) {
     AssertNullSemantics(sealed_.get());
+}
+
+TEST_F(TimestamptzArithCompareCorrectnessTest,
+       SealedScalarIndexStillUsesRawDataPath) {
+    auto values = dataset_->get_col<int64_t>(tstz_fid_);
+    LoadTimestamptzIndex(values.data(), false);
+
+    milvus::test::ExprBatchSizeGuard batch_size_guard(7);
+    auto typed_expr =
+        MakeTstzPlusOneMonthCompare(tstz_fid_, kFarFutureUs, false);
+    EXPECT_FALSE(
+        milvus::test::CanExprExecuteAllAtOnce(typed_expr, sealed_.get(), N));
+    EXPECT_EQ(milvus::test::EvalExprBatchSizes(typed_expr, sealed_.get(), N),
+              (std::vector<int64_t>{7, 7, 7, 7, 4}));
+}
+
+TEST_F(TimestamptzArithCompareCorrectnessTest,
+       SealedIndexOnlyFullScanPreservesNullableValidity) {
+    std::vector<int64_t> values(N);
+    std::iota(values.begin(), values.end(), int64_t{0});
+    LoadTimestamptzIndex(values.data(), true);
+
+    proto::plan::Interval interval;
+    interval.set_months(1);
+    constexpr int64_t kFebruaryStartUs = 2678400LL * 1000000;
+    auto typed_expr = MakeTstzCompare(tstz_fid_,
+                                      proto::plan::ArithOpType::Add,
+                                      interval,
+                                      proto::plan::OpType::LessThan,
+                                      kFebruaryStartUs + 16);
+
+    milvus::test::ExprBatchSizeGuard batch_size_guard(7);
+    EXPECT_TRUE(
+        milvus::test::CanExprExecuteAllAtOnce(typed_expr, sealed_.get(), N));
+    auto evaluation =
+        milvus::test::EvalExprInBatches(typed_expr, sealed_.get(), N);
+    EXPECT_EQ(evaluation.batch_sizes, (std::vector<int64_t>{7, 7, 7, 7, 4}));
+
+    TargetBitmapView result(evaluation.result->GetRawData(), N);
+    TargetBitmapView valid(evaluation.result->GetValidRawData(), N);
+    for (size_t i = 0; i < N; ++i) {
+        const bool expected = tstz_valid_[i] && i < 16;
+        EXPECT_EQ(result[i], expected) << "row " << i;
+        EXPECT_EQ(valid[i], tstz_valid_[i]) << "row " << i;
+    }
+
+    auto plan = milvus::test::CreateRetrievePlanByExpr(typed_expr);
+    auto all_at_once =
+        query::ExecuteQueryExpr(plan, sealed_.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(all_at_once.size(), N);
+    for (size_t i = 0; i < N; ++i) {
+        EXPECT_EQ(all_at_once[i], tstz_valid_[i] && i < 16) << "row " << i;
+    }
+}
+
+TEST_F(TimestamptzArithCompareCorrectnessTest,
+       SealedIndexOnlyUnknownArithComparesTimestampDirectly) {
+    std::vector<int64_t> values(N);
+    std::iota(values.begin(), values.end(), int64_t{0});
+    LoadTimestamptzIndex(values.data(), true);
+
+    proto::plan::Interval ignored_interval;
+    ignored_interval.set_months(1);
+    auto typed_expr = MakeTstzCompare(tstz_fid_,
+                                      proto::plan::ArithOpType::Unknown,
+                                      ignored_interval,
+                                      proto::plan::OpType::GreaterEqual,
+                                      16);
+
+    EXPECT_TRUE(
+        milvus::test::CanExprExecuteAllAtOnce(typed_expr, sealed_.get(), N));
+    auto evaluation =
+        milvus::test::EvalExprInBatches(typed_expr, sealed_.get(), N);
+    TargetBitmapView result(evaluation.result->GetRawData(), N);
+    TargetBitmapView valid(evaluation.result->GetValidRawData(), N);
+    for (size_t i = 0; i < N; ++i) {
+        const bool expected = tstz_valid_[i] && i >= 16;
+        EXPECT_EQ(result[i], expected) << "row " << i;
+        EXPECT_EQ(valid[i], tstz_valid_[i]) << "row " << i;
+    }
 }
 
 TEST_F(TimestamptzArithCompareCorrectnessTest, SealedOffsetInputNullSemantics) {

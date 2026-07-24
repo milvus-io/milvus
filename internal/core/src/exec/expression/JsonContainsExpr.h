@@ -514,6 +514,20 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         SegmentExpr::DetermineExecPath();
+        if (exec_path_ != ExprExecPath::ScalarIndex ||
+            expr_->column_.data_type_ != DataType::JSON ||
+            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
+            return;
+        }
+        const auto has_unsafe_int_literal = std::any_of(
+            expr_->vals_.begin(),
+            expr_->vals_.end(),
+            [this](const auto& value) {
+                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
+            });
+        if (has_unsafe_int_literal) {
+            exec_path_ = ExprExecPath::RawData;
+        }
     }
 
  private:
