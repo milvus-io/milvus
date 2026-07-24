@@ -6974,12 +6974,14 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
-	ImportBaseBufferSize        ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
-	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
-	ImportMaxWriteRetryAttempts ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore     ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB           ParamItem `refreshable:"true"`
+	ImportBaseBufferSize            ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize          ParamItem `refreshable:"true"`
+	ImportMemoryLimitPercentage     ParamItem `refreshable:"true"`
+	ImportMaxWriteRetryAttempts     ParamItem `refreshable:"true"`
+	ImportWriteRetryInitialInterval ParamItem `refreshable:"true"`
+	ImportWriteRetryMaxInterval     ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -7352,6 +7354,24 @@ if this parameter <= 0, will set it as 10`,
 		DefaultValue: "0",
 	}
 	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
+
+	p.ImportWriteRetryInitialInterval = ParamItem{
+		Key:          "dataNode.import.writeRetryInitialInterval",
+		Version:      "2.6.9",
+		Doc:          "Initial backoff interval in seconds for import write retry.",
+		DefaultValue: "1",
+		Export:       true,
+	}
+	p.ImportWriteRetryInitialInterval.Init(base.mgr)
+
+	p.ImportWriteRetryMaxInterval = ParamItem{
+		Key:          "dataNode.import.writeRetryMaxInterval",
+		Version:      "2.6.9",
+		Doc:          "Maximum backoff interval in seconds for import write retry.",
+		DefaultValue: "60",
+		Export:       true,
+	}
+	p.ImportWriteRetryMaxInterval.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
