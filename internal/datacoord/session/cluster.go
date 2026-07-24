@@ -86,8 +86,10 @@ type Cluster interface {
 	CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error
 	// QueryRefreshExternalCollectionTask queries the status of a refresh-external-collection task
 	QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error)
-	// DropRefreshExternalCollectionTask drops a refresh-external-collection task
-	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
+	// DropRefreshExternalCollectionTask drops a refresh-external-collection task.
+	// version fences the drop to a specific attempt so a stale drop cannot remove
+	// a re-dispatched attempt (pass 0 to force).
+	DropRefreshExternalCollectionTask(nodeID int64, taskID int64, version int64) error
 
 	// CreateCopySegment creates a copy segment task
 	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error
@@ -688,11 +690,12 @@ func (c *cluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64)
 	return result, nil
 }
 
-func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
+func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64, version int64) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.RefreshExternalCollection)
+	properties.AppendTaskVersion(version)
 	return c.dropTask(nodeID, properties)
 }
 

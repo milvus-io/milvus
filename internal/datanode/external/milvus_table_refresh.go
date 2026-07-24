@@ -202,6 +202,7 @@ func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	ctx context.Context,
 	seg *datapb.SegmentInfo,
 	fragments []packed.Fragment,
+	baseManifest string,
 ) (*datapb.SegmentInfo, error) {
 	workFragments, err := t.prepareMilvusTableDeltalogFragments(fragments)
 	if err != nil {
@@ -213,6 +214,11 @@ func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	}
 	updated := proto.Clone(seg).(*datapb.SegmentInfo)
 	updated.ManifestPath = manifestPath
+	// Record the original dispatch-time manifest (not this freshly created one) as
+	// the adoption base so DataCoord's base==current CAS rejects the result only
+	// when a concurrent commit really advanced the segment. Existing-segment
+	// rewrites must carry a non-empty base; only genuinely new segments have none.
+	updated.BaseManifest = baseManifest
 	updated.StorageVersion = storage.StorageV3
 	return updated, nil
 }

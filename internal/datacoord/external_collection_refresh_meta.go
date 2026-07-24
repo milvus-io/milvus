@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -408,6 +409,15 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 
 	if preApply != nil {
 		if err := preApply(job); err != nil {
+			// A stale-manifest conflict or a mid-retry not-ready apply is a
+			// transient concurrency condition, not a terminal failure. Leave the
+			// job non-terminal so the checker can drive the retry (reset tasks /
+			// wait a tick); the per-job timeout is the ultimate bound. The retry
+			// decision lives in the checker, so just surface the signal here.
+			if errors.Is(err, errExternalRefreshStaleManifest) ||
+				errors.Is(err, errExternalRefreshNotReady) {
+				return false, err
+			}
 			cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
 			cloneJob.State = indexpb.JobState_JobStateFailed
 			cloneJob.FailReason = err.Error()
@@ -647,9 +657,15 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 	return true, cloneTask, nil
 }
 
-// UpdateTaskState updates task state
-func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state indexpb.JobState, failReason string) error {
+// UpdateTaskState updates task state. expectedVersion fences the write to a
+// specific attempt (0 = unconditional job-scoped write). Returns whether the
+// write landed so callers can skip attempt-scoped side effects on a superseded
+// write.
+func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID, expectedVersion int64, state indexpb.JobState, failReason string) (bool, error) {
 	applied, _, err := m.mutateTask(taskID, "update task state", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if taskVersionMismatch(task, expectedVersion) {
+			return true, nil // skip: superseded attempt
+		}
 		task.State = state
 		task.FailReason = failReason
 		if state == indexpb.JobState_JobStateFinished {
@@ -662,7 +678,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state inde
 			mlog.Int64("taskID", taskID),
 			mlog.String("state", state.String()))
 	}
-	return err
+	return applied, err
 }
 
 // UpdateTaskProgress updates task progress
@@ -674,15 +690,62 @@ func (m *externalCollectionRefreshMeta) UpdateTaskProgress(taskID int64, progres
 	return err
 }
 
+// taskVersionMismatch reports whether an attempt-scoped write for expectedVersion
+// must be skipped because the persisted task has been re-dispatched under a newer
+// version. expectedVersion == 0 means "unconditional" (a job-scoped write such as
+// timeout that is not tied to a specific attempt).
+func taskVersionMismatch(task *datapb.ExternalCollectionRefreshTask, expectedVersion int64) bool {
+	return expectedVersion != 0 && task.GetVersion() != expectedVersion
+}
+
+// ResetTaskForRetry atomically returns a task to Init for re-dispatch and clears
+// its transient result payload and progress in the same write. This mirrors the
+// stats retry path: a re-dispatchable task must not leave a stale result behind
+// (job-level aggregation would otherwise adopt it) nor report Progress=100 while
+// the rebuild is still running. expectedVersion fences the write to a specific
+// attempt (0 = unconditional).
+func (m *externalCollectionRefreshMeta) ResetTaskForRetry(taskID, expectedVersion int64, reason string) (bool, error) {
+	return m.mutateTaskApplied(taskID, "reset task for retry", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if taskVersionMismatch(task, expectedVersion) {
+			return true, nil // skip: superseded attempt
+		}
+		task.State = indexpb.JobState_JobStateInit
+		task.FailReason = reason
+		task.Progress = 0
+		task.ResultReady = false
+		task.KeptSegments = nil
+		task.UpdatedSegments = nil
+		return false, nil
+	})
+}
+
+// mutateTaskApplied is mutateTask returning only (applied, error) for callers that
+// need to know whether a version-fenced write actually landed.
+func (m *externalCollectionRefreshMeta) mutateTaskApplied(taskID int64, opName string, mutate func(*datapb.ExternalCollectionRefreshTask) (bool, error)) (bool, error) {
+	applied, _, err := m.mutateTask(taskID, opName, mutate)
+	return applied, err
+}
+
 // UpdateTaskResult persists the terminal worker response for job-level aggregation.
 func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 	taskID int64,
+	expectedVersion int64,
 	state indexpb.JobState,
 	failReason string,
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
-) error {
+) (bool, error) {
 	applied, cloned, err := m.mutateTask(taskID, "update task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if taskVersionMismatch(task, expectedVersion) {
+			// A superseded attempt's result — the task was re-dispatched under a
+			// newer version. Drop the write so a stale/late Query response cannot
+			// overwrite the current attempt's state.
+			mlog.Info(m.ctx, "drop refresh task result from a superseded attempt",
+				mlog.Int64("taskID", taskID),
+				mlog.Int64("resultVersion", expectedVersion),
+				mlog.Int64("currentVersion", task.GetVersion()))
+			return true, nil
+		}
 		task.State = state
 		task.FailReason = failReason
 		task.KeptSegments = append([]int64(nil), keptSegments...)
@@ -700,7 +763,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 			mlog.Int("keptSegments", len(cloned.GetKeptSegments())),
 			mlog.Int("updatedSegments", len(cloned.GetUpdatedSegments())))
 	}
-	return err
+	return applied, err
 }
 
 // ClearTaskResult clears stored task result payload after the owning job has

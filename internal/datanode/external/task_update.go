@@ -398,6 +398,12 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			continue
 		}
 
+		// Capture the original dispatch-time manifest before any rewrite. It is
+		// the manifest DataCoord currently holds, so it is the correct adoption
+		// base for the CAS through every subsequent manifest transformation
+		// (deltalog refresh and/or missing-column append), even though those
+		// transforms produce new intermediate manifests DataCoord has not seen.
+		originalManifest := seg.GetManifestPath()
 		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
@@ -405,7 +411,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 		var patchedSegment *datapb.SegmentInfo
 		if shouldRefreshDeltalogs {
-			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, originalManifest)
 			if err != nil {
 				return nil, err
 			}
@@ -423,7 +429,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				segmentToPatch = patchedSegment
 				patchFragments = matchedNewFragments
 			}
-			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns, originalManifest)
 			if err != nil {
 				return nil, err
 			}
@@ -591,6 +597,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 	seg *datapb.SegmentInfo,
 	fragments []packed.Fragment,
 	missingColumns []string,
+	baseManifest string,
 ) (*datapb.SegmentInfo, error) {
 	schema := t.req.GetSchema()
 	newManifestPath, err := packed.AppendSegmentManifestColumns(
@@ -638,6 +645,13 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 
 	patched := proto.Clone(seg).(*datapb.SegmentInfo)
 	patched.ManifestPath = newManifestPath
+	// Record the ORIGINAL dispatch-time manifest as the adoption base — not
+	// seg.GetManifestPath(), which on the combined deltalog-refresh + missing-columns
+	// path is an intermediate manifest DataCoord never saw (the CAS would then never
+	// match and the refresh would livelock). DataCoord's base==current CAS uses this
+	// to reject the patch only when a concurrent index/compaction commit really
+	// advanced the segment's manifest.
+	patched.BaseManifest = baseManifest
 	patched.SchemaVersion = schema.GetVersion()
 	patched.StorageVersion = storage.StorageV3
 	patched.Binlogs = buildFakeBinlogs(seg.GetID(), seg.GetNumOfRows(), memorySize, schema, t.parsedSpec.Format)

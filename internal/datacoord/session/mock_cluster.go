@@ -637,17 +637,17 @@ func (_c *MockCluster_DropIndex_Call) RunAndReturn(run func(int64, int64) error)
 	return _c
 }
 
-// DropRefreshExternalCollectionTask provides a mock function with given fields: nodeID, taskID
-func (_m *MockCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
-	ret := _m.Called(nodeID, taskID)
+// DropRefreshExternalCollectionTask provides a mock function with given fields: nodeID, taskID, version
+func (_m *MockCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64, version int64) error {
+	ret := _m.Called(nodeID, taskID, version)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropRefreshExternalCollectionTask")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
-		r0 = rf(nodeID, taskID)
+	if rf, ok := ret.Get(0).(func(int64, int64, int64) error); ok {
+		r0 = rf(nodeID, taskID, version)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -663,13 +663,14 @@ type MockCluster_DropRefreshExternalCollectionTask_Call struct {
 // DropRefreshExternalCollectionTask is a helper method to define mock.On call
 //   - nodeID int64
 //   - taskID int64
-func (_e *MockCluster_Expecter) DropRefreshExternalCollectionTask(nodeID interface{}, taskID interface{}) *MockCluster_DropRefreshExternalCollectionTask_Call {
-	return &MockCluster_DropRefreshExternalCollectionTask_Call{Call: _e.mock.On("DropRefreshExternalCollectionTask", nodeID, taskID)}
+//   - version int64
+func (_e *MockCluster_Expecter) DropRefreshExternalCollectionTask(nodeID interface{}, taskID interface{}, version interface{}) *MockCluster_DropRefreshExternalCollectionTask_Call {
+	return &MockCluster_DropRefreshExternalCollectionTask_Call{Call: _e.mock.On("DropRefreshExternalCollectionTask", nodeID, taskID, version)}
 }
 
-func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_DropRefreshExternalCollectionTask_Call {
+func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) Run(run func(nodeID int64, taskID int64, version int64)) *MockCluster_DropRefreshExternalCollectionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		run(args[0].(int64), args[1].(int64), args[2].(int64))
 	})
 	return _c
 }
@@ -679,7 +680,7 @@ func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) Return(_a0 error) 
 	return _c
 }
 
-func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropRefreshExternalCollectionTask_Call {
+func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) RunAndReturn(run func(int64, int64, int64) error) *MockCluster_DropRefreshExternalCollectionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -679,6 +679,25 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
+	s.Run("query refresh external collection task not tracked returns retry", func() {
+		// A task DataCoord believes is in flight but the worker no longer tracks
+		// (e.g. after a DataNode restart) must report Retry so DataCoord
+		// re-dispatches it, not Failed (which would fail the whole refresh job).
+		req := &workerpb.QueryTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.RefreshExternalCollection,
+				taskcommon.TaskIDKey:    "424242",
+			},
+		}
+		resp, err := s.node.QueryTask(s.ctx, req)
+		s.NoError(merr.CheckRPCCall(resp, err))
+		props := taskcommon.NewProperties(resp.GetProperties())
+		state, err := props.GetTaskState()
+		s.NoError(err)
+		s.Equal(taskcommon.Retry, state)
+	})
+
 	s.Run("query index task with cost", func() {
 		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_InProgress})
 		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
