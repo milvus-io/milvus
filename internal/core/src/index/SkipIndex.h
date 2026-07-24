@@ -190,6 +190,9 @@ class SkipIndex {
         auto cloned = std::make_shared<SkipIndex>();
         std::shared_lock lck(mutex_);
         cloned->fieldChunkMetrics_ = fieldChunkMetrics_;
+        // Static metrics are immutable (shared_ptr<const>), so the clone just
+        // shares them — a later Reopen that replaces a field re-Loads its slot.
+        cloned->fieldStaticMetrics_ = fieldStaticMetrics_;
         return cloned;
     }
 
@@ -197,6 +200,7 @@ class SkipIndex {
     Erase(FieldId field_id) {
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_.erase(field_id);
+        fieldStaticMetrics_.erase(field_id);
     }
 
     template <typename T>
@@ -488,6 +492,24 @@ class SkipIndex {
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
     }
 
+    // Install already-built, deep-owning per-chunk skip metrics for a field.
+    // Unlike LoadSkip/LoadSkipFromStatistics these are NOT evictable: they were
+    // distilled once from the parquet footer while its reader was alive (so the
+    // BYTE_ARRAY min/max views never outlive the reader) and hold no reference
+    // to any file/reader/statistics, so there is nothing to regenerate. The
+    // caller guarantees `metrics` is positional — index i is chunk/cell i, with
+    // a NoneFieldChunkMetrics for a chunk that had no usable statistics. The
+    // metrics are immutable and shared_ptr so the same set can be installed into
+    // several staged runtime snapshots of one load. This is the storage-neutral
+    // entry point a manifest (v3) load path can reuse.
+    void
+    LoadSkipMetrics(
+        milvus::FieldId field_id,
+        std::vector<std::shared_ptr<const index::FieldChunkMetrics>> metrics) {
+        std::unique_lock lck(mutex_);
+        fieldStaticMetrics_[field_id] = std::move(metrics);
+    }
+
  private:
     OpType
     FlipComparisonOperator(OpType op) const {
@@ -520,6 +542,13 @@ class SkipIndex {
         FieldId,
         std::shared_ptr<cachinglayer::CacheSlot<index::FieldChunkMetrics>>>
         fieldChunkMetrics_;
+    // Non-evictable, positional per-chunk metrics (index i == chunk/cell i)
+    // installed via LoadSkipMetrics. Resolved before fieldChunkMetrics_ in
+    // GetFieldChunkMetrics; immutable, so a snapshot may share them by value.
+    std::unordered_map<
+        FieldId,
+        std::vector<std::shared_ptr<const index::FieldChunkMetrics>>>
+        fieldStaticMetrics_;
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus
