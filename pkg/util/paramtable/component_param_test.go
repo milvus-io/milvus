@@ -65,7 +65,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("query node mmap writeback config", func(t *testing.T) {
-		item := params.QueryNodeCfg.MmapWriteback
+		item := &params.QueryNodeCfg.MmapWriteback
 		t.Cleanup(func() {
 			params.Reset(item.Key)
 		})
@@ -79,7 +79,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("query node storage v2 async load config", func(t *testing.T) {
-		item := params.QueryNodeCfg.StorageV2EnableAsyncLoad
+		item := &params.QueryNodeCfg.StorageV2EnableAsyncLoad
 		t.Cleanup(func() {
 			params.Reset(item.Key)
 		})
