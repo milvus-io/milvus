@@ -863,7 +863,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "should be specified by element_schema")
+		assert.Contains(t, err.Error(), "nested array field nested_array should be specified by element_schema")
 	})
 
 	t.Run("struct array field - nested array of vector rejected", func(t *testing.T) {

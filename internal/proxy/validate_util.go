@@ -1181,13 +1181,13 @@ func normalizeNestedArrayElementType(
 func (v *validateUtil) checkNestedArrayValue(
 	row *schemapb.ScalarField,
 	arrayType *schemapb.TypeSchema,
-	fieldSchema *schemapb.FieldSchema,
+	fieldName string,
 	level int,
 ) error {
 	if row == nil || row.GetData() == nil {
 		return merr.WrapErrParameterInvalidMsg(
 			"nested array field %s has an undeclared null value at level %d",
-			fieldSchema.GetName(),
+			fieldName,
 			level,
 		)
 	}
@@ -1197,16 +1197,16 @@ func (v *validateUtil) checkNestedArrayValue(
 		if arrayData == nil {
 			return merr.WrapErrParameterInvalidMsg(
 				"nested array field %s level %d expects Array data",
-				fieldSchema.GetName(),
+				fieldName,
 				level,
 			)
 		}
 		expectedType := arraySchemaElementType(arrayType.GetElementSchema())
-		if err := normalizeNestedArrayElementType(arrayData, expectedType, fieldSchema.GetName()); err != nil {
+		if err := normalizeNestedArrayElementType(arrayData, expectedType, fieldName); err != nil {
 			return err
 		}
 		if v.checkMaxCap {
-			maxCapacity, err := parameterutil.GetMaxCapacityByLevel(fieldSchema, level)
+			maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(arrayType)
 			if err != nil {
 				return err
 			}
@@ -1214,7 +1214,7 @@ func (v *validateUtil) checkNestedArrayValue(
 				return merr.WrapErrParameterInvalidMsg(
 					"the length (%d) of nested array field %s at level %d exceeds max capacity (%d)",
 					len(arrayData.GetData()),
-					fieldSchema.GetName(),
+					fieldName,
 					level,
 					maxCapacity,
 				)
@@ -1224,7 +1224,7 @@ func (v *validateUtil) checkNestedArrayValue(
 			if err := v.checkNestedArrayValue(
 				child,
 				arrayType.GetElementSchema(),
-				fieldSchema,
+				fieldName,
 				level+1,
 			); err != nil {
 				return merr.Wrapf(err, "nested array element %d", index)
@@ -1234,7 +1234,7 @@ func (v *validateUtil) checkNestedArrayValue(
 	}
 
 	leafField := &schemapb.FieldSchema{
-		Name:        fieldSchema.GetName(),
+		Name:        fieldName,
 		DataType:    schemapb.DataType_Array,
 		ElementType: arrayType.GetElementType(),
 		TypeParams:  arrayType.GetTypeParams(),
@@ -1244,7 +1244,7 @@ func (v *validateUtil) checkNestedArrayValue(
 		ElementType: arrayType.GetElementType(),
 	}
 	if v.checkMaxCap {
-		maxCapacity, err := parameterutil.GetMaxCapacityByLevel(fieldSchema, level)
+		maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(arrayType)
 		if err != nil {
 			return err
 		}
@@ -1270,7 +1270,7 @@ func (v *validateUtil) checkNestedArrayFieldData(
 		return err
 	}
 	for rowIndex, row := range data.GetData() {
-		if err := v.checkNestedArrayValue(row, rootType, fieldSchema, 0); err != nil {
+		if err := v.checkNestedArrayValue(row, rootType, fieldSchema.GetName(), 0); err != nil {
 			return merr.Wrapf(err, "nested array row %d", rowIndex)
 		}
 	}

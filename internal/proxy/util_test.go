@@ -4725,10 +4725,11 @@ func TestValidateFieldsInStruct(t *testing.T) {
 	t.Run("old-style nested element_type not supported", func(t *testing.T) {
 		testCases := []struct {
 			elementType schemapb.DataType
+			expected    string
 		}{
-			{schemapb.DataType_ArrayOfStruct},
-			{schemapb.DataType_ArrayOfVector},
-			{schemapb.DataType_Array},
+			{schemapb.DataType_ArrayOfStruct, "nested ArrayOfStruct is not supported"},
+			{schemapb.DataType_ArrayOfVector, "nested ArrayOfVector is not supported"},
+			{schemapb.DataType_Array, "nested array field nested_array should be specified by element_schema"},
 		}
 
 		for _, tc := range testCases {
@@ -4739,7 +4740,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "should be specified by element_schema")
+			assert.Contains(t, err.Error(), tc.expected)
 		}
 	})
 
