@@ -229,22 +229,6 @@ configure_manifest_file_manager_context(
     }
 }
 
-void
-configure_cipher_plugin_file_manager_context(
-    milvus::storage::FileManagerContext& file_manager_context,
-    const milvus::proto::indexcgo::BuildIndexInfo& build_index_info) {
-    if (!build_index_info.has_storage_plugin_context()) {
-        return;
-    }
-
-    const auto& plugin_context = build_index_info.storage_plugin_context();
-    file_manager_context.set_plugin_context(
-        milvus::storage::PluginLoader::GetInstance()
-            .registerCipherPluginContext(plugin_context.encryption_zone_id(),
-                                         plugin_context.collection_id(),
-                                         plugin_context.encryption_key()));
-}
-
 milvus::Config
 get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     milvus::Config config;
@@ -361,8 +345,17 @@ CreateIndex(CIndex* res_index,
         configure_manifest_file_manager_context(
             fileManagerContext, *build_index_info, storage_config);
 
-        configure_cipher_plugin_file_manager_context(fileManagerContext,
-                                                     *build_index_info);
+        if (build_index_info->has_storage_plugin_context()) {
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
+        }
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -450,8 +443,17 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         configure_manifest_file_manager_context(
             fileManagerContext, *build_index_info, storage_config);
 
-        configure_cipher_plugin_file_manager_context(fileManagerContext,
-                                                     *build_index_info);
+        if (build_index_info->has_storage_plugin_context()) {
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
+        }
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
@@ -533,8 +535,17 @@ BuildTextIndex(ProtoLayoutInterface result,
         configure_manifest_file_manager_context(
             fileManagerContext, *build_index_info, storage_config);
 
-        configure_cipher_plugin_file_manager_context(fileManagerContext,
-                                                     *build_index_info);
+        if (build_index_info->has_storage_plugin_context()) {
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
+        }
 
         auto scalar_index_engine_version =
             build_index_info->current_scalar_index_version();
