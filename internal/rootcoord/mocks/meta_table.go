@@ -5,16 +5,12 @@ package mockrootcoord
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-
-	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
-	mock "github.com/stretchr/testify/mock"
-
 	model "github.com/milvus-io/milvus/internal/metastore/model"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	mock "github.com/stretchr/testify/mock"
 
 	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )
@@ -1936,6 +1932,70 @@ func (_c *IMetaTable_DropRole_Call) Return(_a0 error) *IMetaTable_DropRole_Call 
 }
 
 func (_c *IMetaTable_DropRole_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAvailableCollectionCount provides a mock function with given fields: ctx, dbID
+func (_m *IMetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (int, int, bool) {
+	ret := _m.Called(ctx, dbID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAvailableCollectionCount")
+	}
+
+	var r0 int
+	var r1 int
+	var r2 bool
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (int, int, bool)); ok {
+		return rf(ctx, dbID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) int); ok {
+		r0 = rf(ctx, dbID)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) int); ok {
+		r1 = rf(ctx, dbID)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, int64) bool); ok {
+		r2 = rf(ctx, dbID)
+	} else {
+		r2 = ret.Get(2).(bool)
+	}
+
+	return r0, r1, r2
+}
+
+// IMetaTable_GetAvailableCollectionCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAvailableCollectionCount'
+type IMetaTable_GetAvailableCollectionCount_Call struct {
+	*mock.Call
+}
+
+// GetAvailableCollectionCount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbID int64
+func (_e *IMetaTable_Expecter) GetAvailableCollectionCount(ctx interface{}, dbID interface{}) *IMetaTable_GetAvailableCollectionCount_Call {
+	return &IMetaTable_GetAvailableCollectionCount_Call{Call: _e.mock.On("GetAvailableCollectionCount", ctx, dbID)}
+}
+
+func (_c *IMetaTable_GetAvailableCollectionCount_Call) Run(run func(ctx context.Context, dbID int64)) *IMetaTable_GetAvailableCollectionCount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetAvailableCollectionCount_Call) Return(dbCount int, totalCount int, dbExists bool) *IMetaTable_GetAvailableCollectionCount_Call {
+	_c.Call.Return(dbCount, totalCount, dbExists)
+	return _c
+}
+
+func (_c *IMetaTable_GetAvailableCollectionCount_Call) RunAndReturn(run func(context.Context, int64) (int, int, bool)) *IMetaTable_GetAvailableCollectionCount_Call {
 	_c.Call.Return(run)
 	return _c
 }
