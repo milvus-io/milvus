@@ -5780,6 +5780,61 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	}
 }
 
+func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *testing.T) {
+	ctx := context.Background()
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
+		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+			return callback()
+		})
+
+	segIDs := []int64{10}
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
+		Return(segIDs).Build()
+	defer getSegIDsMock.UnPatch()
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "vchan-0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogID:       10,
+				TimestampTo: 500,
+			}},
+		}},
+	}})
+
+	server := &Server{
+		importMeta: importMetaMock,
+		meta: &meta{
+			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segments,
+		},
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:           3001,
+		Vchannel:        "vchan-0",
+		CommitTimestamp: 300,
+	})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+	assert.ErrorIs(t, merr.Error(resp), merr.ErrImportSysFailed)
+
+	seg := server.meta.GetSegment(ctx, 10)
+	require.NotNil(t, seg)
+	assert.EqualValues(t, 0, seg.GetCommitTimestamp())
+	assert.True(t, seg.GetIsImporting())
+}
+
 func TestHandleCommitVchannelRPC_MissingJobReturnsError(t *testing.T) {
 	ctx := context.Background()
 
