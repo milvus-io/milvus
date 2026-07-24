@@ -185,6 +185,10 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/resource_groups/list":             "ListResourceGroups",
 	"/v2/vectordb/resource_groups/transfer_replica": "TransferMaster",
 
+	"/v2/vectordb/file_resources/add":    "AddFileResource",
+	"/v2/vectordb/file_resources/remove": "RemoveFileResource",
+	"/v2/vectordb/file_resources/list":   "ListFileResources",
+
 	"/v2/vectordb/segments/describe":    "GetSegmentsInfo",
 	"/v2/vectordb/quotacenter/describe": "GetQuotaMetrics",
 
@@ -347,6 +351,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ResourceGroupCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &ResourceGroupReq{} }, wrapperTraceLog(h.describeResourceGroup))))
 	router.POST(ResourceGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listResourceGroups))))
 	router.POST(ResourceGroupCategory+TransferReplicaAction, timeoutMiddleware(wrapperPost(func() any { return &TransferReplicaReq{} }, wrapperTraceLog(h.transferReplica))))
+
+	// file resource
+	router.POST(FileResourceCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &FileResourceReq{} }, wrapperTraceLog(h.addFileResource))))
+	router.POST(FileResourceCategory+RemoveAction, timeoutMiddleware(wrapperPost(func() any { return &FileResourceNameReq{} }, wrapperTraceLog(h.removeFileResource))))
+	router.POST(FileResourceCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listFileResources))))
 
 	// segment group
 	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
