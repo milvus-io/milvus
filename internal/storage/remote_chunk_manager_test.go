@@ -29,6 +29,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
@@ -74,6 +75,50 @@ func TestInitRemoteChunkManager(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
+}
+
+func TestRemoteChunkManagerImplementsCrossBucketCopier(t *testing.T) {
+	var _ CrossBucketCopier = (*RemoteChunkManager)(nil)
+}
+
+type objectStorageTarget struct {
+	ObjectStorage
+}
+
+func TestRemoteChunkManagerCopyCrossBucket(t *testing.T) {
+	ctx := context.Background()
+	copyErr := errors.New("copy failed")
+
+	t.Run("copy object across buckets successfully", func(t *testing.T) {
+		client := &objectStorageTarget{}
+		called := false
+		mockCopy := mockey.Mock((*objectStorageTarget).CopyObjectCrossBucket).To(
+			func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+				called = true
+				assert.Equal(t, "src-bucket", srcBucket)
+				assert.Equal(t, "src-object", srcObject)
+				assert.Equal(t, "dst-bucket", dstBucket)
+				assert.Equal(t, "dst-object", dstObject)
+				return nil
+			},
+		).Build()
+		defer mockCopy.UnPatch()
+		mcm := &RemoteChunkManager{client: client}
+
+		err := mcm.CopyCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("return copy error", func(t *testing.T) {
+		client := &objectStorageTarget{}
+		mockCopy := mockey.Mock((*objectStorageTarget).CopyObjectCrossBucket).Return(copyErr).Build()
+		defer mockCopy.UnPatch()
+		mcm := &RemoteChunkManager{client: client}
+
+		err := mcm.CopyCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
+		require.ErrorIs(t, err, copyErr)
+	})
 }
 
 func TestMinioChunkManager(t *testing.T) {

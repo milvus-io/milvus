@@ -5300,6 +5300,8 @@ type dataCoordConfig struct {
 	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
+	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
+	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	// LOB Garbage Collection
@@ -6262,6 +6264,35 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export: false,
 	}
 	p.SnapshotRestorePinTTLSeconds.Init(base.mgr)
+
+	p.SnapshotCrossBucketEndpointAllowlist = ParamItem{
+		Key:          "dataCoord.snapshot.crossBucketEndpointAllowlist",
+		Version:      "2.6.15",
+		DefaultValue: "",
+		Doc: "Comma/space separated endpoint host[:port] allowlist for snapshot " +
+			"server-side cross-bucket copy with custom object storage endpoints. " +
+			"Canonical cloud endpoints derived from cloud_provider and region are " +
+			"allowed without this list.",
+		Export: true,
+	}
+	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
+
+	p.SnapshotExportCopyConcurrency = ParamItem{
+		Key:          "dataCoord.snapshot.exportCopyConcurrency",
+		Version:      "2.6.15",
+		DefaultValue: "16",
+		Doc: "Maximum concurrent provider-side object copy requests for ExportSnapshot. " +
+			"Invalid or non-positive values are coerced to the default value 16.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed <= 0 {
+				return "16"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportCopyConcurrency.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

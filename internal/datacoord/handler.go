@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -56,7 +57,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 
@@ -675,7 +676,7 @@ func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collection
 //   - collectionID: ID of collection to snapshot
 //
 // Returns:
-//   - SnapshotData: Complete snapshot with collection metadata and segment descriptions
+//   - snapshotstorage.SnapshotData: Complete snapshot with collection metadata and segment descriptions
 //   - error: If collection not found, timestamp generation fails, or binlog operations fail
 //
 // Partition filtering logic:
@@ -704,7 +705,7 @@ func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collection
 // - Creating backup snapshots for disaster recovery
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
-func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
 	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -841,7 +842,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Value: strconv.Itoa(int(resp.GetConsistencyLevel())),
 	})
 
-	return &SnapshotData{
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			CollectionId:         collectionID,
 			PartitionIds:         partitionIDs,

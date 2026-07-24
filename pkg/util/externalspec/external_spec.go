@@ -140,6 +140,7 @@ var secretExtfsKeys = map[string]bool{
 	ExtfsKeyAccessKeyValue: true,
 	ExtfsKeySSLCACert:      true,
 	ExtfsKeyExternalID:     true, // STS shared secret; confused-deputy guard.
+	"credential_json":      true, // Snapshot request-level GCP service-account JSON.
 }
 
 // ParseExternalSpec parses the JSON external spec string

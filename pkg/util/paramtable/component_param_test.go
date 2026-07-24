@@ -56,6 +56,24 @@ func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T)
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
 }
 
+func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
+	Init()
+	params := Get()
+	key := params.DataCoordCfg.SnapshotExportCopyConcurrency.Key
+	params.Reset(key)
+	t.Cleanup(func() { params.Reset(key) })
+
+	assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+
+	params.Save(key, "3")
+	assert.Equal(t, 3, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+
+	for _, invalid := range []string{"0", "-1", "invalid"} {
+		params.Save(key, invalid)
+		assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
+	}
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()

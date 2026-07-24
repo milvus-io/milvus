@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -2767,6 +2768,84 @@ func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
 	})
 }
 
+func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedCollectionID int64
+	var capturedSnapshotName string
+	var capturedTargetS3Path string
+	var capturedExternalSpec string
+	var capturedKeys []message.ResourceKey
+	lockAcquired := false
+	fakeHandler := &embeddedHandler{}
+	mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
+		&collectionInfo{
+			ID:           100,
+			DatabaseName: "test_db",
+			Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
+		}, nil,
+	).Build()
+	defer mockGetColl.UnPatch()
+	mockBroadcaster := &embeddedBroadcastAPI{}
+	mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+	defer mockClose.UnPatch()
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			capturedKeys = keys
+			lockAcquired = true
+			return mockBroadcaster, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).To(
+		func(
+			_ *snapshotManager,
+			_ context.Context,
+			collectionID int64,
+			snapshotName string,
+			targetS3Path string,
+			externalSpec string,
+		) (string, error) {
+			assert.True(t, lockAcquired, "export must acquire snapshot resource lock before pinning")
+			capturedCollectionID = collectionID
+			capturedSnapshotName = snapshotName
+			capturedTargetS3Path = targetS3Path
+			capturedExternalSpec = externalSpec
+			return "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", nil
+		}).Build()
+	defer mockExport.UnPatch()
+
+	server := &Server{
+		handler:         fakeHandler,
+		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.ExportSnapshot(ctx, &datapb.ExportSnapshotRequest{
+		Name:         "snapshot-1",
+		CollectionId: 100,
+		TargetS3Path: "s3://foreign-bucket/export-root",
+		ExternalSpec: `{"extfs":{"region":"us-west-2"}}`,
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	assert.Equal(t, "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", resp.GetSnapshotMetadataUri())
+	assert.Equal(t, int64(100), capturedCollectionID)
+	assert.Equal(t, "snapshot-1", capturedSnapshotName)
+	assert.Equal(t, "s3://foreign-bucket/export-root", capturedTargetS3Path)
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedExternalSpec)
+
+	byDomain := make(map[messagespb.ResourceDomain]message.ResourceKey, len(capturedKeys))
+	for _, k := range capturedKeys {
+		byDomain[k.Domain] = k
+	}
+	assert.True(t, byDomain[messagespb.ResourceDomain_ResourceDomainDBName].Shared)
+	assert.Equal(t, "test_db", byDomain[messagespb.ResourceDomain_ResourceDomainDBName].Key)
+	assert.True(t, byDomain[messagespb.ResourceDomain_ResourceDomainCollectionName].Shared)
+	assert.Equal(t, "test_db:test_coll", byDomain[messagespb.ResourceDomain_ResourceDomainCollectionName].Key)
+	assert.True(t, byDomain[messagespb.ResourceDomain_ResourceDomainSnapshotName].Shared)
+	assert.Equal(t, "100:snapshot-1", byDomain[messagespb.ResourceDomain_ResourceDomainSnapshotName].Key)
+}
+
 // --- Test rollbackRestoreSnapshot ---
 // Note: The actual DropCollection RPC is tested in internal/datacoord/broker/coordinator_broker_test.go
 
@@ -3086,7 +3165,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 		// Mock DescribeSnapshot to return error
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
 				return nil, errors.New("snapshot not found: " + name)
 			}).Build()
 		defer mockDescribe.UnPatch()
@@ -3109,8 +3188,8 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 		// Mock DescribeSnapshot to return snapshot data
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
-				return &SnapshotData{
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
+				return &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Name:         name,
 						CollectionId: 100,
@@ -3144,8 +3223,8 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 		// Mock DescribeSnapshot to return snapshot data with collection info
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
-				return &SnapshotData{
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
+				return &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Name:         name,
 						CollectionId: 100,
@@ -3288,26 +3367,6 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
-	t.Run("external_restore_not_implemented", func(t *testing.T) {
-		ctx := context.Background()
-
-		server := &Server{}
-		server.stateCode.Store(commonpb.StateCode_Healthy)
-
-		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
-			External:             true,
-			SnapshotS3Location:   "s3://bucket/export-root/snapshots/100/metadata/1.json",
-			TargetDbName:         "default",
-			TargetCollectionName: "new_collection",
-		})
-
-		assert.NoError(t, err)
-		statusErr := merr.Error(resp.GetStatus())
-		assert.Error(t, statusErr)
-		assert.True(t, errors.Is(statusErr, merr.ErrServiceUnimplemented))
-		assert.False(t, merr.IsRetryableErr(statusErr))
-	})
-
 	t.Run("missing_snapshot_name", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -3382,7 +3441,27 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 func TestServer_ExportSnapshot(t *testing.T) {
 	ctx := context.Background()
 
-	server := &Server{}
+	fakeHandler := &embeddedHandler{}
+	mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
+		&collectionInfo{
+			ID:           100,
+			DatabaseName: "test_db",
+			Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
+		}, nil,
+	).Build()
+	defer mockGetColl.UnPatch()
+	mockBroadcaster := &embeddedBroadcastAPI{}
+	mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+	defer mockClose.UnPatch()
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(mockBroadcaster, nil).Build()
+	defer mockBroadcast.UnPatch()
+	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).Return("", merr.WrapErrServiceUnimplemented(errors.New("not implemented"))).Build()
+	defer mockExport.UnPatch()
+
+	server := &Server{
+		handler:         fakeHandler,
+		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	resp, err := server.ExportSnapshot(ctx, &datapb.ExportSnapshotRequest{
@@ -5427,6 +5506,72 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.GetStatus()))
 		assert.Equal(t, int64(99), resp.GetJobId())
 		assert.Equal(t, int64(0), capturedSourceCollectionID)
+	})
+}
+
+func TestServer_RestoreSnapshot_External(t *testing.T) {
+	t.Run("missing_snapshot_s3_location", func(t *testing.T) {
+		ctx := context.Background()
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			External:             true,
+			TargetDbName:         "default",
+			TargetCollectionName: "restored_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	})
+
+	t.Run("delegates_to_external_restore", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedLocation, capturedTargetCollName, capturedTargetDbName string
+		var capturedExternalSpec string
+		mockRestore := mockey.Mock((*snapshotManager).RestoreExternalSnapshot).To(
+			func(
+				sm *snapshotManager,
+				ctx context.Context,
+				snapshotS3Location string,
+				targetCollectionName string,
+				targetDbName string,
+				externalSpec string,
+				startExternalRestoreLock StartExternalRestoreLockFunc,
+				startBroadcaster StartBroadcasterFunc,
+				rollback RollbackFunc,
+				validateResources ValidateResourcesFunc,
+			) (int64, error) {
+				capturedLocation = snapshotS3Location
+				capturedTargetCollName = targetCollectionName
+				capturedTargetDbName = targetDbName
+				capturedExternalSpec = externalSpec
+				return 10001, nil
+			}).Build()
+		defer mockRestore.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			External:             true,
+			SnapshotS3Location:   "s3://bucket/files/snapshots/meta.json",
+			TargetDbName:         "target_db",
+			TargetCollectionName: "restored_collection",
+			ExternalSpec:         `{"extfs":{"region":"us-west-2"}}`,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(10001), resp.GetJobId())
+		assert.Equal(t, "s3://bucket/files/snapshots/meta.json", capturedLocation)
+		assert.Equal(t, "restored_collection", capturedTargetCollName)
+		assert.Equal(t, "target_db", capturedTargetDbName)
+		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedExternalSpec)
 	})
 }
 
