@@ -39,29 +39,36 @@
 
 namespace milvus::segcore {
 
+// Validity (null bitmap) storage for growing segments.
+//
+// Backed by fixed-size per-chunk buffers held in a std::deque so that, once a
+// chunk is appended, its buffer never moves. A raw pointer returned by
+// get_chunk_data() therefore stays valid across concurrent inserts (which only
+// append — never relocate existing chunks). This replaces a single resizable
+// FixedVector<bool> whose reallocation on insert could dangle a validity
+// pointer that a concurrent query had cached.
+//
+// Contract: a get_chunk_data() borrow may only be read within its own chunk
+// ([offset, chunk end)). All current readers apply validity per chunk (see
+// ApplyFieldValidData and InsertRecord::get_span_base), so this holds.
 class ThreadSafeValidData {
  public:
-    explicit ThreadSafeValidData() = default;
-    explicit ThreadSafeValidData(FixedVector<bool> data)
-        : data_(std::move(data)) {
+    explicit ThreadSafeValidData(int64_t size_per_chunk)
+        : size_per_chunk_(size_per_chunk) {
+        AssertInfo(size_per_chunk_ > 0,
+                   "size_per_chunk must be positive, got {}",
+                   size_per_chunk_);
     }
 
     void
     set_data_raw(const std::vector<FieldDataPtr>& datas) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        auto total = 0;
-        for (auto& field_data : datas) {
-            total += field_data->get_num_rows();
-        }
-        if (length_ + total > data_.size()) {
-            data_.resize(length_ + total);
-        }
-
         for (auto& field_data : datas) {
             auto num_row = field_data->get_num_rows();
-            for (size_t i = 0; i < num_row; i++) {
-                data_[length_ + i] = field_data->is_valid(i);
-            }
+            reserve_to(length_ + num_row);
+            write_bits(length_, num_row, [&field_data](size_t i) {
+                return field_data->is_valid(i);
+            });
             length_ += num_row;
         }
     }
@@ -72,11 +79,8 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
-            if (length_ + num_rows > data_.size()) {
-                data_.resize(length_ + num_rows);
-            }
-            auto src = data->valid_data().data();
-            std::copy_n(src, num_rows, data_.data() + length_);
+            reserve_to(length_ + num_rows);
+            write_from(length_, num_rows, data->valid_data().data());
             length_ += num_rows;
         }
     }
@@ -88,9 +92,12 @@ class ThreadSafeValidData {
                    "offset out of range, offset={}, length_={}",
                    offset,
                    length_);
-        return data_[offset];
+        return chunks_[offset / size_per_chunk_][offset % size_per_chunk_];
     }
 
+    // Borrow a pointer into the validity bitmap at `offset`. Valid only for
+    // reads within the same chunk ([offset, chunk end)); the pointed-to chunk
+    // buffer never moves, so the borrow survives concurrent inserts.
     bool*
     get_chunk_data(size_t offset) {
         std::shared_lock<std::shared_mutex> lck(mutex_);
@@ -98,18 +105,105 @@ class ThreadSafeValidData {
                    "offset out of range, offset={}, length_={}",
                    offset,
                    length_);
-        return &data_[offset];
+        return &chunks_[offset / size_per_chunk_][offset % size_per_chunk_];
     }
 
+    // Fill out[i] with the validity of offsets[i] for `count` offsets under a
+    // single lock acquisition. Out-of-range offsets yield false (not an
+    // assert), matching the tolerant semantics of offset-driven read paths.
+    void
+    bulk_is_valid(const int64_t* offsets, int64_t count, bool* out) const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = offsets[i];
+            out[i] = offset >= 0 && static_cast<size_t>(offset) < length_ &&
+                     chunks_[offset / spc][offset % spc];
+        }
+    }
+
+    // WARNING: materializes a flat copy of the WHOLE bitmap (O(segment rows))
+    // — avoid on hot paths. Prefer empty() for emptiness checks,
+    // is_valid()/bulk_is_valid() for point/batch lookups, or get_chunk_data()
+    // to borrow within a chunk.
     FixedVector<bool>
     get_data() const {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        return data_;
+        FixedVector<bool> out(length_);
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        size_t copied = 0;
+        for (const auto& chunk : chunks_) {
+            if (copied >= length_) {
+                break;
+            }
+            const size_t n = std::min(spc, length_ - copied);
+            std::copy_n(chunk.begin(), n, out.begin() + copied);
+            copied += n;
+        }
+        return out;
+    }
+
+    bool
+    empty() const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
+        return length_ == 0;
     }
 
  private:
+    // Ensure enough chunks exist to hold `n` elements. Caller holds the lock.
+    void
+    reserve_to(size_t n) {
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        const size_t need = (n + spc - 1) / spc;
+        while (chunks_.size() < need) {
+            chunks_.emplace_back(spc, false);
+        }
+    }
+
+    // Write `count` bits starting at global offset `at` from a contiguous
+    // source array, chunk by chunk via copy_n. Caller holds the lock and has
+    // already reserved capacity.
+    void
+    write_from(size_t at, size_t count, const bool* src) {
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        size_t written = 0;
+        while (written < count) {
+            const size_t g = at + written;
+            const size_t ci = g / spc;
+            const size_t oi = g % spc;
+            const size_t n = std::min(count - written, spc - oi);
+            std::copy_n(src + written, n, chunks_[ci].begin() + oi);
+            written += n;
+        }
+    }
+
+    // Write `count` bits starting at global offset `at`, taking bit k from
+    // f(k). Splits across chunk boundaries. Caller holds the lock and has
+    // already reserved capacity.
+    template <typename F>
+    void
+    write_bits(size_t at, size_t count, F&& f) {
+        const size_t spc = static_cast<size_t>(size_per_chunk_);
+        size_t written = 0;
+        while (written < count) {
+            const size_t g = at + written;
+            const size_t ci = g / spc;
+            const size_t oi = g % spc;
+            const size_t room = spc - oi;
+            const size_t n =
+                (count - written < room) ? (count - written) : room;
+            auto& chunk = chunks_[ci];
+            for (size_t k = 0; k < n; ++k) {
+                chunk[oi + k] = f(written + k);
+            }
+            written += n;
+        }
+    }
+
     mutable std::shared_mutex mutex_{};
-    FixedVector<bool> data_;
+    // Fixed-size (size_per_chunk_) buffers; deque keeps existing buffers put.
+    std::deque<FixedVector<bool>> chunks_;
+    const int64_t size_per_chunk_;
     // number of actual elements
     size_t length_{0};
 };
