@@ -152,6 +152,76 @@ class ColumnEstimateTestChunkReader : public milvus_storage::api::ChunkReader {
     size_t* named_lookup_count_;
 };
 
+class FullyDeletedTestChunkReader : public milvus_storage::api::ChunkReader {
+ public:
+    FullyDeletedTestChunkReader(
+        std::unique_ptr<milvus_storage::api::ChunkReader> delegate,
+        size_t column_count)
+        : delegate_(std::move(delegate)), column_count_(column_count) {
+    }
+
+    size_t
+    total_number_of_chunks() const override {
+        return 1;
+    }
+
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>& row_indices) override {
+        if (row_indices.empty()) {
+            return std::vector<int64_t>{};
+        }
+        return arrow::Status::Invalid(
+            "fully deleted test chunk contains no rows");
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t chunk_index) override {
+        if (chunk_index != 0) {
+            return arrow::Status::Invalid("test chunk index out of range");
+        }
+        ARROW_ASSIGN_OR_RAISE(auto batch, delegate_->get_chunk(0));
+        return batch->Slice(0, 0);
+    }
+
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>& chunk_indices,
+               size_t /*parallelism*/) override {
+        std::vector<std::shared_ptr<arrow::RecordBatch>> chunks;
+        chunks.reserve(chunk_indices.size());
+        for (auto chunk_index : chunk_indices) {
+            ARROW_ASSIGN_OR_RAISE(auto chunk, get_chunk(chunk_index));
+            chunks.push_back(std::move(chunk));
+        }
+        return chunks;
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        return std::vector<uint64_t>{0};
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(
+        const std::string& /*field_name*/) override {
+        return std::vector<uint64_t>{0};
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return std::vector<std::vector<uint64_t>>(column_count_,
+                                                  std::vector<uint64_t>{0});
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        return std::vector<uint64_t>{0};
+    }
+
+ private:
+    std::unique_ptr<milvus_storage::api::ChunkReader> delegate_;
+    size_t column_count_;
+};
+
 class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
@@ -598,6 +668,41 @@ TEST_P(ManifestGroupTranslatorTest,
     auto cells = translator->get_cells(nullptr, {0});
     ASSERT_EQ(cells.size(), 1);
     EXPECT_EQ(cells.front().first, 0);
+}
+
+TEST_P(ManifestGroupTranslatorTest,
+       TestFullyDeletedRowGroupUsesPositiveLoadingReservation) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    auto field_metas = test_data_->GetFieldMetas(0);
+    auto chunk_reader = std::make_unique<FullyDeletedTestChunkReader>(
+        test_data_->CreateChunkReader(0), column_group->columns.size());
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        field_metas,
+        column_group->columns,
+        /*full_projection=*/true,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /*eager_load=*/true,
+        /*warmup_policy=*/"");
+
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    ASSERT_EQ(translator->num_cells(), 1);
+    ASSERT_EQ(meta->chunk_memory_size_.size(), 1);
+
+    std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>>
+        cells;
+    ASSERT_NO_THROW(cells = translator->get_cells(nullptr, {0}));
+    ASSERT_EQ(cells.size(), 1);
+    EXPECT_EQ(cells.front().first, 0);
+    EXPECT_NE(cells.front().second, nullptr);
+    EXPECT_GT(meta->chunk_memory_size_.front(), 0);
 }
 
 TEST_P(ManifestGroupTranslatorTest,

@@ -274,6 +274,9 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     // from an older fragment after schema evolution. Replace it before cell
     // grouping so a positive row group in the same cell cannot mask the
     // missing reservation or distort ComputeRowGroupsPerCell.
+    // FIXME: Remove this sentinel once CellSpec distinguishes a known-empty
+    // cell from an unavailable size estimate and accepts zero for the former.
+    constexpr uint64_t kEmptyRowGroupReservationBytes = 1;
     constexpr uint64_t kLastResortBytesPerRow = 4096;
     const auto positive_fallback_bytes_per_row =
         fallback_bytes_per_row > 0
@@ -283,6 +286,11 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     size_t positive_fallback_row_groups = 0;
     for (size_t i = 0; i < row_group_sizes.size(); ++i) {
         if (row_group_rows[i] == 0) {
+            // Empty logical row groups still participate in cell ranges. Keep
+            // their loading reservation positive so the batch planner can
+            // reach the reader and receive the valid empty batch.
+            row_group_sizes[i] =
+                std::max(row_group_sizes[i], kEmptyRowGroupReservationBytes);
             continue;
         }
         ++live_row_groups;
