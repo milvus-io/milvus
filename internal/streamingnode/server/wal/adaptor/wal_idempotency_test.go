@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -43,10 +44,12 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
 		params.Reset(params.MinioCfg.RootPath.Key)
+		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
 	}()
 
 	initIdempotencyResourceForTest(t)
@@ -114,6 +117,7 @@ func TestWALIdempotencyAppend(t *testing.T) {
 
 func initIdempotencyResourceForTest(t *testing.T) {
 	var consumeCheckpoint *streamingpb.WALCheckpoint
+	segmentAssignments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
 	idempotencyWindowMetas := make(map[string]*streamingpb.VChannelWindowMeta)
 	var pchannelWindowMeta *streamingpb.PChannelWindowMeta
@@ -161,20 +165,19 @@ func initIdempotencyResourceForTest(t *testing.T) {
 		consumeCheckpoint = proto.Clone(checkpoint).(*streamingpb.WALCheckpoint)
 		return nil
 	}).Maybe()
-	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) ([]*streamingpb.SegmentAssignmentMeta, error) {
+		values := make([]*streamingpb.SegmentAssignmentMeta, 0, len(segmentAssignments))
+		for _, meta := range segmentAssignments {
+			values = append(values, proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta))
+		}
+		return values, nil
+	}).Maybe()
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) ([]*streamingpb.VChannelMeta, error) {
 		values := make([]*streamingpb.VChannelMeta, 0, len(vchannels))
 		for _, meta := range vchannels {
 			values = append(values, proto.Clone(meta).(*streamingpb.VChannelMeta))
 		}
 		return values, nil
-	}).Maybe()
-	catalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, saved map[string]*streamingpb.VChannelMeta) error {
-		for key, meta := range saved {
-			vchannels[key] = proto.Clone(meta).(*streamingpb.VChannelMeta)
-		}
-		return nil
 	}).Maybe()
 	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
 		values := make([]*streamingpb.VChannelWindowMeta, 0, len(idempotencyWindowMetas))
@@ -189,6 +192,12 @@ func initIdempotencyResourceForTest(t *testing.T) {
 		}
 		return nil
 	}).Maybe()
+	catalog.EXPECT().RemoveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, removed []string) error {
+		for _, key := range removed {
+			delete(idempotencyWindowMetas, key)
+		}
+		return nil
+	}).Maybe()
 	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelWindowMeta, error) {
 		if pchannelWindowMeta == nil {
 			return nil, nil
@@ -199,8 +208,39 @@ func initIdempotencyResourceForTest(t *testing.T) {
 		pchannelWindowMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
 		return nil
 	}).Maybe()
+	catalog.EXPECT().RemovePChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
+		pchannelWindowMeta = nil
+		return nil
+	}).Maybe()
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, snapshot *metastore.WALRecoverySnapshot) error {
+		if snapshot == nil {
+			return nil
+		}
+		for _, meta := range snapshot.SegmentAssignments {
+			segmentID := meta.GetSegmentId()
+			if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+				delete(segmentAssignments, segmentID)
+				continue
+			}
+			segmentAssignments[segmentID] = proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta)
+		}
+		for key, meta := range snapshot.VChannels {
+			vchannelName := key
+			if meta.GetVchannel() != "" {
+				vchannelName = meta.GetVchannel()
+			}
+			if meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+				delete(vchannels, vchannelName)
+				continue
+			}
+			vchannels[vchannelName] = proto.Clone(meta).(*streamingpb.VChannelMeta)
+		}
+		if snapshot.ConsumeCheckpoint != nil {
+			consumeCheckpoint = proto.Clone(snapshot.ConsumeCheckpoint).(*streamingpb.WALCheckpoint)
+		}
+		return nil
+	}).Maybe()
 
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixCoordClient.Set(rc)

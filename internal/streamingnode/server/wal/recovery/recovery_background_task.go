@@ -131,7 +131,7 @@ func (rs *recoveryStorageImpl) persistRecoverySnapshotData(ctx context.Context, 
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
 	}
-	if err := rs.retryOperationWithBackoff(ctx,
+	if err := retryOperationWithBackoff(ctx,
 		logger.With(
 			mlog.String("op", "persistRecoverySnapshot"),
 			mlog.Int64s("segmentIds", lo.Keys(snapshot.SegmentAssignments)),
