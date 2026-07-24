@@ -1249,7 +1249,19 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         baseline = collect_observations()
         assert baseline["match_ids"] == sorted(row_id for row_id, row in source_by_id.items() if row[STRUCT_FIELD])
         assert baseline["contains_ids"] == [4]
-        compact_id, _ = self.compact(client, collection_name)
+        import time
+        for _ in range(30):
+            segs = self.list_persistent_segments(client, collection_name)[0]
+            if len(segs) >= 2:
+                break
+            time.sleep(1)
+
+        compact_id = -1
+        for _ in range(10):
+            compact_id, _ = self.compact(client, collection_name)
+            if compact_id > 0:
+                break
+            time.sleep(1)
         assert compact_id > 0
         assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
         assert collect_observations() == baseline

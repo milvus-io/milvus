@@ -3418,6 +3418,95 @@ func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam
 	s.Equal(int64(0), op.(*searchReduceOperator).offset)
 }
 
+func (s *SearchPipelineSuite) TestNewSearchReduceOperator_OrderByOffset() {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 102, Name: "price", DataType: schemapb.DataType_Int64},
+		},
+	})
+
+	// Case 1: orderByFields present, offset = 0 -> topK = topk + 0 = 10
+	taskZeroOffset := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 0,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op1, err := newSearchReduceOperator(taskZeroOffset, nil)
+	s.NoError(err)
+	s.Equal(int64(10), op1.(*searchReduceOperator).topK)
+
+	// Case 2: orderByFields present, offset = 20 -> topK = 10 + 20 = 30
+	taskNonZeroOffset := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 20,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op2, err := newSearchReduceOperator(taskNonZeroOffset, nil)
+	s.NoError(err)
+	s.Equal(int64(30), op2.(*searchReduceOperator).topK)
+
+	// Case 3: orderByFields present, large offset = 1000 -> topK = 10 + 1000 = 1010
+	taskLargeOffset := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 1000,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op3, err := newSearchReduceOperator(taskLargeOffset, nil)
+	s.NoError(err)
+	s.Equal(int64(1010), op3.(*searchReduceOperator).topK)
+
+	// Case 4: orderByFields present, but isAdvanced = true -> topK = 10 (offset not added)
+	taskAdvanced := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:         1,
+			Topk:       10,
+			Offset:     20,
+			IsAdvanced: true,
+		},
+		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
+		schema:        schema,
+		queryInfos:    []*planpb.QueryInfo{{}},
+	}
+	op4, err := newSearchReduceOperator(taskAdvanced, nil)
+	s.NoError(err)
+	s.Equal(int64(10), op4.(*searchReduceOperator).topK)
+
+	// Case 5: No orderByFields, offset = 20 -> topK = 10
+	taskNoOrderBy := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:     1,
+			Topk:   10,
+			Offset: 20,
+		},
+		schema:     schema,
+		queryInfos: []*planpb.QueryInfo{{}},
+	}
+	op5, err := newSearchReduceOperator(taskNoOrderBy, nil)
+	s.NoError(err)
+	s.Equal(int64(10), op5.(*searchReduceOperator).topK)
+}
+
 func (s *SearchPipelineSuite) TestNewOrderByOperatorUsesPluralGroupByFieldIDs() {
 	task := &searchTask{
 		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
