@@ -4213,8 +4213,49 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     auto effective_commit_ts =
         snapshot->commit_ts != 0 ? std::optional<Timestamp>{snapshot->commit_ts}
                                  : std::nullopt;
+    // Resolve matched-row timestamps by lazily pinning the timestamp column
+    // ONE chunk at a time and reusing that pin for all offsets that fall in
+    // it, instead of the per-row ReadTimestamp() path (a fresh cachinglayer
+    // pin per matched row). Under the delete-replay amplification of issue
+    // #49435 (tens of millions of matched rows per LoadDeletedRecord call)
+    // the per-row pin dominated the whole call. A single group chunk stays
+    // pinned at a time (same peak residency as the per-row path, not the
+    // whole column group), and nothing is pinned for zero-hit calls (empty
+    // pks, bloom-filter false positives) because the pin is created on first
+    // use inside read_ts. Pins are refcounts on the snapshot's cells, so
+    // reopen's atomic publication is not blocked, and per-call snapshot
+    // consistency is identical to the per-row variant.
+    auto runtime_ts_data = runtime != nullptr ? runtime->timestamps : nullptr;
+    bool ts_from_array =
+        runtime_ts_data != nullptr && !runtime_ts_data->empty();
+    std::shared_ptr<ChunkedColumnInterface> ts_column;
+    cachinglayer::PinWrapper<Chunk*> ts_chunk_pin{nullptr};
+    const Timestamp* ts_chunk_data = nullptr;
+    int64_t ts_chunk_base = 0;
+    int64_t ts_chunk_limit = -1;  // pinned chunk covers offsets [base, limit)
     auto read_ts = [&](int64_t offset) -> Timestamp {
-        return ReadTimestamp(offset, runtime, effective_commit_ts);
+        if (effective_commit_ts) {
+            return *effective_commit_ts;
+        }
+        if (ts_from_array) {
+            return (*runtime_ts_data)[offset];
+        }
+        if (offset < ts_chunk_base || offset >= ts_chunk_limit) {
+            if (!ts_column) {
+                ts_column = get_column(runtime, TimestampFieldID);
+                AssertInfo(ts_column != nullptr, "timestamp data is not ready");
+            }
+            auto [cid, off_in_chunk] = ts_column->GetChunkIDByOffset(offset);
+            ts_chunk_pin = ts_column->GetChunk(nullptr, cid);
+            // Data() (not RawData()) skips a nullable field's leading null
+            // bitmap; the timestamp system field is non-nullable today so the
+            // two coincide, but Data() is the layout-correct accessor.
+            ts_chunk_data =
+                reinterpret_cast<const Timestamp*>(ts_chunk_pin.get()->Data());
+            ts_chunk_base = offset - static_cast<int64_t>(off_in_chunk);
+            ts_chunk_limit = ts_chunk_base + ts_column->chunk_row_nums(cid);
+        }
+        return ts_chunk_data[offset - ts_chunk_base];
     };
 
     // Virtual PK offset maps can resolve pk -> offset directly by bit-extract.
