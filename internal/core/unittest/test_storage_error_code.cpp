@@ -51,8 +51,13 @@ TEST(StorageErrorCode, ArrowStatusToErrorCodeMapping) {
     using milvus::storage::ArrowStatusToErrorCode;
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::OutOfMemory("oom")),
               milvus::ErrorCode::MemAllocateFailed);  // retriable
+    // A bare IOError with no ExtendStatusDetail maps to permanent
+    // StorageError(2044): since milvus-storage#574 the producer tags every
+    // known-transient failure with a retryable detail, so "no detail" means
+    // unclassified and the fallback is deliberately conservative
+    // (non-retriable). Transient IO reaches 2045 only via a tagged detail.
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::IOError("io")),
-              milvus::ErrorCode::StorageTransientError);  // 2045, retriable
+              milvus::ErrorCode::StorageError);  // 2044, conservative fallback
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::Invalid("bad")),
               milvus::ErrorCode::DataFormatBroken);  // permanent data error
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::TypeError("type")),
