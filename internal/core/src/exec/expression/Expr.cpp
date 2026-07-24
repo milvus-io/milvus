@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <ratio>
 
@@ -32,6 +33,7 @@
 #include "exec/expression/CompareExpr.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/ExistsExpr.h"
+#include "exec/expression/GISConjunctExpr.h"
 #include "exec/expression/GISFunctionFilterExpr.h"
 #include "exec/expression/JsonContainsExpr.h"
 #include "exec/expression/LogicalBinaryExpr.h"
@@ -47,6 +49,7 @@
 #include "monitor/Monitor.h"
 #include "pb/plan.pb.h"
 #include "prometheus/histogram.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/Utils.h"
 
 namespace milvus {
@@ -485,7 +488,192 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
     return false;
 }
 
-inline void
+// Split same-column geometry predicates of an AND conjunction into a cheap
+// Coarse(R-Tree) node (bucketed early, prunes others) and an expensive Refine
+// node (bucketed last, consumes bitmap_input + fuses per-row construction).
+// Gated by queryNode.segcore.enableGISSplitFusion. See
+// docs/design_docs/gis_filter_coarse_refine_split_fusion.md.
+static void
+SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
+                     ExecContext* context) {
+    if (!milvus::segcore::SegcoreConfig::default_config()
+             .get_enable_gis_split_fusion()) {
+        return;
+    }
+    // Algebra requires an AND parent to hoist B_coarse / B_refine.
+    if (!expr->IsAnd()) {
+        return;
+    }
+    auto* qc = context->get_query_context();
+    auto* segment = qc->get_segment();
+    if (!segment) {
+        return;
+    }
+    auto active = qc->get_active_count();
+    auto bs = qc->query_config()->get_expr_batch_size();
+    auto cl = qc->get_consistency_level();
+    auto* op_ctx = qc->get_op_context();
+
+    auto as_groupable_gis = [](const std::shared_ptr<Expr>& e)
+        -> std::shared_ptr<PhyGISFunctionFilterExpr> {
+        auto g = std::dynamic_pointer_cast<PhyGISFunctionFilterExpr>(e);
+        if (!g) {
+            return nullptr;
+        }
+        // Whitelist only the binary topological predicates the coarse/refine
+        // split + fusion path actually supports: they carry a non-empty query
+        // WKT and have a case in EvaluateGISPreparedOp. Everything else is left
+        // on the baseline per-predicate path. In particular:
+        //   - DWithin carries a distance (not handled by the prepared fusion);
+        //   - STIsValid is a UNARY op with an EMPTY query WKT and is routed to
+        //     RawData by DetermineExecPath -- grouping it would construct a
+        //     Geometry from "" (GEOS returns null -> AssertInfo throws) and has
+        //     no EvaluateGISPreparedOp case, crashing valid queries.
+        switch (g->GetGISExpr()->op_) {
+            case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Within:
+                return g;
+            default:
+                // DWithin, STIsValid, Invalid, and any future op: not grouped.
+                return nullptr;
+        }
+    };
+
+    auto emit_split_nodes =
+        [&](int64_t field,
+            bool is_and,
+            const std::vector<std::shared_ptr<PhyGISFunctionFilterExpr>>&
+                leaves,
+            std::vector<std::shared_ptr<Expr>>& out) {
+            auto state = std::make_shared<GISGroupState>();
+            state->field_id = FieldId(field);
+            state->is_and = is_and;
+            for (auto& g : leaves) {
+                auto le = g->GetGISExpr();
+                // Guard at the point of use, independent of the
+                // as_groupable_gis whitelist above: the split path drops
+                // DWithin's distance (Pred carries no distance,
+                // EvalPrepared hardcodes 0.0) and RunRTreeQuery performs no
+                // bbox expansion, so a grouped DWithin would silently
+                // under-match. Fail loudly if a future whitelist edit ever
+                // lets it through.
+                AssertInfo(
+                    le->op_ != proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+                    "DWithin must not enter the GIS split/fusion group: the "
+                    "grouped path drops its distance and skips the coarse "
+                    "bbox expansion");
+                GISGroupState::Pred p;
+                p.op = le->op_;
+                p.query_wkt = le->geometry_wkt_;
+                p.has_index = segment->HasIndex(FieldId(field));
+                state->preds.push_back(std::move(p));
+            }
+            out.push_back(std::make_shared<PhyGISCoarseConjunctExpr>(
+                state,
+                "PhyGISCoarseConjunctExpr",
+                op_ctx,
+                segment,
+                active,
+                bs,
+                cl));
+            out.push_back(std::make_shared<PhyGISRefineConjunctExpr>(
+                state,
+                "PhyGISRefineConjunctExpr",
+                op_ctx,
+                segment,
+                active,
+                bs,
+                cl));
+        };
+
+    const auto& inputs = expr->GetInputsRef();
+    std::vector<std::shared_ptr<Expr>> kept;
+    std::vector<std::shared_ptr<Expr>> new_nodes;
+    std::map<int64_t, std::vector<std::shared_ptr<PhyGISFunctionFilterExpr>>>
+        direct;
+    bool changed = false;
+
+    for (const auto& child : inputs) {
+        if (auto g = as_groupable_gis(child)) {
+            direct[g->GetGISExpr()->column_.field_id_.get()].push_back(g);
+            changed = true;
+            continue;
+        }
+        // Shape B: a child sub-conjunction made entirely of same-field GIS
+        // predicates (e.g. the "ST OR ST OR ..." group after query rewrite).
+        if (auto sub =
+                std::dynamic_pointer_cast<PhyConjunctFilterExpr>(child)) {
+            const auto& sc = sub->GetInputsRef();
+            bool pure = !sc.empty();
+            int64_t field = -1;
+            std::vector<std::shared_ptr<PhyGISFunctionFilterExpr>> leaves;
+            for (const auto& c2 : sc) {
+                auto g = as_groupable_gis(c2);
+                if (!g) {
+                    pure = false;
+                    break;
+                }
+                int64_t f = g->GetGISExpr()->column_.field_id_.get();
+                if (field == -1) {
+                    field = f;
+                } else if (field != f) {
+                    pure = false;
+                    break;
+                }
+                leaves.push_back(g);
+            }
+            if (pure && field != -1) {
+                emit_split_nodes(field, sub->IsAnd(), leaves, new_nodes);
+                changed = true;
+                continue;
+            }
+        }
+        kept.push_back(child);
+    }
+
+    if (!changed) {
+        return;
+    }
+    // Trivial case: a single same-field GIS predicate with no R-Tree index and
+    // no other prunable sibling (no scalar leaf kept, no Shape-B group). The
+    // split would add a Coarse node that allocates a full-set bitmap for zero
+    // pruning benefit and gains nothing from fusion (only one predicate), so
+    // leave the original leaf untouched.
+    if (kept.empty() && new_nodes.empty() && direct.size() == 1) {
+        auto it = direct.begin();
+        if (it->second.size() == 1 && !segment->HasIndex(FieldId(it->first))) {
+            return;
+        }
+    }
+    // NOTE: when a field appears BOTH as a direct AND-leaf here and inside a
+    // Shape-B subgroup (e.g. `ST_A(geo) AND (ST_B(geo) OR ST_C(geo))`), this
+    // emits two independent coarse/refine pairs for that field, so the row
+    // geometry is constructed twice and the R-Tree runs twice — the result is
+    // still correct but part of the K->1 fusion win is lost. Merging them would
+    // require GISGroupState to carry a top-level-AND of {is_and, preds}
+    // sub-blocks; tracked as a follow-up (kept out of this PR to stay focused).
+    for (auto& kv : direct) {
+        // Direct leaves are children of THIS AND conjunction -> combine = AND.
+        emit_split_nodes(kv.first, /*is_and=*/true, kv.second, new_nodes);
+    }
+
+    std::vector<std::shared_ptr<Expr>> rebuilt;
+    rebuilt.reserve(kept.size() + new_nodes.size());
+    for (auto& e : kept) {
+        rebuilt.push_back(e);
+    }
+    for (auto& e : new_nodes) {
+        rebuilt.push_back(e);
+    }
+    expr->RebuildInputs(std::move(rebuilt));
+}
+
+void
 ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                     ExecContext* context,
                     bool& has_heavy_operation) {
@@ -493,6 +681,9 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     if (!segment || !expr) {
         return;
     }
+    // Rewrite same-column geometry predicates into Coarse + Refine nodes before
+    // bucketing, so the buckets below schedule coarse early / refine last.
+    SplitFuseGISConjunct(expr, context);
     auto schema = segment->get_schema();
     auto namespace_field_id = schema.get_namespace_field_id();
     std::vector<size_t> reorder;
@@ -516,6 +707,19 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     std::optional<size_t> namespace_expr_idx;
     for (int i = 0; i < inputs.size(); i++) {
         const auto& input = inputs[i];
+
+        // GIS split-fusion nodes: coarse runs early (indexed bucket) so its
+        // R-Tree bitmap prunes others; refine runs last (heavy bucket) so it
+        // consumes the full bitmap_input and only refines surviving rows.
+        if (input->name() == "PhyGISCoarseConjunctExpr") {
+            indexed_expr.push_back(i);
+            continue;
+        }
+        if (input->name() == "PhyGISRefineConjunctExpr") {
+            heavy_conjunct_expr.push_back(i);
+            has_heavy_operation = true;
+            continue;
+        }
 
         if (namespace_field_id.has_value() &&
             input->name() == "PhyUnaryRangeFilterExpr") {
@@ -580,6 +784,12 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             }
         }
 
+        // NOTE: do NOT extend this recursion through PhyLogicalUnaryExpr (NOT).
+        // The GIS split nodes' all-ones `valid` is only sound because a split
+        // group can never sit under a negation -- see the PRECONDITION in
+        // GISConjunctExpr.cpp. Reordering (and thus splitting) a conjunction
+        // under a NOT would negate that all-ones `valid` into selecting
+        // null-geometry rows.
         if (input->name() == "PhyConjunctFilterExpr") {
             bool sub_expr_heavy = false;
             auto sub_expr =

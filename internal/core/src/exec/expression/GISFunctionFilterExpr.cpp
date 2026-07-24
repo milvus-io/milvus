@@ -428,36 +428,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     // - equals, dwithin: no prepared version, fall back to regular Geometry
     auto evaluate_geometry_prepared =
         [this, &prepared_query, &query_geometry](const Geometry& left) -> bool {
-        switch (expr_->op_) {
-            case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
-                // Symmetric: prepared_query.intersects(left) == left.intersects(query)
-                return prepared_query.intersects(left);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
-                // Symmetric
-                return prepared_query.touches(left);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
-                // Symmetric
-                return prepared_query.overlaps(left);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
-                // Symmetric
-                return prepared_query.crosses(left);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
-                // left.contains(query) == query.within(left)
-                return prepared_query.within(left);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Within:
-                // left.within(query) == query.contains(left)
-                return prepared_query.contains(left);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
-                // No prepared version - fall back to regular geometry
-                return left.equals(query_geometry);
-            case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
-                // Distance-based operation - no prepared version
-                return left.dwithin(query_geometry, expr_->distance_);
-            default:
-                ThrowInfo(NotImplemented,
-                          "unknown GIS op : {}",
-                          static_cast<int>(expr_->op_));
-        }
+        return EvaluateGISPreparedOp(
+            expr_->op_, prepared_query, query_geometry, left, expr_->distance_);
     };
 
     TargetBitmap batch_result;
@@ -550,9 +522,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     }
                 }
             } else {
-                milvus::OpContext op_ctx;
                 auto data_array = segment_->bulk_subscript(
-                    &op_ctx, field_id_, hit_offsets.data(), hit_offsets.size());
+                    op_ctx_, field_id_, hit_offsets.data(), hit_offsets.size());
 
                 auto geometry_array =
                     static_cast<const milvus::proto::schema::GeometryArray*>(
