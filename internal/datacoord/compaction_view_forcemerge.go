@@ -28,9 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-const (
-	defaultToleranceMB = 0.05
-)
+const forceMergeSizeTolerance = 0.05
 
 // static segment view, only algothrims here, no IO
 type ForceMergeSegmentView struct {
@@ -102,31 +100,34 @@ func (v *ForceMergeSegmentView) GetTriggerID() int64 {
 	return v.triggerID
 }
 
-func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64, targetCount int64) {
+func (v *ForceMergeSegmentView) calculateTargetSizeCount() (targetSize int64, targetCount int64) {
 	log := mlog.With(mlog.Int64("triggerID", v.triggerID), mlog.String("label", v.label.String()))
-	maxSafeSize = v.calculateMaxSafeSize()
-	if maxSafeSize < v.configMaxSize {
+	machineSafeSize := v.calculateMaxSafeSize()
+	if machineSafeSize < v.configMaxSize {
 		log.Info(context.TODO(), "maxSafeSize is less than configMaxSize, set to configMaxSize",
-			mlog.Float64("maxSafeSize", maxSafeSize),
+			mlog.Float64("maxSafeSize", machineSafeSize),
 			mlog.Float64("configMaxSize", v.configMaxSize))
-		maxSafeSize = v.configMaxSize
+		machineSafeSize = v.configMaxSize
 	}
 
+	selectedTargetSize := machineSafeSize
 	if v.expectedTargetSize > 0 {
-		if v.expectedTargetSize <= maxSafeSize {
+		if v.expectedTargetSize <= machineSafeSize {
 			log.Info(context.TODO(), "using user-provided target size",
 				mlog.Float64("expectedTargetSize", v.expectedTargetSize),
-				mlog.Float64("maxSafeSize", maxSafeSize))
-			maxSafeSize = v.expectedTargetSize
+				mlog.Float64("maxSafeSize", machineSafeSize))
+			selectedTargetSize = v.expectedTargetSize
 		} else {
 			log.Warn(context.TODO(), "user-provided target size exceeds maxSafeSize, using maxSafeSize",
 				mlog.Float64("expectedTargetSize", v.expectedTargetSize),
-				mlog.Float64("maxSafeSize", maxSafeSize))
+				mlog.Float64("maxSafeSize", machineSafeSize))
 		}
 	}
 
+	selectedTargetSize = min(selectedTargetSize*(1+forceMergeSizeTolerance), machineSafeSize)
+	targetSize = forceMergeEffectiveSize(selectedTargetSize)
 	totalSize := v.GetTotalSize()
-	targetCount = estimateResultSegmentCount(totalSize, maxSafeSize)
+	targetCount = plannedForceMergeOutputCount(totalSize, targetSize)
 
 	queryNodeCount := int64(len(v.topology.QueryNodeMemory))
 	numReplicas := int64(v.topology.NumReplicas)
@@ -145,222 +146,259 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 
 	if perShardParallelism > 1 && targetCount < perShardParallelism {
 		desiredCount := perShardParallelism
-		if totalSize/float64(desiredCount) >= v.configMaxSize {
-			targetCount = desiredCount
-			maxSafeSize = totalSize / float64(targetCount)
+		adjustedTargetSize := totalSize / float64(desiredCount)
+		if adjustedTargetSize >= v.configMaxSize {
+			targetSize = min(targetSize, forceMergeEffectiveSize(math.Floor(adjustedTargetSize)))
+			targetCount = plannedForceMergeOutputCount(totalSize, targetSize)
 			log.Info(context.TODO(), "adjusted target count for parallel loading per shard",
 				mlog.Int64("queryNodeCount", queryNodeCount),
 				mlog.Int64("numReplicas", numReplicas),
 				mlog.Int64("numShards", numShards),
 				mlog.Int64("perShardParallelism", perShardParallelism),
 				mlog.Int64("adjustedTargetCount", targetCount),
-				mlog.Float64("adjustedTargetSize", maxSafeSize))
+				mlog.Int64("adjustedTargetSize", targetSize))
 		}
 	}
 
 	log.Info(context.TODO(), "topology-aware force merge calculation",
 		mlog.Int64("targetSegmentCount", targetCount),
-		mlog.Float64("targetSegmentSize", maxSafeSize),
+		mlog.Int64("targetSegmentSize", targetSize),
 		mlog.Int64("queryNodeCount", queryNodeCount),
 		mlog.Int64("numReplicas", numReplicas),
 		mlog.Int64("numShards", numShards),
 		mlog.Int64("perShardParallelism", perShardParallelism))
-	return maxSafeSize, targetCount
+	return targetSize, targetCount
 }
 
 func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
-	targetSizePerSegment, targetCount := v.calculateTargetSizeCount()
-	groups := adaptiveGroupSegments(v.segments, targetSizePerSegment)
+	if len(v.segments) == 0 {
+		return nil, "force merge trigger"
+	}
 
-	results := make([]CompactionView, 0, len(groups))
-	for _, group := range groups {
-		groupTargetCount := targetCount
-		if len(groups) > 1 {
-			// Once adaptive grouping splits the input, each subgroup needs its
-			// own estimate; the topology-adjusted count applies only to the
-			// unsplit single-group case.
-			groupTargetCount = estimateResultSegmentCount(sumSegmentSize(group), targetSizePerSegment)
-		}
+	targetSize, targetCount := v.calculateTargetSizeCount()
+	threshold := paramtable.Get().DataCoordCfg.CompactionMaxFullSegmentThreshold.GetAsInt()
+
+	var plan []forceMergeTaskPlan
+	strategy := "exact DP"
+	if len(v.segments) <= threshold {
+		plan = exactForceMergePlan(v.segments, targetSize)
+	} else {
+		strategy = "bounded sequential"
+		plan = boundedSequentialForceMergePlan(v.segments, targetSize)
+	}
+
+	mlog.Info(context.TODO(), "planned force merge groups",
+		mlog.Int64("triggerID", v.triggerID),
+		mlog.String("label", v.label.String()),
+		mlog.String("strategy", strategy),
+		mlog.Int64("targetSegmentSize", targetSize),
+		mlog.Int64("wholePoolTargetCount", targetCount),
+		mlog.Int("taskCount", len(plan)),
+		mlog.Int64("plannedOutputCount", totalForceMergePlanOutputs(plan)),
+		mlog.Float64("peakTaskInput", peakForceMergeTaskInput(plan)))
+
+	results := make([]CompactionView, 0, len(plan))
+	for _, task := range plan {
 		results = append(results, &ForceMergeSegmentView{
 			label:              v.label,
-			segments:           group,
+			segments:           v.segments[task.start:task.end],
 			triggerID:          v.triggerID,
 			collectionTTL:      v.collectionTTL,
 			configMaxSize:      v.configMaxSize,
 			expectedTargetSize: v.expectedTargetSize,
-			targetSegmentSize:  targetSizePerSegment,
-			targetSegmentCount: groupTargetCount,
+			targetSegmentSize:  float64(targetSize),
+			targetSegmentCount: task.outputCount,
 			topology:           v.topology,
 		})
 	}
 	return results, "force merge trigger"
 }
 
-// adaptiveGroupSegments automatically selects the best grouping algorithm based on segment count
-// For small segment counts (≤ threshold), use maxFull for optimal full segment count
-// For large segment counts, use larger for better performance
-func adaptiveGroupSegments(segments []*SegmentView, targetSize float64) [][]*SegmentView {
-	if len(segments) == 0 {
-		return nil
-	}
-
-	n := len(segments)
-
-	// Get threshold from config, fallback to default if not available
-	threshold := paramtable.Get().DataCoordCfg.CompactionMaxFullSegmentThreshold.GetAsInt()
-
-	// Use maxFull for small segment counts to maximize full segments
-	// Use larger for large segment counts for O(n) performance
-	if n <= threshold {
-		mlog.Info(context.TODO(), "adaptiveGroupSegments: using maxFullSegmentsGrouping algorithm",
-			mlog.Int("segmentCount", n),
-			mlog.Int("threshold", threshold),
-			mlog.Float64("targetSize", targetSize))
-		return maxFullSegmentsGrouping(segments, targetSize)
-	}
-
-	mlog.Info(context.TODO(), "adaptiveGroupSegments: using largerGroupingSegments algorithm",
-		mlog.Int("segmentCount", n),
-		mlog.Int("threshold", threshold),
-		mlog.Float64("targetSize", targetSize))
-	return largerGroupingSegments(segments, targetSize)
+type forceMergeTaskPlan struct {
+	start              int
+	end                int
+	inputSize          float64
+	outputCount        int64
+	oversizedSingleton bool
 }
 
-// largerGroupingSegments groups segments to minimize number of tasks
-// Strategy: Create larger groups that produce multiple full target-sized segments
-// This approach favors fewer compaction tasks with larger batches
-func largerGroupingSegments(segments []*SegmentView, targetSize float64) [][]*SegmentView {
-	if len(segments) == 0 {
+type forceMergeExactState struct {
+	valid              bool
+	outputCount        int64
+	peakInput          float64
+	previous           int
+	taskInputSize      float64
+	taskOutputCount    int64
+	oversizedSingleton bool
+}
+
+func exactForceMergePlan(
+	segments []*SegmentView,
+	targetSize int64,
+) []forceMergeTaskPlan {
+	n := len(segments)
+	if n == 0 {
 		return nil
 	}
 
-	n := len(segments)
-	// Pre-allocate with estimated capacity to reduce allocations
-	estimatedGroups := max(1, n/10)
-	groups := make([][]*SegmentView, 0, estimatedGroups)
-
-	i := 0
-	for i < n {
-		groupStart := i
+	inputCeiling := forceMergeMultiSegmentInputCeiling(targetSize)
+	// Keep one lexicographically best state per received-order prefix.
+	// Equal scores retain the first boundary visited by these ordered loops.
+	states := make([]forceMergeExactState, n+1)
+	states[0] = forceMergeExactState{valid: true, previous: -1}
+	for end := 1; end <= n; end++ {
 		groupSize := 0.0
+		for start := end - 1; start >= 0; start-- {
+			groupSize += segments[start].Size
+			segmentCount := end - start
+			oversizedSingleton := segmentCount == 1 && groupSize > inputCeiling
+			if segmentCount > 1 && groupSize > inputCeiling {
+				break
+			}
 
-		// Accumulate segments to form multiple target-sized outputs
-		for i < n {
-			groupSize += segments[i].Size
-			i++
+			previous := states[start]
+			if !previous.valid {
+				continue
+			}
 
-			// Check if we should stop
-			if i < n {
-				nextSize := groupSize + segments[i].Size
-				currentFull := int(groupSize / targetSize)
-				nextFull := int(nextSize / targetSize)
+			taskOutputCount := plannedForceMergeOutputCount(groupSize, targetSize)
+			outputCount := previous.outputCount + taskOutputCount
+			peakInput := previous.peakInput
+			if !oversizedSingleton {
+				peakInput = max(peakInput, groupSize)
+			}
 
-				// Stop if we have full segments and next addition won't give another full segment
-				if currentFull > 0 && nextFull == currentFull {
-					currentRemainder := math.Mod(groupSize, targetSize)
-					if currentRemainder < targetSize*defaultToleranceMB {
-						break
-					}
-				}
+			current := states[end]
+			if current.valid && (current.outputCount < outputCount ||
+				(current.outputCount == outputCount && current.peakInput <= peakInput)) {
+				continue
+			}
+			states[end] = forceMergeExactState{
+				valid:              true,
+				outputCount:        outputCount,
+				peakInput:          peakInput,
+				previous:           start,
+				taskInputSize:      groupSize,
+				taskOutputCount:    taskOutputCount,
+				oversizedSingleton: oversizedSingleton,
 			}
 		}
-
-		groups = append(groups, segments[groupStart:i])
 	}
 
-	return groups
+	if !states[n].valid {
+		return nil
+	}
+
+	plan := make([]forceMergeTaskPlan, 0, n)
+	for end := n; end > 0; {
+		state := states[end]
+		plan = append(plan, forceMergeTaskPlan{
+			start:              state.previous,
+			end:                end,
+			inputSize:          state.taskInputSize,
+			outputCount:        state.taskOutputCount,
+			oversizedSingleton: state.oversizedSingleton,
+		})
+		end = state.previous
+	}
+	reverseForceMergePlan(plan)
+	return plan
 }
 
-// maxFullSegmentsGrouping groups segments to maximize number of full target-sized outputs
-// Strategy: Use dynamic programming to find partitioning that produces most full segments
-// This approach minimizes tail segments and achieves best space utilization
-func maxFullSegmentsGrouping(segments []*SegmentView, targetSize float64) [][]*SegmentView {
+func boundedSequentialForceMergePlan(
+	segments []*SegmentView,
+	targetSize int64,
+) []forceMergeTaskPlan {
 	if len(segments) == 0 {
 		return nil
 	}
 
-	n := len(segments)
+	inputCeiling := forceMergeMultiSegmentInputCeiling(targetSize)
+	plan := make([]forceMergeTaskPlan, 0, len(segments))
+	for start := 0; start < len(segments); {
+		end := start + 1
+		groupSize := segments[start].Size
+		if groupSize > inputCeiling {
+			plan = append(plan, forceMergeTaskPlan{
+				start:              start,
+				end:                end,
+				inputSize:          groupSize,
+				outputCount:        plannedForceMergeOutputCount(groupSize, targetSize),
+				oversizedSingleton: true,
+			})
+			start = end
+			continue
+		}
 
-	// Pre-compute prefix sums to avoid repeated summation
-	prefixSum := make([]float64, n+1)
-	for i := 0; i < n; i++ {
-		prefixSum[i+1] = prefixSum[i] + segments[i].Size
-	}
-
-	// dp[i] = best result for segments[0:i]
-	type dpState struct {
-		fullSegments int
-		tailSegments int
-		numGroups    int
-		groupIndices []int
-	}
-
-	dp := make([]dpState, n+1)
-	dp[0] = dpState{fullSegments: 0, tailSegments: 0, numGroups: 0, groupIndices: make([]int, 0, n/10)}
-
-	for i := 1; i <= n; i++ {
-		dp[i] = dpState{fullSegments: -1, tailSegments: math.MaxInt32, numGroups: 0, groupIndices: nil}
-
-		// Try different starting positions for the last group
-		for j := 0; j < i; j++ {
-			// Calculate group size from j to i-1 using prefix sums (O(1) instead of O(n))
-			groupSize := prefixSum[i] - prefixSum[j]
-
-			numFull := int(groupSize / targetSize)
-			remainder := math.Mod(groupSize, targetSize)
-			hasTail := 0
-			if remainder > 0.01 {
-				hasTail = 1
+		for end < len(segments) {
+			nextSize := segments[end].Size
+			if groupSize+nextSize > inputCeiling {
+				break
 			}
 
-			newFull := dp[j].fullSegments + numFull
-			newTails := dp[j].tailSegments + hasTail
-			newGroups := dp[j].numGroups + 1
-
-			// Prioritize: more full segments, then fewer tails, then more groups (for parallelism)
-			isBetter := false
-			if newFull > dp[i].fullSegments {
-				isBetter = true
-			} else if newFull == dp[i].fullSegments && newTails < dp[i].tailSegments {
-				isBetter = true
-			} else if newFull == dp[i].fullSegments && newTails == dp[i].tailSegments && newGroups > dp[i].numGroups {
-				isBetter = true
+			currentFullOutputs := math.Floor(groupSize / float64(targetSize))
+			nextFullOutputs := math.Floor((groupSize + nextSize) / float64(targetSize))
+			if currentFullOutputs > 0 &&
+				math.Mod(groupSize, float64(targetSize)) < forceMergeSizeTolerance*float64(targetSize) &&
+				nextFullOutputs == currentFullOutputs {
+				break
 			}
 
-			if isBetter {
-				// Pre-allocate with exact capacity to avoid reallocation
-				newIndices := make([]int, 0, len(dp[j].groupIndices)+1)
-				newIndices = append(newIndices, dp[j].groupIndices...)
-				newIndices = append(newIndices, j)
-				dp[i] = dpState{
-					fullSegments: newFull,
-					tailSegments: newTails,
-					numGroups:    newGroups,
-					groupIndices: newIndices,
-				}
-			}
+			groupSize += nextSize
+			end++
+		}
+
+		plan = append(plan, forceMergeTaskPlan{
+			start:       start,
+			end:         end,
+			inputSize:   groupSize,
+			outputCount: plannedForceMergeOutputCount(groupSize, targetSize),
+		})
+		start = end
+	}
+	return plan
+}
+
+func plannedForceMergeOutputCount(inputSize float64, targetSize int64) int64 {
+	if inputSize <= 0 || math.IsNaN(inputSize) || targetSize <= 0 {
+		return 1
+	}
+	return max(int64(math.Ceil(inputSize/float64(targetSize))), 1)
+}
+
+func forceMergeMultiSegmentInputCeiling(targetSize int64) float64 {
+	return 3 * float64(targetSize)
+}
+
+func forceMergeEffectiveSize(size float64) int64 {
+	if size < 1 || math.IsNaN(size) {
+		return 1
+	}
+	return int64(size)
+}
+
+func totalForceMergePlanOutputs(plan []forceMergeTaskPlan) int64 {
+	total := int64(0)
+	for _, task := range plan {
+		total += task.outputCount
+	}
+	return total
+}
+
+func peakForceMergeTaskInput(plan []forceMergeTaskPlan) float64 {
+	peak := 0.0
+	for _, task := range plan {
+		if !task.oversizedSingleton {
+			peak = max(peak, task.inputSize)
 		}
 	}
+	return peak
+}
 
-	// Reconstruct groups from indices
-	if dp[n].groupIndices == nil {
-		return [][]*SegmentView{segments}
+func reverseForceMergePlan(plan []forceMergeTaskPlan) {
+	for left, right := 0, len(plan)-1; left < right; left, right = left+1, right-1 {
+		plan[left], plan[right] = plan[right], plan[left]
 	}
-
-	groupStarts := append(dp[n].groupIndices, n)
-	groups := make([][]*SegmentView, 0, len(groupStarts))
-	for i := 0; i < len(groupStarts); i++ {
-		start := groupStarts[i]
-		end := n
-		if i+1 < len(groupStarts) {
-			end = groupStarts[i+1]
-		}
-		if start < end {
-			groups = append(groups, segments[start:end])
-		}
-	}
-
-	return groups
 }
 
 func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
