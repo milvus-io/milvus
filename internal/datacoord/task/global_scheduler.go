@@ -36,6 +36,7 @@ const NullNodeID = -1
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
+	GetPendingTaskCount() int
 
 	Start()
 	Stop()
@@ -121,6 +122,10 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
 	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
+}
+
+func (s *globalTaskScheduler) GetPendingTaskCount() int {
+	return s.pendingTasks.TaskCount()
 }
 
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {

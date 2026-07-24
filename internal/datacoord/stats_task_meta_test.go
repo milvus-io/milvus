@@ -265,6 +265,12 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		})
 	})
 
+	s.Run("HasStatsTask", func() {
+		s.False(m.HasStatsTask(100, indexpb.StatsSubJob_Sort))
+		s.False(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_BM25Job))
+		s.True(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_Sort))
+	})
+
 	s.Run("DropStatsTask", func() {
 		s.Run("failed case", func() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
