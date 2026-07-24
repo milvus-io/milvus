@@ -90,6 +90,9 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 			arrayValues[i] = parsedValue
 		}
 		elementType = schemapb.DataType_JSON
+	case nil:
+		arrayValues = make([]*planpb.GenericValue, 0)
+		elementType = schemapb.DataType_None
 	default:
 		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type: %v", templateValue.GetData())
 	}

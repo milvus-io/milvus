@@ -141,7 +141,23 @@ func TestGetLengthFromTemplateValue(t *testing.T) {
 			},
 		}
 
-		assert.Equal(t, -1, getLengthFromTemplateValue(tv))
+		assert.Equal(t, 0, getLengthFromTemplateValue(tv))
+	})
+
+	t.Run("nested_array", func(t *testing.T) {
+		tv := &schemapb.TemplateValue{
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_ArrayData{
+						ArrayData: &schemapb.TemplateArrayValueArray{
+							Data: []*schemapb.TemplateArrayValue{{}, {}},
+						},
+					},
+				},
+			},
+		}
+
+		assert.Equal(t, 2, getLengthFromTemplateValue(tv))
 	})
 
 	t.Run("primitive", func(t *testing.T) {
