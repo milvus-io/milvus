@@ -288,6 +288,7 @@ class SegmentExpr : public Expr {
         auto& schema = segment_->get_schema();
         auto& field_meta = schema[field_id_];
         field_type_ = field_meta.get_data_type();
+        is_nullable_ = field_meta.is_nullable();
 
         if (schema.get_primary_field_id().has_value() &&
             schema.get_primary_field_id().value() == field_id_ &&
@@ -315,6 +316,18 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    // A null-rejecting consumer (top-level filter, or AND/OR above -- see
+    // Expr::MarkNullRejecting) folds a NULL row into the excluded set and never
+    // distinguishes NULL from FALSE, so result validity is never observed. When
+    // our output feeds such a consumer, a chunk skipped by SkipIndex needs no
+    // validity even for a nullable column, which lets it skip the validity
+    // fetch (and thus materializing the row group) entirely. As a leaf we only
+    // capture the mark; we do not propagate it.
+    void
+    MarkNullRejecting() override {
+        null_rejecting_ = true;
     }
 
     // Pin the scalar index cell. Called by DetermineExecPath() only after the
@@ -1614,34 +1627,48 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
-                // Chunk is skipped by SkipIndex.
-                // We still need to:
-                // 1. Apply valid_data to handle nullable fields
+                // Chunk is skipped by SkipIndex: it cannot contain a matching
+                // row, so its whole result is all-false. We must still:
+                // 1. For nullable columns whose validity is observed, apply
+                //    valid_data so valid_res is nulled where the row is null
+                //    (three-valued logic / NOT correctness).
                 // 2. Call func with nullptr to update internal cursors
-                //    (e.g., processed_cursor for bitmap_input indexing)
-                const bool* valid_data;
-                if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json> ||
-                              std::is_same_v<T, ArrayView> ||
-                              std::is_same_v<T, VectorArrayView>) {
-                    auto pw = segment_->get_batch_views<T>(
-                        op_ctx_, field_id_, i, data_pos, size);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   size);
-                } else {
-                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
-                    auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
+                //    (e.g., processed_cursor for bitmap_input indexing).
+                // For a non-nullable column valid_data would be null and
+                // ApplyValidData a no-op, so we skip pinning/materializing the
+                // chunk entirely -- this is what lets a skipped cell avoid its
+                // page-in / decode (real IO saving, paired with the skip-aware
+                // prefetch). When the consumer is null-rejecting (no NOT above),
+                // result validity is never observed either -- min/max already
+                // excluded every non-null row and null rows are folded into the
+                // excluded set -- so a nullable chunk needs no validity here and
+                // we skip the fetch too.
+                if (is_nullable_ && !null_rejecting_) {
+                    const bool* valid_data;
+                    if constexpr (std::is_same_v<T, std::string_view> ||
+                                  std::is_same_v<T, Json> ||
+                                  std::is_same_v<T, ArrayView> ||
+                                  std::is_same_v<T, VectorArrayView>) {
+                        auto pw = segment_->get_batch_views<T>(
+                            op_ctx_, field_id_, i, data_pos, size);
+                        valid_data = pw.get().second.data();
+                        ApplyValidData(valid_data,
+                                       res + processed_size,
+                                       valid_res + processed_size,
+                                       size);
+                    } else {
+                        auto pw =
+                            segment_->chunk_data<T>(op_ctx_, field_id_, i);
+                        auto chunk = pw.get();
+                        valid_data = chunk.valid_data();
+                        if (valid_data != nullptr) {
+                            valid_data += data_pos;
+                        }
+                        ApplyValidData(valid_data,
+                                       res + processed_size,
+                                       valid_res + processed_size,
+                                       size);
                     }
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   size);
                 }
                 // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
@@ -2580,6 +2607,14 @@ class SegmentExpr : public Expr {
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
     bool is_pk_field_{false};
+    // Whether the column carries a validity (null) bitmap. When false, a chunk
+    // skipped by SkipIndex needs no per-row validity work, so the multi-chunk
+    // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
+    bool is_nullable_{false};
+    // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
+    // this expr's output, so result validity (valid_res) is never observed and
+    // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
+    bool null_rejecting_{false};
     DataType pk_type_;
     int64_t batch_size_;
 
