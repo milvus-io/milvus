@@ -75,4 +75,17 @@ class PhyRescoresNode : public Operator {
     const proto::plan::ScoreOption* option_;
     bool is_finished_{false};
 };
+
+// Evaluate a boost filter whose expression cannot consume offset input
+// (text match, GIS) over the whole segment. Each ExprSet::Eval call only
+// advances the expression by one internal batch
+// (DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE rows), while the topk offsets being
+// scored may reference any row of the segment -- accumulate every batch so
+// the returned bitset covers all active rows. UNKNOWN (NULL) rows are folded
+// to FALSE so they never receive a boost.
+TargetBitmap
+EvalNonNativeBoostFilterAllBatches(ExecContext* exec_context,
+                                   ExprSet* expr_set,
+                                   EvalCtx& eval_ctx,
+                                   const expr::TypedExprPtr& filter);
 }  // namespace milvus::exec

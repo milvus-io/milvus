@@ -10,9 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include "common/Geometry.h"
+#include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
+#include "exec/operator/RescoresNode.h"
+#include "expr/ITypeExpr.h"
+#include "geos_c.h"
+#include "pb/plan.pb.h"
 #include "query/Plan.h"
+#include "rescores/Scorer.h"
 
 #include "segcore/reduce_c.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -177,5 +187,159 @@ TEST(Rescorer, Normal) {
                        search_result->distances_[i],
                        search_result_same_seed->distances_[i]);
         }
+    }
+}
+// Test: TargetBitmap batch_score with out-of-bounds offsets (should NOT
+// crash). Both WeightScorer and RandomScorer indexed bitmap[offsets[i]]
+// without a bounds check, reading past the end of the bitset whenever the
+// filter bitmap does not cover the whole segment.
+TEST(WeightScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto raw_data = DataGen(schema, 8);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    expr::TypedExprPtr filter = nullptr;
+    rescores::WeightScorer scorer(filter, 2.0F);
+
+    TargetBitmap bitmap(50);
+    bitmap.set(10);
+    bitmap.set(40);
+
+    // Offsets where some are OUT OF BOUNDS (>= 50), e.g. when the filter
+    // bitmap does not cover the whole segment.
+    FixedVector<int32_t> offsets = {10, 40, 60, 100, 200};
+    std::vector<std::optional<float>> boost_scores(offsets.size(),
+                                                   std::nullopt);
+
+    ASSERT_NO_THROW(scorer.batch_score(nullptr,
+                                       segment.get(),
+                                       proto::plan::FunctionModeSum,
+                                       offsets,
+                                       bitmap,
+                                       boost_scores));
+
+    // In-bounds matched offsets should be scored.
+    EXPECT_TRUE(boost_scores[0].has_value());
+    EXPECT_TRUE(boost_scores[1].has_value());
+
+    // Out-of-bounds offsets should NOT have scores (safely skipped).
+    EXPECT_FALSE(boost_scores[2].has_value());
+    EXPECT_FALSE(boost_scores[3].has_value());
+    EXPECT_FALSE(boost_scores[4].has_value());
+}
+
+TEST(RandomScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
+    // The segment is only consulted for get_segment_id() on the
+    // no-seed-field path of random_score.
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto raw_data = DataGen(schema, 8);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    expr::TypedExprPtr filter = nullptr;
+    ProtoParams params;
+    auto* seed = params.Add();
+    seed->set_key("seed");
+    seed->set_value("42");
+    rescores::RandomScorer scorer(filter, 1.0F, params);
+
+    TargetBitmap bitmap(50);
+    bitmap.set(10);
+    bitmap.set(40);
+
+    FixedVector<int32_t> offsets = {10, 40, 60, 100, 200};
+    std::vector<std::optional<float>> boost_scores(offsets.size(),
+                                                   std::nullopt);
+
+    ASSERT_NO_THROW(scorer.batch_score(nullptr,
+                                       segment.get(),
+                                       proto::plan::FunctionModeSum,
+                                       offsets,
+                                       bitmap,
+                                       boost_scores));
+
+    // In-bounds matched offsets should be scored.
+    EXPECT_TRUE(boost_scores[0].has_value());
+    EXPECT_TRUE(boost_scores[1].has_value());
+
+    // Out-of-bounds offsets should NOT have scores (safely skipped).
+    EXPECT_FALSE(boost_scores[2].has_value());
+    EXPECT_FALSE(boost_scores[3].has_value());
+    EXPECT_FALSE(boost_scores[4].has_value());
+}
+
+// Test: a boost filter whose expression does not support offset input (GIS,
+// text match) is evaluated batch by batch over the whole segment. The
+// resulting bitset must cover every active row, not just the first
+// expression batch (DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192 rows),
+// otherwise offsets beyond the first batch silently lose their boost (or
+// read out of bounds).
+TEST(RescoresNode, NonNativeBoostFilterBitsetCoversAllBatches) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto raw_data = DataGen(schema, N);
+    proto::schema::FieldData* geo_field_data = nullptr;
+    for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == geo_fid.get()) {
+            geo_field_data = &fd;
+            break;
+        }
+    }
+    ASSERT_NE(geo_field_data, nullptr);
+    // Even rows sit inside the query polygon, odd rows far outside.
+    auto* geo_col = geo_field_data->mutable_scalars()->mutable_geometry_data();
+    geo_col->clear_data();
+    auto ctx = GEOS_init_r();
+    for (int64_t i = 0; i < N; i++) {
+        const char* wkt =
+            (i % 2 == 0) ? "POINT (0.5 0.5)" : "POINT (100.0 100.0)";
+        Geometry geom(ctx, wkt);
+        geo_col->add_data(geom.to_wkb_string());
+    }
+    GEOS_finish_r(ctx);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    expr::TypedExprPtr filter = std::make_shared<expr::GISFunctionFilterExpr>(
+        expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Within,
+        "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))");
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_rescore_gis_multi_batch", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    std::vector<expr::TypedExprPtr> filters;
+    filters.emplace_back(filter);
+    auto expr_set = std::make_unique<exec::ExprSet>(filters, &exec_context);
+    exec::EvalCtx eval_ctx(&exec_context, expr_set.get());
+
+    // GIS must take the non-native fallback.
+    ASSERT_FALSE(expr_set->exprs()[0]->SupportOffsetInput());
+
+    auto bitset = exec::EvalNonNativeBoostFilterAllBatches(
+        &exec_context, expr_set.get(), eval_ctx, filter);
+
+    // The bitset must cover every active row, not just the first batch.
+    ASSERT_EQ(bitset.size(), N);
+    for (int64_t offset :
+         {int64_t(0), int64_t(1), int64_t(9000), int64_t(9001), N - 2, N - 1}) {
+        bool expected = (offset % 2 == 0);
+        ASSERT_EQ(bitset[offset], expected)
+            << "wrong filter bit at offset " << offset;
     }
 }
