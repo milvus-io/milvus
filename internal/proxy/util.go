@@ -1440,6 +1440,22 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
+// GetIdempotencyKeyFromContext extracts the client-supplied idempotency key
+// from the incoming gRPC metadata (util.HeaderIdempotencyKey). It returns ""
+// when no key is present; when the header carries multiple values the last one
+// wins, matching the client-side overwrite semantics.
+func GetIdempotencyKeyFromContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	values := md.Get(util.HeaderIdempotencyKey)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[len(values)-1]
+}
+
 // GetCurDBNameFromRequestOrContext returns the database a request actually
 // operates on. It prefers the DbName carried in the request body (which is
 // what downstream handlers execute against, after DatabaseInterceptor has

@@ -7607,6 +7607,14 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// idempotent write configuration.
+	IdempotencyEnabled             ParamItem `refreshable:"false"`
+	IdempotencyWindowTTL           ParamItem `refreshable:"false"`
+	IdempotencyMinEntriesPerWindow ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow   ParamItem `refreshable:"false"`
+	IdempotencySnapshotInterval    ParamItem `refreshable:"false"`
+	IdempotencyMaxKeyLength        ParamItem `refreshable:"false"`
+
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
@@ -8030,6 +8038,66 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.IdempotencyEnabled = ParamItem{
+		Key:          "streaming.idempotency.enabled",
+		Version:      "3.0.0",
+		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
+		DefaultValue: "false",
+		FallbackKeys: []string{"idempotency.enabled"},
+		Export:       false,
+	}
+	p.IdempotencyEnabled.Init(base.mgr)
+
+	p.IdempotencyWindowTTL = ParamItem{
+		Key:          "streaming.idempotency.windowTTL",
+		Version:      "3.0.0",
+		Doc:          `The retention TTL target for completed idempotency key window entries. For entries still retained in memory, duplicate visibility does not extend past this TTL; maxBytesPerWindow is a hard cap and may evict entries before TTL.`,
+		DefaultValue: "10m",
+		FallbackKeys: []string{"idempotency.windowTTL"},
+		Export:       false,
+	}
+	p.IdempotencyWindowTTL.Init(base.mgr)
+
+	p.IdempotencyMinEntriesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.minEntriesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The minimum completed idempotency key entries retained for each vchannel window after TTL eviction. It does not extend duplicate visibility past windowTTL and can be overridden by the hard maxBytesPerWindow cap.`,
+		DefaultValue: "1000",
+		FallbackKeys: []string{"idempotency.minEntriesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMinEntriesPerWindow.Init(base.mgr)
+
+	p.IdempotencyMaxBytesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.maxBytesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The hard maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Oldest entries by commit timetick are evicted first, even before windowTTL; this hard cap overrides minEntriesPerWindow, since an entry-count floor cannot bound memory. 0 disables the byte cap.`,
+		DefaultValue: "16777216",
+		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
+
+	p.IdempotencySnapshotInterval = ParamItem{
+		Key:          "streaming.idempotency.snapshotInterval",
+		Version:      "3.0.0",
+		Doc:          `The interval for persisting idempotency write commit checkpoints. It is scheduled independently from walRecovery.persistInterval.`,
+		DefaultValue: "10s",
+		FallbackKeys: []string{"idempotency.snapshotInterval"},
+		Export:       false,
+	}
+	p.IdempotencySnapshotInterval.Init(base.mgr)
+
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:          "streaming.idempotency.maxKeyLength",
+		Version:      "3.0.0",
+		Doc:          `The maximum accepted idempotency key string length in bytes. Explicit idempotency keys longer than this value are rejected.`,
+		DefaultValue: "1024",
+		FallbackKeys: []string{"idempotency.maxKeyLength"},
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

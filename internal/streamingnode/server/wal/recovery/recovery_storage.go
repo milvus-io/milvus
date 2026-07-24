@@ -27,6 +27,20 @@ type RecoverySnapshot struct {
 	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
 	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
 	SalvageCheckpoint *utility.ReplicateCheckpoint
+
+	// IdempotencyWindows contains recovered in-memory DID windows used to initialize
+	// the idempotency interceptor. It is rebuilt from pchannelWindow store during recovery
+	// and is not persisted to etcd.
+	IdempotencyWindows map[string]*streamingpb.WindowSnapshot
+	// pchannelWindowRecords are pending physical window records grouped by vchannel.
+	// They are written to pchannelWindowChunk before advancing the pchannel consume checkpoint.
+	pchannelWindowRecords map[string][]committedWriteRecord
+	// vchannelWindowMetaUpdates are pending logical view metadata updates.
+	// They are persisted before PChannelWindowMeta uses their GC boundary.
+	vchannelWindowMetaUpdates map[string]*idempotencyWindowMetaUpdate
+	// pchannelWindowSourceCheckpoint is the source pchannel checkpoint covered by
+	// the latest pchannelWindowChunk. It is persisted before the pchannel consume checkpoint.
+	pchannelWindowSourceCheckpoint *WALCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.

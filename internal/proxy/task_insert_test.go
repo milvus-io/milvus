@@ -2,10 +2,13 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -21,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t *testing.T) {
@@ -67,7 +71,8 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 		},
 	}
 
-	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0)
+	// Idempotency disabled: no header decorator, so no key and no insert result.
+	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
@@ -75,6 +80,245 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 	header := msg.Header()
 	assert.NotNil(t, header.SchemaVersion)
 	assert.Equal(t, int32(0), header.GetSchemaVersion())
+	assert.Empty(t, header.GetIdempotencyKey())
+	_, ok := message.IdempotentInsertResultFromInsertHeader(header)
+	assert.False(t, ok)
+
+	// Idempotency enabled: the proxy decorator single-sources both the idempotency
+	// key and the per-write-unit insert result onto the insert header.
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
+	msgs, err = repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0, it.idempotentInsertHeaderDecorator())
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+
+	msg = message.MustAsMutableInsertMessageV1(msgs[0])
+	header = msg.Header()
+	assert.Equal(t, "key-1", header.GetIdempotencyKey())
+	extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
+	assert.True(t, ok)
+	assert.Equal(t, []uint32{0}, extra.GetRowOffsets())
+	assert.Equal(t, []int64{1}, extra.GetIds().GetIntId().GetData())
+}
+
+func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *testing.T) {
+	paramtable.Init()
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
+
+	insertMsg, result := newIdempotentRepackInsertMsg(3)
+	payloads := insertMsg.GetFieldsData()[2].GetScalars().GetStringData().GetData()
+	for i := range payloads {
+		payloads[i] = strings.Repeat("x", 512)
+	}
+	idxComputer := typeutil.NewFieldDataIdxComputer(insertMsg.GetFieldsData())
+	fieldIdxs := idxComputer.Compute(0)
+	rowSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), 0, fieldIdxs...)
+	require.NoError(t, err)
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(rowSize*2)))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
+
+	msgs, err := repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(msgs), 1)
+
+	assert.Equal(t, []uint32{0, 1, 2}, collectIdempotentRepackOffsets(t, msgs, "ch", "key-split"))
+}
+
+func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessage(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
+
+	insertMsg, result := newIdempotentRepackInsertMsg(1)
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+
+	bodyOnly, err := repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, bodyOnly, 1)
+
+	withIdempotency, err := repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.NoError(t, err)
+	require.Len(t, withIdempotency, 1)
+	require.Greater(t, withIdempotency[0].EstimateSize(), bodyOnly[0].EstimateSize())
+	require.Greater(t, withIdempotency[0].EstimateSize()-1, bodyOnly[0].EstimateSize())
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(withIdempotency[0].EstimateSize()-1)))
+	_, err = repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), "after adding streaming headers")
+}
+
+func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessagesShareKey(t *testing.T) {
+	paramtable.Init()
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.EXPECT().GetPartitions(mock.Anything, "db", "coll").Return(map[string]int64{
+		"partition_0": 300,
+		"partition_1": 301,
+	}, nil)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
+
+	insertMsg, result := newIdempotentRepackInsertMsg(16)
+	partitionKeys := insertMsg.GetFieldsData()[1]
+	hashValues, err := typeutil.HashKey2Partitions(partitionKeys, []string{"partition_0", "partition_1"})
+	require.NoError(t, err)
+	require.Contains(t, hashValues, uint32(0))
+	require.Contains(t, hashValues, uint32(1))
+
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 3, Name: "payload", DataType: schemapb.DataType_VarChar},
+		},
+	}
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-partition", result: result}
+
+	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(msgs), 1)
+
+	partitionIDs := typeutil.NewSet[int64]()
+	for _, raw := range msgs {
+		header := message.MustAsMutableInsertMessageV1(raw).Header()
+		require.Len(t, header.GetPartitions(), 1)
+		partitionIDs.Insert(header.GetPartitions()[0].GetPartitionId())
+	}
+	assert.ElementsMatch(t, []int64{300, 301}, partitionIDs.Collect())
+	assert.ElementsMatch(t, []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+		collectIdempotentRepackOffsets(t, msgs, "ch", "key-partition"))
+}
+
+func newIdempotentRepackInsertMsg(rows int) (*msgstream.InsertMsg, *milvuspb.MutationResult) {
+	pks := make([]int64, 0, rows)
+	partitionKeys := make([]int64, 0, rows)
+	payloads := make([]string, 0, rows)
+	rowIDs := make([]int64, 0, rows)
+	timestamps := make([]uint64, 0, rows)
+	for i := 0; i < rows; i++ {
+		pks = append(pks, int64(i+1))
+		partitionKeys = append(partitionKeys, int64(i))
+		payloads = append(payloads, "payload")
+		rowIDs = append(rowIDs, int64(1000+i))
+		timestamps = append(timestamps, uint64(2000+i))
+	}
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{Ctx: context.Background()},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, SourceID: 1},
+			CollectionID:   100,
+			DbName:         "db",
+			CollectionName: "coll",
+			PartitionName:  "_default",
+			NumRows:        uint64(rows),
+			Version:        msgpb.InsertDataVersion_ColumnBased,
+			FieldsData: []*schemapb.FieldData{
+				int64FieldData("pk", 1, pks),
+				int64FieldData("part", 2, partitionKeys),
+				stringFieldData(3, "payload", payloads),
+			},
+			RowIDs:     rowIDs,
+			Timestamps: timestamps,
+		},
+	}
+	result := &milvuspb.MutationResult{
+		IDs: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}},
+		},
+	}
+	return insertMsg, result
+}
+
+func stringFieldData(fieldID int64, name string, values []string) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: name,
+		FieldId:   fieldID,
+		Type:      schemapb.DataType_VarChar,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: values},
+				},
+			},
+		},
+	}
+}
+
+func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage, vchannel string, key string) []uint32 {
+	t.Helper()
+	offsets := make([]uint32, 0)
+	for _, raw := range msgs {
+		require.Equal(t, vchannel, raw.VChannel())
+		msg := message.MustAsMutableInsertMessageV1(raw)
+		header := msg.Header()
+		require.Equal(t, key, header.GetIdempotencyKey())
+		extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
+		require.True(t, ok)
+		body := msg.MustBody()
+		require.Equal(t, body.GetNumRows(), uint64(len(extra.GetRowOffsets())))
+		require.Equal(t, body.GetNumRows(), uint64(len(extra.GetIds().GetIntId().GetData())))
+		offsets = append(offsets, extra.GetRowOffsets()...)
+	}
+	return offsets
 }
 
 func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {

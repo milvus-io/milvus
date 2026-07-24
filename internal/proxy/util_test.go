@@ -1079,6 +1079,24 @@ func TestGetCurDBNameFromContext(t *testing.T) {
 	assert.Equal(t, dbNameValue, dbName)
 }
 
+func TestGetIdempotencyKeyFromContext(t *testing.T) {
+	assert.Empty(t, GetIdempotencyKeyFromContext(context.Background()))
+
+	emptyCtx := metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{}))
+	assert.Empty(t, GetIdempotencyKeyFromContext(emptyCtx))
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{
+		util.HeaderIdempotencyKey: "key-1",
+	}))
+	assert.Equal(t, "key-1", GetIdempotencyKeyFromContext(ctx))
+
+	// multiple values: the last one wins, matching client overwrite semantics
+	md := metadata.New(map[string]string{})
+	md.Append(util.HeaderIdempotencyKey, "key-1", "key-2")
+	ctx = metadata.NewIncomingContext(context.Background(), md)
+	assert.Equal(t, "key-2", GetIdempotencyKeyFromContext(ctx))
+}
+
 func TestGetRole(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

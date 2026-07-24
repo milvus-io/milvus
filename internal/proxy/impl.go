@@ -2474,6 +2474,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		idAllocator:     node.rowIDAllocator,
 		chMgr:           node.chMgr,
 		schemaTimestamp: request.SchemaTimestamp,
+		idempotencyKey:  GetIdempotencyKeyFromContext(ctx),
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {

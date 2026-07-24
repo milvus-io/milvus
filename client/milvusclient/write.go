@@ -21,12 +21,34 @@ import (
 	"math"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
+
+// withIdempotencyKey derives a child context that carries the idempotency key
+// to the server via gRPC metadata (the "idempotency-key" header). Client.Insert
+// applies it only for a non-empty option-level key: the option then overrides
+// any existing outgoing metadata for this call, while callers that set the
+// header directly on ctx remain compatible when no option key is provided.
+func withIdempotencyKey(ctx context.Context, key string) context.Context {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		md = metadata.New(nil)
+	} else {
+		md = md.Copy()
+	}
+	if key == "" {
+		md.Delete(idempotencyKeyHeader)
+	} else {
+		md.Set(idempotencyKeyHeader, key)
+	}
+	return metadata.NewOutgoingContext(ctx, md)
+}
 
 type InsertResult struct {
 	InsertCount int64
@@ -37,6 +59,14 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 	startTime := time.Now()
 	collectionName := option.CollectionName()
 	result := InsertResult{}
+	// Scope any non-empty option-level idempotency key onto a per-call child
+	// context. With no option key, preserve any existing outgoing metadata so
+	// callers that set the header directly remain compatible.
+	if keyed, ok := option.(interface{ IdempotencyKey() string }); ok {
+		if key := keyed.IdempotencyKey(); key != "" {
+			ctx = withIdempotencyKey(ctx, key)
+		}
+	}
 	err := c.retryIfSchemaError(ctx, collectionName, func(ctx context.Context) (uint64, error) {
 		collection, err := c.getCollection(ctx, option.CollectionName())
 		if err != nil {
@@ -112,6 +142,11 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 		}
 		req, err := option.UpsertRequest(collection)
 		if err != nil {
+			// Only the idempotency-key-on-Upsert rejection short-circuits; other
+			// parameter errors fall through to the schema-mismatch retry as before.
+			if errors.Is(err, errIdempotencyKeyUnsupportedForDML) {
+				return collection.UpdateTimestamp, err
+			}
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}

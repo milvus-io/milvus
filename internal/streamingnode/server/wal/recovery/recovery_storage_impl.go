@@ -42,6 +42,19 @@ func RecoverRecoveryStorage(
 		rs.Logger().Warn(ctx, "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
+	// Recover the idempotency window cache before WAL replay. The chunk store is
+	// the source of truth when a chunk write succeeded but catalog metadata was
+	// not advanced before crash. With idempotency disabled recoverWindows only
+	// drops a stale leftover store; corruption of REFERENCED window state fails
+	// the WAL open (the WAL may already be truncated past the store's coverage —
+	// see wrapWindowRecoveryError), while orphan-chunk corruption self-heals. It
+	// returns the (possibly rewound) checkpoint to resume consuming from.
+	rewoundCheckpoint, err := rs.windowManager.recoverWindows(ctx, recoveryStreamBuilder.Channel().Name, rs.checkpoint, rs.vchannels)
+	if err != nil {
+		rs.Logger().Warn(ctx, "recovery storage failed", mlog.Err(err))
+		return nil, nil, err
+	}
+	rs.checkpoint = rewoundCheckpoint
 	// recover the state from wal and start the background task to persist the state.
 	snapshot, err := rs.recoverFromStream(ctx, recoveryStreamBuilder, lastTimeTickMessage)
 	if err != nil {
@@ -50,20 +63,25 @@ func RecoverRecoveryStorage(
 	}
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
-	rs.SetLogger(resource.Resource().Logger().With(
+	logger := resource.Resource().Logger().With(
 		mlog.Int64("nodeID", paramtable.GetNodeID()),
 		mlog.FieldComponent(componentRecoveryStorage),
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
-		mlog.String("state", recoveryStorageStateWorking)))
+		mlog.String("state", recoveryStorageStateWorking))
+	rs.SetLogger(logger)
+	rs.windowManager.SetLogger(logger)
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
+	rs.windowManager.setNormalMode()
 	go rs.backgroundTask()
+	//nolint:gosec // G118: the window background task is a WAL-lifetime goroutine; it must outlive the recovery request context.
+	go rs.windowManager.windowBackgroundTask()
 	return rs, snapshot, nil
 }
 
 // newRecoveryStorage creates a new recovery storage.
 func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *recoveryStorageImpl {
 	cfg := newConfig()
-	return &recoveryStorageImpl{
+	rs := &recoveryStorageImpl{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		cfg:                    cfg,
 		mu:                     sync.Mutex{},
@@ -75,6 +93,12 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
 	}
+	rs.windowManager = newWindowManager(channel.Name, channel.Term, cfg, rs.metrics, cp, windowEvictionConfig{
+		windowTTL:  cfg.idempotencyWindowTTL,
+		maxBytes:   cfg.idempotencyMaxBytes,
+		minEntries: cfg.idempotencyMinEntries,
+	})
+	return rs
 }
 
 // recoveryStorageImpl is a component that manages the recovery info for the streaming service.
@@ -88,14 +112,15 @@ type recoveryStorageImpl struct {
 	channel                types.PChannelInfo
 	segments               map[int64]*segmentRecoveryInfo
 	vchannels              map[string]*vchannelRecoveryInfo
+	windowManager          *windowManager
 	checkpoint             *WALCheckpoint
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
-	persistNotifier        chan struct{}
-	gracefulClosed         bool
-	truncator              walimpls.WALImpls
-	metrics                *recoveryMetrics
-	pendingPersistSnapshot *RecoverySnapshot
+	persistNotifier                chan struct{}
+	gracefulClosed                 bool
+	truncator                      walimpls.WALImpls
+	metrics                        *recoveryMetrics
+	pendingRecoveryPersistSnapshot *RecoverySnapshot
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -161,12 +186,22 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// observeMessage mutates window state that the window background task also
+	// touches, so hold windowManager.mu for the whole message: the per-message
+	// window updates stay atomic as a group and mutually exclusive with window
+	// persistence. The lock order is always rs.mu -> windowManager.mu.
+	r.windowManager.mu.Lock()
+	defer r.windowManager.mu.Unlock()
 	r.observeMessage(ctx, msg)
 	return nil
 }
 
 // Close closes the recovery storage and wait the background task stop.
 func (r *recoveryStorageImpl) Close() {
+	if r.windowManager != nil {
+		r.windowManager.windowBackgroundTaskNotifier.Cancel()
+		r.windowManager.windowBackgroundTaskNotifier.BlockUntilFinish()
+	}
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
 	r.metrics.Close()
@@ -185,7 +220,11 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
+	return r.consumeDirtySnapshotLocked()
+}
+
+func (r *recoveryStorageImpl) consumeDirtySnapshotLocked() *RecoverySnapshot {
+	if !r.hasDirtyRecoveryStateUnsafe() {
 		return nil
 	}
 
@@ -204,6 +243,9 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot()
 		if shouldBeRemoved {
 			delete(r.vchannels, vchannel.meta.Vchannel)
+			// The vchannel is fully reclaimed; drop its idempotency window too so
+			// m.windows does not grow without bound under create/drop churn.
+			r.windowManager.removeIdempotencyWindow(vchannel.meta.Vchannel)
 		}
 		if dirtySnapshot != nil {
 			vchannels[vchannel.meta.Vchannel] = dirtySnapshot
@@ -223,6 +265,11 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	}
 }
 
+func (r *recoveryStorageImpl) hasDirtyRecoveryStateUnsafe() bool {
+	return r.dirtyCounter > 0 || r.pendingSalvageCheckpoint != nil ||
+		r.windowManager.canPersistConsumeCheckpoint(r.checkpoint, r.getFlusherCheckpointUnsafe())
+}
+
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
@@ -236,8 +283,11 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 		return
 	}
 	r.handleMessage(ctx, msg)
+	r.windowManager.advanceIdempotencyWindowCheckpoints(r.checkpoint)
+	r.windowManager.observeMessage(msg)
 
 	r.updateCheckpoint(ctx, msg)
+	r.windowManager.advancePChannelWindowSnapshotCheckpoint(r.checkpoint)
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
 	if !msg.IsPersisted() {
@@ -514,6 +564,9 @@ func (r *recoveryStorageImpl) handleCreateCollection(ctx context.Context, msg me
 		return
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateCollectionMessage(msg)
+	// The vchannel just became active; create its idempotency window here rather
+	// than rescanning every active vchannel on each observed message.
+	r.windowManager.ensureIdempotencyWindow(msg.VChannel(), r.checkpoint)
 	r.Logger().Info(ctx, "create collection", mlog.FieldMessage(msg))
 }
 
@@ -669,7 +722,10 @@ func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context
 func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.getFlusherCheckpointUnsafe()
+}
 
+func (r *recoveryStorageImpl) getFlusherCheckpointUnsafe() *WALCheckpoint {
 	var minimumCheckpoint *WALCheckpoint
 	for _, vchannel := range r.vchannels {
 		if vchannel.GetFlushCheckpoint() == nil {

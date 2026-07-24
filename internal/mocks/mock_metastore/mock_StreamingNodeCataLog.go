@@ -83,6 +83,65 @@ func (_c *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetPChannelWindowMeta provides a mock function with given fields: ctx, pchannelName
+func (_m *MockStreamingNodeCataLog) GetPChannelWindowMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelWindowMeta, error) {
+	ret := _m.Called(ctx, pchannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPChannelWindowMeta")
+	}
+
+	var r0 *streamingpb.PChannelWindowMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*streamingpb.PChannelWindowMeta, error)); ok {
+		return rf(ctx, pchannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *streamingpb.PChannelWindowMeta); ok {
+		r0 = rf(ctx, pchannelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.PChannelWindowMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pchannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_GetPChannelWindowMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPChannelWindowMeta'
+type MockStreamingNodeCataLog_GetPChannelWindowMeta_Call struct {
+	*mock.Call
+}
+
+// GetPChannelWindowMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) GetPChannelWindowMeta(ctx interface{}, pchannelName interface{}) *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call {
+	return &MockStreamingNodeCataLog_GetPChannelWindowMeta_Call{Call: _e.mock.On("GetPChannelWindowMeta", ctx, pchannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call) Run(run func(ctx context.Context, pchannelName string)) *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call) Return(_a0 *streamingpb.PChannelWindowMeta, _a1 error) *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call) RunAndReturn(run func(context.Context, string) (*streamingpb.PChannelWindowMeta, error)) *MockStreamingNodeCataLog_GetPChannelWindowMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, pChannelName
 func (_m *MockStreamingNodeCataLog) GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, pChannelName)
@@ -260,6 +319,162 @@ func (_c *MockStreamingNodeCataLog_ListVChannel_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// ListVChannelWindowMetas provides a mock function with given fields: ctx, pchannelName, viewType
+func (_m *MockStreamingNodeCataLog) ListVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
+	ret := _m.Called(ctx, pchannelName, viewType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListVChannelWindowMetas")
+	}
+
+	var r0 []*streamingpb.VChannelWindowMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) ([]*streamingpb.VChannelWindowMeta, error)); ok {
+		return rf(ctx, pchannelName, viewType)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) []*streamingpb.VChannelWindowMeta); ok {
+		r0 = rf(ctx, pchannelName, viewType)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*streamingpb.VChannelWindowMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, pchannelName, viewType)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_ListVChannelWindowMetas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListVChannelWindowMetas'
+type MockStreamingNodeCataLog_ListVChannelWindowMetas_Call struct {
+	*mock.Call
+}
+
+// ListVChannelWindowMetas is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+//   - viewType string
+func (_e *MockStreamingNodeCataLog_Expecter) ListVChannelWindowMetas(ctx interface{}, pchannelName interface{}, viewType interface{}) *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call {
+	return &MockStreamingNodeCataLog_ListVChannelWindowMetas_Call{Call: _e.mock.On("ListVChannelWindowMetas", ctx, pchannelName, viewType)}
+}
+
+func (_c *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call) Run(run func(ctx context.Context, pchannelName string, viewType string)) *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call) Return(_a0 []*streamingpb.VChannelWindowMeta, _a1 error) *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call) RunAndReturn(run func(context.Context, string, string) ([]*streamingpb.VChannelWindowMeta, error)) *MockStreamingNodeCataLog_ListVChannelWindowMetas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemovePChannelWindowMeta provides a mock function with given fields: ctx, pchannelName
+func (_m *MockStreamingNodeCataLog) RemovePChannelWindowMeta(ctx context.Context, pchannelName string) error {
+	ret := _m.Called(ctx, pchannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemovePChannelWindowMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, pchannelName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePChannelWindowMeta'
+type MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call struct {
+	*mock.Call
+}
+
+// RemovePChannelWindowMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) RemovePChannelWindowMeta(ctx interface{}, pchannelName interface{}) *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call {
+	return &MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call{Call: _e.mock.On("RemovePChannelWindowMeta", ctx, pchannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call) Run(run func(ctx context.Context, pchannelName string)) *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call) Return(_a0 error) *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call) RunAndReturn(run func(context.Context, string) error) *MockStreamingNodeCataLog_RemovePChannelWindowMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveVChannelWindowMetas provides a mock function with given fields: ctx, pchannelName, viewType, vchannels
+func (_m *MockStreamingNodeCataLog) RemoveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error {
+	ret := _m.Called(ctx, pchannelName, viewType, vchannels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveVChannelWindowMetas")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, []string) error); ok {
+		r0 = rf(ctx, pchannelName, viewType, vchannels)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveVChannelWindowMetas'
+type MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call struct {
+	*mock.Call
+}
+
+// RemoveVChannelWindowMetas is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+//   - viewType string
+//   - vchannels []string
+func (_e *MockStreamingNodeCataLog_Expecter) RemoveVChannelWindowMetas(ctx interface{}, pchannelName interface{}, viewType interface{}, vchannels interface{}) *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call {
+	return &MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call{Call: _e.mock.On("RemoveVChannelWindowMetas", ctx, pchannelName, viewType, vchannels)}
+}
+
+func (_c *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call) Run(run func(ctx context.Context, pchannelName string, viewType string, vchannels []string)) *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].([]string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call) Return(_a0 error) *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call) RunAndReturn(run func(context.Context, string, string, []string) error) *MockStreamingNodeCataLog_RemoveVChannelWindowMetas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveConsumeCheckpoint provides a mock function with given fields: ctx, pChannelName, checkpoint
 func (_m *MockStreamingNodeCataLog) SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error {
 	ret := _m.Called(ctx, pChannelName, checkpoint)
@@ -308,6 +523,54 @@ func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) RunAndReturn(run 
 	return _c
 }
 
+// SavePChannelWindowMeta provides a mock function with given fields: ctx, pchannelName, meta
+func (_m *MockStreamingNodeCataLog) SavePChannelWindowMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error {
+	ret := _m.Called(ctx, pchannelName, meta)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SavePChannelWindowMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *streamingpb.PChannelWindowMeta) error); ok {
+		r0 = rf(ctx, pchannelName, meta)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingNodeCataLog_SavePChannelWindowMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SavePChannelWindowMeta'
+type MockStreamingNodeCataLog_SavePChannelWindowMeta_Call struct {
+	*mock.Call
+}
+
+// SavePChannelWindowMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+//   - meta *streamingpb.PChannelWindowMeta
+func (_e *MockStreamingNodeCataLog_Expecter) SavePChannelWindowMeta(ctx interface{}, pchannelName interface{}, meta interface{}) *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call {
+	return &MockStreamingNodeCataLog_SavePChannelWindowMeta_Call{Call: _e.mock.On("SavePChannelWindowMeta", ctx, pchannelName, meta)}
+}
+
+func (_c *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call) Run(run func(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta)) *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*streamingpb.PChannelWindowMeta))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call) Return(_a0 error) *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call) RunAndReturn(run func(context.Context, string, *streamingpb.PChannelWindowMeta) error) *MockStreamingNodeCataLog_SavePChannelWindowMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveRecoverySnapshot provides a mock function with given fields: ctx, pChannelName, snapshot
 func (_m *MockStreamingNodeCataLog) SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *metastore.WALRecoverySnapshot) error {
 	ret := _m.Called(ctx, pChannelName, snapshot)
@@ -352,6 +615,55 @@ func (_c *MockStreamingNodeCataLog_SaveRecoverySnapshot_Call) Return(_a0 error) 
 }
 
 func (_c *MockStreamingNodeCataLog_SaveRecoverySnapshot_Call) RunAndReturn(run func(context.Context, string, *metastore.WALRecoverySnapshot) error) *MockStreamingNodeCataLog_SaveRecoverySnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveVChannelWindowMetas provides a mock function with given fields: ctx, pchannelName, viewType, windows
+func (_m *MockStreamingNodeCataLog) SaveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, windows map[string]*streamingpb.VChannelWindowMeta) error {
+	ret := _m.Called(ctx, pchannelName, viewType, windows)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveVChannelWindowMetas")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, map[string]*streamingpb.VChannelWindowMeta) error); ok {
+		r0 = rf(ctx, pchannelName, viewType, windows)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveVChannelWindowMetas'
+type MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call struct {
+	*mock.Call
+}
+
+// SaveVChannelWindowMetas is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+//   - viewType string
+//   - windows map[string]*streamingpb.VChannelWindowMeta
+func (_e *MockStreamingNodeCataLog_Expecter) SaveVChannelWindowMetas(ctx interface{}, pchannelName interface{}, viewType interface{}, windows interface{}) *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call {
+	return &MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call{Call: _e.mock.On("SaveVChannelWindowMetas", ctx, pchannelName, viewType, windows)}
+}
+
+func (_c *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call) Run(run func(ctx context.Context, pchannelName string, viewType string, windows map[string]*streamingpb.VChannelWindowMeta)) *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(map[string]*streamingpb.VChannelWindowMeta))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call) Return(_a0 error) *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call) RunAndReturn(run func(context.Context, string, string, map[string]*streamingpb.VChannelWindowMeta) error) *MockStreamingNodeCataLog_SaveVChannelWindowMetas_Call {
 	_c.Call.Return(run)
 	return _c
 }

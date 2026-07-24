@@ -74,10 +74,11 @@ func TestGenInsertMsgsByPartitionSingleOversizedRow(t *testing.T) {
 		},
 	}
 
-	msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg)
+	msgs, msgRowOffsets, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 	assert.Equal(t, uint64(1), msgs[0].(*msgstream.InsertMsg).GetNumRows())
+	assert.Equal(t, [][]int{{0}}, msgRowOffsets)
 }
 
 func TestRepackInsertData(t *testing.T) {
