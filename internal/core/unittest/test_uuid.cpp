@@ -56,7 +56,7 @@ TEST(UuidTest, InitScalarFieldDataWithLength) {
     auto field_data = InitScalarFieldDataWithLength(DataType::UUID, kLength);
     ASSERT_NE(field_data, nullptr);
     ASSERT_EQ(field_data->get_data_type(), DataType::UUID);
-    ASSERT_EQ(field_data->length(), kLength);
+    ASSERT_EQ(field_data->Length(), kLength);
 }
 
 // Verify that a UUID field can be added to a Schema via AddDebugField.
@@ -69,5 +69,5 @@ TEST(UuidTest, SchemaAddField) {
 
     auto& field_meta = schema->operator[](field_id);
     ASSERT_EQ(field_meta.get_data_type(), DataType::UUID);
-    ASSERT_EQ(field_meta.get_name(), "uuid_field");
+    ASSERT_EQ(field_meta.get_name().get(), "uuid_field");
 }
