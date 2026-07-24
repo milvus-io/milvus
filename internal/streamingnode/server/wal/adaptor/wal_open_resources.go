@@ -10,7 +10,7 @@ import (
 
 type walOpenResources struct {
 	once            sync.Once
-	released        bool
+	released        bool // Release and Close are called by the same openRWWAL goroutine.
 	roWAL           *roWALAdaptorImpl
 	param           *interceptors.InterceptorBuildParam
 	recoveryStorage recovery.RecoveryStorage
@@ -22,6 +22,7 @@ func (r *walOpenResources) Close() {
 		return
 	}
 	r.once.Do(func() {
+		// WALFlusherImpl owns and closes recoveryStorage when it is present.
 		if r.flusher != nil {
 			r.flusher.Close()
 		} else if r.recoveryStorage != nil {
