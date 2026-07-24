@@ -456,8 +456,6 @@ TEST_F(SegmentLoadInfoTest,
         std::make_shared<milvus_storage::api::ColumnGroups>());
     current_info.SetFieldFilledWithDefault(FieldId(101));
     current_info.SetFieldFilledWithDefault(FieldId(102));
-    current_info.SetTextIndexCreated(FieldId(101));
-    current_info.SetTextIndexCreated(FieldId(102));
     current_info.CompactRuntimeInfoForManifest();
 
     auto new_schema = std::make_shared<Schema>();
@@ -478,8 +476,7 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_FALSE(new_info.HasIndexInfo(FieldId(102)));
     EXPECT_FALSE(new_info.IsFieldFilledWithDefault(FieldId(101)));
     EXPECT_TRUE(new_info.IsFieldFilledWithDefault(FieldId(102)));
-    EXPECT_FALSE(new_info.HasTextIndexCreated(FieldId(101)));
-    EXPECT_TRUE(new_info.HasTextIndexCreated(FieldId(102)));
+    EXPECT_FALSE(new_info.HasTextStatsLog(101));
 
     auto diff = current_info.ComputeDiff(new_info);
     EXPECT_TRUE(diff.indexes_to_load.empty());
@@ -1756,6 +1753,84 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexAlreadyLoaded) {
     EXPECT_TRUE(diff.text_indexes_to_create.empty());
 }
 
+TEST_F(SegmentLoadInfoTest, RejectsPrebuiltTextIndexIdentityChange) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto& current_stats = (*current_proto.mutable_textstatslogs())[102];
+    current_stats.set_fieldid(102);
+    current_stats.set_version(1);
+    current_stats.set_buildid(5001);
+    current_stats.set_memory_size(1024);
+    current_stats.set_current_scalar_index_version(3);
+    current_stats.set_base_path("/text/index/v1");
+    current_stats.add_files("index.bin");
+
+    auto new_proto = current_proto;
+    (*new_proto.mutable_textstatslogs())[102].set_version(2);
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+}
+
+TEST_F(SegmentLoadInfoTest, RejectsPrebuiltTextIndexSchemaIdentityChange) {
+    auto old_schema = CreateSchemaWithTextMatchField();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    std::map<std::string, std::string> analyzer_params = {
+        {"analyzer_params", R"({"tokenizer":"standard"})"}};
+    new_schema->AddDebugVarcharField(FieldName("text_field"),
+                                     DataType::VARCHAR,
+                                     /*max_length=*/65535,
+                                     /*nullable=*/false,
+                                     /*enable_match=*/true,
+                                     /*enable_analyzer=*/true,
+                                     analyzer_params,
+                                     std::nullopt);
+    new_schema->AddDebugField("plain_varchar", DataType::VARCHAR);
+    new_schema->set_primary_field_id(FieldId(100));
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto& text_stats = (*proto.mutable_textstatslogs())[102];
+    text_stats.set_fieldid(102);
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.add_files("/path/to/text_index");
+
+    SegmentLoadInfo current_info(proto, old_schema);
+    SegmentLoadInfo new_info(proto, new_schema);
+    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+}
+
+TEST_F(SegmentLoadInfoTest, RejectsPrebuiltToRawBuiltTextIndexChange) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto& current_stats = (*current_proto.mutable_textstatslogs())[102];
+    current_stats.set_fieldid(102);
+    current_stats.set_version(1);
+    current_stats.set_buildid(5001);
+    current_stats.add_files("/path/to/text_index");
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+}
+
 TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreatedFromRawData) {
     // ComputeDiff: current already created text index from raw data ->
     // should not be re-created or re-loaded
@@ -1776,6 +1851,79 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreatedFromRawData) {
     EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) == 0);
     // Field 102 should NOT be in text_indexes_to_load (no stats in new)
     EXPECT_TRUE(diff.text_indexes_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, RejectsRawBuiltToPrebuiltTextIndexChange) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto& incoming_stats = (*new_proto.mutable_textstatslogs())[102];
+    incoming_stats.set_fieldid(102);
+    incoming_stats.set_version(1);
+    incoming_stats.set_buildid(5001);
+    incoming_stats.add_files("/path/to/text_index");
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    current_info.SetTextIndexCreated(FieldId(102));
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+}
+
+TEST_F(SegmentLoadInfoTest, RejectsRawBuiltTextIndexSchemaIdentityChange) {
+    auto old_schema = CreateSchemaWithTextMatchField();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    std::map<std::string, std::string> analyzer_params = {
+        {"analyzer_params", R"({"tokenizer":"standard"})"}};
+    new_schema->AddDebugVarcharField(FieldName("text_field"),
+                                     DataType::VARCHAR,
+                                     /*max_length=*/65535,
+                                     /*nullable=*/false,
+                                     /*enable_match=*/true,
+                                     /*enable_analyzer=*/true,
+                                     analyzer_params,
+                                     std::nullopt);
+    new_schema->AddDebugField("plain_varchar", DataType::VARCHAR);
+    new_schema->set_primary_field_id(FieldId(100));
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(proto, old_schema);
+    current_info.SetTextIndexCreated(FieldId(102));
+    SegmentLoadInfo new_info(proto, new_schema);
+    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+}
+
+TEST_F(SegmentLoadInfoTest, RejectsRawBuiltTextIndexRemovalWithFieldRetained) {
+    auto old_schema = CreateSchemaWithTextMatchField();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    new_schema->AddDebugField("text_field", DataType::VARCHAR);
+    new_schema->AddDebugField("plain_varchar", DataType::VARCHAR);
+    new_schema->set_primary_field_id(FieldId(100));
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(proto, old_schema);
+    current_info.SetTextIndexCreated(FieldId(102));
+    SegmentLoadInfo new_info(proto, new_schema);
+    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreateForUnindexed) {
@@ -3730,7 +3878,12 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexesDroppedField) {
     new_schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
     // Skip field 102 (dropped)
-    new_schema->AddDebugField("plain_varchar", DataType::VARCHAR);
+    new_schema->AddField(FieldName("plain_varchar"),
+                         FieldId(103),
+                         DataType::VARCHAR,
+                         /*max_length=*/65535,
+                         /*nullable=*/false,
+                         std::nullopt);
     new_schema->set_primary_field_id(FieldId(100));
 
     proto::segcore::SegmentLoadInfo current_proto;
@@ -3742,12 +3895,50 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexesDroppedField) {
     new_proto.set_num_of_rows(1000);
 
     SegmentLoadInfo current_info(current_proto, old_schema);
+    current_info.SetTextIndexCreated(FieldId(102));
     SegmentLoadInfo new_info(new_proto, new_schema);
     auto diff = current_info.ComputeDiff(new_info);
 
     // Field 102 is dropped — it should NOT be in text_indexes_to_create
     EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) == 0)
         << "Dropped field 102 should not be in text_indexes_to_create";
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ReplaceSchemaForReopenPrunesDroppedRawBuiltTextIndex) {
+    auto old_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    SegmentLoadInfo current_info(proto, old_schema);
+    current_info.SetTextIndexCreated(FieldId(102));
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddField(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt);
+    new_schema->AddField(FieldName("vec"),
+                         FieldId(101),
+                         DataType::VECTOR_FLOAT,
+                         128,
+                         knowhere::metric::L2,
+                         false);
+    new_schema->AddField(FieldName("plain_varchar"),
+                         FieldId(103),
+                         DataType::VARCHAR,
+                         /*max_length=*/65535,
+                         /*nullable=*/false,
+                         std::nullopt);
+    new_schema->set_primary_field_id(FieldId(100));
+    new_schema->set_schema_version(old_schema->get_schema_version() + 1);
+
+    SegmentLoadInfo new_info(current_info);
+    new_info.ReplaceSchemaForReopen(new_schema);
+    EXPECT_FALSE(new_info.HasTextIndexCreated(FieldId(102)));
+
+    auto diff = current_info.ComputeDiff(new_info);
+    EXPECT_TRUE(diff.text_indexes_to_load.empty());
+    EXPECT_TRUE(diff.text_indexes_to_create.empty());
 }
 
 // NOTE: ComputeDiffIndexes also has a schema filter for dropped fields, but
