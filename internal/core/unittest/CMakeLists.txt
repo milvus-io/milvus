@@ -74,6 +74,7 @@ set(MILVUS_TEST_FILES
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
         test_segment_read_lease.cpp
+        CipherPluginContextTest.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
