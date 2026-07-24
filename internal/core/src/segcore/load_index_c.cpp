@@ -60,6 +60,82 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
+namespace {
+
+void
+FillLoadIndexInfoFromProto(const milvus::proto::cgo::LoadIndexInfo& info_proto,
+                           milvus::segcore::LoadIndexInfo* load_index_info) {
+    load_index_info->collection_id = info_proto.collectionid();
+    load_index_info->partition_id = info_proto.partitionid();
+    load_index_info->segment_id = info_proto.segmentid();
+    load_index_info->field_id = info_proto.field().fieldid();
+    load_index_info->field_type =
+        static_cast<milvus::DataType>(info_proto.field().data_type());
+    load_index_info->element_type =
+        static_cast<milvus::DataType>(info_proto.field().element_type());
+    load_index_info->enable_mmap = info_proto.enable_mmap();
+    load_index_info->index_id = info_proto.indexid();
+    load_index_info->index_build_id = info_proto.index_buildid();
+    load_index_info->index_version = info_proto.index_version();
+    load_index_info->index_store_path_version =
+        info_proto.index_store_path_version();
+    for (const auto& [k, v] : info_proto.index_params()) {
+        load_index_info->index_params[k] = v;
+    }
+    load_index_info->index_files.assign(info_proto.index_files().begin(),
+                                        info_proto.index_files().end());
+    load_index_info->uri = info_proto.uri();
+    load_index_info->index_engine_version = info_proto.index_engine_version();
+    auto scalar_version = info_proto.current_scalar_index_version();
+    if (scalar_version > 0) {
+        load_index_info
+            ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            std::to_string(scalar_version);
+    }
+    load_index_info->schema = info_proto.field();
+    load_index_info->index_size = info_proto.index_file_size();
+    load_index_info->num_rows = info_proto.num_rows();
+    auto field_schema = milvus::FieldMeta::ParseFrom(load_index_info->schema);
+    size_t dim =
+        IsVectorDataType(field_schema.get_data_type()) &&
+                !IsSparseFloatVectorDataType(field_schema.get_data_type())
+            ? field_schema.get_dim()
+            : 1;
+    load_index_info->dim = dim;
+    auto warmup_it = load_index_info->index_params.find("warmup");
+    if (warmup_it != load_index_info->index_params.end()) {
+        load_index_info->warmup_policy = warmup_it->second;
+        LOG_INFO("Index warmup_policy extracted from index_params: {}",
+                 load_index_info->warmup_policy);
+    } else {
+        load_index_info->warmup_policy = "";
+        LOG_INFO("No warmup key in index_params, warmup_policy will be empty");
+    }
+}
+
+LoadResourceRequest
+EstimateLoadIndexResourceFromLoadInfo(
+    const milvus::segcore::LoadIndexInfo* load_index_info) {
+    auto field_type = load_index_info->field_type;
+    auto element_type = load_index_info->element_type;
+    auto& index_params = load_index_info->index_params;
+    bool find_index_type = index_params.count("index_type") > 0 ? true : false;
+    AssertInfo(find_index_type == true,
+               "Can't find index type in index_params");
+
+    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        field_type,
+        element_type,
+        load_index_info->index_engine_version,
+        load_index_info->index_size,
+        index_params,
+        load_index_info->enable_mmap,
+        load_index_info->num_rows,
+        load_index_info->dim);
+}
+
+}  // namespace
+
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
     SCOPE_CGO_CALL_METRIC();
@@ -154,31 +230,38 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto field_type = load_index_info->field_type;
-        auto element_type = load_index_info->element_type;
-        auto& index_params = load_index_info->index_params;
-        bool find_index_type =
-            index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
-
-        LoadResourceRequest request =
-            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-                field_type,
-                element_type,
-                load_index_info->index_engine_version,
-                load_index_info->index_size,
-                index_params,
-                load_index_info->enable_mmap,
-                load_index_info->num_rows,
-                load_index_info->dim);
-        return request;
+        return EstimateLoadIndexResourceFromLoadInfo(load_index_info);
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,
                   fmt::format("failed to estimate index load resource, "
                               "encounter exception : {}",
                               e.what()));
         return LoadResourceRequest{0, 0, 0, 0, false};
+    }
+}
+
+CStatus
+EstimateLoadIndexResourceFromSerializedInfo(
+    const uint8_t* serialized_load_index_info,
+    const uint64_t len,
+    LoadResourceRequest* load_resource_request) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(load_resource_request != nullptr,
+                   "load resource request is null");
+        auto info_proto = milvus::proto::cgo::LoadIndexInfo();
+        auto parsed =
+            info_proto.ParseFromArray(serialized_load_index_info, len);
+        AssertInfo(parsed, "failed to parse load index info");
+
+        auto load_index_info = milvus::segcore::LoadIndexInfo();
+        FillLoadIndexInfoFromProto(info_proto, &load_index_info);
+        *load_resource_request =
+            EstimateLoadIndexResourceFromLoadInfo(&load_index_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -319,59 +402,7 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         // TODO: keep this since LoadIndexInfo is used by SegmentSealed.
         {
-            load_index_info->collection_id = info_proto->collectionid();
-            load_index_info->partition_id = info_proto->partitionid();
-            load_index_info->segment_id = info_proto->segmentid();
-            load_index_info->field_id = info_proto->field().fieldid();
-            load_index_info->field_type =
-                static_cast<milvus::DataType>(info_proto->field().data_type());
-            load_index_info->element_type = static_cast<milvus::DataType>(
-                info_proto->field().element_type());
-            load_index_info->enable_mmap = info_proto->enable_mmap();
-            load_index_info->index_id = info_proto->indexid();
-            load_index_info->index_build_id = info_proto->index_buildid();
-            load_index_info->index_version = info_proto->index_version();
-            load_index_info->index_store_path_version =
-                info_proto->index_store_path_version();
-            for (const auto& [k, v] : info_proto->index_params()) {
-                load_index_info->index_params[k] = v;
-            }
-            load_index_info->index_files.assign(
-                info_proto->index_files().begin(),
-                info_proto->index_files().end());
-            load_index_info->uri = info_proto->uri();
-            load_index_info->index_engine_version =
-                info_proto->index_engine_version();
-            // Inject scalar index version into index_params for scalar indexes
-            auto scalar_version = info_proto->current_scalar_index_version();
-            if (scalar_version > 0) {
-                load_index_info
-                    ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
-                    std::to_string(scalar_version);
-            }
-            load_index_info->schema = info_proto->field();
-            load_index_info->index_size = info_proto->index_file_size();
-            load_index_info->num_rows = info_proto->num_rows();
-            auto field_schema =
-                milvus::FieldMeta::ParseFrom(load_index_info->schema);
-            size_t dim = IsVectorDataType(field_schema.get_data_type()) &&
-                                 !IsSparseFloatVectorDataType(
-                                     field_schema.get_data_type())
-                             ? field_schema.get_dim()
-                             : 1;
-            load_index_info->dim = dim;
-            // Extract warmup_policy from index_params (keep it for Knowhere)
-            auto warmup_it = load_index_info->index_params.find("warmup");
-            if (warmup_it != load_index_info->index_params.end()) {
-                load_index_info->warmup_policy = warmup_it->second;
-                LOG_INFO("Index warmup_policy extracted from index_params: {}",
-                         load_index_info->warmup_policy);
-            } else {
-                LOG_INFO(
-                    "No warmup key in index_params, warmup_policy will be "
-                    "empty");
-            }
-
+            FillLoadIndexInfoFromProto(*info_proto, load_index_info);
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                     .GetRemoteChunkManager();

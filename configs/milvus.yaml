@@ -509,6 +509,11 @@ queryCoord:
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
+  autoscale:
+    precheckEnabled: false # Whether QueryCoord performs load resource precheck before committing load configuration changes. This does not disable in-flight load metrics.
+    enabled: false # Whether QueryCoord load resource precheck can admit load requests by considering autoscale capacity. This is effective only when precheckEnabled is true.
+    maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GB. 0 means autoscale cannot add memory capacity.
+    maxDiskLimit: 0 # Maximum global QueryNode disk capacity after autoscale, unit: GB. 0 means autoscale cannot add disk capacity.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
