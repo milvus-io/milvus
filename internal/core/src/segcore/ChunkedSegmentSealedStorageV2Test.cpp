@@ -1775,22 +1775,14 @@ class FakeChunkStatsSource : public milvus::ChunkStatsSource {
         return 2;
     }
 
-    std::shared_ptr<parquet::Statistics>
-    GetChunkStatistics(int64_t chunk_id) override {
+    std::unique_ptr<milvus::index::FieldChunkMetrics>
+    BuildChunkMetrics(int64_t chunk_id) override {
         ++calls_;
-        auto node = parquet::schema::PrimitiveNode::Make(
-            "c", parquet::Repetition::OPTIONAL, parquet::Type::INT64);
-        auto descr = std::make_shared<parquet::ColumnDescriptor>(node, 1, 0);
-        descrs_.push_back(descr);
-        auto stats = std::static_pointer_cast<parquet::Int64Statistics>(
-            parquet::Statistics::Make(descr.get(),
-                                      arrow::default_memory_pool()));
         // chunk 0 spans [0,10]; chunk 1 spans [100,110]
         int64_t lo = chunk_id == 0 ? 0 : 100;
         int64_t hi = chunk_id == 0 ? 10 : 110;
-        stats->Update(&lo, 1, 0);
-        stats->Update(&hi, 1, 0);
-        return stats;
+        return std::make_unique<index::IntFieldChunkMetrics<int64_t>>(
+            lo, hi, nullptr);
     }
 
     int
@@ -1800,7 +1792,6 @@ class FakeChunkStatsSource : public milvus::ChunkStatsSource {
 
  private:
     int calls_{0};
-    std::vector<std::shared_ptr<parquet::ColumnDescriptor>> descrs_;
 };
 }  // namespace
 

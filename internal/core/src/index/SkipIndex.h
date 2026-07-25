@@ -26,15 +26,18 @@
 
 namespace milvus {
 
-// Lazily re-readable source of one field's per-chunk statistics, so the skip
-// metrics built from them stay evictable: an evicted cell is rebuilt by asking
-// the source again, exactly like the column-backed translator below rebuilds
-// from ChunkedColumnInterface::GetChunk. The implementation (see segcore) reads
-// the parquet footer and MUST keep whatever owns the returned Statistics alive
-// for the duration of the call -- Arrow's BYTE_ARRAY min/max are string_views
-// into the file metadata, so a Statistics that outlives its reader dangles.
-// SkipIndexStatsBuilder::Build deep-copies, so the built metrics are safe to
-// hand out afterwards.
+// Lazily re-readable source of one field's per-chunk skip metrics, so the cells
+// built from it stay evictable: an evicted cell is rebuilt by asking the source
+// again, exactly like the column-backed translator below rebuilds from
+// ChunkedColumnInterface::GetChunk.
+//
+// The source owns the INTERPRETATION as well as the read, which is what keeps
+// this seam storage-neutral: the parquet implementation (see segcore) reads a
+// footer and runs SkipIndexStatsBuilder over it, while a manifest/zone-map
+// backed one can construct metrics directly. Whatever it reads from must stay
+// alive for the duration of the call -- Arrow's BYTE_ARRAY min/max are
+// string_views into the file metadata -- but since the built metrics deep-copy,
+// they are safe to hand out afterwards.
 class ChunkStatsSource {
  public:
     virtual ~ChunkStatsSource() = default;
@@ -44,10 +47,14 @@ class ChunkStatsSource {
     virtual int64_t
     num_chunks() const = 0;
 
-    // Statistics of `chunk_id`, or nullptr when this chunk carries none
-    // (the builder degrades such a chunk to NoneFieldChunkMetrics).
-    virtual std::shared_ptr<parquet::Statistics>
-    GetChunkStatistics(int64_t chunk_id) = 0;
+    // The skip metrics of `chunk_id`, already interpreted. The source owns the
+    // interpretation, so a new backing store (v3 manifest, Vortex zone maps, a
+    // future range filter) only implements this -- it does not have to express
+    // its statistics as parquet's, and a richer filter is just another
+    // FieldChunkMetrics subclass. Must never return nullptr; a chunk with no
+    // usable statistics yields NoneFieldChunkMetrics (never skips).
+    virtual std::unique_ptr<index::FieldChunkMetrics>
+    BuildChunkMetrics(int64_t chunk_id) = 0;
 };
 
 class FieldChunkMetricsTranslatorFromStatistics
@@ -56,10 +63,8 @@ class FieldChunkMetricsTranslatorFromStatistics
     FieldChunkMetricsTranslatorFromStatistics(
         int64_t segment_id,
         FieldId field_id,
-        milvus::DataType data_type,
         std::shared_ptr<ChunkStatsSource> stats_source)
         : key_(fmt::format("skip_seg_{}_f_{}", segment_id, field_id.get())),
-          data_type_(data_type),
           stats_source_(std::move(stats_source)),
           meta_(cachinglayer::StorageType::MEMORY,
                 milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
@@ -102,14 +107,11 @@ class FieldChunkMetricsTranslatorFromStatistics
             cells;
         cells.reserve(cids.size());
         for (auto cid : cids) {
-            // Re-read this chunk's footer statistics and rebuild. Nothing is
+            // Rebuild this chunk's metrics from the source. Nothing is
             // retained between calls, so an evicted cell costs one (small,
-            // usually cached) footer lookup to restore -- the same shape as the
+            // usually cached) lookup to restore -- the same shape as the
             // column-backed translator below, which re-reads its chunk.
-            cells.emplace_back(
-                cid,
-                builder_.Build(data_type_,
-                               stats_source_->GetChunkStatistics(cid)));
+            cells.emplace_back(cid, stats_source_->BuildChunkMetrics(cid));
         }
         return cells;
     }
@@ -127,8 +129,6 @@ class FieldChunkMetricsTranslatorFromStatistics
 
  private:
     std::string key_;
-    milvus::DataType data_type_;
-    index::SkipIndexStatsBuilder builder_;
     std::shared_ptr<ChunkStatsSource> stats_source_;
     cachinglayer::Meta meta_;
 };
@@ -521,11 +521,10 @@ class SkipIndex {
     void
     LoadSkipFromStatsSource(int64_t segment_id,
                             milvus::FieldId field_id,
-                            milvus::DataType data_type,
                             std::shared_ptr<ChunkStatsSource> stats_source) {
         auto translator =
             std::make_unique<FieldChunkMetricsTranslatorFromStatistics>(
-                segment_id, field_id, data_type, std::move(stats_source));
+                segment_id, field_id, std::move(stats_source));
         auto cache_slot = cachinglayer::Manager::GetInstance()
                               .CreateCacheSlot<index::FieldChunkMetrics>(
                                   std::move(translator));

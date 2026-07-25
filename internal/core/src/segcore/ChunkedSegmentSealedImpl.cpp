@@ -2438,10 +2438,18 @@ CollectSkipStatsFields(
 // are string_views into this metadata.
 class GroupFooterCache {
  public:
-    GroupFooterCache(std::vector<std::string> files, std::string debug_key)
+    // `seed` carries the footers the loader already read while building the
+    // cell layout, so the query path never reopens a file it just read. Any
+    // hole is opened lazily on first use (and then kept, so a rebuild after
+    // eviction is a lookup rather than an open).
+    GroupFooterCache(
+        std::vector<std::string> files,
+        std::string debug_key,
+        std::vector<std::shared_ptr<milvus_storage::PackedFileMetadata>> seed)
         : files_(std::move(files)),
           debug_key_(std::move(debug_key)),
-          metas_(files_.size()) {
+          metas_(std::move(seed)) {
+        metas_.resize(files_.size());
     }
 
     std::shared_ptr<milvus_storage::PackedFileMetadata>
@@ -2497,10 +2505,12 @@ class FooterChunkStatsSource : public ChunkStatsSource {
  public:
     FooterChunkStatsSource(std::shared_ptr<GroupFooterCache> footers,
                            std::vector<int64_t> row_groups_per_file,
-                           int64_t field_id)
+                           int64_t field_id,
+                           DataType data_type)
         : footers_(std::move(footers)),
           row_groups_per_file_(std::move(row_groups_per_file)),
-          field_id_(field_id) {
+          field_id_(field_id),
+          data_type_(data_type) {
         for (auto n : row_groups_per_file_) {
             total_row_groups_ += n;
         }
@@ -2511,8 +2521,16 @@ class FooterChunkStatsSource : public ChunkStatsSource {
         return total_row_groups_;
     }
 
+    std::unique_ptr<index::FieldChunkMetrics>
+    BuildChunkMetrics(int64_t chunk_id) override {
+        // Build() deep-copies out of the statistics, and the footer stays
+        // owned by the cache for the whole call, so nothing escapes it.
+        return builder_.Build(data_type_, GetChunkStatistics(chunk_id));
+    }
+
+ private:
     std::shared_ptr<parquet::Statistics>
-    GetChunkStatistics(int64_t chunk_id) override {
+    GetChunkStatistics(int64_t chunk_id) {
         if (chunk_id < 0 || chunk_id >= total_row_groups_) {
             return nullptr;  // builder degrades to "never skip"
         }
@@ -2536,11 +2554,12 @@ class FooterChunkStatsSource : public ChunkStatsSource {
                                             : nullptr;
     }
 
- private:
     std::shared_ptr<GroupFooterCache> footers_;
     std::vector<int64_t> row_groups_per_file_;
     int64_t field_id_;
+    DataType data_type_;
     int64_t total_row_groups_{0};
+    index::SkipIndexStatsBuilder builder_;
 };
 
 }  // namespace
@@ -2551,7 +2570,10 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
 
-    std::vector<std::future<milvus_storage::RowGroupMetadataVector>> futures;
+    std::vector<std::future<
+        std::pair<milvus_storage::RowGroupMetadataVector,
+                  std::shared_ptr<milvus_storage::PackedFileMetadata>>>>
+        futures;
     futures.reserve(insert_files.size());
     for (const auto& file : insert_files) {
         // Futures are always joined below before this function returns, so
@@ -2568,8 +2590,11 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                            result.status().ToString());
 
             auto reader = result.ValueOrDie();
-            auto row_group_meta =
-                reader->file_metadata()->GetRowGroupMetadataVector();
+            // Keep the parsed footer: the skip index reuses it instead of
+            // reopening the file, and PackedFileMetadata owns its thrift
+            // memory so it stays valid after the reader closes.
+            auto file_metadata = reader->file_metadata();
+            auto row_group_meta = file_metadata->GetRowGroupMetadataVector();
             auto status = reader->Close();
             AssertInfo(status.ok(),
                        "[StorageV2] metadata loader {} failed to close "
@@ -2577,7 +2602,8 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                        debug_key,
                        file,
                        status.ToString());
-            return row_group_meta;
+            return std::make_pair(std::move(row_group_meta),
+                                  std::move(file_metadata));
         }));
     }
 
@@ -2594,8 +2620,11 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
 
     LoadedGroupChunkMetadata metadata;
     metadata.row_group_meta_list.reserve(insert_files.size());
+    metadata.file_metadata_list.reserve(insert_files.size());
     for (auto& future : futures) {
-        metadata.row_group_meta_list.push_back(future.get());
+        auto [row_group_meta, file_metadata] = future.get();
+        metadata.row_group_meta_list.push_back(std::move(row_group_meta));
+        metadata.file_metadata_list.push_back(std::move(file_metadata));
     }
 
     return metadata;
@@ -2699,8 +2728,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
         std::shared_ptr<GroupFooterCache> footer_cache;
         if (!fields_for_stats.empty()) {
-            footer_cache =
-                std::make_shared<GroupFooterCache>(insert_files, debug_key);
+            footer_cache = std::make_shared<GroupFooterCache>(
+                insert_files, debug_key, metadata.file_metadata_list);
         }
         std::set<int64_t> stats_field_ids;
         for (const auto& [fid, dtype] : fields_for_stats) {
@@ -2742,7 +2771,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             std::shared_ptr<ChunkStatsSource> stats_source;
             if (stats_field_ids.count(field_id.get()) > 0) {
                 stats_source = std::make_shared<FooterChunkStatsSource>(
-                    footer_cache, row_groups_per_file, field_id.get());
+                    footer_cache,
+                    row_groups_per_file,
+                    field_id.get(),
+                    data_type);
             }
 
             load_field_data_common(field_id,
@@ -2868,8 +2900,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
         std::shared_ptr<GroupFooterCache> footer_cache;
         if (!fields_for_stats.empty()) {
-            footer_cache =
-                std::make_shared<GroupFooterCache>(insert_files, debug_key);
+            footer_cache = std::make_shared<GroupFooterCache>(
+                insert_files, debug_key, metadata.file_metadata_list);
         }
         std::set<int64_t> stats_field_ids;
         for (const auto& [fid, dtype] : fields_for_stats) {
@@ -2905,7 +2937,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             std::shared_ptr<ChunkStatsSource> stats_source;
             if (stats_field_ids.count(field_id.get()) > 0) {
                 stats_source = std::make_shared<FooterChunkStatsSource>(
-                    footer_cache, row_groups_per_file, field_id.get());
+                    footer_cache,
+                    row_groups_per_file,
+                    field_id.get(),
+                    data_type);
             }
 
             load_field_data_common(field_id,
@@ -7185,7 +7220,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 const auto num_cells = column->num_chunks();
                 if (stats_source->num_chunks() == num_cells) {
                     target_runtime.skip_index->LoadSkipFromStatsSource(
-                        id_, field_id, data_type, stats_source);
+                        id_, field_id, stats_source);
                 } else {
                     LOG_WARN(
                         "[StorageV2] skip statistics of segment {} field {} do "

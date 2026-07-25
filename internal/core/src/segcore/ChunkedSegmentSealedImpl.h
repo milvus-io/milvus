@@ -2679,6 +2679,10 @@ CreateSealedSegment(
 
 struct LoadedGroupChunkMetadata {
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
+    // Parsed footers of the same files, kept so the skip index can build its
+    // statistics without reopening what the loader already read.
+    std::vector<std::shared_ptr<milvus_storage::PackedFileMetadata>>
+        file_metadata_list;
 };
 
 LoadedGroupChunkMetadata
