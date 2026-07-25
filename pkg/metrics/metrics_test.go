@@ -21,6 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -40,6 +41,24 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterStreamingNode(r)
 		RegisterLoggingMetrics(r)
 	})
+}
+
+func TestRegisterProxyMetaCacheMetrics(t *testing.T) {
+	r := prometheus.NewRegistry()
+	RegisterProxy(r)
+
+	ProxyMetaCacheLockWaitLatency.WithLabelValues("1", "read", "collection_fill").Observe(1)
+	ProxyMetaCacheInvalidationLatency.WithLabelValues("1", "collection_invalidate").Observe(1)
+
+	families, err := r.Gather()
+	require.NoError(t, err)
+
+	names := make(map[string]struct{}, len(families))
+	for _, family := range families {
+		names[family.GetName()] = struct{}{}
+	}
+	assert.Contains(t, names, "milvus_proxy_metacache_lock_wait_latency")
+	assert.Contains(t, names, "milvus_proxy_metacache_invalidation_latency")
 }
 
 func TestGetRegisterer(t *testing.T) {
