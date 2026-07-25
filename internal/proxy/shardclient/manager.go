@@ -73,6 +73,8 @@ type shardClientMgrImpl struct {
 	sfShardCache conc.Singleflight[*shardLeaders]
 	refreshSeq   uint64
 	refreshes    map[shardCacheRefreshKey]*shardCacheRefreshToken
+	// refreshWriteSeq fences cache publication across normal and forced refresh flights.
+	refreshWriteSeq map[int64]uint64
 
 	shardCacheRefreshTimeout time.Duration
 	shardCacheTTL            time.Duration
@@ -124,9 +126,10 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[int64]*shardLeaders),
-		refreshes:  make(map[shardCacheRefreshKey]*shardCacheRefreshToken),
-		mixCoord:   mixCoord,
+		collLeader:      make(map[int64]*shardLeaders),
+		refreshes:       make(map[shardCacheRefreshKey]*shardCacheRefreshToken),
+		refreshWriteSeq: make(map[int64]uint64),
+		mixCoord:        mixCoord,
 
 		shardCacheRefreshTimeout: defaultShardCacheRefreshTimeout,
 		shardCacheTTL:            defaultShardCacheTTL,
@@ -188,9 +191,13 @@ func (m *shardClientMgrImpl) acquireShardCacheRefresh(key shardCacheRefreshKey) 
 	if m.refreshes == nil {
 		m.refreshes = make(map[shardCacheRefreshKey]*shardCacheRefreshToken)
 	}
+	if m.refreshWriteSeq == nil {
+		m.refreshWriteSeq = make(map[int64]uint64)
+	}
 	m.refreshSeq++
 	refresh := &shardCacheRefreshToken{id: m.refreshSeq}
 	m.refreshes[key] = refresh
+	m.refreshWriteSeq[key.collectionID] = refresh.id
 	return refresh
 }
 
@@ -199,6 +206,9 @@ func (m *shardClientMgrImpl) finishShardCacheRefresh(key shardCacheRefreshKey, r
 	defer m.leaderMut.Unlock()
 	if m.refreshes[key] == refresh {
 		delete(m.refreshes, key)
+	}
+	if m.refreshWriteSeq[key.collectionID] == refresh.id {
+		delete(m.refreshWriteSeq, key.collectionID)
 	}
 }
 
@@ -322,7 +332,7 @@ func (m *shardClientMgrImpl) cacheShardLeaders(
 ) {
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
-	if m.refreshes[refreshKey] != refresh {
+	if m.refreshes[refreshKey] != refresh || m.refreshWriteSeq[collectionID] != refresh.id {
 		return
 	}
 	m.collLeader[collectionID] = leaders
@@ -418,6 +428,7 @@ func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 		delete(m.collLeader, collectionID)
 		delete(m.refreshes, shardCacheRefreshKey{collectionID: collectionID})
 		delete(m.refreshes, shardCacheRefreshKey{collectionID: collectionID, force: true})
+		delete(m.refreshWriteSeq, collectionID)
 	}
 }
 
