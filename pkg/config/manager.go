@@ -89,6 +89,7 @@ type Manager struct {
 	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
 	forbiddenKeys *typeutil.ConcurrentSet[string]
 	immutableKeys *typeutil.ConcurrentSet[string]
+	sensitiveKeys *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
 	configCache map[string]any
@@ -103,6 +104,7 @@ func NewManager() *Manager {
 		overlays:      typeutil.NewConcurrentMap[string, string](),
 		forbiddenKeys: typeutil.NewConcurrentSet[string](),
 		immutableKeys: typeutil.NewConcurrentSet[string](),
+		sensitiveKeys: typeutil.NewConcurrentSet[string](),
 		configCache:   make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
@@ -322,6 +324,34 @@ func (m *Manager) IsImmutable(key string) bool {
 	return m.immutableKeys.Contain(formatKey(key))
 }
 
+// SensitiveUpdate marks a configuration key as sensitive. Sensitive keys are
+// redacted by the /management/config/get endpoint to prevent disclosure of
+// credentials, infrastructure topology, and security posture to authenticated
+// but unprivileged callers.
+func (m *Manager) SensitiveUpdate(key string) {
+	m.sensitiveKeys.Insert(formatKey(key))
+}
+
+// IsSensitive checks if a configuration key is marked as sensitive.
+func (m *Manager) IsSensitive(key string) bool {
+	return m.sensitiveKeys.Contain(formatKey(key))
+}
+
+// RedactedValue returns value for logging, replacing it with a placeholder when
+// the key is marked Sensitive. Config values reach the log at Info level in a
+// few places (immutable-config persistence in particular), and a Sensitive key
+// is by definition one whose value must not be disclosed — a log file is a
+// disclosure channel just as much as /management/config/get.
+func (m *Manager) RedactedValue(key, value string) string {
+	if value == "" {
+		return value
+	}
+	if m.IsSensitive(key) {
+		return "<redacted>"
+	}
+	return value
+}
+
 func (m *Manager) UpdateSourceOptions(opts ...Option) {
 	var options Options
 	for _, opt := range opts {
@@ -538,21 +568,23 @@ func (m *Manager) ProcessImmutableConfigs(renderers map[string]func(raw string) 
 			if hasRenderer {
 				rendered := render(configValue)
 				mlog.Info(context.TODO(), "rendered immutable config value before persisting",
-					mlog.String("key", key), mlog.String("rawValue", configValue), mlog.String("renderedValue", rendered))
+					mlog.String("key", key), mlog.String("rawValue", m.RedactedValue(key, configValue)),
+					mlog.String("renderedValue", m.RedactedValue(key, rendered)))
 				configValue = rendered
 			}
 			mlog.Info(context.TODO(), "immutable config not exist in etcd, saving to persistent storage",
-				mlog.String("fromSource", confgSourceName), mlog.String("key", key), mlog.String("value", configValue))
+				mlog.String("fromSource", confgSourceName), mlog.String("key", key),
+				mlog.String("value", m.RedactedValue(key, configValue)))
 			if err := m.SaveConfigToEtcd(etcdSourceImpl, key, configValue); err != nil {
 				mlog.Error(context.TODO(), "failed to save immutable config to etcd",
-					mlog.String("key", key), mlog.String("value", configValue), mlog.Err(err))
+					mlog.String("key", key), mlog.String("value", m.RedactedValue(key, configValue)), mlog.Err(err))
 				saveErrors = append(saveErrors, err)
 			} else {
-				mlog.Info(context.TODO(), "successfully saved immutable config to etcd", mlog.String("key", key), mlog.String("value", configValue))
+				mlog.Info(context.TODO(), "successfully saved immutable config to etcd", mlog.String("key", key), mlog.String("value", m.RedactedValue(key, configValue)))
 				savedConfigs = append(savedConfigs, key)
 			}
 		} else if getFromEtcdErr == nil {
-			mlog.Info(context.TODO(), "immutable config already exists in etcd", mlog.String("key", key), mlog.String("value", configValue))
+			mlog.Info(context.TODO(), "immutable config already exists in etcd", mlog.String("key", key), mlog.String("value", m.RedactedValue(key, configValue)))
 		} else {
 			mlog.Warn(context.TODO(), "failed to check config in etcd", mlog.String("key", key), mlog.Err(getFromEtcdErr))
 		}
