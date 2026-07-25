@@ -132,6 +132,7 @@
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
+#include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
@@ -152,6 +153,25 @@
 namespace milvus::segcore {
 
 constexpr auto kCollectionSchemaVersionNotReady = static_cast<ErrorCode>(2046);
+
+static void
+WaitAllColumnGroupFutures(
+    std::vector<folly::SemiFuture<folly::Unit>>& futures) {
+    auto results = folly::collectAll(futures.begin(), futures.end()).get();
+    std::exception_ptr first_exception;
+    for (auto& result : results) {
+        try {
+            result.throwUnlessValue();
+        } catch (...) {
+            if (first_exception == nullptr) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    if (first_exception != nullptr) {
+        std::rethrow_exception(first_exception);
+    }
+}
 
 static std::string
 FormatFieldIds(const std::vector<FieldId>& field_ids) {
@@ -2086,6 +2106,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         bool eager_load;
         storagev2translator::ColumnSizeEstimateResult size_estimate;
     };
+    const bool enable_async_load =
+        storagev2translator::StorageV2AsyncLoadEnabled();
     std::vector<FieldGroupTask> tasks;
     for (const auto& pair : cg_field_ids) {
         auto cg_index = pair.first;
@@ -2125,7 +2147,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             tasks.push_back({cg_index, {fid}, false});
         }
 
-        if (task_start != tasks.size()) {
+        if (!enable_async_load && task_start != tasks.size()) {
             auto estimate_columns = GetStorageColumnNames(
                 schema_snapshot, tasks[task_start].field_ids);
             auto size_estimate = FetchColumnGroupSizeEstimate(
@@ -2151,42 +2173,62 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         tasks.size(),
         cg_field_ids.size());
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_group_futures;
-    for (auto& task : tasks) {
-        auto future = pool.Submit([this,
-                                   column_groups,
-                                   properties,
-                                   cg_index = task.cg_index,
-                                   field_ids = std::move(task.field_ids),
-                                   &segment_load_info,
-                                   schema_snapshot,
-                                   eager_load = task.eager_load,
-                                   size_estimate =
-                                       std::move(task.size_estimate),
-                                   op_ctx,
-                                   is_replace,
-                                   &committer]() mutable {
-            CheckCancellation(op_ctx,
-                              id_,
-                              cg_index,
-                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-            LoadColumnGroup(column_groups,
-                            properties,
-                            cg_index,
-                            field_ids,
-                            segment_load_info,
-                            schema_snapshot,
-                            eager_load,
-                            op_ctx,
-                            is_replace,
-                            committer,
-                            std::move(size_estimate));
-        });
-        load_group_futures.emplace_back(std::move(future));
+    if (!enable_async_load) {
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<void>> load_group_futures;
+        for (auto& task : tasks) {
+            auto future =
+                pool.Submit([this,
+                             column_groups,
+                             properties,
+                             cg_index = task.cg_index,
+                             field_ids = std::move(task.field_ids),
+                             &segment_load_info,
+                             schema_snapshot,
+                             eager_load = task.eager_load,
+                             size_estimate = std::move(task.size_estimate),
+                             op_ctx,
+                             is_replace,
+                             &committer]() mutable {
+                    CheckCancellation(
+                        op_ctx,
+                        id_,
+                        cg_index,
+                        "ChunkedSegmentSealedImpl::LoadColumnGroup()");
+                    LoadColumnGroup(column_groups,
+                                    properties,
+                                    cg_index,
+                                    field_ids,
+                                    segment_load_info,
+                                    schema_snapshot,
+                                    eager_load,
+                                    op_ctx,
+                                    is_replace,
+                                    committer,
+                                    std::move(size_estimate));
+                });
+            load_group_futures.emplace_back(std::move(future));
+        }
+        storage::WaitAllFutures(load_group_futures);
+    } else {
+        std::vector<folly::SemiFuture<folly::Unit>> load_group_futures;
+        load_group_futures.reserve(tasks.size());
+        for (const auto& task : tasks) {
+            load_group_futures.emplace_back(
+                LoadColumnGroupAsync(column_groups,
+                                     properties,
+                                     task.cg_index,
+                                     task.field_ids,
+                                     segment_load_info,
+                                     schema_snapshot,
+                                     task.eager_load,
+                                     op_ctx,
+                                     is_replace,
+                                     committer));
+        }
+        WaitAllColumnGroupFutures(load_group_futures);
     }
-
-    storage::WaitAllFutures(load_group_futures);
     if (schema_snapshot->is_external_collection()) {
         committer.Commit(
             [&](RuntimeResourceState& runtime, PublishedSegmentState&) {
@@ -8175,62 +8217,85 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
-    auto reader = committer.runtime()->reader;
-    AssertInfo(reader != nullptr,
-               "reader must exist before estimating manifest column groups, "
-               "segment {}",
-               get_segment_id());
-    std::unordered_map<int, storagev2translator::ColumnSizeEstimateResult>
-        size_estimates;
-    for (const auto& [cg_index, field_ids] : cg_field_ids) {
-        if (size_estimates.find(cg_index) == size_estimates.end()) {
-            auto estimate_columns =
-                GetStorageColumnNames(schema_snapshot, field_ids);
-            size_estimates.emplace(
-                cg_index,
-                FetchColumnGroupSizeEstimate(
-                    *reader, cg_index, estimate_columns, get_segment_id()));
+    if (!storagev2translator::StorageV2AsyncLoadEnabled()) {
+        auto reader = committer.runtime()->reader;
+        AssertInfo(
+            reader != nullptr,
+            "reader must exist before estimating manifest column groups, "
+            "segment {}",
+            get_segment_id());
+        std::unordered_map<int, storagev2translator::ColumnSizeEstimateResult>
+            size_estimates;
+        for (const auto& [cg_index, field_ids] : cg_field_ids) {
+            if (size_estimates.find(cg_index) == size_estimates.end()) {
+                auto estimate_columns =
+                    GetStorageColumnNames(schema_snapshot, field_ids);
+                size_estimates.emplace(
+                    cg_index,
+                    FetchColumnGroupSizeEstimate(
+                        *reader, cg_index, estimate_columns, get_segment_id()));
+            }
         }
-    }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_group_futures;
-    for (const auto& cg_field_id : cg_field_ids) {
-        const auto cg_index = cg_field_id.first;
-        const auto& field_ids_ref = cg_field_id.second;
-        auto size_estimate = size_estimates.at(cg_index);
-        auto future = pool.Submit([this,
-                                   column_groups,
-                                   properties,
-                                   cg_index,
-                                   field_ids = field_ids_ref,
-                                   size_estimate = std::move(size_estimate),
-                                   &segment_load_info,
-                                   schema_snapshot,
-                                   eager_load,
-                                   op_ctx,
-                                   is_replace,
-                                   &committer]() mutable {
-            CheckCancellation(op_ctx,
-                              id_,
-                              cg_index,
-                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-            LoadColumnGroup(column_groups,
-                            properties,
-                            cg_index,
-                            field_ids,
-                            segment_load_info,
-                            schema_snapshot,
-                            eager_load,
-                            op_ctx,
-                            is_replace,
-                            committer,
-                            std::move(size_estimate));
-        });
-        load_group_futures.emplace_back(std::move(future));
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<void>> load_group_futures;
+        for (const auto& cg_field_id : cg_field_ids) {
+            const auto cg_index = cg_field_id.first;
+            const auto& field_ids_ref = cg_field_id.second;
+            auto size_estimate = size_estimates.at(cg_index);
+            auto future = pool.Submit([this,
+                                       column_groups,
+                                       properties,
+                                       cg_index,
+                                       field_ids = field_ids_ref,
+                                       size_estimate = std::move(size_estimate),
+                                       &segment_load_info,
+                                       schema_snapshot,
+                                       eager_load,
+                                       op_ctx,
+                                       is_replace,
+                                       &committer]() mutable {
+                CheckCancellation(
+                    op_ctx,
+                    id_,
+                    cg_index,
+                    "ChunkedSegmentSealedImpl::LoadColumnGroup()");
+                LoadColumnGroup(column_groups,
+                                properties,
+                                cg_index,
+                                field_ids,
+                                segment_load_info,
+                                schema_snapshot,
+                                eager_load,
+                                op_ctx,
+                                is_replace,
+                                committer,
+                                std::move(size_estimate));
+            });
+            load_group_futures.emplace_back(std::move(future));
+        }
+        storage::WaitAllFutures(load_group_futures);
+    } else {
+        std::vector<folly::SemiFuture<folly::Unit>> load_group_futures;
+        load_group_futures.reserve(cg_field_ids.size());
+        for (const auto& pair : cg_field_ids) {
+            auto cg_index = pair.first;
+            const auto& field_ids = pair.second;
+            load_group_futures.emplace_back(
+                LoadColumnGroupAsync(column_groups,
+                                     properties,
+                                     cg_index,
+                                     field_ids,
+                                     segment_load_info,
+                                     schema_snapshot,
+                                     eager_load,
+                                     op_ctx,
+                                     is_replace,
+                                     committer));
+        }
+        WaitAllColumnGroupFutures(load_group_futures);
     }
-
-    storage::WaitAllFutures(load_group_futures);
 }
 
 void
@@ -8602,6 +8667,267 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             }
         }
     }
+}
+
+folly::SemiFuture<folly::Unit>
+ChunkedSegmentSealedImpl::LoadColumnGroupAsync(
+    const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    int64_t index,
+    const std::vector<FieldId>& milvus_field_ids,
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot,
+    bool eager_load,
+    milvus::OpContext* op_ctx,
+    bool is_replace,
+    StagedStateCommitter& committer) {
+    (void)properties;
+    // LoadColumnGroups drains every returned future before these staged
+    // operation objects leave scope.
+    auto load_info = &segment_load_info;
+    auto committer_ptr = &committer;
+    auto executor_keep_alive =
+        folly::getKeepAliveToken(storagev2translator::GetAsyncLoadExecutor());
+
+    return folly::makeSemiFuture()
+        .via(executor_keep_alive.copy())
+        .thenValue([this,
+                    column_groups,
+                    index,
+                    field_ids = milvus_field_ids,
+                    load_info,
+                    schema_snapshot,
+                    eager_load,
+                    op_ctx,
+                    is_replace,
+                    committer_ptr,
+                    executor_keep_alive =
+                        std::move(executor_keep_alive)](folly::Unit) mutable {
+            CheckCancellation(
+                op_ctx,
+                id_,
+                index,
+                "ChunkedSegmentSealedImpl::LoadColumnGroupAsync()");
+            AssertInfo(index < column_groups->size(),
+                       "load column group index out of range");
+            AssertInfo(!field_ids.empty(),
+                       "load column group with empty field list");
+            auto column_group = column_groups->at(index);
+
+            for (const auto& field_id : field_ids) {
+                AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
+                           "field {} not found in schema when loading column "
+                           "group",
+                           field_id.get());
+            }
+
+            auto field_metas = schema_snapshot->get_field_metas(field_ids);
+            auto warmup_policy = resolve_field_data_group_warmup_policy(
+                field_metas, *load_info, schema_snapshot);
+
+            bool is_vector = false;
+            bool has_mmap_setting = false;
+            bool mmap_enabled = false;
+            for (auto& [field_id, field_meta] : field_metas) {
+                if (IsVectorDataType(field_meta.get_data_type())) {
+                    is_vector = true;
+                }
+                auto [field_has_setting, field_mmap_enabled] =
+                    schema_snapshot->MmapEnabled(field_id);
+                has_mmap_setting = has_mmap_setting || field_has_setting;
+                mmap_enabled = mmap_enabled || field_mmap_enabled;
+            }
+
+            auto& mmap_config =
+                storage::MmapManager::GetInstance().GetMmapConfig();
+            auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
+            bool global_use_mmap = is_vector
+                                       ? mmap_config.GetVectorFieldEnableMmap()
+                                       : mmap_config.GetScalarFieldEnableMmap();
+            auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
+            auto mmap_populate = mmap_config.GetMmapPopulate();
+
+            auto needed_columns = std::make_shared<std::vector<std::string>>();
+            needed_columns->reserve(field_ids.size());
+            for (const auto& field_id : field_ids) {
+                needed_columns->push_back(
+                    schema_snapshot->get_storage_column_name(field_id));
+            }
+            auto column_group_columns = column_group->columns;
+
+            auto reader = committer_ptr->runtime()->reader;
+            AssertInfo(
+                reader != nullptr,
+                "reader must exist before loading manifest column group, "
+                "segment {}",
+                get_segment_id());
+
+            auto mmap_dir_path =
+                milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                    .GetChunkManager()
+                    ->GetRootPath();
+            std::string cache_key_suffix;
+            if (!eager_load) {
+                cache_key_suffix = std::to_string(field_ids.front().get());
+            }
+
+            return reader->get_chunk_reader_async(index, needed_columns)
+                .via(std::move(executor_keep_alive))
+                .thenValue([this,
+                            index,
+                            field_ids = std::move(field_ids),
+                            load_info,
+                            schema_snapshot,
+                            eager_load,
+                            op_ctx,
+                            is_replace,
+                            committer_ptr,
+                            reader = std::move(reader),
+                            field_metas = std::move(field_metas),
+                            needed_columns = std::move(needed_columns),
+                            column_group_columns =
+                                std::move(column_group_columns),
+                            use_mmap,
+                            mmap_populate,
+                            mmap_dir_path = std::move(mmap_dir_path),
+                            warmup_policy = std::move(warmup_policy),
+                            cache_key_suffix = std::move(cache_key_suffix),
+                            writeback_mode](
+                               arrow::Result<std::unique_ptr<
+                                   milvus_storage::api::ChunkReader>>
+                                   chunk_reader_result) mutable {
+                    (void)reader;
+                    CheckCancellation(op_ctx,
+                                      id_,
+                                      index,
+                                      "ChunkedSegmentSealedImpl::"
+                                      "LoadColumnGroupAsync()");
+                    if (!chunk_reader_result.ok()) {
+                        throw milvus_storage::ToSegcoreError(
+                            chunk_reader_result.status());
+                    }
+
+                    auto chunk_reader =
+                        std::move(chunk_reader_result).ValueOrDie();
+                    LOG_INFO(
+                        "[StorageV2] segment {} asynchronously loads "
+                        "manifest cg index {}",
+                        get_segment_id(),
+                        index);
+
+                    auto translator = std::make_unique<
+                        storagev2translator::ManifestGroupTranslator>(
+                        get_segment_id(),
+                        GroupChunkType::DEFAULT,
+                        index,
+                        std::move(chunk_reader),
+                        field_metas,
+                        column_group_columns,
+                        *needed_columns,
+                        use_mmap,
+                        mmap_populate,
+                        mmap_dir_path,
+                        field_ids.size(),
+                        load_info->GetPriority(),
+                        eager_load,
+                        warmup_policy,
+                        cache_key_suffix,
+                        load_info->GetEstimatedBytesPerRow(),
+                        load_info->GetInsertChannel(),
+                        std::nullopt,
+                        writeback_mode,
+                        /*enable_async_load=*/true);
+                    auto chunked_column_group =
+                        std::make_shared<ChunkedColumnGroup>(
+                            std::move(translator));
+
+                    for (const auto& field_id : field_ids) {
+                        const auto& field_meta = field_metas.at(field_id);
+                        auto column = std::make_shared<ProxyChunkColumn>(
+                            chunked_column_group, field_id, field_meta);
+                        auto data_type = field_meta.get_data_type();
+                        load_field_data_common(field_id,
+                                               column,
+                                               load_info->GetNumOfRows(),
+                                               data_type,
+                                               use_mmap,
+                                               true,
+                                               *load_info,
+                                               schema_snapshot,
+                                               nullptr,
+                                               std::nullopt,
+                                               op_ctx,
+                                               is_replace,
+                                               committer_ptr);
+                        if (field_id != TimestampFieldID) {
+                            continue;
+                        }
+
+                        int64_t num_rows = load_info->GetNumOfRows();
+                        if (commit_ts_ != 0) {
+                            std::vector<Timestamp> ts(num_rows, commit_ts_);
+                            auto timestamp_index =
+                                std::make_shared<const TimestampIndex>(
+                                    build_timestamp_index(ts.data(), num_rows));
+                            auto timestamp_data =
+                                std::make_shared<TimestampData>();
+                            timestamp_data->InitFromOwnedData(std::move(ts));
+                            committer_ptr->Commit(
+                                [this,
+                                 timestamp_data = std::move(timestamp_data),
+                                 timestamp_index = std::move(timestamp_index),
+                                 num_rows](RuntimeResourceState& runtime,
+                                           PublishedSegmentState&) mutable {
+                                    runtime.timestamps =
+                                        std::move(timestamp_data);
+                                    runtime.timestamp_index =
+                                        std::move(timestamp_index);
+                                    runtime.timestamp_index_slot.reset();
+                                    stats_.mem_size +=
+                                        sizeof(Timestamp) * num_rows;
+                                });
+                        } else {
+                            std::unique_ptr<Translator<
+                                storagev2translator::TimestampIndexCell>>
+                                translator = std::make_unique<
+                                    storagev2translator::
+                                        TimestampIndexTranslator>(
+                                    id_, column, num_rows, "");
+                            auto slot = Manager::GetInstance().CreateCacheSlot(
+                                std::move(translator));
+                            auto cell_holder =
+                                SemiInlineGet(slot->PinCells(nullptr, {0}));
+                            auto* cell = cell_holder->get_cell_of(0);
+                            AssertInfo(cell != nullptr,
+                                       "timestamp index cache is corrupted, "
+                                       "segment {}",
+                                       id_);
+
+                            auto timestamps = std::make_shared<TimestampData>();
+                            auto pins = column->GetAllChunks(nullptr);
+                            timestamps->InitFromPinnedChunks(column,
+                                                             std::move(pins));
+                            auto timestamp_index =
+                                std::make_shared<const TimestampIndex>(
+                                    cell->timestamp_index());
+                            committer_ptr->Commit(
+                                [timestamps = std::move(timestamps),
+                                 timestamp_index = std::move(timestamp_index),
+                                 slot = std::move(slot)](
+                                    RuntimeResourceState& runtime,
+                                    PublishedSegmentState&) mutable {
+                                    runtime.timestamps = std::move(timestamps);
+                                    runtime.timestamp_index =
+                                        std::move(timestamp_index);
+                                    runtime.timestamp_index_slot =
+                                        std::move(slot);
+                                });
+                        }
+                    }
+                    return folly::unit;
+                });
+        })
+        .semi();
 }
 
 void

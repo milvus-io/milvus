@@ -72,12 +72,6 @@ class PriorityThreadPoolExecutor : public folly::Executor {
     }
 };
 
-folly::Executor*
-DefaultAsyncLoadExecutor() {
-    static PriorityThreadPoolExecutor executor;
-    return &executor;
-}
-
 size_t
 LoadingBudgetBytes(const CellSpec& cell) {
     auto bytes = cell.loading_overhead_size > 0 ? cell.loading_overhead_size
@@ -169,6 +163,12 @@ FinalizeWindow(milvus::OpContext* ctx,
 }
 
 }  // namespace
+
+folly::Executor*
+GetAsyncLoadExecutor() {
+    static PriorityThreadPoolExecutor executor;
+    return &executor;
+}
 
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
@@ -281,7 +281,7 @@ LoadCellsAsync(milvus::OpContext* ctx,
                                  : FieldDataReadWindowBytes();
     auto windows = BuildAsyncReadWindows(cells, read_window_bytes);
     auto executor =
-        options.executor ? options.executor : DefaultAsyncLoadExecutor();
+        options.executor ? options.executor : GetAsyncLoadExecutor();
     auto executor_keep_alive = folly::getKeepAliveToken(executor);
     auto executor_priority = ExecutorPriority(options.load_priority);
     auto budget_priority = BudgetPriority(options.load_priority);
