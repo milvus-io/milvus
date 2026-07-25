@@ -157,7 +157,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
-				return err
+				return mapObjectStorageError(prefix, err)
 			}
 			for _, blob := range pageResp.Segment.BlobItems {
 				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
@@ -172,7 +172,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
-				return err
+				return mapObjectStorageError(prefix, err)
 			}
 
 			for _, blob := range pageResp.Segment.BlobItems {
