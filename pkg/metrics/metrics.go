@@ -17,11 +17,13 @@
 package metrics
 
 import (
-	// #nosec
-	_ "net/http/pprof"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// Note: net/http/pprof is now imported explicitly (not as a blank import) in
+// internal/http/server.go, where its handlers are registered with auth control
+// rather than being relied on to attach to http.DefaultServeMux as a package
+// init side effect.
 
 const (
 	milvusNamespace = "milvus"
