@@ -200,6 +200,44 @@ std::map<std::string, std::string> optimizeExprLatencyLabels{
 std::map<std::string, std::string> filterRatioLabels{
     {"type", "expr_filter_ratio"}};
 
+std::map<std::string, std::string> skipIndexScannedMap = {
+    {"skipindex_chunks", "scanned"}};
+std::map<std::string, std::string> skipIndexPrunedMap = {
+    {"skipindex_chunks", "pruned"}};
+std::map<std::string, std::string> skipIndexRatioMap = {
+    {"skipindex", "prune_ratio"}};
+std::map<std::string, std::string> queryScannedTotalMap = {
+    {"query_scanned", "total"}};
+std::map<std::string, std::string> queryScannedColdMap = {
+    {"query_scanned", "cold"}};
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_core_skipindex_chunks,
+                                 "[cpp]chunks considered/pruned by skip index")
+DEFINE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_scanned,
+                          internal_core_skipindex_chunks,
+                          skipIndexScannedMap)
+DEFINE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_pruned,
+                          internal_core_skipindex_chunks,
+                          skipIndexPrunedMap)
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_skipindex_prune_ratio,
+                                   "[cpp]fraction of chunks pruned per expr")
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_skipindex_prune_ratio_expr,
+    internal_core_skipindex_prune_ratio,
+    skipIndexRatioMap,
+    ratioBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes,
+                                   "[cpp]bytes of cells touched per query")
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_query_scanned_bytes_total,
+    internal_core_query_scanned_bytes,
+    queryScannedTotalMap,
+    bytesBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_query_scanned_bytes_cold,
+                                         internal_core_query_scanned_bytes,
+                                         queryScannedColdMap,
+                                         bytesBuckets)
+
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar,

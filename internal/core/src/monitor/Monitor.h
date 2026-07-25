@@ -55,6 +55,21 @@ DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_anon);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file);
 
 // search metrics
+// skip index effectiveness: how many chunks the skip index was consulted for
+// vs how many it pruned, plus the per-expression prune ratio distribution.
+DECLARE_PROMETHEUS_COUNTER_FAMILY(internal_core_skipindex_chunks);
+DECLARE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_scanned);
+DECLARE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_pruned);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_skipindex_prune_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_skipindex_prune_ratio_expr);
+
+// per-query storage traffic: total = every cell touched, cold = the cells that
+// actually had to be loaded (i.e. real IO). Reading both is what tells you
+// whether pruning translated into IO saved, or only into skipped CPU.
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_query_scanned_bytes_total);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_query_scanned_bytes_cold);
+
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_vector);

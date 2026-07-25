@@ -1380,6 +1380,8 @@ PhyTermFilterExpr::PrefetchRawData() {
         }
     }
 
+    RecordSkipIndexEffect(num_data_chunk_,
+                          num_data_chunk_ - chunks_may_hit.size());
     segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 

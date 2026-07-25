@@ -31,8 +31,24 @@
 #include "query/PlanProto.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
+#include "monitor/Monitor.h"
 
 namespace milvus::query {
+namespace {
+// Publishes this operation's storage traffic once, on every exit path.
+// scanned_total = every cell the operation touched; scanned_cold = the cells
+// that actually had to be loaded, i.e. real IO. Comparing the two across a
+// flag flip is how you tell whether skip-index pruning removed IO or only CPU.
+struct ScannedBytesReporter {
+    const milvus::OpContext& ctx;
+    ~ScannedBytesReporter() {
+        milvus::monitor::internal_core_query_scanned_bytes_total.Observe(
+            static_cast<double>(ctx.storage_usage.scanned_total_bytes.load()));
+        milvus::monitor::internal_core_query_scanned_bytes_cold.Observe(
+            static_cast<double>(ctx.storage_usage.scanned_cold_bytes.load()));
+    }
+};
+}  // namespace
 
 static SearchResult
 empty_search_result(int64_t num_queries, bool element_level = false) {
@@ -297,6 +313,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    ScannedBytesReporter scanned_reporter{op_context};
     query_context->set_op_context(&op_context);
 
     // Do task execution
@@ -451,6 +468,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
             }
 
             auto op_context = milvus::OpContext(cancel_token_);
+            ScannedBytesReporter scanned_reporter{op_context};
             op_context.trace_span = trace_span_;
             query_context->set_op_context(&op_context);
 
@@ -511,6 +529,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    ScannedBytesReporter scanned_reporter{op_context};
     op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
 

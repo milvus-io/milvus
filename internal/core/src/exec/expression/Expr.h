@@ -31,6 +31,7 @@
 #include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
+#include "monitor/Monitor.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/ExprCacheHelper.h"
 #include "exec/expression/Utils.h"
@@ -316,6 +317,26 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    // Report how effective the skip index was for this expression: how many
+    // chunks it judged and how many it pruned. Counters give the cumulative
+    // prune rate; the histogram gives the per-expression distribution, which is
+    // what distinguishes "every query prunes a little" from "a few queries
+    // prune a lot". Read together with internal_core_query_scanned_bytes_cold:
+    // pruning that does not lower cold bytes saved CPU but no IO.
+    void
+    RecordSkipIndexEffect(int64_t chunks_judged, int64_t chunks_pruned) const {
+        if (chunks_judged <= 0) {
+            return;
+        }
+        milvus::monitor::internal_core_skipindex_chunks_scanned.Increment(
+            static_cast<double>(chunks_judged));
+        milvus::monitor::internal_core_skipindex_chunks_pruned.Increment(
+            static_cast<double>(chunks_pruned));
+        milvus::monitor::internal_core_skipindex_prune_ratio_expr.Observe(
+            static_cast<double>(chunks_pruned) /
+            static_cast<double>(chunks_judged));
     }
 
     // A null-rejecting consumer (top-level filter, or AND/OR above -- see

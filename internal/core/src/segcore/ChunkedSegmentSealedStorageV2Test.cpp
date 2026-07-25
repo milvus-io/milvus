@@ -1799,8 +1799,7 @@ TEST(SkipIndexPr51441, StatsSourcePositionalRebuildAndErase) {
     milvus::SkipIndex skip;
     const FieldId fid(101);
     auto source = std::make_shared<FakeChunkStatsSource>();
-    skip.LoadSkipFromStatsSource(
-        /*segment_id=*/1, fid, DataType::INT64, source);
+    skip.LoadSkipFromStatsSource(/*segment_id=*/1, fid, source);
 
     // Positional: 105 cannot be in chunk 0, but can be in chunk 1.
     EXPECT_TRUE(
