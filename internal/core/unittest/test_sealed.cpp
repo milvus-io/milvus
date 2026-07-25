@@ -12,6 +12,7 @@
 #include <fmt/core.h>
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
 #include <time.h>
@@ -68,6 +69,7 @@
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
 #include "knowhere/version.h"
+#include "milvus-storage/common/extend_status.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -81,6 +83,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -112,6 +115,15 @@ GetFieldBit(const BitsetType& bitset, FieldId field_id) {
 
 constexpr int64_t kWarmupPkFieldId = START_USER_FIELDID;
 constexpr int64_t kWarmupVectorFieldId = START_USER_FIELDID + 1;
+
+auto
+SetStorageV2AsyncLoadForTest(bool enabled) {
+    auto previous = storagev2translator::StorageV2AsyncLoadEnabled();
+    storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+    return folly::makeGuard([previous] {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(previous);
+    });
+}
 
 void
 AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
@@ -160,6 +172,10 @@ MakeWarmupTestColumnGroups() {
 
 class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
  public:
+    explicit WarmupTestChunkReader(std::thread::id* chunk_rows_thread = nullptr)
+        : chunk_rows_thread_(chunk_rows_thread) {
+    }
+
     size_t
     total_number_of_chunks() const override {
         return 1;
@@ -192,15 +208,27 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
 
     arrow::Result<std::vector<uint64_t>>
     get_chunk_rows() override {
+        if (chunk_rows_thread_ != nullptr) {
+            *chunk_rows_thread_ = std::this_thread::get_id();
+        }
         return std::vector<uint64_t>{1};
     }
+
+ private:
+    std::thread::id* chunk_rows_thread_;
 };
 
 class WarmupTestReader : public milvus_storage::api::Reader {
  public:
     explicit WarmupTestReader(
-        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups)
-        : column_groups_(std::move(column_groups)) {
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
+        bool allow_sync_open = true,
+        arrow::Status async_open_status = arrow::Status::OK(),
+        std::thread::id* chunk_rows_thread = nullptr)
+        : column_groups_(std::move(column_groups)),
+          allow_sync_open_(allow_sync_open),
+          async_open_status_(std::move(async_open_status)),
+          chunk_rows_thread_(chunk_rows_thread) {
     }
 
     std::shared_ptr<milvus_storage::api::ColumnGroups>
@@ -216,7 +244,27 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>
     get_chunk_reader(int64_t, const std::shared_ptr<std::vector<std::string>>&)
         const override {
-        return std::make_unique<WarmupTestChunkReader>();
+        if (!allow_sync_open_) {
+            return arrow::Status::Invalid(
+                "synchronous chunk reader open must not be used");
+        }
+        return MakeChunkReader();
+    }
+
+    folly::SemiFuture<
+        arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>>
+    get_chunk_reader_async(
+        int64_t,
+        const std::shared_ptr<std::vector<std::string>>&) const override {
+        if (!async_open_status_.ok()) {
+            return folly::makeSemiFuture(
+                arrow::Result<
+                    std::unique_ptr<milvus_storage::api::ChunkReader>>(
+                    async_open_status_));
+        }
+        return folly::makeSemiFuture(
+            arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>(
+                MakeChunkReader()));
     }
 
     arrow::Result<std::shared_ptr<arrow::Table>>
@@ -232,7 +280,15 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     }
 
  private:
+    std::unique_ptr<milvus_storage::api::ChunkReader>
+    MakeChunkReader() const {
+        return std::make_unique<WarmupTestChunkReader>(chunk_rows_thread_);
+    }
+
     std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+    bool allow_sync_open_;
+    arrow::Status async_open_status_;
+    std::thread::id* chunk_rows_thread_;
 };
 
 class CancellationObservingIndexTranslator
@@ -4854,6 +4910,7 @@ TEST(SealedSegmentCowState,
 
 TEST(SealedSegmentCowState,
      StagedStorageV2ColumnGroupUsesVectorIndexWarmupForNoIndexVector) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(false);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
 
@@ -4886,6 +4943,148 @@ TEST(SealedSegmentCowState,
     ASSERT_NE(proxy_column, nullptr);
     EXPECT_EQ(proxy_column->TestCacheWarmupPolicy(),
               CacheWarmupPolicy::CacheWarmupPolicy_Disable);
+}
+
+TEST(SealedSegmentCowState,
+     StagedStorageV2ColumnGroupKeepsSyncReaderWhenAsyncDisabled) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(false);
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1007);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(
+        column_groups,
+        /*allow_sync_open=*/true,
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+            "async open must not be used"));
+    auto column = sealed->TestStageLoadColumnGroupWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        /*index=*/0,
+        {vec},
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/true);
+
+    EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
+}
+
+TEST(SealedSegmentCowState, StagedStorageV2ColumnGroupUsesAsyncReader) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1007);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     /*allow_sync_open=*/false);
+    std::shared_ptr<ChunkedColumnInterface> column;
+    ASSERT_NO_THROW(column = sealed->TestStageLoadColumnGroupWithReader(
+                        column_groups,
+                        std::make_shared<milvus_storage::api::Properties>(),
+                        /*index=*/0,
+                        {vec},
+                        segment_load_info,
+                        schema,
+                        std::move(reader),
+                        /*eager_load=*/true));
+
+    EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
+}
+
+TEST(SealedSegmentCowState,
+     StagedStorageV2ColumnGroupPreparesCacheSlotOffCallerThread) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1008);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    const auto caller_thread = std::this_thread::get_id();
+    std::thread::id chunk_rows_thread = caller_thread;
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     /*allow_sync_open=*/true,
+                                                     arrow::Status::OK(),
+                                                     &chunk_rows_thread);
+    ASSERT_NO_THROW(sealed->TestStageLoadColumnGroupWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        /*index=*/0,
+        {vec},
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/true));
+
+    EXPECT_NE(chunk_rows_thread, caller_thread);
+}
+
+TEST(SealedSegmentCowState,
+     StagedStorageV2ColumnGroupPreservesAsyncReaderStorageError) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1009);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(
+        column_groups,
+        /*allow_sync_open=*/true,
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+            "async open timeout"));
+
+    bool caught_storage_error = false;
+    try {
+        sealed->TestStageLoadColumnGroupWithReader(
+            column_groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            /*index=*/0,
+            {vec},
+            segment_load_info,
+            schema,
+            std::move(reader),
+            /*eager_load=*/true);
+    } catch (const SegcoreError& error) {
+        caught_storage_error = true;
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageTransientError);
+    }
+    EXPECT_TRUE(caught_storage_error);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {

@@ -54,6 +54,9 @@ struct AsyncLoadPipelineOptions {
 using AsyncCellResult =
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>;
 
+folly::Executor*
+GetAsyncLoadExecutor();
+
 folly::SemiFuture<std::vector<AsyncCellResult>>
 LoadCellsAsync(milvus::OpContext* ctx,
                std::vector<CellSpec> cells,
