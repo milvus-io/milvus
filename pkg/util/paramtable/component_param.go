@@ -894,16 +894,27 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		Immutable:    true,
+		Sensitive:    true,
 	}
 	p.SuperUsers.Init(base.mgr)
 
 	p.DefaultRootPassword = ParamItem{
 		Key:     "common.security.defaultRootPassword",
 		Version: "2.4.7",
-		Doc: `default password for root user. The maximum length is 72 characters. 
+		Doc: `default password for root user. The maximum length is 72 characters.
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		// Sensitive but deliberately NOT Immutable: ProcessImmutableConfigs
+		// persists every Immutable key's current value into etcd on first
+		// startup, so marking a credential Immutable would copy it into etcd in
+		// cleartext — the opposite of what redacting it from
+		// /management/config/get is for. Unauthorized mutation of this key is
+		// prevented by the management-plane auth gate instead. The same
+		// reasoning keeps minio/etcd/kafka credentials Sensitive-only; see
+		// TestNoCredentialIsImmutable.
+		Sensitive: true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -938,6 +949,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "false",
 		Doc:          "Whether to enable the /expr endpoint for debugging.",
 		Export:       true,
+		Immutable:    true,
 	}
 	p.ExprEnabled.Init(base.mgr)
 
@@ -1600,10 +1612,11 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.JaegerURL.Init(base.mgr)
 
 	t.OtlpEndpoint = ParamItem{
-		Key:     "trace.otlp.endpoint",
-		Version: "2.3.0",
-		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
-		Export:  true,
+		Key:       "trace.otlp.endpoint",
+		Version:   "2.3.0",
+		Doc:       `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
+		Export:    true,
+		Sensitive: true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
