@@ -54,7 +54,7 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
                               check_task=CheckTasks.err_res,
                               check_items=params.get("expected"))
         else:
-            self.create_index(client, collection_name, index_params)
+            self.create_index(client, collection_name, index_params, timeout=600)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
 
             # load collection
