@@ -31,6 +31,7 @@
 #include "query/PlanProto.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
+#include "cachinglayer/TieredStorageConfig.h"
 #include "monitor/Monitor.h"
 
 namespace milvus::query {
@@ -42,6 +43,17 @@ namespace {
 struct ScannedBytesReporter {
     const milvus::OpContext& ctx;
     ~ScannedBytesReporter() {
+        // The cachinglayer only accumulates storage_usage when tiered-storage
+        // usage tracking is on, and that setting defaults to OFF and is frozen
+        // into each CacheSlot at creation. Reporting regardless would publish a
+        // stream of zeros on a default deployment and make the skip index look
+        // like it removed all IO, so only report when tracking is actually
+        // enabled -- an absent series is honest, a zero series is not.
+        if (!milvus::cachinglayer::TieredStorageConfig::GetInstance()
+                 .GetSnapshot()
+                 .storage_usage_tracking_enabled) {
+            return;
+        }
         milvus::monitor::internal_core_query_scanned_bytes_total.Observe(
             static_cast<double>(ctx.storage_usage.scanned_total_bytes.load()));
         milvus::monitor::internal_core_query_scanned_bytes_cold.Observe(

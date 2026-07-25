@@ -1819,3 +1819,33 @@ TEST(SkipIndexPr51441, StatsSourcePositionalRebuildAndErase) {
     EXPECT_FALSE(
         skip.CanSkipUnaryRange<int64_t>(fid, 0, OpType::Equal, int64_t(105)));
 }
+
+// Integer arithmetic predicates cannot be inverted by integer multiplication /
+// division: the rewrite truncates and is strictly narrower than the original,
+// so it would prune chunks that actually match. Each case below is chosen so
+// that the NAIVE rewrite would prune while the real predicate matches -- i.e.
+// they fail if the inversion ever comes back. FakeChunkStatsSource gives
+// chunk 0 == [0,10] and chunk 1 == [100,110].
+TEST(SkipIndexPr51441, IntegerMulDivArithNeverPrunes) {
+    milvus::SkipIndex skip;
+    const FieldId fid(202);
+    skip.LoadSkipFromStatsSource(
+        /*segment_id=*/2, fid, std::make_shared<FakeChunkStatsSource>());
+
+    // field * 2 < 201 is true for field == 100, which chunk 1 contains.
+    // Naive rewrite: field < 201/2 == 100 -- nothing in [100,110] satisfies
+    // that, so the rewrite would prune a chunk holding a match.
+    EXPECT_FALSE(skip.CanSkipBinaryArithRange<int64_t>(
+        fid, 1, OpType::LessThan, ArithOpType::Mul, int64_t(201), int64_t(2)));
+
+    // field / 7 == 14 is true for field in [98,104]; chunk 1 holds 100..104.
+    // Naive rewrite: field == 14*7 == 98 -- outside [100,110], so the rewrite
+    // would prune a chunk holding a match.
+    EXPECT_FALSE(skip.CanSkipBinaryArithRange<int64_t>(
+        fid, 1, OpType::Equal, ArithOpType::Div, int64_t(14), int64_t(7)));
+
+    // Add/Sub are exact on integers and must still prune a non-matching chunk:
+    // field + 1 == 1000 => field == 999, outside [0,10].
+    EXPECT_TRUE(skip.CanSkipBinaryArithRange<int64_t>(
+        fid, 0, OpType::Equal, ArithOpType::Add, int64_t(1000), int64_t(1)));
+}

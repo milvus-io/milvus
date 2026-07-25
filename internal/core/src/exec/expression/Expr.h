@@ -320,7 +320,8 @@ class SegmentExpr : public Expr {
     }
 
     // Report how effective the skip index was for this expression: how many
-    // chunks it judged and how many it pruned. Counters give the cumulative
+    // chunks it judged and how many it pruned. Only call this for expressions
+    // that actually consult the skip index. Counters give the cumulative
     // prune rate; the histogram gives the per-expression distribution, which is
     // what distinguishes "every query prunes a little" from "a few queries
     // prune a lot". Read together with internal_core_query_scanned_bytes_cold:
@@ -1643,10 +1644,17 @@ class SegmentExpr : public Expr {
             int64_t judged = 0;
             int64_t pruned = 0;
             for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-                ++judged;
-                if (skip_func && skip_func(*skip_index, field_id_, i)) {
-                    ++pruned;
-                    continue;
+                if (skip_func) {
+                    // Only chunks the skip index actually judged belong in the
+                    // metrics; expressions that pass no skip_func (GIS, Exists,
+                    // JSON contains, timestamptz arithmetic, ...) would
+                    // otherwise flood the ratio with prune_ratio == 0 samples
+                    // and hide how the skip index really performs.
+                    ++judged;
+                    if (skip_func(*skip_index, field_id_, i)) {
+                        ++pruned;
+                        continue;
+                    }
                 }
                 pf_chunk_ids.push_back(i);
             }

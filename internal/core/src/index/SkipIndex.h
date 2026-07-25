@@ -26,10 +26,14 @@
 
 namespace milvus {
 
-// Lazily re-readable source of one field's per-chunk skip metrics, so the cells
-// built from it stay evictable: an evicted cell is rebuilt by asking the source
-// again, exactly like the column-backed translator below rebuilds from
-// ChunkedColumnInterface::GetChunk.
+// Lazily re-readable source of one field's per-chunk skip metrics: cells are
+// built on first use and can be rebuilt by asking the source again, exactly
+// like the column-backed translator below rebuilds from
+// ChunkedColumnInterface::GetChunk. NOTE: rebuildable is not the same as
+// evicted -- both skip-metrics translators still report support_eviction=false
+// and a {0,0} size estimate, so the cache never reclaims these cells. Enabling
+// that (now that rebuilding works) needs a real size estimate too, and is a
+// follow-up.
 //
 // The source owns the INTERPRETATION as well as the read, which is what keeps
 // this seam storage-neutral: the parquet implementation (see segcore) reads a
