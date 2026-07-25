@@ -31,7 +31,6 @@
 #include "query/PlanProto.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
-#include "cachinglayer/TieredStorageConfig.h"
 #include "monitor/Monitor.h"
 
 namespace milvus::query {
@@ -43,19 +42,27 @@ namespace {
 struct ScannedBytesReporter {
     const milvus::OpContext& ctx;
     ~ScannedBytesReporter() {
-        // The cachinglayer only accumulates storage_usage when tiered-storage
-        // usage tracking is on, and that setting defaults to OFF and is frozen
-        // into each CacheSlot at creation. Reporting regardless would publish a
-        // stream of zeros on a default deployment and make the skip index look
-        // like it removed all IO, so only report when tracking is actually
-        // enabled -- an absent series is honest, a zero series is not.
-        if (!milvus::cachinglayer::TieredStorageConfig::GetInstance()
-                 .GetSnapshot()
-                 .storage_usage_tracking_enabled) {
+        // Report only what was actually measured. The cachinglayer accumulates
+        // storage_usage only when tiered-storage usage tracking is on, that
+        // setting defaults to OFF, and -- crucially -- each CacheSlot freezes
+        // it at creation while the global value is refreshable and really is
+        // updated at runtime (see updateTieredStorageConfigCallback). So asking
+        // the config "is tracking on now?" answers the wrong question and is
+        // wrong in both directions after a flip: newly enabled, the old slots
+        // still do not accumulate and we would publish phantom zeros; newly
+        // disabled, the old slots still do accumulate and we would drop real
+        // samples. Gate on the observation itself instead -- non-zero means
+        // some slot really did track this operation, whatever the config says.
+        // Trade-off: an operation that genuinely touched no cell is not
+        // reported. That is degenerate (a query still pins timestamps/pk), and
+        // losing it is far safer than publishing zeros that read as "the skip
+        // index removed all IO".
+        const auto total = ctx.storage_usage.scanned_total_bytes.load();
+        if (total <= 0) {
             return;
         }
         milvus::monitor::internal_core_query_scanned_bytes_total.Observe(
-            static_cast<double>(ctx.storage_usage.scanned_total_bytes.load()));
+            static_cast<double>(total));
         milvus::monitor::internal_core_query_scanned_bytes_cold.Observe(
             static_cast<double>(ctx.storage_usage.scanned_cold_bytes.load()));
     }
