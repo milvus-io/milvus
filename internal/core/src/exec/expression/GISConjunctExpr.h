@@ -42,19 +42,14 @@ struct GISGroupState {
         std::string query_wkt;
         bool has_index{false};
         // Per-predicate R-Tree coarse bitmap (segment-level, computed once).
-        TargetBitmap coarse;
-        // Why this predicate's coarse bitmap ended up all-ones, if it did.
         // An all-ones coarse is always CORRECT -- Refine still evaluates the
         // exact predicate -- but it prunes nothing, so the pruning gain
-        // silently drops to zero. ON/OFF equivalence tests cannot see this
-        // (they are only sensitive to coarse UNDER-inclusion), which is why
-        // the reason is recorded rather than left implicit.
-        enum class CoarseDegrade {
-            kNone = 0,       // R-Tree answered; coarse is a real candidate set
-            kNoIndex,        // no geometry index on this field (expected)
-            kIndexUnusable,  // index reported present but the pin yielded nothing
-        };
-        CoarseDegrade degraded{CoarseDegrade::kNone};
+        // silently drops to zero. That is surfaced two ways instead of a
+        // per-predicate flag: the refine ratio metric (a ratio near 1 means
+        // coarse stopped pruning) and, for the unexpected "index present but
+        // unusable" case, a single per-segment LOG_WARN raised by the Coarse
+        // node after combining B_coarse.
+        TargetBitmap coarse;
     };
 
     FieldId field_id;
@@ -75,6 +70,16 @@ struct GISGroupState {
     // atomicity -- it is only read/written inside PhyGISCoarseConjunctExpr::Eval.
     bool coarse_done{false};
 
+    // A state may be destroyed without being evaluated to completion: the
+    // FilterBits result cache can bypass the expression tree entirely,
+    // cancellation/errors can stop between batches, and an upstream conjunct
+    // can skip both GIS nodes. Destructor-based metrics are valid only after
+    // both node cursors account for the whole segment and Coarse actually
+    // computed B_coarse. MoveCursor maintains these flags for both evaluated
+    // and short-circuited batches.
+    bool coarse_cursor_complete{false};
+    bool refine_cursor_complete{false};
+
     // --- pruning observability -------------------------------------------
     // The point of split-fusion is that Refine only evaluates survivors. That
     // contract is invisible to ON/OFF equivalence tests: making Refine
@@ -84,15 +89,17 @@ struct GISGroupState {
     //
     // Rows set in B_coarse after combining every predicate.
     int64_t coarse_selected{0};
-    // Rows Refine actually evaluated the exact predicate for, i.e. survivors
-    // of (scalars AND B_coarse). Must stay well below active_count for a
-    // selective query, otherwise pruning is not happening.
+    // Survivors of (scalars AND B_coarse) that Refine fetched, i.e. the rows it
+    // paid to look at. This is the fetch cost the split exists to shrink and
+    // must stay well below active_count for a selective query. It counts every
+    // fetched survivor, including null/invalid geometries that are skipped
+    // before any exact predicate runs -- Refine still fetched them, so they are
+    // part of the cost being measured; the exact predicate (and the geometry
+    // construction it needs) runs for the non-null subset.
     int64_t refined_rows{0};
 
-    // Reports the two counters above as ratios of active_count. This state is
-    // created per segment and shared only by that segment's Coarse/Refine
-    // nodes, so destruction is exactly "this query is done with this segment"
-    // -- the one point where both counters are final and every batch has been
+    // Reports the two counters above as ratios of active_count, but only when
+    // coarse_done and both cursor-complete flags prove every batch has been
     // accounted for. Defined out-of-line so the Prometheus headers stay out of
     // this one.
     ~GISGroupState();
@@ -156,6 +163,7 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
     void
     MoveCursor() override {
         current_pos_ += NextBatchSize();
+        st_->coarse_cursor_complete = current_pos_ == active_count_;
     }
 
     // The coarse node never reads the raw geometry column: it either queries
@@ -169,6 +177,20 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
     PrefetchRawData() override {
     }
 
+    // DELIBERATELY NOT overridden to return true. It is tempting to: this node
+    // self-manages its cursor and its Eval handles a single active_count_-sized
+    // batch, so it *could* run all-at-once, which would restore parity with the
+    // baseline PhyGISFunctionFilterExpr (that reaches all-at-once via ScalarIndex
+    // when the field has an R-Tree). But a conjunction is all-at-once eligible
+    // only if EVERY child is, and the Refine node forces RawData -> base returns
+    // false -> the whole Coarse+Refine conjunction stays batched. Inheriting the
+    // base here (index -> true, no-index -> false) keeps that invariant: if this
+    // node ever *did* qualify, SetExecuteAllAtOnce would set batch_size_ =
+    // active_count_ and Refine would bulk_subscript the ENTIRE WKB column in one
+    // Eval (all-ones coarse + default-off geometry cache), turning a batch-bounded
+    // query into a whole-column one and risking a QueryNode OOM. Losing the
+    // all-at-once fast path is the favorable trade. See PR #50675 review.
+
  private:
     int64_t
     NextBatchSize() const {
@@ -177,7 +199,10 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
     }
 
     // Run the R-Tree index query for a single predicate, filling p.coarse.
-    void
+    // Returns true if the pin came up empty and coarse degraded to an all-set
+    // bitmap (index reported present but unusable); the caller raises a single
+    // per-segment warning for the whole group instead of one per predicate.
+    bool
     RunRTreeQuery(GISGroupState::Pred& p);
 
     GISGroupStatePtr st_;
@@ -229,19 +254,45 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
     void
     MoveCursor() override {
         current_pos_ += NextBatchSize();
+        st_->refine_cursor_complete = current_pos_ == active_count_;
     }
 
-    // The refine node always reads the raw geometry column (geometry cache or
-    // bulk_subscript) and never touches pinned_index_ -- only the Coarse node
-    // queries the R-Tree, via its own EnsurePinnedIndex() in RunRTreeQuery().
-    // The SegmentExpr default would see HasIndex() == true, pin an index cell
-    // this node never reads (a pointless cold fetch under tiered storage), and
-    // commit to ScalarIndex -- which also makes PrefetchAsync() skip the
-    // raw-data prefetch this node actually needs. Commit to RawData instead.
+    // The refine node reads the raw geometry column only for survivors (via the
+    // geometry cache or a bulk_subscript over their offsets) and never touches
+    // pinned_index_ -- only the Coarse node queries the R-Tree, via its own
+    // EnsurePinnedIndex() in RunRTreeQuery(). The SegmentExpr default would see
+    // HasIndex() == true, pin an index cell this node never reads (a pointless
+    // cold fetch under tiered storage), and commit to ScalarIndex. Commit to
+    // RawData instead so no index is pinned. This exec_path_ choice is about
+    // pinning, NOT prefetch: see PrefetchRawData() below, which overrides the
+    // wasteful full-column warm-up the RawData default would otherwise trigger.
     void
     DetermineExecPath() override {
         exec_path_ = ExprExecPath::RawData;
     }
+
+    // Refine reads only survivors -- via the geometry cache or a bulk_subscript
+    // over specific offsets -- never a sequential full-column scan, so the base
+    // full-column prefetch (prefetch_chunks over every chunk) is mostly wasted.
+    // Warm the column only when reads will actually span it: no geometry cache
+    // (with a cache the column is never read) AND no R-Tree index (with one,
+    // Coarse narrows survivors to a small subset that bulk_subscript fetches
+    // lazily). Defined out-of-line so the GeometryCache header stays out of this
+    // one.
+    void
+    PrefetchRawData() override;
+
+    // DELIBERATELY NOT overridden. This node forces RawData, so the inherited
+    // base CanExecuteAllAtOnce() returns false and the refine stage is ALWAYS
+    // batched. That is load-bearing, not incidental: overriding it to true would
+    // let SetExecuteAllAtOnce set batch_size_ = active_count_, and Eval would
+    // then bulk_subscript survivors for the whole segment in one pass -- for an
+    // all-ones coarse (no R-Tree) with the geometry cache off (default) that
+    // decodes the entire WKB column into one GeometryArray, a whole-column peak
+    // in place of a batch-bounded one, and can OOM the QueryNode. Keeping Refine
+    // batched also caps the indexed-but-non-selective case (a wide coarse
+    // viewport still yields many survivors). See PhyGISCoarseConjunctExpr and
+    // PR #50675 review.
 
  private:
     int64_t

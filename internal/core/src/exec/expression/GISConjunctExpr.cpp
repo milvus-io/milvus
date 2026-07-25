@@ -55,9 +55,14 @@ SetGISGroupStateObserverForTest(GISGroupStateObserver observer) {
 }
 
 GISGroupState::~GISGroupState() {
-    // active_count == 0 means the group was built but the segment held no
-    // visible row, so both ratios would be 0/0. Nothing to report.
-    if (active_count > 0) {
+    // Expression construction does not imply execution: FilterBits may return
+    // a cached result, an upstream conjunct may skip this group, or an
+    // exception/cancellation may stop between batches. In those cases the
+    // zero/partial counters are not segment-level pruning ratios and must not
+    // enter the histograms.
+    const bool reportable = active_count > 0 && coarse_done &&
+                            coarse_cursor_complete && refine_cursor_complete;
+    if (reportable) {
         const double denom = static_cast<double>(active_count);
         milvus::monitor::internal_core_gis_coarse_ratio.Observe(
             static_cast<double>(coarse_selected) / denom);
@@ -83,7 +88,7 @@ GISGroupState::~GISGroupState() {
         std::lock_guard<std::mutex> lock(GISGroupStateObserverMutex());
         observer = GISGroupStateObserverSlot();
     }
-    if (observer) {
+    if (observer && reportable) {
         observer(*this);
     }
 }
@@ -92,7 +97,7 @@ GISGroupState::~GISGroupState() {
 // Coarse node: run each predicate's R-Tree query once (segment-level), combine
 // per is_and, cache, and emit the per-batch slice.
 // -------------------------------------------------------------------------
-void
+bool
 PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // Mirrors PhyGISFunctionFilterExpr::EvalForIndexSegment's coarse query.
     using Index = index::ScalarIndex<std::string>;
@@ -112,22 +117,12 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
             ? dynamic_cast<const Index*>(pinned_index_[0].get())
             : nullptr;
     if (scalar_index == nullptr) {
+        // Degrade to an all-set coarse: results stay correct (Refine still
+        // evaluates the exact predicate) but this segment loses R-Tree pruning.
+        // The caller aggregates this across the group's predicates and warns
+        // once per segment (see Eval), instead of once per predicate here.
         p.coarse = TargetBitmap(active_count_, true);
-        p.degraded = GISGroupState::Pred::CoarseDegrade::kIndexUnusable;
-        // Runs once per segment per predicate (guarded by coarse_done), never
-        // on the row-level path. Warn rather than stay silent: results remain
-        // correct but this segment loses all R-Tree pruning, and nothing else
-        // in the pipeline reports it -- a persistently unusable index would
-        // otherwise look exactly like a healthy one that is merely slow.
-        LOG_WARN(
-            "GIS coarse pruning degraded to full scan: field {} reports an "
-            "index but the pin yielded no usable string index "
-            "(num_index_chunk={}, pinned={}); results stay correct via Refine, "
-            "R-Tree pruning is lost for this segment",
-            st_->field_id.get(),
-            num_index_chunk_,
-            pinned_index_.size());
-        return;
+        return true;
     }
 
     // GEOS objects are bound to the per-thread context.
@@ -160,16 +155,24 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
         TargetBitmap sliced;
         sliced.append(tmp, 0, active_count_);
         p.coarse = std::move(sliced);
-        return;
+        return false;
     }
     if (static_cast<int64_t>(tmp.size()) < active_count_) {
         tmp.resize(active_count_, /*init=*/true);
     }
     p.coarse = std::move(tmp);
+    return false;
 }
 
 void
 PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    // Self-guard like every other SegmentExpr subclass: block until the
+    // prefetch-pool DetermineExecPath()/EnsurePinnedIndex() has finished before
+    // RunRTreeQuery() re-pins on the query thread, closing the pinned_index_
+    // race. No-op once the future is drained (subsequent batches hit the cheap
+    // EnsureExecPathDetermined() branch). FilterBits already waits before the
+    // first Eval, so this only hardens direct/other callers.
+    WaitPrefetch();
     auto real_batch_size = NextBatchSize();
     if (real_batch_size == 0) {
         result = nullptr;
@@ -179,21 +182,20 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // Phase 1: build B_coarse once for the whole segment.
     if (!st_->coarse_done) {
         TargetBitmap cand(active_count_, st_->is_and);  // AND -> 1s / OR -> 0s
+        int unusable_index = 0;  // preds whose R-Tree pin came up empty
+        int no_index = 0;        // preds with no geometry index at all
         for (auto& p : st_->preds) {
             if (p.has_index) {
-                RunRTreeQuery(p);
+                if (RunRTreeQuery(p)) {
+                    ++unusable_index;
+                }
             } else {
                 // No R-Tree index: coarse degenerates to the full set; the
                 // Refine node still prunes via bitmap_input and fuses
-                // construction. Expected, so this is DEBUG -- but it must be
-                // distinguishable from the kIndexUnusable warning above, which
-                // looks identical from the outside.
+                // construction. Expected, so it is aggregated into a single
+                // DEBUG line below rather than logged per predicate.
                 p.coarse = TargetBitmap(active_count_, true);
-                p.degraded = GISGroupState::Pred::CoarseDegrade::kNoIndex;
-                LOG_DEBUG(
-                    "GIS coarse pruning unavailable: field {} has no geometry "
-                    "index, coarse degenerates to the full set",
-                    st_->field_id.get());
+                ++no_index;
             }
             if (st_->is_and) {
                 cand &= p.coarse;
@@ -205,6 +207,34 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // per-predicate bitmaps. Release it now so we don't hold one extra
             // active_count_-bit bitmap per predicate for the whole query life.
             p.coarse = TargetBitmap{};
+        }
+        // One log per segment per query (this block is guarded by coarse_done),
+        // NOT one per predicate. The unusable-index case is unexpected and
+        // loses all R-Tree pruning for the segment while the index warms up --
+        // or permanently, if it is broken -- so warn: nothing else in the
+        // pipeline reports it and a degraded deployment would otherwise look
+        // exactly like a healthy one. All preds share the field's index, so
+        // num_index_chunk_/pinned_index_ reflect that shared pin state.
+        if (unusable_index > 0) {
+            LOG_WARN(
+                "GIS coarse pruning degraded to full scan: field {} reports an "
+                "index but the pin yielded no usable string index for {} of {} "
+                "predicate(s) (num_index_chunk={}, pinned={}); results stay "
+                "correct via Refine, R-Tree pruning is lost for this segment",
+                st_->field_id.get(),
+                unusable_index,
+                st_->preds.size(),
+                num_index_chunk_,
+                pinned_index_.size());
+        }
+        if (no_index > 0) {
+            LOG_DEBUG(
+                "GIS coarse pruning unavailable: field {} has no geometry "
+                "index "
+                "for {} of {} predicate(s), coarse degenerates to the full set",
+                st_->field_id.get(),
+                no_index,
+                st_->preds.size());
         }
         // Reported once per segment by ~GISGroupState, together with
         // refined_rows: an all-ones coarse still returns correct results, so
@@ -219,6 +249,28 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // Phase 2: emit slice [current_pos_, +real_batch_size).
     TargetBitmap out;
     out.append(*st_->coarse_candidates, current_pos_, real_batch_size);
+    // Intersect with any mask an OUTER conjunction supplied. Within this same AND
+    // it is redundant -- the conjunction re-ANDs Coarse's output and rebuilds
+    // bitmap_input from the accumulated result, so scalar siblings still reach
+    // Refine either way. But when the split group is NESTED (e.g. under an OR
+    // arm: `id < 100 OR (st_intersects(geo,P1) AND st_within(geo,P2))`), the
+    // inner conjunction's accumulator starts fresh and Coarse -- bucketed first
+    // as the indexed expr -- is the only node positioned to consume the outer
+    // mask before it is overwritten. Sound in BOTH directions: a row masked off
+    // is already settled by the parent (TRUE under an OR arm, FALSE under an AND
+    // arm), so dropping it here cannot change the recombined three-valued result,
+    // and it spares Refine from building geometries for rows the outer arm
+    // already decided (also making internal_core_gis_refine_ratio reflect the
+    // real pruned work for nested shapes). coarse_candidates itself is left pure
+    // B_coarse -- only this per-batch slice is narrowed. See PR #50675 review.
+    const auto& outer_mask = context.get_bitmap_input();
+    if (!outer_mask.empty()) {
+        AssertInfo(static_cast<int64_t>(outer_mask.size()) == real_batch_size,
+                   "bitmap_input size {} != real_batch_size {}",
+                   outer_mask.size(),
+                   real_batch_size);
+        out &= outer_mask;
+    }
     // valid is all-ones intentionally (see also the Refine node). PRECONDITION:
     // these split nodes NEVER sit under a NOT and "null == not-selected" for
     // them. This holds because split is only applied INSIDE a pure conjunction
@@ -234,8 +286,8 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // See PR #50675 review.
     TargetBitmap valid(real_batch_size, true);
 
-    MoveCursor();
     result = std::make_shared<ColumnVector>(std::move(out), std::move(valid));
+    MoveCursor();
 }
 
 // -------------------------------------------------------------------------
@@ -256,7 +308,35 @@ PhyGISRefineConjunctExpr::EvalPrepared(
 }
 
 void
+PhyGISRefineConjunctExpr::PrefetchRawData() {
+    // Refine reads only survivors -- through the geometry cache or a
+    // bulk_subscript over their offsets -- never a sequential full-column scan,
+    // so the base prefetch_chunks over EVERY chunk is mostly wasted. Warm the
+    // column only when reads will actually span it.
+    auto* geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
+        segment_->get_segment_id(), st_->field_id);
+    if (geometry_cache != nullptr) {
+        // Reads come from the cache; the raw column is never touched.
+        return;
+    }
+    // All preds share the field, hence the same index state.
+    const bool has_index = !st_->preds.empty() && st_->preds.front().has_index;
+    if (has_index) {
+        // Coarse narrows survivors to a small subset; bulk_subscript fetches
+        // only those chunks lazily, so a full warm-up would over-read.
+        return;
+    }
+    // No cache and no index: survivors are bounded only by the scalar mask and
+    // may span the whole column, so the base full-column warm-up pays off.
+    SegmentExpr::PrefetchRawData(field_id_);
+}
+
+void
 PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    // Self-guard like every other SegmentExpr subclass (see the Coarse node):
+    // drain the prefetch future before reading the raw column so a direct
+    // caller that skipped the operator-level wait still sees a warmed column.
+    WaitPrefetch();
     auto real_batch_size = NextBatchSize();
     if (real_batch_size == 0) {
         result = nullptr;
@@ -380,9 +460,9 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
-    MoveCursor();
     result =
         std::make_shared<ColumnVector>(std::move(res), std::move(valid_res));
+    MoveCursor();
 }
 
 }  // namespace exec
