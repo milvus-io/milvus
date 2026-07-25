@@ -128,6 +128,13 @@ func Test_IndexEngineVersionManager_IndexStorePathVersionConfigGate(t *testing.T
 	// a malformed value must fall back to the legacy layout, not to the opt-in one
 	paramtable.Get().Save(key, "not-a-number")
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// an out-of-range value is not a layout this binary knows, so it must not be read as opting in
+	paramtable.Get().Save(key, "2")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	paramtable.Get().Save(key, "-1")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 }
 
 func Test_IndexEngineVersionManager_GetMergedScalarIndexVersion(t *testing.T) {

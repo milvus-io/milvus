@@ -3,6 +3,8 @@ package datacoord
 import (
 	"context"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
@@ -13,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // IndexEngineVersionManager manages the index engine versions reported by all QueryNodes in the cluster.
@@ -126,19 +127,41 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 	m.addOrUpdate(session)
 }
 
+// configuredIndexStorePathVersion parses dataCoord.index.storePathVersion. Only the two layouts
+// the enum defines are accepted; anything else (including a malformed value, which the paramtable
+// getters silently coerce to 0) falls back to the legacy layout and is logged, so an operator typo
+// is visible instead of being read as an opt-in.
+func configuredIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	raw := Params.DataCoordCfg.IndexStorePathVersion.GetValue()
+	parsed, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 32)
+	if err == nil {
+		switch version := indexpb.IndexStorePathVersion(parsed); version {
+		case indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED:
+			return version
+		}
+	}
+	mlog.RatedWarn(context.TODO(), rate.Limit(60), "unsupported dataCoord.index.storePathVersion, falling back to the legacy index layout",
+		mlog.String("value", raw))
+	return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+}
+
 // GetClusterMinIndexStorePathVersion returns the index file layout to use for new index builds.
 //
 // COLLECTION_ROOTED requires BOTH:
 //   - the operator to opt in via dataCoord.index.storePathVersion, because a binary older than
 //     this one cannot read that layout and the opt-in is what gives up rollback compatibility;
-//   - every QueryNode to already run this version, because QueryNodes rebuild the remote index
-//     prefix themselves (storage/FileManager.h GetRemoteIndexObjectPrefix), so an older one
-//     would look for the files under the legacy layout.
+//   - no QueryNode to still report an older release line, because QueryNodes rebuild the remote
+//     index prefix themselves (storage/FileManager.h GetRemoteIndexObjectPrefix), so an older one
+//     would look for the files under the legacy layout. The comparison below is against the
+//     version each QueryNode publishes in its session, which is the compile-time common.Version
+//     constant, so it only separates release lines (2.6.x vs 3.0.x): two binaries on the same
+//     line report the identical version and cannot be told apart here.
 //
 // Falling back to BUILD_ROOTED is always safe: the layout is recorded per SegmentIndex, so
 // records built earlier keep being read and GC'd under the layout they were built with.
 func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
-	if !metautil.IsCollectionRooted(indexpb.IndexStorePathVersion(Params.DataCoordCfg.IndexStorePathVersion.GetAsInt32())) {
+	if configuredIndexStorePathVersion() != indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
 		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	}
 
