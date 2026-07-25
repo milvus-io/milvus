@@ -42,19 +42,14 @@ struct GISGroupState {
         std::string query_wkt;
         bool has_index{false};
         // Per-predicate R-Tree coarse bitmap (segment-level, computed once).
-        TargetBitmap coarse;
-        // Why this predicate's coarse bitmap ended up all-ones, if it did.
         // An all-ones coarse is always CORRECT -- Refine still evaluates the
         // exact predicate -- but it prunes nothing, so the pruning gain
-        // silently drops to zero. ON/OFF equivalence tests cannot see this
-        // (they are only sensitive to coarse UNDER-inclusion), which is why
-        // the reason is recorded rather than left implicit.
-        enum class CoarseDegrade {
-            kNone = 0,       // R-Tree answered; coarse is a real candidate set
-            kNoIndex,        // no geometry index on this field (expected)
-            kIndexUnusable,  // index reported present but the pin yielded nothing
-        };
-        CoarseDegrade degraded{CoarseDegrade::kNone};
+        // silently drops to zero. That is surfaced two ways instead of a
+        // per-predicate flag: the refine ratio metric (a ratio near 1 means
+        // coarse stopped pruning) and, for the unexpected "index present but
+        // unusable" case, a single per-segment LOG_WARN raised by the Coarse
+        // node after combining B_coarse.
+        TargetBitmap coarse;
     };
 
     FieldId field_id;
@@ -75,6 +70,16 @@ struct GISGroupState {
     // atomicity -- it is only read/written inside PhyGISCoarseConjunctExpr::Eval.
     bool coarse_done{false};
 
+    // A state may be destroyed without being evaluated to completion: the
+    // FilterBits result cache can bypass the expression tree entirely,
+    // cancellation/errors can stop between batches, and an upstream conjunct
+    // can skip both GIS nodes. Destructor-based metrics are valid only after
+    // both node cursors account for the whole segment and Coarse actually
+    // computed B_coarse. MoveCursor maintains these flags for both evaluated
+    // and short-circuited batches.
+    bool coarse_cursor_complete{false};
+    bool refine_cursor_complete{false};
+
     // --- pruning observability -------------------------------------------
     // The point of split-fusion is that Refine only evaluates survivors. That
     // contract is invisible to ON/OFF equivalence tests: making Refine
@@ -84,15 +89,17 @@ struct GISGroupState {
     //
     // Rows set in B_coarse after combining every predicate.
     int64_t coarse_selected{0};
-    // Rows Refine actually evaluated the exact predicate for, i.e. survivors
-    // of (scalars AND B_coarse). Must stay well below active_count for a
-    // selective query, otherwise pruning is not happening.
+    // Survivors of (scalars AND B_coarse) that Refine fetched, i.e. the rows it
+    // paid to look at. This is the fetch cost the split exists to shrink and
+    // must stay well below active_count for a selective query. It counts every
+    // fetched survivor, including null/invalid geometries that are skipped
+    // before any exact predicate runs -- Refine still fetched them, so they are
+    // part of the cost being measured; the exact predicate (and the geometry
+    // construction it needs) runs for the non-null subset.
     int64_t refined_rows{0};
 
-    // Reports the two counters above as ratios of active_count. This state is
-    // created per segment and shared only by that segment's Coarse/Refine
-    // nodes, so destruction is exactly "this query is done with this segment"
-    // -- the one point where both counters are final and every batch has been
+    // Reports the two counters above as ratios of active_count, but only when
+    // coarse_done and both cursor-complete flags prove every batch has been
     // accounted for. Defined out-of-line so the Prometheus headers stay out of
     // this one.
     ~GISGroupState();
@@ -156,7 +163,15 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
     void
     MoveCursor() override {
         current_pos_ += NextBatchSize();
+        st_->coarse_cursor_complete = current_pos_ == active_count_;
     }
+
+    // NOTE (2.6): the master PR overrides PrefetchRawData() here to a no-op and
+    // documents why CanExecuteAllAtOnce() is deliberately NOT overridden. Neither
+    // applies on 2.6: SegmentExpr has no lazy exec-path / prefetch machinery
+    // (PrefetchRawData, WaitPrefetch, DetermineExecPath) and no all-at-once path
+    // (CanExecuteAllAtOnce / SetExecuteAllAtOnce), so this node is always batched
+    // and never prefetches. Both overrides come back with that machinery.
 
  private:
     int64_t
@@ -166,7 +181,10 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
     }
 
     // Run the R-Tree index query for a single predicate, filling p.coarse.
-    void
+    // Returns true if the pin came up empty and coarse degraded to an all-set
+    // bitmap (index reported present but unusable); the caller raises a single
+    // per-segment warning for the whole group instead of one per predicate.
+    bool
     RunRTreeQuery(GISGroupState::Pred& p);
 
     GISGroupStatePtr st_;
@@ -218,7 +236,16 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
     void
     MoveCursor() override {
         current_pos_ += NextBatchSize();
+        st_->refine_cursor_complete = current_pos_ == active_count_;
     }
+
+    // NOTE (2.6): the master PR overrides DetermineExecPath() (commit to
+    // RawData so no R-Tree cell is pinned) and PrefetchRawData() (warm the
+    // column only when reads will span it) here, plus a comment on why
+    // CanExecuteAllAtOnce() stays inherited. None of that machinery exists on
+    // 2.6 -- the scalar index is pinned eagerly in InitSegmentExpr, there is no
+    // prefetch pool for expressions, and there is no all-at-once path -- so the
+    // overrides are omitted. They come back with that machinery.
 
  private:
     int64_t

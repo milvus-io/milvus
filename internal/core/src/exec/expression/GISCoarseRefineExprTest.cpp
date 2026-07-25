@@ -78,7 +78,9 @@ struct GISSplitFusionGuard {
 // Captures what ~GISGroupState reports -- the same two counters the
 // internal_core_gis_{coarse,refine}_ratio metrics carry -- so a test can assert
 // the pruning contract itself instead of only the result bits, which are
-// identical whether or not Refine prunes. One snapshot per group per segment.
+// identical whether or not Refine prunes. Incomplete/bypassed groups produce no
+// snapshot, matching production metric suppression. One snapshot per completed
+// group per segment.
 struct GISGroupStateCapture {
     struct Snapshot {
         int64_t active_count;
@@ -166,7 +168,37 @@ EquivExprs() {
         // the shape discriminating (a ~10 m radius would select nothing and
         // the ON-vs-OFF comparison would degenerate to 0 == 0).
         R"expr(st_dwithin(geo, "POINT(0 0)", 5000000) and st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))"))expr",
-        // (11) SELECTIVE scalar upstream. Every `age >= 0` above selects all N
+        // (11)-(15) The remaining whitelisted operators. Shapes above cover
+        // only Intersects and Within, but as_groupable_gis whitelists seven
+        // (Equals/Touches/Overlaps/Crosses/Contains/Intersects/Within,
+        // Expr.cpp). Both paths run the SAME EvaluateGISPreparedOp for refine
+        // and the SAME R-Tree Query(ds) for coarse, so per-operator divergence
+        // is impossible by construction TODAY -- these are a regression
+        // tripwire for a future whitelist or shared-helper edit, not a
+        // live-defect check. Each is a single groupable leaf under AND so it
+        // splits, mirroring shape (1).
+        // (11) st_contains: a generated polygon enclosing the origin contains
+        // the query point.
+        R"expr(age >= 0 and st_contains(geo, "POINT(0 0)"))expr",
+        // (12) st_overlaps: partial same-dimension overlap with a large box.
+        R"expr(age >= 0 and st_overlaps(geo, "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))"))expr",
+        // (13) st_crosses: a generated LINESTRING crossing the box boundary.
+        R"expr(age >= 0 and st_crosses(geo, "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))"))expr",
+        // (14) st_touches: boundary-only contact -- typically empty on random
+        // data, kept as the Touches-case tripwire.
+        R"expr(age >= 0 and st_touches(geo, "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))"))expr",
+        // (15) st_equals: exact equality -- effectively empty on random data,
+        // kept as the Equals-case tripwire.
+        R"expr(age >= 0 and st_equals(geo, "POINT(0 0)"))expr",
+        // (16) OR-ROOTED split. SplitFuseGISConjunct bails on a non-AND root,
+        // but ReorderConjunctExpr still recurses into the AND child of an OR and
+        // splits the same-field group there (Expr.cpp). Every other shape here
+        // is AND-rooted; this pins that a split emitted BENEATH an OR stays
+        // ON/OFF-equivalent -- the split nodes' all-ones validity is never
+        // inverted because the recursion provably does not cross a NOT. The
+        // `age >= 950` arm keeps the OR non-degenerate (50 of N=1000 rows).
+        R"expr(age >= 950 or (st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))") and st_within(geo, "POLYGON((-100 -100, 100 -100, 100 100, -100 100, -100 -100))")))expr",
+        // (17) SELECTIVE scalar upstream. Every `age >= 0` above selects all N
         // rows: DataGen fills a non-random INT64 field with `data[i] = i /
         // repeat_count` and repeat_count defaults to 1 (DataGen.h), so the
         // predicate is a tautology and `survivors &= pre` in the Refine node
@@ -341,6 +373,54 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionOnVsOff) {
     ScopedSchemaHandle handle(*schema);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// FilterBits constructs ExprSet before its result-cache lookup, so a cache hit
+// can destroy a GISGroupState that never executed. Cancellation/error paths can
+// likewise destroy a partially initialized state. Neither case has final
+// segment-level ratios and therefore must not report.
+TEST(GISCoarseRefineExprTest, IncompleteStateDoesNotReportMetrics) {
+    GISGroupStateCapture capture;
+    {
+        auto state = std::make_shared<milvus::exec::GISGroupState>();
+        state->active_count = 100;
+    }
+    {
+        auto state = std::make_shared<milvus::exec::GISGroupState>();
+        state->active_count = 100;
+        state->coarse_done = true;
+        state->coarse_cursor_complete = true;
+        state->coarse_selected = 40;
+        state->refined_rows = 10;
+        // Simulate cancellation after only part of Refine ran.
+        state->refine_cursor_complete = false;
+    }
+    EXPECT_TRUE(capture.snapshots.empty());
+}
+
+// A successful query can also bypass the GIS nodes: numeric predicates run
+// before the indexed Coarse bucket, and an empty active bitmap advances the GIS
+// cursors through SkipFollowingExprs without ever computing B_coarse. Reporting
+// the default 0/active_count counters would look like perfect R-Tree pruning.
+TEST(GISCoarseRefineExprTest, FullyShortCircuitedGroupDoesNotReportMetrics) {
+    ExprBatchSizeGuard batch_guard(128);
+    auto schema = MakeGISSchema();
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    GISGroupStateCapture capture;
+    GISSplitFusionGuard on(true);
+    auto res = RunFilter(
+        schema,
+        handle,
+        seg.get(),
+        N,
+        R"expr(age < 0 and st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))"))expr");
+
+    EXPECT_EQ(res.count(), 0u);
+    EXPECT_TRUE(capture.snapshots.empty());
 }
 
 // ON-vs-OFF equivalence is blind to how much work Refine does -- making it
@@ -551,4 +631,55 @@ TEST(GISCoarseRefineExprTest, GISDoesNotSupportOffsetInput) {
                 << "fusion ON, expr: " << e;
         }
     }
+}
+
+// NOTE (2.6): master adds GISSplitStaysBatchedNotAllAtOnce here, pinning that
+// the split conjunction never becomes all-at-once eligible (which would let
+// Refine bulk_subscript the whole WKB column in one Eval and OOM the
+// QueryNode). 2.6 has no all-at-once path at all -- neither
+// CanExecuteAllAtOnce() nor SetExecuteAllAtOnce() exists on Expr -- so every
+// expression is batched unconditionally and there is nothing to pin. The test
+// comes back with that machinery.
+
+// Coarse intersects its emitted slice with bitmap_input so an OUTER conjunction's
+// mask prunes the split group even when it is NESTED (Coarse is the only node
+// that sees the outer mask before the inner accumulator overwrites it; Refine
+// then inherits the narrowed mask). The equivalence tests are blind to this --
+// the recombined result is identical whether or not Coarse consumes the mask --
+// so it is pinned here through refined_rows: an OR whose left arm settles some
+// rows TRUE must keep Refine from evaluating those rows in the nested GIS group.
+TEST(GISCoarseRefineExprTest, NestedOuterMaskPrunesRefine) {
+    auto schema = MakeGISSchema();
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    // OR root: age >= 950 settles ~50 rows TRUE, so the nested same-field GIS
+    // AND-group receives them masked OFF via bitmap_input. With no R-Tree here
+    // B_coarse is all-ones (coarse_selected == N), so a Refine that ignored the
+    // outer mask would evaluate all N rows; consuming it drops the settled rows,
+    // making refined_rows strictly less than coarse_selected. The world-covering
+    // query polygons keep B_coarse all-ones regardless of geometry shape, so the
+    // arithmetic depends only on the outer mask.
+    const char* nested =
+        R"expr(age >= 950 or (st_intersects(geo, "POLYGON((-180 -90, 180 -90, 180 90, -180 90, -180 -90))") and st_within(geo, "POLYGON((-180 -90, 180 -90, 180 90, -180 90, -180 -90))")))expr";
+
+    GISGroupStateCapture capture;
+    GISSplitFusionGuard on(true);
+    auto res = RunFilter(schema, handle, seg.get(), N, nested);
+    ASSERT_EQ(capture.snapshots.size(), 1u)
+        << "expected exactly one GIS split-fusion group for the nested shape";
+    const auto& s = capture.snapshots.front();
+    EXPECT_EQ(s.active_count, N);
+    // No R-Tree on geo -> coarse degenerates to all-ones.
+    EXPECT_EQ(s.coarse_selected, N);
+    EXPECT_GT(s.refined_rows, 0);
+    // Without the Coarse bitmap_input intersect this equals coarse_selected (N):
+    // Refine would build geometries for the age >= 950 rows the OR already
+    // settled.
+    EXPECT_LT(s.refined_rows, s.coarse_selected)
+        << "Coarse dropped the outer bitmap_input; Refine evaluated all of "
+           "B_coarse (refined_rows "
+        << s.refined_rows << " == coarse_selected " << s.coarse_selected << ")";
 }
