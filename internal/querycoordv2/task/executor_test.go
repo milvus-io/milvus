@@ -25,11 +25,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -415,4 +421,128 @@ func TestExecutorDeadlockReproduction(t *testing.T) {
 	chOverflowTask.SetID(999)
 	ok = ex.Execute(chOverflowTask, 0)
 	assert.False(t, ok, "overflow channel task should be rejected")
+}
+
+// TestExecutorGetLoadInfoAppliesOverrideIndexType verifies that the QueryCoord
+// load path (getLoadInfo) runs AppendPrepareLoadParams over each segment index,
+// so a configured knowhere load-stage override (HNSW -> GPU_HNSW) is baked into
+// the SegmentLoadInfo the QueryNode receives — routing a persisted HNSW segment
+// to the GPU at load without a rebuild.
+func TestExecutorGetLoadInfoAppliesOverrideIndexType(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	const (
+		collectionID = int64(1000)
+		segmentID    = int64(2000)
+		indexID      = int64(3000)
+		fieldID      = int64(101)
+		channelName  = "getloadinfo-ch-0"
+	)
+
+	// Configure the knowhere load-stage override for HNSW.
+	p := paramtable.Get()
+	overrideKey := p.KnowhereConfig.IndexParam.KeyPrefix + "HNSW.load.override_index_type"
+	p.Save(overrideKey, "GPU_HNSW")
+	defer p.Reset(overrideKey)
+
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			NumOfRows:     1000,
+			InsertChannel: channelName,
+		},
+	}, nil)
+	broker.EXPECT().GetIndexInfo(mock.Anything, collectionID, segmentID).Return(
+		map[int64][]*querypb.FieldIndexInfo{
+			segmentID: {
+				{
+					FieldID: fieldID,
+					IndexID: indexID,
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "HNSW"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+					},
+				},
+			},
+		}, nil)
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return([]*indexpb.IndexInfo{
+		{CollectionID: collectionID, IndexID: indexID},
+	}, nil)
+
+	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
+	channel := &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channelName,
+		SeekPosition: &msgpb.MsgPosition{},
+	}}
+
+	loadInfo, _, err := ex.getLoadInfo(ctx, collectionID, segmentID, channel, commonpb.LoadPriority_LOW)
+	assert.NoError(t, err)
+	assert.NotNil(t, loadInfo)
+	assert.Len(t, loadInfo.GetIndexInfos(), 1)
+
+	got := funcutil.KeyValuePair2Map(loadInfo.GetIndexInfos()[0].GetIndexParams())
+	assert.Equal(t, "GPU_HNSW", got[common.IndexTypeKey],
+		"getLoadInfo must swap index_type HNSW -> GPU_HNSW via the load-stage override")
+	assert.Equal(t, "GPU_HNSW", got[paramtable.OverrideIndexTypeKey])
+}
+
+// TestExecutorGetLoadInfoNoOverride verifies getLoadInfo leaves index_type
+// untouched when no load-stage override is configured for the index type.
+func TestExecutorGetLoadInfoNoOverride(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	const (
+		collectionID = int64(1001)
+		segmentID    = int64(2001)
+		indexID      = int64(3001)
+		fieldID      = int64(101)
+		channelName  = "getloadinfo-ch-1"
+	)
+
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			NumOfRows:     1000,
+			InsertChannel: channelName,
+		},
+	}, nil)
+	broker.EXPECT().GetIndexInfo(mock.Anything, collectionID, segmentID).Return(
+		map[int64][]*querypb.FieldIndexInfo{
+			segmentID: {
+				{
+					FieldID: fieldID,
+					IndexID: indexID,
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "HNSW"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+					},
+				},
+			},
+		}, nil)
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return([]*indexpb.IndexInfo{
+		{CollectionID: collectionID, IndexID: indexID},
+	}, nil)
+
+	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
+	channel := &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channelName,
+		SeekPosition: &msgpb.MsgPosition{},
+	}}
+
+	loadInfo, _, err := ex.getLoadInfo(ctx, collectionID, segmentID, channel, commonpb.LoadPriority_LOW)
+	assert.NoError(t, err)
+	assert.NotNil(t, loadInfo)
+	assert.Len(t, loadInfo.GetIndexInfos(), 1)
+
+	got := funcutil.KeyValuePair2Map(loadInfo.GetIndexInfos()[0].GetIndexParams())
+	assert.Equal(t, "HNSW", got[common.IndexTypeKey], "index_type must be untouched without an override")
+	assert.NotContains(t, got, paramtable.OverrideIndexTypeKey)
 }

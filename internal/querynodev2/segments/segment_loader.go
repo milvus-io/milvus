@@ -259,14 +259,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// Apply override_index_type before resource estimation so GPU_HNSW's
 	// StaticEstimateLoadResource (memoryCost=0) is used instead of the
 	// default HNSW estimate (memoryCost=file_size).
-	for _, info := range infos {
-		for _, indexInfo := range info.IndexInfos {
-			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-				return nil, err
-			}
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
-		}
+	if err := ApplyLoadStageOverrides(infos); err != nil {
+		return nil, err
 	}
 
 	// Check memory & storage limit
@@ -2188,17 +2182,8 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			}
 
 			if gpuIndexRequiresGpu(fieldIndexInfo.IndexParams) {
-				// GPU admission (checkSegmentGpuMemSize) reserves the incremental
-				// VRAM a segment adds against actual device free memory. Prefer
-				// the index-reported device footprint; fall back to the host
-				// transient MaxMemoryCost for GPU indexes that don't report one.
-				// This avoids charging the (larger) host reconstruct/upload peak
-				// against VRAM, which over-reserves and falsely rejects loads.
-				gpuMemoryCost := estimateResult.GpuMemoryCost
-				if gpuMemoryCost == 0 {
-					gpuMemoryCost = estimateResult.MaxMemoryCost
-				}
-				fieldGpuMemorySize = append(fieldGpuMemorySize, gpuMemoryCost)
+				fieldGpuMemorySize = append(fieldGpuMemorySize,
+					gpuAdmissionCost(estimateResult.GpuMemoryCost, estimateResult.MaxMemoryCost))
 			}
 
 			// could skip binlog or
@@ -2502,14 +2487,8 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	// index type and could spuriously reject a GPU reopen with insufficient
 	// memory. AppendPrepareLoadParams is idempotent, so segment.Reopen below
 	// receives the same overridden params.
-	for _, info := range infos {
-		for _, indexInfo := range info.GetIndexInfos() {
-			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-				return err
-			}
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
-		}
+	if err := ApplyLoadStageOverrides(infos); err != nil {
+		return err
 	}
 
 	// use full resource in case of whole segment reopen
@@ -2574,6 +2553,45 @@ func indexLoadingMemoryContribution(tieredEvictionEnabled, isGpuIndex bool, maxM
 		return maxMemoryCost
 	}
 	return 0
+}
+
+// ApplyLoadStageOverrides applies knowhere load-stage overrides (e.g.
+// override_index_type: HNSW -> GPU_HNSW) to every index in the given segment
+// load infos, in place.
+//
+// It must run before resource estimation so that, for an overridden index,
+// the override type's StaticEstimateLoadResource (GPU_HNSW: memoryCost=0) is
+// used instead of the default estimate for the persisted type (HNSW:
+// memoryCost=file_size). AppendPrepareLoadParams is idempotent, so applying it
+// again downstream (segment creation / Reopen) is a no-op. It is shared by the
+// QueryNode LoadSegments handler entry point and the loader's Load/Reopen paths
+// so the override is guaranteed present regardless of caller.
+func ApplyLoadStageOverrides(infos []*querypb.SegmentLoadInfo) error {
+	for _, info := range infos {
+		for _, indexInfo := range info.GetIndexInfos() {
+			indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
+			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+				return err
+			}
+			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		}
+	}
+	return nil
+}
+
+// gpuAdmissionCost returns the incremental VRAM (bytes) to reserve for a single
+// GPU index field during GPU admission (checkSegmentGpuMemSize).
+//
+// It prefers the index-reported device footprint (gpuMemoryCost) and falls back
+// to the host transient MaxMemoryCost only for GPU indexes that do not report a
+// distinct device footprint. Preferring the device footprint avoids charging the
+// (larger) host reconstruct/upload peak against VRAM, which would over-reserve
+// and falsely reject loads that actually fit on the device.
+func gpuAdmissionCost(gpuMemoryCost, maxMemoryCost uint64) uint64 {
+	if gpuMemoryCost == 0 {
+		return maxMemoryCost
+	}
+	return gpuMemoryCost
 }
 
 func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {

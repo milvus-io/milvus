@@ -999,3 +999,50 @@ func TestBaseSegment_SkipGrowingBF(t *testing.T) {
 	results := bs.BatchPkExist(blc)
 	assert.Equal(t, []bool{true, true, true}, results)
 }
+
+// TestResolveIndexNumRows covers the row-count fallback used when building the C
+// load info. A FieldIndexInfo with NumRows==0 (the common case, since it carries
+// index metadata rather than segment stats) must fall back to the segment's row
+// count so knowhere's load-resource estimator sizes the transient host peak
+// correctly and does not over-admit concurrent GPU_HNSW uploads (OOM regression).
+func TestResolveIndexNumRows(t *testing.T) {
+	tests := []struct {
+		name      string
+		indexRows int64
+		segRows   int64
+		expected  int64
+	}{
+		{
+			name:      "index carries row count: use it",
+			indexRows: 1_000_000,
+			segRows:   500_000,
+			expected:  1_000_000,
+		},
+		{
+			name:      "index omits row count (0): fall back to segment rows",
+			indexRows: 0,
+			segRows:   500_000,
+			expected:  500_000,
+		},
+		{
+			name:      "index reports negative: fall back to segment rows",
+			indexRows: -1,
+			segRows:   777,
+			expected:  777,
+		},
+		{
+			name:      "both zero: stays zero",
+			indexRows: 0,
+			segRows:   0,
+			expected:  0,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			indexInfo := &querypb.FieldIndexInfo{NumRows: test.indexRows}
+			loadInfo := &querypb.SegmentLoadInfo{NumOfRows: test.segRows}
+			assert.Equal(t, test.expected, resolveIndexNumRows(indexInfo, loadInfo))
+		})
+	}
+}

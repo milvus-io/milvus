@@ -1176,6 +1176,23 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	return nil
 }
 
+// resolveIndexNumRows returns the row count to report in the C load info.
+//
+// The FieldIndexInfo frequently omits the row count (it carries index metadata,
+// not segment stats), which leaves NumRows==0. Knowhere's load-resource
+// estimator multiplies rows*dim to size the transient host peak (notably the
+// fp32-expanded GPU_HNSW upload), so a zero here collapses the estimate to
+// ~file_size and lets the loader admit far too many concurrent uploads. Fall
+// back to the segment's row count, which equals the indexed vector count for a
+// sealed segment.
+func resolveIndexNumRows(indexInfo *querypb.FieldIndexInfo, loadInfo *querypb.SegmentLoadInfo) int64 {
+	numRows := indexInfo.GetNumRows()
+	if numRows <= 0 {
+		numRows = loadInfo.GetNumOfRows()
+	}
+	return numRows
+}
+
 func GetCLoadInfoWithFunc(ctx context.Context,
 	fieldSchema *schemapb.FieldSchema,
 	loadInfo *querypb.SegmentLoadInfo,
@@ -1227,17 +1244,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 			indexParams[common.WarmupKey] = warmupPolicy
 		}
 	}
-	// The FieldIndexInfo frequently omits the row count (it carries index
-	// metadata, not segment stats), which leaves NumRows==0 in the C load info.
-	// Knowhere's load-resource estimator multiplies rows*dim to size the
-	// transient host peak (notably the fp32-expanded GPU_HNSW upload), so a
-	// zero here collapses the estimate to ~file_size and lets the loader admit
-	// far too many concurrent uploads. Fall back to the segment's row count,
-	// which equals the indexed vector count for a sealed segment.
-	numRows := indexInfo.GetNumRows()
-	if numRows <= 0 {
-		numRows = loadInfo.GetNumOfRows()
-	}
+	numRows := resolveIndexNumRows(indexInfo, loadInfo)
 
 	// Pass DataCoord-built index file paths through; QueryNode should not
 	// attach v0/v1 path layout semantics to the read path.

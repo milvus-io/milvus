@@ -58,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -510,15 +509,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	// index params in the request. This provides defense-in-depth at the handler entry
 	// point: regardless of whether the caller (QueryCoord executor, streamingnode, etc.)
 	// already applied the override, it is always present before reaching the loader/delegator.
-	for _, info := range req.GetInfos() {
-		for _, indexInfo := range info.GetIndexInfos() {
-			idxParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), idxParams); err != nil {
-				mlog.Warn(ctx, "failed to apply load-stage overrides", mlog.Err(err))
-				return merr.Status(err), nil
-			}
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(idxParams)
-		}
+	if err := segments.ApplyLoadStageOverrides(req.GetInfos()); err != nil {
+		mlog.Warn(ctx, "failed to apply load-stage overrides", mlog.Err(err))
+		return merr.Status(err), nil
 	}
 
 	// Delegates request to workers
