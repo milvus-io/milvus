@@ -375,30 +375,26 @@ class SkipIndex {
                 return check_and_skip(value + right_operand, op_type);
             }
             case ArithOpType::Mul: {
-                // field * C > V
-                if (right_operand == 0) {
-                    // field * 0 > V => 0 > V. This doesn't depend on the field's range.
-                    return false;
-                }
-
-                OpType new_op_type = op_type;
-                if (right_operand < 0) {
-                    new_op_type = FlipComparisonOperator(op_type);
-                }
-                return check_and_skip(value / right_operand, new_op_type);
+                // field * C <op> V cannot be inverted into a range on `field`
+                // by integer division: this overload is only instantiated for
+                // integral T, so `value / right_operand` truncates and the
+                // rewritten predicate is strictly narrower than the original.
+                // e.g. `field * 2 < 3` holds for field == 1 (2 < 3), but
+                // rewrites to `field < 3/2 == 1`, which prunes a chunk of
+                // [1,1] that actually matches -- a silent dropped row.
+                // Inverting this correctly needs per-comparator floor/ceil
+                // rules; until then do not prune (never skipping is safe).
+                return false;
             }
             case ArithOpType::Div: {
                 // field / C > V
-                if (right_operand == 0) {
-                    // Division by zero. Cannot evaluate, so cannot skip.
-                    return false;
-                }
-
-                OpType new_op_type = op_type;
-                if (right_operand < 0) {
-                    new_op_type = FlipComparisonOperator(op_type);
-                }
-                return check_and_skip(value * right_operand, new_op_type);
+                // Same truncation problem as Mul, in the other direction:
+                // integer division maps a RANGE of field values onto one
+                // result, so multiplying the bound back is not the inverse.
+                // e.g. `field / 2 == 1` holds for field in {2,3}, but rewrites
+                // to `field == 2`, which prunes a chunk of [3,3] that actually
+                // matches. Do not prune until the exact rules are implemented.
+                return false;
             }
             default:
                 return false;

@@ -2476,7 +2476,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                *current->load_info,
                                schema_snapshot,
                                runtime.get(),
-                               std::nullopt,
+                               /*stats_source=*/nullptr,
                                nullptr,
                                /*is_replace=*/true,
                                &committer);
