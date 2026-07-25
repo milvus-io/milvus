@@ -167,6 +167,83 @@ func TestShardCacheCoalescesConcurrentRefreshPerCollectionID(t *testing.T) {
 	assert.Equal(t, int32(1), coordCalls.Load())
 }
 
+func TestShardCacheNewerForcedRefreshWinsWriteRace(t *testing.T) {
+	const (
+		channel      = "test_channel"
+		collectionID = int64(200)
+	)
+
+	normalStarted := make(chan struct{})
+	forcedStarted := make(chan struct{})
+	releaseNormal := make(chan struct{})
+	releaseForced := make(chan struct{})
+	var releaseNormalOnce sync.Once
+	var releaseForcedOnce sync.Once
+	defer releaseNormalOnce.Do(func() { close(releaseNormal) })
+	defer releaseForcedOnce.Do(func() { close(releaseForced) })
+
+	coordCalls := atomic.NewInt32(0)
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ *querypb.GetShardLeadersRequest, _ ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+			switch coordCalls.Inc() {
+			case 1:
+				close(normalStarted)
+				<-releaseNormal
+				return singleShardResp(channel, collectionID, "old:19530"), nil
+			case 2:
+				close(forcedStarted)
+				<-releaseForced
+				return singleShardResp(channel, collectionID, "new:19530"), nil
+			default:
+				return nil, fmt.Errorf("unexpected extra GetShardLeaders call")
+			}
+		}).Twice()
+
+	type shardResult struct {
+		nodes []NodeInfo
+		err   error
+	}
+	mgr := NewShardClientMgr(mixCoord)
+	normalDone := make(chan shardResult, 1)
+	go func() {
+		nodes, err := mgr.GetShard(context.Background(), true, "db", "alias", collectionID, channel)
+		normalDone <- shardResult{nodes: nodes, err: err}
+	}()
+	<-normalStarted
+
+	forcedDone := make(chan shardResult, 1)
+	go func() {
+		nodes, err := mgr.GetShard(context.Background(), false, "db", "alias", collectionID, channel)
+		forcedDone <- shardResult{nodes: nodes, err: err}
+	}()
+	<-forcedStarted
+
+	releaseForcedOnce.Do(func() { close(releaseForced) })
+	forcedResult := <-forcedDone
+	assert.NoError(t, forcedResult.err)
+	if assert.Len(t, forcedResult.nodes, 1) {
+		assert.Equal(t, "new:19530", forcedResult.nodes[0].Address)
+	}
+
+	releaseNormalOnce.Do(func() { close(releaseNormal) })
+	normalResult := <-normalDone
+	assert.NoError(t, normalResult.err)
+	if assert.Len(t, normalResult.nodes, 1) {
+		assert.Equal(t, "old:19530", normalResult.nodes[0].Address)
+	}
+
+	cached := mgr.loadCachedShardLeaders(collectionID)
+	if assert.NotNil(t, cached) {
+		assert.Equal(t, "new:19530", cached.Get(channel)[0].Address)
+	}
+	assert.Equal(t, int32(2), coordCalls.Load())
+	mgr.leaderMut.RLock()
+	assert.Empty(t, mgr.refreshes)
+	assert.Empty(t, mgr.refreshWriteSeq)
+	mgr.leaderMut.RUnlock()
+}
+
 func TestShardCacheLeaderCancellationDoesNotCancelSharedRefresh(t *testing.T) {
 	const (
 		channel      = "test_channel"
@@ -317,7 +394,7 @@ func TestShardCacheInvalidationFencesInFlightRefresh(t *testing.T) {
 
 func TestInvalidateShardLeaderCacheRevokesRefreshTokensByID(t *testing.T) {
 	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
-	mgr.collLeader[100] = &shardLeaders{}
+	mgr.collLeader.Insert(100, &shardLeaders{})
 	mgr.acquireShardCacheRefresh(shardCacheRefreshKey{collectionID: 100})
 	mgr.acquireShardCacheRefresh(shardCacheRefreshKey{collectionID: 100, force: true})
 	mgr.acquireShardCacheRefresh(shardCacheRefreshKey{collectionID: 200})
@@ -326,10 +403,12 @@ func TestInvalidateShardLeaderCacheRevokesRefreshTokensByID(t *testing.T) {
 
 	mgr.leaderMut.RLock()
 	defer mgr.leaderMut.RUnlock()
-	assert.NotContains(t, mgr.collLeader, int64(100))
+	assert.False(t, mgr.collLeader.Contain(100))
 	assert.NotContains(t, mgr.refreshes, shardCacheRefreshKey{collectionID: 100})
 	assert.NotContains(t, mgr.refreshes, shardCacheRefreshKey{collectionID: 100, force: true})
 	assert.Contains(t, mgr.refreshes, shardCacheRefreshKey{collectionID: 200})
+	assert.NotContains(t, mgr.refreshWriteSeq, int64(100))
+	assert.Contains(t, mgr.refreshWriteSeq, int64(200))
 }
 
 func TestListShardLocationDropsIdleEntries(t *testing.T) {
@@ -348,14 +427,14 @@ func TestListShardLocationDropsIdleEntries(t *testing.T) {
 
 	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
 	mgr.shardCacheTTL = time.Minute
-	mgr.collLeader[100] = oldLeaders
-	mgr.collLeader[200] = newLeaders
+	mgr.collLeader.Insert(100, oldLeaders)
+	mgr.collLeader.Insert(200, newLeaders)
 
 	locations := mgr.ListShardLocation()
 	assert.NotContains(t, locations, int64(1))
 	assert.Contains(t, locations, int64(2))
-	assert.NotContains(t, mgr.collLeader, int64(100))
-	assert.Contains(t, mgr.collLeader, int64(200))
+	assert.False(t, mgr.collLeader.Contain(100))
+	assert.True(t, mgr.collLeader.Contain(200))
 }
 
 func TestListShardLocationAllowsConcurrentCacheHits(t *testing.T) {
@@ -368,13 +447,13 @@ func TestListShardLocationAllowsConcurrentCacheHits(t *testing.T) {
 	leaders.touch(time.Now())
 
 	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
-	mgr.collLeader[collectionID] = leaders
-	readLocked := make(chan struct{})
+	mgr.collLeader.Insert(collectionID, leaders)
+	scanStarted := make(chan struct{})
 	releaseScan := make(chan struct{})
 	var releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(releaseScan) })
-	mgr.testHookListShardLocationReadLocked = func() {
-		close(readLocked)
+	mgr.testHookListShardLocationScan = func() {
+		close(scanStarted)
 		<-releaseScan
 	}
 
@@ -383,7 +462,7 @@ func TestListShardLocationAllowsConcurrentCacheHits(t *testing.T) {
 		defer close(listDone)
 		mgr.ListShardLocation()
 	}()
-	<-readLocked
+	<-scanStarted
 
 	hitDone := make(chan error, 1)
 	go func() {
@@ -401,6 +480,107 @@ func TestListShardLocationAllowsConcurrentCacheHits(t *testing.T) {
 	<-listDone
 }
 
+func TestListShardLocationScanDoesNotBlockInvalidation(t *testing.T) {
+	leaders100 := &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: 100,
+		shardLeaders: map[string][]NodeInfo{"channel-100": {{NodeID: 1, Address: "node-1:19530", Serviceable: true}}},
+	}
+	leaders200 := &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: 200,
+		shardLeaders: map[string][]NodeInfo{"channel-200": {{NodeID: 2, Address: "node-2:19530", Serviceable: true}}},
+	}
+	leaders100.touch(time.Now())
+	leaders200.touch(time.Now())
+
+	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
+	mgr.collLeader.Insert(100, leaders100)
+	mgr.collLeader.Insert(200, leaders200)
+	scanStarted := make(chan struct{})
+	releaseScan := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseScan) })
+	mgr.testHookListShardLocationScan = func() {
+		close(scanStarted)
+		<-releaseScan
+	}
+
+	listDone := make(chan struct{})
+	go func() {
+		defer close(listDone)
+		mgr.ListShardLocation()
+	}()
+	<-scanStarted
+
+	invalidationDone := make(chan struct{})
+	go func() {
+		defer close(invalidationDone)
+		mgr.InvalidateShardLeaderCache([]int64{100})
+	}()
+	select {
+	case <-invalidationDone:
+	case <-time.After(time.Second):
+		t.Fatal("shard cache scan blocked an unrelated invalidation")
+	}
+
+	hitDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetShard(context.Background(), true, "db", "name", 200, "channel-200")
+		hitDone <- err
+	}()
+	select {
+	case err := <-hitDone:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("cache hit was blocked while the shard cache scan was paused")
+	}
+
+	releaseOnce.Do(func() { close(releaseScan) })
+	<-listDone
+}
+
+func TestShardCacheHitTouchesBeforeIdleDelete(t *testing.T) {
+	const collectionID = int64(200)
+	leaders := &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: collectionID,
+		shardLeaders: map[string][]NodeInfo{"channel": {{NodeID: 1, Address: "node:19530", Serviceable: true}}},
+	}
+	leaders.touch(time.Now().Add(-2 * time.Minute))
+
+	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
+	mgr.shardCacheTTL = time.Minute
+	mgr.collLeader.Insert(collectionID, leaders)
+	cacheLoaded := make(chan struct{})
+	releaseHit := make(chan struct{})
+	var releaseHitOnce sync.Once
+	defer releaseHitOnce.Do(func() { close(releaseHit) })
+	mgr.testHookAfterShardCacheLoad = func() {
+		close(cacheLoaded)
+		<-releaseHit
+	}
+
+	hitDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetShard(context.Background(), true, "db", "name", collectionID, "channel")
+		hitDone <- err
+	}()
+	<-cacheLoaded
+
+	beforeDelete := make(chan struct{})
+	mgr.testHookBeforeShardLocationDelete = func() { close(beforeDelete) }
+	locationsDone := make(chan map[int64]NodeInfo, 1)
+	go func() { locationsDone <- mgr.ListShardLocation() }()
+	<-beforeDelete
+
+	releaseHitOnce.Do(func() { close(releaseHit) })
+	assert.NoError(t, <-hitDone)
+	locations := <-locationsDone
+	assert.Contains(t, locations, int64(1))
+	assert.Same(t, leaders, mgr.loadCachedShardLeaders(collectionID))
+}
+
 func TestListShardLocationRechecksExpiredCandidateBeforeDelete(t *testing.T) {
 	const collectionID = int64(200)
 	leaders := &shardLeaders{
@@ -412,7 +592,7 @@ func TestListShardLocationRechecksExpiredCandidateBeforeDelete(t *testing.T) {
 
 	mgr := NewShardClientMgr(mocks.NewMockMixCoordClient(t))
 	mgr.shardCacheTTL = time.Minute
-	mgr.collLeader[collectionID] = leaders
+	mgr.collLeader.Insert(collectionID, leaders)
 	beforeDelete := make(chan struct{})
 	resumeDelete := make(chan struct{})
 	var resumeOnce sync.Once

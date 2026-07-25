@@ -268,7 +268,7 @@ collectionID → shardLeaders {
 - **Invalidation** (the cache is keyed by the cluster-unique collection id):
   - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by id and revoke their in-flight refresh generations (called on shard-leader changes, collection drop, and search/query retry). O(len(collectionIDs)) direct deletes.
   - `RemoveDatabase(db)`: No-op. DropDatabase requires an empty database, so its collections were already dropped and evicted by id; the id-keyed cache does not track database membership.
-- **Idle cleanup**: `ListShardLocation` scans with a read lock, then briefly takes the write lock to revalidate and delete expired entries. Cache hits remain concurrent with the scan.
+- **Idle cleanup**: `ListShardLocation` scans the concurrent collection-id map without the refresh lifecycle lock, then briefly takes that lock per candidate to revalidate and delete expired entries. Cache hits, refresh publications, and unrelated invalidations remain concurrent with the full scan.
 
 ### Client Purging
 

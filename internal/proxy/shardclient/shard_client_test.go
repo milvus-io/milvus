@@ -93,22 +93,22 @@ func TestPurgeClient(t *testing.T) {
 		return qn, nil
 	}
 
+	collLeader := typeutil.NewConcurrentMap[int64, *shardLeaders]()
+	collLeader.Insert(1, &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: 1,
+		shardLeaders: map[string][]NodeInfo{
+			"0": {node},
+		},
+	})
+
 	s := &shardClientMgrImpl{
 		clients:         typeutil.NewConcurrentMap[UniqueID, *shardClient](),
 		clientCreator:   creator,
 		closeCh:         make(chan struct{}),
 		purgeInterval:   1 * time.Second,
 		expiredDuration: 3 * time.Second,
-
-		collLeader: map[int64]*shardLeaders{
-			1: {
-				idx:          atomic.NewInt64(0),
-				collectionID: 1,
-				shardLeaders: map[string][]NodeInfo{
-					"0": {node},
-				},
-			},
-		},
+		collLeader:      collLeader,
 	}
 
 	go s.PurgeClient()
@@ -151,11 +151,11 @@ func TestPurgeClient(t *testing.T) {
 func seedShardLeaders(mgr *shardClientMgrImpl, database string, collectionID int64, channel string, node NodeInfo) {
 	mgr.leaderMut.Lock()
 	defer mgr.leaderMut.Unlock()
-	mgr.collLeader[collectionID] = &shardLeaders{
+	mgr.collLeader.Insert(collectionID, &shardLeaders{
 		idx:          atomic.NewInt64(0),
 		collectionID: collectionID,
 		shardLeaders: map[string][]NodeInfo{channel: {node}},
-	}
+	})
 }
 
 func TestRemoveDatabase(t *testing.T) {
@@ -211,9 +211,9 @@ func TestInvalidateShardLeaderCache(t *testing.T) {
 		// Verify collection with ID 100 is removed, but 101 remains
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader[100]
+		_, exists := mgr.collLeader.Get(100)
 		assert.False(t, exists)
-		_, exists = mgr.collLeader[101]
+		_, exists = mgr.collLeader.Get(101)
 		assert.True(t, exists)
 	})
 
@@ -227,11 +227,11 @@ func TestInvalidateShardLeaderCache(t *testing.T) {
 		// Verify collections 100 and 102 are removed, but 101 remains
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader[100]
+		_, exists := mgr.collLeader.Get(100)
 		assert.False(t, exists)
-		_, exists = mgr.collLeader[101]
+		_, exists = mgr.collLeader.Get(101)
 		assert.True(t, exists)
-		_, exists = mgr.collLeader[102]
+		_, exists = mgr.collLeader.Get(102)
 		assert.False(t, exists)
 	})
 
@@ -243,7 +243,7 @@ func TestInvalidateShardLeaderCache(t *testing.T) {
 		// Verify collection 100 still exists
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader[100]
+		_, exists := mgr.collLeader.Get(100)
 		assert.True(t, exists)
 	})
 
@@ -255,9 +255,9 @@ func TestInvalidateShardLeaderCache(t *testing.T) {
 
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader[200]
+		_, exists := mgr.collLeader.Get(200)
 		assert.False(t, exists)
-		_, exists = mgr.collLeader[201]
+		_, exists = mgr.collLeader.Get(201)
 		assert.False(t, exists)
 	})
 
@@ -271,9 +271,9 @@ func TestInvalidateShardLeaderCache(t *testing.T) {
 
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader[300]
+		_, exists := mgr.collLeader.Get(300)
 		assert.False(t, exists)
-		_, exists = mgr.collLeader[400]
+		_, exists = mgr.collLeader.Get(400)
 		assert.False(t, exists)
 	})
 
