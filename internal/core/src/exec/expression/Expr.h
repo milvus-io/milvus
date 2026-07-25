@@ -1628,13 +1628,29 @@ class SegmentExpr : public Expr {
         const ValTypes&... values) {
         int64_t processed_size = 0;
 
-        // prefetch chunks to reduce cache miss latency
+        // Prefetch chunks to reduce cache miss latency, minus the ones the skip
+        // index already rules out. This must filter: the driver-level prefetch
+        // (which is skip-aware) only runs when common.enableDriverPrefetch is
+        // on, and that defaults to OFF -- so on the default configuration this
+        // is the ONLY prefetch, and pulling every chunk here would spend the IO
+        // for pruned chunks before the scan below ever gets to skip them,
+        // leaving the skip index saving CPU but no IO. Reporting the effect
+        // here too keeps the metrics meaningful on that same default path.
         if (!prefetched_) {
+            auto skip_index = segment_->GetSkipIndex();
             std::vector<int64_t> pf_chunk_ids;
             pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+            int64_t judged = 0;
+            int64_t pruned = 0;
             for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+                ++judged;
+                if (skip_func && skip_func(*skip_index, field_id_, i)) {
+                    ++pruned;
+                    continue;
+                }
                 pf_chunk_ids.push_back(i);
             }
+            RecordSkipIndexEffect(judged, pruned);
             segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
             prefetched_ = true;
         }
