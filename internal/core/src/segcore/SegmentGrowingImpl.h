@@ -38,7 +38,6 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "segcore/TextLobSpillover.h"
 #include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
@@ -74,6 +73,8 @@
 #include "query/PlanImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/TextLobReader.h"
+#include "segcore/TextLobSpillover.h"
 #include "storage/MmapChunkManager.h"
 #include "storage/MmapManager.h"
 
@@ -150,8 +151,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // Test-only: inject TEXT LOB base path.
     void
     SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
-        text_lob_paths_[field_id] = std::move(lob_base_path);
+        auto reader =
+            GetGlobalTextLobReaderRegistry().AcquireHandle(lob_base_path);
+        std::unique_lock lock(text_field_resources_mutex_);
+        text_field_resources_[field_id].lob_reader = std::move(reader);
     }
+
+    std::shared_ptr<const milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const override;
 
     void
     Reopen(SchemaPtr sch) override;
@@ -185,12 +192,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     BuildGeometryCacheForInsert(FieldId field_id,
                                 const DataArray* data_array,
-                                int64_t num_rows);
+                                int64_t num_rows,
+                                int64_t offset_begin);
 
     // Build geometry cache for loaded field data
     void
     BuildGeometryCacheForLoad(FieldId field_id,
-                              const std::vector<FieldDataPtr>& field_data);
+                              const std::vector<FieldDataPtr>& field_data,
+                              int64_t offset_begin);
 
  public:
     const InsertRecord<false>&
@@ -213,9 +222,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return chunk_mutex_;
     }
 
-    const Schema&
+    SchemaPtr
     get_schema() const override {
-        return *schema_;
+        std::shared_lock lock(sch_mutex_);
+        return schema_;
     }
 
     FieldId
@@ -293,9 +303,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     uint64_t
     GetTextSpilloverDiskUsage() const {
         uint64_t total = 0;
-        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
-            if (spillover) {
-                total += spillover->GetDiskUsage();
+        std::shared_lock lock(text_field_resources_mutex_);
+        for (const auto& [field_id, resource] : text_field_resources_) {
+            if (resource.spillover) {
+                total += resource.spillover->GetDiskUsage();
             }
         }
         return total;
@@ -468,11 +479,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     ~SegmentGrowingImpl() {
-        // Clean up geometry cache for all fields in this segment
-        auto& cache_manager =
-            milvus::exec::SimpleGeometryCacheManager::Instance();
-        cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
-
         if (ctx_) {
             GEOS_finish_r(ctx_);
             ctx_ = nullptr;
@@ -643,22 +649,35 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     bool
     HasTextLobSpillover(FieldId field_id) const {
-        return text_lob_spillovers_.find(field_id) !=
-               text_lob_spillovers_.end();
+        return GetTextLobSpillover(field_id) != nullptr;
     }
 
     /**
      * @brief Get TextLobSpillover for a TEXT field (for query/flush paths)
      * @return Pointer to TextLobSpillover, or nullptr if not found
      */
-    TextLobSpillover*
+    std::shared_ptr<TextLobSpillover>
     GetTextLobSpillover(FieldId field_id) const {
-        auto it = text_lob_spillovers_.find(field_id);
-        if (it != text_lob_spillovers_.end()) {
-            return it->second.get();
-        }
-        return nullptr;
+        std::shared_lock lock(text_field_resources_mutex_);
+        auto it = text_field_resources_.find(field_id);
+        return it != text_field_resources_.end() ? it->second.spillover
+                                                 : nullptr;
     }
+
+    struct TextFieldResourceState {
+        // Local TEXT values are stored in this segment-owned spillover file.
+        std::shared_ptr<TextLobSpillover> spillover;
+
+        // V3-loaded prefixes contain partition-level LOB references and hold
+        // a shared reader handle for as long as those references are readable.
+        std::shared_ptr<SharedTextLobReader> lob_reader;
+        int64_t loaded_lob_end_offset{0};
+    };
+
+    // Capture the reader, spillover, and representation boundary together.
+    // Query and flush paths must not read these members independently.
+    TextFieldResourceState
+    CaptureTextFieldResource(FieldId field_id) const;
 
     std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id) const override {
@@ -788,6 +807,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     UpdateResourceTracking();
 
  private:
+    ResourceUsage
+    EstimateSegmentResourceUsage(const SchemaPtr& schema_snapshot) const;
+
+    void
+    UpdateResourceTracking(const SchemaPtr& schema_snapshot);
+
     void
     AddTexts(FieldId field_id,
              const std::string* texts,
@@ -810,22 +835,32 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     InitializeTextLobSpillovers();
 
+    std::shared_ptr<TextLobSpillover>
+    EnsureTextLobSpillover(FieldId field_id);
+
     /**
      * @brief Initialize TEXT LOB paths from manifest path (for reload from V3 storage)
      *
-     * Similar to ChunkedSegmentSealedImpl::InitTextLobPaths.
-     * Resolves LOBReferences at query time via TextColumnCache.
+     * Similar to ChunkedSegmentSealedImpl::InitTextLobReaders.
+     * Resolves LOBReferences at query time via shared, runtime-owned readers.
      */
     void
-    InitTextLobPaths(const std::string& manifest_path);
+    InitTextLobReaders(const std::string& manifest_path,
+                       const std::vector<FieldId>& loaded_text_fields);
 
     /**
      * @brief Check if a TEXT field has LOB path (reload from V3 storage)
      */
     bool
-    HasTextLobPath(FieldId field_id) const {
-        return text_lob_paths_.find(field_id) != text_lob_paths_.end();
+    HasTextLobReader(FieldId field_id) const {
+        return GetTextLobReader(field_id) != nullptr;
     }
+
+    std::shared_ptr<SharedTextLobReader>
+    GetTextLobReader(FieldId field_id) const;
+
+    void
+    MarkTextFieldLoadedFromLob(FieldId field_id, int64_t end_offset);
 
     /**
      * @brief Load all column groups from a manifest file path
@@ -902,22 +937,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // Mutex to protect tracked_resource_ updates (refund-then-charge must be atomic)
     mutable std::mutex resource_tracking_mutex_;
 
-    // TEXT field spillover: field_id -> TextLobSpillover
-    // TEXT data is written to temporary LOB files to reduce memory usage.
-    // Memory stores only 16-byte references (offset, size, flags).
-    std::unordered_map<FieldId, std::unique_ptr<TextLobSpillover>>
-        text_lob_spillovers_;
+    // All resources needed to interpret one TEXT field are captured together.
+    // This prevents schema reopen or map growth from exposing a reader from one
+    // generation with the representation boundary from another. Spillovers
+    // are segment-owned; V3 readers are shared by path through the global weak
+    // registry and strongly owned here while their loaded column remains
+    // readable.
+    std::unordered_map<FieldId, TextFieldResourceState> text_field_resources_;
+    mutable std::shared_mutex text_field_resources_mutex_;
 
-    // TEXT field LOB paths for V3 storage reload (same as sealed segment)
-    // field_id -> LOB base path on remote storage
-    // LOBReferences in ConcurrentVector are resolved at query time via TextColumnCache
-    std::unordered_map<FieldId, std::string> text_lob_paths_;
-
-    // Boundary between loaded data and inserted data for TEXT fields.
-    // [0, text_loaded_row_count_): loaded via load paths (raw text or LOBReference)
-    // [text_loaded_row_count_, total): inserted via Insert() (spillover LOBRef)
-    // Query path uses this to determine resolution strategy.
-    int64_t text_loaded_row_count_ = 0;
+    // GEOMETRY caches are derived from insert_record_ and share its segment
+    // lifetime. Queries take shared_ptr snapshots before reading.
+    std::unordered_map<FieldId,
+                       std::shared_ptr<milvus::exec::SimpleGeometryCache>>
+        geometry_caches_;
+    mutable std::shared_mutex geometry_caches_mutex_;
 };
 
 inline SegmentGrowingPtr

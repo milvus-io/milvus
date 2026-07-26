@@ -68,6 +68,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/TextLobReader.h"
 #include "segcore/TextLobSpillover.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
@@ -881,8 +882,11 @@ struct FieldInfo {
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
     milvus::segcore::ThreadSafeValidDataPtr valid_data;
-    // For TEXT fields with spillover: reader for temp LOB file
-    milvus::segcore::TextLobSpillover* text_lob_spillover = nullptr;
+    // One immutable capture of every resource needed to decode this TEXT
+    // field. A recovered growing segment can contain a remote-LOB prefix and
+    // a local-spillover suffix, so retaining only one reader is insufficient.
+    milvus::segcore::SegmentGrowingImpl::TextFieldResourceState
+        text_field_resource;
 };
 
 struct BM25StatsAccumulator {
@@ -899,6 +903,33 @@ struct BM25StatsAccumulator {
         num_token += other.num_token;
     }
 };
+
+CStatus
+FailureCStatusFromArrowStatus(std::string_view operation,
+                              const arrow::Status& status,
+                              bool persisted_data = false) {
+    AssertInfo(!status.ok(),
+               "cannot convert an OK Arrow status for operation {}",
+               operation);
+
+    // Plain Invalid/Type/Key statuses from writer construction and Arrow array
+    // assembly are internal contract failures, not malformed user input and
+    // not necessarily persisted-data corruption. Preserve the storage taxonomy
+    // only when the producer supplied structured storage detail, the status is
+    // an IO/OOM failure, or the caller knows it was decoding persisted bytes.
+    const bool preserve_storage_class =
+        persisted_data || status.IsIOError() || status.IsOutOfMemory() ||
+        milvus_storage::ExtendStatusDetail::UnwrapStatus(status) != nullptr;
+    if (!preserve_storage_class) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            fmt::format("{}: {}", operation, status.ToString()));
+    }
+
+    auto error = milvus_storage::ToSegcoreError(status);
+    return milvus::FailureCStatus(
+        error.get_error_code(), fmt::format("{}: {}", operation, error.what()));
+}
 
 void
 AppendSparseBytesToBM25Stats(const void* data,
@@ -1346,41 +1377,112 @@ BuildStringArrayForChunk(
     return builder.Finish();
 }
 
-// build TEXT array for a chunk when spillover is enabled
-// reads LOB references from ConcurrentVector, decodes and reads actual text from spillover
+// Build a logical TEXT array from the two physical encodings a growing segment
+// can contain: V3-loaded rows reference partition-level LOB files, while rows
+// inserted after recovery reference the segment-owned spillover file.
 arrow::Result<std::shared_ptr<arrow::Array>>
-BuildTextArrayForChunkWithSpillover(
+BuildTextArrayForChunk(
     const milvus::segcore::ConcurrentVector<std::string>* ref_vec,
-    milvus::segcore::TextLobSpillover* spillover,
+    const milvus::segcore::SegmentGrowingImpl::TextFieldResourceState&
+        text_resource,
+    milvus::FieldId field_id,
     int64_t start_offset,
     int64_t num_rows,
     const milvus::segcore::ThreadSafeValidDataPtr& valid_data) {
     arrow::StringBuilder builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
 
-    // Collect non-null refs for batch read
-    std::vector<int64_t> pending_indices;
-    std::vector<std::string_view> pending_refs;
+    std::vector<std::string> values(num_rows);
+    std::vector<bool> has_value(num_rows, false);
+    std::vector<int64_t> remote_indices;
+    std::vector<milvus_storage::lob_column::EncodedRef> remote_refs;
+    std::vector<int64_t> local_indices;
+    std::vector<std::string_view> local_refs;
+
     for (int64_t i = 0; i < num_rows; i++) {
         int64_t offset = start_offset + i;
         if (valid_data && !valid_data->is_valid(offset)) {
             continue;
         }
-        pending_refs.push_back(ref_vec->view_element(offset));
-        pending_indices.push_back(i);
+        has_value[i] = true;
+        auto ref = ref_vec->view_element(offset);
+        if (offset < text_resource.loaded_lob_end_offset) {
+            if (ref.empty()) {
+                return arrow::Status::Invalid(
+                    fmt::format("empty remote TEXT LOB reference for field {} "
+                                "at offset {}",
+                                field_id.get(),
+                                offset));
+            }
+            auto* data = reinterpret_cast<const uint8_t*>(ref.data());
+            if (milvus_storage::lob_column::IsInlineData(data)) {
+                values[i] = milvus_storage::lob_column::DecodeInlineText(
+                    data, ref.size());
+            } else {
+                remote_indices.push_back(i);
+                remote_refs.push_back({data, ref.size()});
+            }
+        } else {
+            local_indices.push_back(i);
+            local_refs.push_back(ref);
+        }
     }
 
-    // Batch pread all refs
-    auto texts = spillover->DecodeAndReadBatch(pending_refs);
+    if (!local_refs.empty()) {
+        if (text_resource.spillover == nullptr) {
+            return arrow::Status::Invalid(fmt::format(
+                "TEXT field {} has local refs but no spillover owner",
+                field_id.get()));
+        }
+        auto texts = text_resource.spillover->DecodeAndReadBatch(local_refs);
+        if (texts.size() != local_indices.size()) {
+            return arrow::Status::Invalid(fmt::format(
+                "TEXT spillover returned {} values for {} refs, field {}",
+                texts.size(),
+                local_indices.size(),
+                field_id.get()));
+        }
+        for (size_t i = 0; i < local_indices.size(); ++i) {
+            values[local_indices[i]] = std::move(texts[i]);
+        }
+    }
 
-    // Build arrow array
-    size_t batch_idx = 0;
+    if (!remote_refs.empty()) {
+        if (text_resource.lob_reader == nullptr) {
+            return arrow::Status::Invalid(fmt::format(
+                "TEXT field {} has remote refs but no LOB reader owner",
+                field_id.get()));
+        }
+        auto properties =
+            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                .GetProperties();
+        if (properties == nullptr) {
+            return arrow::Status::Invalid(
+                "Loon FFI properties are not initialized for TEXT flush");
+        }
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        if (fs == nullptr) {
+            return arrow::Status::Invalid(
+                "filesystem is not initialized for TEXT flush");
+        }
+        auto texts =
+            text_resource.lob_reader->ReadBatch(fs, *properties, remote_refs);
+        if (texts.size() != remote_indices.size()) {
+            return arrow::Status::Invalid(fmt::format(
+                "TEXT LOB reader returned {} values for {} refs, field {}",
+                texts.size(),
+                remote_indices.size(),
+                field_id.get()));
+        }
+        for (size_t i = 0; i < remote_indices.size(); ++i) {
+            values[remote_indices[i]] = std::move(texts[i]);
+        }
+    }
+
     for (int64_t i = 0; i < num_rows; i++) {
-        if (batch_idx < pending_indices.size() &&
-            pending_indices[batch_idx] == i) {
-            ARROW_RETURN_NOT_OK(builder.Append(texts[batch_idx].data(),
-                                               texts[batch_idx].length()));
-            batch_idx++;
+        if (has_value[i]) {
+            ARROW_RETURN_NOT_OK(
+                builder.Append(values[i].data(), values[i].size()));
         } else {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
         }
@@ -1553,18 +1655,12 @@ BuildArrayForChunk(const FieldInfo& field_info,
                 return arrow::Status::Invalid(
                     "Expected ConcurrentVector<std::string>");
             }
-            // TEXT with spillover: read from LOB file
-            if (field_info.text_lob_spillover) {
-                return BuildTextArrayForChunkWithSpillover(
-                    string_vec,
-                    field_info.text_lob_spillover,
-                    global_offset,
-                    num_rows,
-                    field_info.valid_data);
-            }
-            // Fallback for TEXT without spillover
-            return BuildStringArrayForChunk(
-                string_vec, global_offset, num_rows, field_info.valid_data);
+            return BuildTextArrayForChunk(string_vec,
+                                          field_info.text_field_resource,
+                                          field_info.field_id,
+                                          global_offset,
+                                          num_rows,
+                                          field_info.valid_data);
         }
 
         case milvus::DataType::JSON: {
@@ -1694,13 +1790,13 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
         }
         auto ids = growing_segment->get_insert_record().get_data_field_ids();
         std::unordered_set<int64_t> seen(ids.begin(), ids.end());
-        const auto& schema = growing_segment->get_schema();
-        for (const auto& field_id : schema.get_field_ids()) {
+        auto schema = growing_segment->get_schema();
+        for (const auto& field_id : schema->get_field_ids()) {
             auto raw_field_id = field_id.get();
             if (seen.find(raw_field_id) != seen.end()) {
                 continue;
             }
-            const auto& field_meta = schema[field_id];
+            const auto& field_meta = (*schema)[field_id];
             if (milvus::IsVectorDataType(field_meta.get_data_type()) &&
                 growing_segment->CanReadRawVectorFromIndex(field_id)) {
                 ids.push_back(raw_field_id);
@@ -2048,7 +2144,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                     // compaction). The Go layer normally trims such columns
                     // from the layout already — this is the defense for
                     // stale layouts.
-                    if (!growing_segment->get_schema().has_field(field_id)) {
+                    if (!growing_segment->get_schema()->has_field(field_id)) {
                         LOG_INFO(
                             "skip dropped field {} when flushing growing "
                             "segment {}",
@@ -2117,11 +2213,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 info.valid_data = insert_record.get_valid_data(field_id);
             }
 
-            info.text_lob_spillover = nullptr;
-            if (field_meta.get_data_type() == milvus::DataType::TEXT &&
-                growing_segment->HasTextLobSpillover(field_id)) {
-                info.text_lob_spillover =
-                    growing_segment->GetTextLobSpillover(field_id);
+            if (field_meta.get_data_type() == milvus::DataType::TEXT) {
+                info.text_field_resource =
+                    growing_segment->CaptureTextFieldResource(field_id);
             }
             if (bm25_field_ids.find(field_id.get()) != bm25_field_ids.end()) {
                 if (field_meta.get_data_type() !=
@@ -2261,8 +2355,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto writer_result = milvus_storage::segment::SegmentWriter::Create(
             fs, arrow_schema, writer_config);
         if (!writer_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          writer_result.status().ToString());
+            return FailureCStatusFromArrowStatus(
+                "failed to create growing segment writer",
+                writer_result.status());
         }
         auto writer = std::move(writer_result).ValueOrDie();
 
@@ -2304,9 +2399,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                                      batch_rows,
                                                      current_offset);
                 if (!arr_result.ok()) {
-                    return milvus::FailureCStatus(
-                        milvus::UnexpectedError,
-                        arr_result.status().ToString());
+                    return FailureCStatusFromArrowStatus(
+                        "failed to build growing flush Arrow array",
+                        arr_result.status());
                 }
                 auto arr = arr_result.ValueOrDie();
                 auto field_id = field_info.field_id.get();
@@ -2338,8 +2433,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                     auto status =
                         CollectBM25StatsFromArrowArray(arr, stats_iter->second);
                     if (!status.ok()) {
-                        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                                      status.ToString());
+                        return FailureCStatusFromArrowStatus(
+                            "failed to collect growing flush BM25 stats",
+                            status);
                     }
                 }
             }
@@ -2349,8 +2445,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 arrow::RecordBatch::Make(arrow_schema, batch_rows, arrays);
             auto write_status = writer->Write(batch);
             if (!write_status.ok()) {
-                return milvus::FailureCStatus(milvus::UnexpectedError,
-                                              write_status.ToString());
+                return FailureCStatusFromArrowStatus(
+                    "failed to write growing segment batch", write_status);
             }
 
             current_offset += batch_rows;
@@ -2360,8 +2456,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // close writer — returns ColumnGroups + LobFiles, does NOT commit
         auto close_result = writer->Close();
         if (!close_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          close_result.status().ToString());
+            return FailureCStatusFromArrowStatus(
+                "failed to close growing segment writer",
+                close_result.status());
         }
         auto output = std::move(close_result).ValueOrDie();
         if (rows_written > 0 && !has_timestamp) {
@@ -2445,16 +2542,17 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 milvus_storage::api::transaction::OverwriteResolver,
                 retry_limit);
         if (!transaction_result.ok()) {
-            return milvus::FailureCStatus(
-                milvus::UnexpectedError,
-                transaction_result.status().ToString());
+            return FailureCStatusFromArrowStatus(
+                "failed to open growing segment manifest transaction",
+                transaction_result.status());
         }
         auto transaction = std::move(transaction_result).ValueOrDie();
 
         auto manifest_result = transaction->GetManifest();
         if (!manifest_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          manifest_result.status().ToString());
+            return FailureCStatusFromArrowStatus(
+                "failed to get growing segment manifest",
+                manifest_result.status());
         }
         auto manifest = manifest_result.ValueOrDie();
 
@@ -2486,8 +2584,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                              config->pk_stats_blob,
                                              config->pk_stats_blob_size);
             if (!write_status.ok()) {
-                return milvus::FailureCStatus(milvus::UnexpectedError,
-                                              write_status.ToString());
+                return FailureCStatusFromArrowStatus(
+                    "failed to write growing segment PK stats", write_status);
             }
             stat_entry.paths.push_back(full_path);
 
@@ -2503,8 +2601,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                             config->merged_pk_stats_blob,
                                             config->merged_pk_stats_blob_size);
                 if (!write_status.ok()) {
-                    return milvus::FailureCStatus(milvus::UnexpectedError,
-                                                  write_status.ToString());
+                    return FailureCStatusFromArrowStatus(
+                        "failed to write merged growing segment PK stats",
+                        write_status);
                 }
                 stat_entry.paths.push_back(merged_full_path);
                 memory_size = config->merged_pk_stats_blob_size;
@@ -2541,8 +2640,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 fmt::format("{}/{}", writer_config.segment_path, rel_path);
             auto write_status = WriteRawFile(fs, full_path, serialized);
             if (!write_status.ok()) {
-                return milvus::FailureCStatus(milvus::UnexpectedError,
-                                              write_status.ToString());
+                return FailureCStatusFromArrowStatus(
+                    "failed to write growing segment BM25 stats", write_status);
             }
             stat_entry.paths.push_back(full_path);
 
@@ -2571,9 +2670,11 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 for (const auto& existing_path : paths_to_merge) {
                     auto existing_result = ReadBM25StatsFile(fs, existing_path);
                     if (!existing_result.ok()) {
-                        return milvus::FailureCStatus(
-                            milvus::UnexpectedError,
-                            existing_result.status().ToString());
+                        return FailureCStatusFromArrowStatus(
+                            "failed to read persisted growing segment BM25 "
+                            "stats",
+                            existing_result.status(),
+                            /*persisted_data=*/true);
                     }
                     merged_stats.Merge(existing_result.ValueOrDie());
                 }
@@ -2587,8 +2688,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 write_status =
                     WriteRawFile(fs, merged_full_path, merged_serialized);
                 if (!write_status.ok()) {
-                    return milvus::FailureCStatus(milvus::UnexpectedError,
-                                                  write_status.ToString());
+                    return FailureCStatusFromArrowStatus(
+                        "failed to write merged growing segment BM25 stats",
+                        write_status);
                 }
                 stat_entry.paths.push_back(merged_full_path);
                 memory_size += merged_serialized.size();
@@ -2601,8 +2703,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // commit
         auto commit_result = transaction->Commit();
         if (!commit_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          commit_result.status().ToString());
+            return FailureCStatusFromArrowStatus(
+                "failed to commit growing segment manifest transaction",
+                commit_result.status());
         }
         auto committed_version = commit_result.ValueOrDie();
 
@@ -2635,7 +2738,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 

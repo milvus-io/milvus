@@ -158,9 +158,9 @@ class PhyCompareFilterExpr : public Expr {
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        auto& schema = segment->get_schema();
-        auto& left_field_meta = schema[left_field_];
-        auto& right_field_meta = schema[right_field_];
+        auto schema = segment->get_schema();
+        auto& left_field_meta = (*schema)[left_field_];
+        auto& right_field_meta = (*schema)[right_field_];
         pinned_index_left_ = PinIndex(op_ctx_, segment, left_field_meta);
         pinned_index_right_ = PinIndex(op_ctx_, segment, right_field_meta);
         is_left_indexed_ = pinned_index_left_.size() > 0;

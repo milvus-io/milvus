@@ -14,6 +14,7 @@
 #include <memory>
 #include <cmath>
 #include <string>
+#include <utility>
 #include "common/EasyAssert.h"
 
 namespace milvus {
@@ -87,7 +88,13 @@ class Geometry {
     Geometry&
     operator=(const Geometry& other) {
         if (this != &other) {
-            geometry_ = other.geometry_;
+            GEOSGeometry* cloned = nullptr;
+            if (other.IsValid()) {
+                cloned = GEOSGeom_clone_r(other.ctx_, other.geometry_);
+                AssertInfo(cloned != nullptr, "Failed to clone geometry");
+            }
+            Reset();
+            geometry_ = cloned;
             ctx_ = other.ctx_;
         }
         return *this;
@@ -103,6 +110,21 @@ class Geometry {
         } else {
             geometry_ = nullptr;
         }
+    }
+
+    Geometry(Geometry&& other) noexcept
+        : geometry_(std::exchange(other.geometry_, nullptr)),
+          ctx_(std::exchange(other.ctx_, nullptr)) {
+    }
+
+    Geometry&
+    operator=(Geometry&& other) noexcept {
+        if (this != &other) {
+            Reset();
+            geometry_ = std::exchange(other.geometry_, nullptr);
+            ctx_ = std::exchange(other.ctx_, nullptr);
+        }
+        return *this;
     }
 
     bool
@@ -124,77 +146,119 @@ class Geometry {
     // Spatial relation operations using GEOS API
     bool
     equals(const Geometry& other) const {
+        return equals(ctx_, other);
+    }
+
+    bool
+    equals(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSEquals_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSEquals_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     touches(const Geometry& other) const {
+        return touches(ctx_, other);
+    }
+
+    bool
+    touches(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSTouches_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSTouches_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     overlaps(const Geometry& other) const {
+        return overlaps(ctx_, other);
+    }
+
+    bool
+    overlaps(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSOverlaps_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSOverlaps_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     crosses(const Geometry& other) const {
+        return crosses(ctx_, other);
+    }
+
+    bool
+    crosses(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSCrosses_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSCrosses_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     contains(const Geometry& other) const {
+        return contains(ctx_, other);
+    }
+
+    bool
+    contains(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSContains_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSContains_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     intersects(const Geometry& other) const {
+        return intersects(ctx_, other);
+    }
+
+    bool
+    intersects(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSIntersects_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSIntersects_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     within(const Geometry& other) const {
+        return within(ctx_, other);
+    }
+
+    bool
+    within(GEOSContextHandle_t op_ctx, const Geometry& other) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSWithin_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSWithin_r(op_ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     // Distance within check using GEOS distance calculation
     bool
     dwithin(const Geometry& other, double distance) const {
+        return dwithin(ctx_, other, distance);
+    }
+
+    bool
+    dwithin(GEOSContextHandle_t op_ctx,
+            const Geometry& other,
+            double distance) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
 
         // Get geometry types
-        int thisType = GEOSGeomTypeId_r(ctx_, geometry_);
-        int otherType = GEOSGeomTypeId_r(ctx_, other.geometry_);
+        int thisType = GEOSGeomTypeId_r(op_ctx, geometry_);
+        int otherType = GEOSGeomTypeId_r(op_ctx, other.geometry_);
 
         // Ensure other geometry is a point
         AssertInfo(otherType == GEOS_POINT, "other geometry is not a point");
@@ -202,10 +266,10 @@ class Geometry {
         // For point-to-point, use Haversine formula for accuracy
         if (thisType == GEOS_POINT) {
             double thisX, thisY, otherX, otherY;
-            if (GEOSGeomGetX_r(ctx_, geometry_, &thisX) == 1 &&
-                GEOSGeomGetY_r(ctx_, geometry_, &thisY) == 1 &&
-                GEOSGeomGetX_r(ctx_, other.geometry_, &otherX) == 1 &&
-                GEOSGeomGetY_r(ctx_, other.geometry_, &otherY) == 1) {
+            if (GEOSGeomGetX_r(op_ctx, geometry_, &thisX) == 1 &&
+                GEOSGeomGetY_r(op_ctx, geometry_, &thisY) == 1 &&
+                GEOSGeomGetX_r(op_ctx, other.geometry_, &otherX) == 1 &&
+                GEOSGeomGetY_r(op_ctx, other.geometry_, &otherY) == 1) {
                 double actual_distance =
                     haversine_distance_meters(thisY, thisX, otherY, otherX);
                 return actual_distance <= distance;
@@ -214,12 +278,12 @@ class Geometry {
 
         // For other geometry types, use GEOS distance (in degrees)
         double geos_distance;
-        if (GEOSDistance_r(ctx_, geometry_, other.geometry_, &geos_distance) ==
-            1) {
+        if (GEOSDistance_r(
+                op_ctx, geometry_, other.geometry_, &geos_distance) == 1) {
             // Get query point coordinates for conversion reference
             double query_lat, query_lon;
-            if (GEOSGeomGetX_r(ctx_, other.geometry_, &query_lon) == 1 &&
-                GEOSGeomGetY_r(ctx_, other.geometry_, &query_lat) == 1) {
+            if (GEOSGeomGetX_r(op_ctx, other.geometry_, &query_lon) == 1 &&
+                GEOSGeomGetY_r(op_ctx, other.geometry_, &query_lat) == 1) {
                 double distance_in_meters =
                     degrees_to_meters_at_location(geos_distance, query_lat);
                 return distance_in_meters <= distance;
@@ -230,13 +294,26 @@ class Geometry {
     }
     bool
     is_valid() const {
+        return is_valid(ctx_);
+    }
+
+    bool
+    is_valid(GEOSContextHandle_t op_ctx) const {
         if (!IsValid()) {
             return false;
         }
-        return GEOSisValid_r(ctx_, geometry_) == 1;
+        return GEOSisValid_r(op_ctx, geometry_) == 1;
     }
 
  private:
+    void
+    Reset() noexcept {
+        if (geometry_ != nullptr) {
+            GEOSGeom_destroy_r(ctx_, geometry_);
+            geometry_ = nullptr;
+        }
+    }
+
     // Convert degrees distance to meters using approximate location
     static double
     degrees_to_meters_at_location(double degrees_distance, double center_lat) {
