@@ -578,11 +578,13 @@ func TestFunctionRunnerManagerReleaseRemovesNotReadyEntry(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	started := make(chan struct{})
 	releaseBuild := make(chan struct{})
-	var once sync.Once
 	buildDone := make(chan struct{})
+	var startedOnce, buildDoneOnce sync.Once
 	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
-		defer close(buildDone)
-		once.Do(func() {
+		// Signal the first build only: the patched builder is global, so a
+		// second invocation would close an already-closed channel.
+		defer buildDoneOnce.Do(func() { close(buildDone) })
+		startedOnce.Do(func() {
 			close(started)
 		})
 		<-releaseBuild
@@ -606,21 +608,17 @@ func TestFunctionRunnerManagerReleaseCloseDoesNotBlockManager(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	closeStarted := make(chan struct{})
 	releaseClose := make(chan struct{})
-	var buildCount atomic.Int32
 	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
-		runner, err := newTestFunctionRunner(schema, fn)
-		if err != nil {
-			return nil, err
-		}
-		if buildCount.Add(1) == 1 {
-			runner.closeStarted = closeStarted
-			runner.releaseClose = releaseClose
-		}
-		return runner, nil
+		return newTestFunctionRunner(schema, fn)
 	})
 
 	require.NoError(t, manager.Alloc(1, "v1", schema))
-	requireRunnerByOutput(t, manager, 1, "v1", 102)
+	// Hook only the installed runner - see the comment in
+	// TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose for why this
+	// is bound by instance instead of by build order.
+	runner := requireRunnerByOutput(t, manager, 1, "v1", 102)
+	runner.closeStarted = closeStarted
+	runner.releaseClose = releaseClose
 
 	releaseDone := make(chan struct{})
 	go func() {
@@ -750,14 +748,18 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T)
 	schema := newBM25SignatureTestSchema()
 	closeStarted := make(chan struct{})
 	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
-		runner, err := newTestFunctionRunner(schema, fn)
-		if err != nil {
-			return nil, err
-		}
-		runner.closeStarted = closeStarted
-		return runner, nil
+		return newTestFunctionRunner(schema, fn)
 	})
 	require.NoError(t, manager.Alloc(1, "v1", schema))
+
+	// Bind the close signal to the runner this test installed, after it is
+	// installed. patchBuildEmbeddingRunner patches the global builder, so wiring
+	// the shared channel inside the builder hands it to every runner built while
+	// the patch is live - including ones a concurrent re-init immediately
+	// discards. Their Close then closes an already-closed channel (the "close of
+	// closed channel" panic this test hit under -race in ci-v2/build-ut-cov) and
+	// reports a close the assertions below are not about.
+	requireRunnerByOutput(t, manager, 1, "v1", 102).closeStarted = closeStarted
 
 	runStarted := make(chan struct{})
 	releaseRun := make(chan struct{})
@@ -808,19 +810,15 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentKeyUpdate(t *testin
 	base := newBM25SignatureTestSchema()
 	changedOutput := newSchemaWithChangedOutput(base)
 	closeStarted := make(chan struct{})
-	var buildCount atomic.Int32
 	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
-		runner, err := newTestFunctionRunner(schema, fn)
-		if err != nil {
-			return nil, err
-		}
-		if buildCount.Add(1) == 1 {
-			runner.closeStarted = closeStarted
-		}
-		return runner, nil
+		return newTestFunctionRunner(schema, fn)
 	})
 	require.NoError(t, manager.Alloc(1, "v1", base))
+	// Hook only the installed runner - see the comment in
+	// TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose for why this
+	// is bound by instance instead of by build order.
 	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
+	baseRunner.closeStarted = closeStarted
 
 	runStarted := make(chan struct{})
 	releaseRun := make(chan struct{})
