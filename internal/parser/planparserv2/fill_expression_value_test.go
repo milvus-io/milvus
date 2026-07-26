@@ -669,6 +669,14 @@ func (s *FillExpressionValueSuite) TestJSONContainsExpression() {
 				expected: true,
 			},
 			{
+				name: "untyped empty array",
+				expr: `json_contains_all(JSONField, {array})`,
+				values: map[string]*schemapb.TemplateValue{
+					"array": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+				},
+				expected: true,
+			},
+			{
 				name: "singleton array",
 				expr: `json_contains_all(JSONField, {array})`,
 				values: map[string]*schemapb.TemplateValue{
