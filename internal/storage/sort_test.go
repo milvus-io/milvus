@@ -413,6 +413,459 @@ func BenchmarkSort(b *testing.B) {
 	})
 }
 
+func TestSort_AllRowsFiltered(t *testing.T) {
+	// All records are read (totalRecords > 0), but predicate rejects every row.
+	// This exercises the path where runRows stays 0 after reading, then the
+	// totalRecords == 0 check is NOT hit (records were read) but no tmp files
+	// are produced, so we go through MergeSort with no readers.
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	const batchSize = 64 * 1024 * 1024
+
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return false // reject all rows
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, gotNumRows)
+	assert.NotNil(t, timings)
+	assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+}
+
+func TestSort_NoSortFields(t *testing.T) {
+	// When sortByFieldIDs is empty, no comparators are created, so the rows
+	// are written in insertion order (no sorting).
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	const batchSize = 64 * 1024 * 1024
+
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	var writtenRows int
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			writtenRows += r.Len()
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{}) // empty sort fields
+	assert.NoError(t, err)
+	assert.Equal(t, 3, gotNumRows)
+	assert.NotNil(t, timings)
+	assert.Equal(t, 3, timings.NumRows)
+	assert.Equal(t, 3, writtenRows)
+}
+
+func TestSort_SmallBatchSizeInFlushRun(t *testing.T) {
+	// Use a very small batchSize (1 byte) so that flushRun hits the inner
+	// "flush to file if batchSize reached" path on every row, exercising
+	// the mid-flush batch write within flushRun.
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	const batchSize = 1 // very small to trigger mid-flush writes
+
+	blobs, err := generateTestDataWithSeed(10, 5)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	var writtenRows int
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			writtenRows += r.Len()
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 5, gotNumRows)
+	assert.NotNil(t, timings)
+	assert.Equal(t, 5, timings.NumRows)
+	assert.Equal(t, 5, writtenRows)
+}
+
+func TestSort_PartialPredicateWithFlush(t *testing.T) {
+	// Predicate accepts only some rows. Also use a small runRowLimit to force
+	// the flush path with partial acceptance.
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	const batchSize = 64 * 1024 * 1024
+	oldRowLimit := runRowLimit
+	defer func() { runRowLimit = oldRowLimit }()
+	runRowLimit = 2 // force flush after 2 accepted rows
+
+	blobs, err := generateTestDataWithSeed(10, 5)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	var writtenRows int
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			writtenRows += r.Len()
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	// Accept only even-indexed PKs (10, 12, 14) from seed=10 num=5 → PKs are 10,11,12,13,14
+	gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
+		return pk%2 == 0
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 3, gotNumRows) // 10, 12, 14
+	assert.NotNil(t, timings)
+	assert.Equal(t, 3, timings.NumRows)
+	assert.Equal(t, 3, writtenRows)
+}
+
+func TestMergeSort_NoReaders(t *testing.T) {
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+	numRows, err := MergeSort(1024, generateTestSchema(), []RecordReader{}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSort_AllReadersEOF(t *testing.T) {
+	// All readers return EOF immediately on the first call to Next().
+	// With non-empty sortByFieldIDs, recs[0] is nil → panics trying to
+	// determine comparator type. Test with empty sort fields to exercise
+	// the "all-EOF, no enqueue" path gracefully.
+	mrr1 := &mockRecordReader{}
+	mrr1.On("Next").Return(nil, io.EOF)
+	mrr1.On("Close").Return(nil)
+
+	mrr2 := &mockRecordReader{}
+	mrr2.On("Next").Return(nil, io.EOF)
+	mrr2.On("Close").Return(nil)
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(1024, generateTestSchema(), []RecordReader{mrr1, mrr2}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{}) // empty sort fields avoids nil-deref on recs[0]
+	assert.NoError(t, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSort_AllReadersEOF_WithSortField_Panics(t *testing.T) {
+	// Demonstrates that if all readers return EOF and sortByFieldIDs is non-empty,
+	// the code panics because recs[0] is nil. This documents the current behavior.
+	mrr1 := &mockRecordReader{}
+	mrr1.On("Next").Return(nil, io.EOF)
+	mrr1.On("Close").Return(nil)
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	assert.Panics(t, func() {
+		MergeSort(1024, generateTestSchema(), []RecordReader{mrr1}, rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+	})
+}
+
+func TestMergeSort_InitialAdvanceRecordError(t *testing.T) {
+	// First reader succeeds, second reader returns a non-EOF error.
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	goodReader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	expectedErr := errors.New("reader connection error")
+	badReader := &mockRecordReader{}
+	badReader.On("Next").Return(nil, expectedErr)
+	badReader.On("Close").Return(nil)
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(1024, generateTestSchema(), []RecordReader{goodReader, badReader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSort_UnsupportedSortType(t *testing.T) {
+	// Create a reader that returns a record with a boolean column as the sort key.
+	alloc := memory.DefaultAllocator
+	boolBuilder := array.NewBooleanBuilder(alloc)
+	boolBuilder.AppendValues([]bool{true, false}, nil)
+	boolArr := boolBuilder.NewBooleanArray()
+	defer boolArr.Release()
+
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "100", Type: arrow.FixedWidthTypes.Boolean},
+	}, nil)
+	arrowRec := array.NewRecord(arrowSchema, []arrow.Array{boolArr}, 2)
+	defer arrowRec.Release()
+
+	field2Col := map[FieldID]int{100: 0}
+	rec := NewSimpleArrowRecord(arrowRec, field2Col)
+
+	mrr := &mockRecordReader{}
+	mrr.On("Next").Return(rec, nil).Once()
+	mrr.On("Next").Return(nil, io.EOF)
+	mrr.On("Close").Return(nil)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Bool},
+		},
+	}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(1024, schema, []RecordReader{mrr}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{100})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported type for sorting key")
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSort_StringSort(t *testing.T) {
+	// Sort by a string field (field 17 in generateTestSchema is a string).
+	blobs, err := generateTestDataWithSeed(10, 5)
+	assert.NoError(t, err)
+	reader1 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	blobs, err = generateTestDataWithSeed(20, 5)
+	assert.NoError(t, err)
+	reader2 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	var writtenRows int
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			writtenRows += r.Len()
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(64*1024*1024, generateTestSchema(), []RecordReader{reader1, reader2}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{17}) // field 17 is string type
+	assert.NoError(t, err)
+	assert.Equal(t, 10, numRows)
+	assert.Equal(t, 10, writtenRows)
+}
+
+func TestMergeSort_WriteError(t *testing.T) {
+	// MergeSort where rw.Write fails.
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	writeErr := errors.New("disk full")
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return writeErr },
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(64*1024*1024, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.Error(t, err)
+	assert.Equal(t, writeErr, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSort_SmallBatchSizeWriteError(t *testing.T) {
+	// MergeSort with small batchSize so the mid-loop write is triggered, then fails.
+	blobs, err := generateTestDataWithSeed(10, 5)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	writeErr := errors.New("write failed")
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return writeErr },
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(1, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.Error(t, err)
+	assert.Equal(t, writeErr, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestPriorityQueue(t *testing.T) {
+	t.Run("basic operations", func(t *testing.T) {
+		pq := NewPriorityQueue(func(x, y *int) bool {
+			return *x < *y
+		})
+		assert.Equal(t, 0, pq.Len())
+
+		vals := []int{5, 1, 3, 2, 4}
+		for i := range vals {
+			pq.Enqueue(&vals[i])
+		}
+		assert.Equal(t, 5, pq.Len())
+
+		// Dequeue should return in sorted order
+		prev := -1
+		for pq.Len() > 0 {
+			v := pq.Dequeue()
+			assert.Greater(t, *v, prev)
+			prev = *v
+		}
+		assert.Equal(t, 0, pq.Len())
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		pq := NewPriorityQueue(func(x, y *int) bool {
+			return *x < *y
+		})
+		v := 42
+		pq.Enqueue(&v)
+		assert.Equal(t, 1, pq.Len())
+		result := pq.Dequeue()
+		assert.Equal(t, 42, *result)
+		assert.Equal(t, 0, pq.Len())
+	})
+
+	t.Run("string priority", func(t *testing.T) {
+		pq := NewPriorityQueue(func(x, y *string) bool {
+			return *x < *y
+		})
+		strs := []string{"banana", "apple", "cherry"}
+		for i := range strs {
+			pq.Enqueue(&strs[i])
+		}
+		first := pq.Dequeue()
+		assert.Equal(t, "apple", *first)
+		second := pq.Dequeue()
+		assert.Equal(t, "banana", *second)
+		third := pq.Dequeue()
+		assert.Equal(t, "cherry", *third)
+	})
+}
+
+func TestMergeSort_PredicateSkipsEntireRecord(t *testing.T) {
+	// Exercise the enqueueAll recursive path: the first record batch has all
+	// rows rejected by predicate, forcing advanceRecord to be called again
+	// within enqueueAll.
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	reader1 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	blobs, err = generateTestDataWithSeed(20, 3)
+	assert.NoError(t, err)
+	reader2 := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	var writtenRows int
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			writtenRows += r.Len()
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	// Accept only PKs >= 20 → the first reader (PKs 10-12) will be fully skipped
+	numRows, err := MergeSort(64*1024*1024, generateTestSchema(), []RecordReader{reader1, reader2}, rw, func(r Record, ri, i int) bool {
+		pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
+		return pk >= 20
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 3, numRows)
+	assert.Equal(t, 3, writtenRows)
+}
+
+func TestSort_MultipleRunsMerge(t *testing.T) {
+	// Force multiple runs by setting a very small runRowLimit, then verify
+	// the final merge produces correct sorted output.
+	origPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	defer func() {
+		paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, origPath)
+	}()
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+
+	const batchSize = 64 * 1024 * 1024
+	oldRowLimit := runRowLimit
+	defer func() { runRowLimit = oldRowLimit }()
+	runRowLimit = 1 // force a flush after every single row
+
+	blobs, err := generateTestDataWithSeed(100, 5)
+	assert.NoError(t, err)
+	reader := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+
+	lastPK := int64(-1)
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			for i := 0; i < r.Len(); i++ {
+				pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
+				assert.Greater(t, pk, lastPK)
+				lastPK = pk
+			}
+			return nil
+		},
+		closefn: func() error {
+			lastPK = int64(-1)
+			return nil
+		},
+	}
+
+	gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 5, gotNumRows)
+	assert.NotNil(t, timings)
+	assert.Equal(t, 5, timings.NumRows)
+}
+
 func TestSortByMoreThanOneField(t *testing.T) {
 	const batchSize = 10000
 	sortByFieldIDs := []int64{common.RowIDField, common.TimeStampField}
