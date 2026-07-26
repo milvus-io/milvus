@@ -511,6 +511,44 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 	}
 }
 
+func (s *DistributionSuite) TestRemoveDistributionsAfterCloseReturnsClosedSignal() {
+	s.dist.AddDistributions(SegmentEntry{
+		NodeID:    1,
+		SegmentID: 1,
+	})
+	s.dist.Flush()
+	s.dist.Close()
+
+	ch := s.dist.RemoveDistributions([]SegmentEntry{{NodeID: 1, SegmentID: 1}}, nil)
+
+	timeout := time.NewTimer(100 * time.Millisecond)
+	defer timeout.Stop()
+	select {
+	case <-ch:
+	case <-timeout.C:
+		s.Fail("remove distribution signal not closed after distribution close")
+	}
+}
+
+func (s *DistributionSuite) TestCloseClearsPendingRemoveDistributionSignal() {
+	s.dist.AddDistributions(SegmentEntry{
+		NodeID:    1,
+		SegmentID: 1,
+	})
+	s.dist.Flush()
+
+	ch := s.dist.RemoveDistributions([]SegmentEntry{{NodeID: 1, SegmentID: 1}}, nil)
+	s.dist.Close()
+
+	timeout := time.NewTimer(100 * time.Millisecond)
+	defer timeout.Stop()
+	select {
+	case <-ch:
+	case <-timeout.C:
+		s.Fail("pending remove distribution signal not closed by distribution close")
+	}
+}
+
 func (s *DistributionSuite) TestPeek() {
 	type testCase struct {
 		tag      string

@@ -599,10 +599,12 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		delete(d.growingSegments, growing.SegmentID)
 	}
 
-	// Capture current snapshot's cleared channel. The next genSnapshot will
-	// create a new snapshot and expire this one, closing the channel.
 	var signal chan struct{}
-	if current := d.current.Load(); current != nil {
+	if d.closed.Load() {
+		signal = getClosedCh()
+	} else if current := d.current.Load(); current != nil {
+		// Capture current snapshot's cleared channel. The next genSnapshot will
+		// create a new snapshot and expire this one, closing the channel.
 		signal = current.cleared
 	} else {
 		signal = make(chan struct{})
@@ -816,7 +818,12 @@ func (d *distribution) Flush() {
 // Close stops the background snapshot loop and waits for it to exit.
 func (d *distribution) Close() {
 	d.closeOnce.Do(func() {
+		d.mut.Lock()
 		d.closed.Store(true)
+		if current := d.current.Load(); current != nil {
+			current.Expire(d.getCleanup(current.version))
+		}
+		d.mut.Unlock()
 		close(d.snapshotClose)
 	})
 	<-d.snapshotDone
