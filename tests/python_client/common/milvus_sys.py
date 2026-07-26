@@ -2,6 +2,7 @@ import ujson
 import json
 from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 from pymilvus import connections
+from common.index_version import get_resolved_scalar_index_version
 # from utils.util_log import test_log as log
 sys_info_req = ujson.dumps({"metric_type": "system_info"})
 sys_statistics_req = ujson.dumps({"metric_type": "system_statistics"})
@@ -64,6 +65,11 @@ class MilvusSys:
         for node in self.query_nodes:
             return node.get('infos').get('system_configurations').get('simd_type')
         raise Exception("No query node found")
+
+    @property
+    def resolved_scalar_index_version(self):
+        """Get DataCoord's effective scalar index engine version."""
+        return get_resolved_scalar_index_version(self.nodes)
 
     @property
     def query_nodes(self):

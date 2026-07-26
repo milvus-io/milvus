@@ -745,14 +745,30 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
 
 
 _json_path_index_params_invalid = [
-    ("INVERTED", "BOOL"),
-    ("INVERTED", "DOUBLE"),
-    ("INVERTED", "VARCHAR"),
-    ("INVERTED", "JSON"),
-    ("STL_SORT", "DOUBLE"),
-    ("STL_SORT", "VARCHAR"),
-    ("BITMAP", "BOOL"),
-    ("BITMAP", "VARCHAR"),
+    pytest.param(("INVERTED", "BOOL"), id="INVERTED_BOOL"),
+    pytest.param(("INVERTED", "DOUBLE"), id="INVERTED_DOUBLE"),
+    pytest.param(("INVERTED", "VARCHAR"), id="INVERTED_VARCHAR"),
+    pytest.param(("INVERTED", "JSON"), id="INVERTED_JSON"),
+    pytest.param(
+        ("STL_SORT", "DOUBLE"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="STL_SORT_DOUBLE",
+    ),
+    pytest.param(
+        ("STL_SORT", "VARCHAR"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="STL_SORT_VARCHAR",
+    ),
+    pytest.param(
+        ("BITMAP", "BOOL"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="BITMAP_BOOL",
+    ),
+    pytest.param(
+        ("BITMAP", "VARCHAR"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="BITMAP_VARCHAR",
+    ),
 ]
 
 
@@ -772,7 +788,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     def not_supported_json_cast_type(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=_json_path_index_params_invalid, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params_invalid])
+    @pytest.fixture(scope="function", params=_json_path_index_params_invalid)
     def json_index_params(self, request):
         yield request.param
 
@@ -787,7 +803,17 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     def supported_json_cast_type(self, json_index_params):
         yield json_index_params[1]
 
-    @pytest.fixture(scope="function", params=["INVERTED", "STL_SORT"])
+    @pytest.fixture(
+        scope="function",
+        params=[
+            pytest.param("INVERTED", id="INVERTED"),
+            pytest.param(
+                "STL_SORT",
+                marks=pytest.mark.requires_scalar_index_version(4),
+                id="STL_SORT",
+            ),
+        ],
+    )
     def supported_double_scalar_index(self, request):
         """Index types that support DOUBLE cast type. Use for tests that
         hardcode json_cast_type to 'double'."""
@@ -1168,14 +1194,30 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
 
 
 _json_path_index_params_valid = [
-    ("INVERTED", "BOOL"),
-    ("INVERTED", "DOUBLE"),
-    ("INVERTED", "VARCHAR"),
-    ("INVERTED", "JSON"),
-    ("STL_SORT", "DOUBLE"),
-    ("STL_SORT", "VARCHAR"),
-    ("BITMAP", "BOOL"),
-    ("BITMAP", "VARCHAR"),
+    pytest.param(("INVERTED", "BOOL"), id="INVERTED_BOOL"),
+    pytest.param(("INVERTED", "DOUBLE"), id="INVERTED_DOUBLE"),
+    pytest.param(("INVERTED", "VARCHAR"), id="INVERTED_VARCHAR"),
+    pytest.param(("INVERTED", "JSON"), id="INVERTED_JSON"),
+    pytest.param(
+        ("STL_SORT", "DOUBLE"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="STL_SORT_DOUBLE",
+    ),
+    pytest.param(
+        ("STL_SORT", "VARCHAR"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="STL_SORT_VARCHAR",
+    ),
+    pytest.param(
+        ("BITMAP", "BOOL"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="BITMAP_BOOL",
+    ),
+    pytest.param(
+        ("BITMAP", "VARCHAR"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="BITMAP_VARCHAR",
+    ),
 ]
 
 
@@ -1186,7 +1228,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
     # def not_supported_varchar_scalar_index(self, request):
     #     yield request.param
 
-    @pytest.fixture(scope="function", params=_json_path_index_params_valid, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params_valid])
+    @pytest.fixture(scope="function", params=_json_path_index_params_valid)
     def json_index_params(self, request):
         yield request.param
 

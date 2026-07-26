@@ -39,21 +39,37 @@ default_int32_value = ct.default_int32_value
 
 # Valid (index_type, json_cast_type) combinations for JSON path index
 _json_path_index_params = [
-    ("INVERTED", "BOOL"),
-    ("INVERTED", "DOUBLE"),
-    ("INVERTED", "VARCHAR"),
-    ("INVERTED", "JSON"),
-    ("STL_SORT", "DOUBLE"),
-    ("STL_SORT", "VARCHAR"),
-    ("BITMAP", "BOOL"),
-    ("BITMAP", "VARCHAR"),
+    pytest.param(("INVERTED", "BOOL"), id="INVERTED_BOOL"),
+    pytest.param(("INVERTED", "DOUBLE"), id="INVERTED_DOUBLE"),
+    pytest.param(("INVERTED", "VARCHAR"), id="INVERTED_VARCHAR"),
+    pytest.param(("INVERTED", "JSON"), id="INVERTED_JSON"),
+    pytest.param(
+        ("STL_SORT", "DOUBLE"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="STL_SORT_DOUBLE",
+    ),
+    pytest.param(
+        ("STL_SORT", "VARCHAR"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="STL_SORT_VARCHAR",
+    ),
+    pytest.param(
+        ("BITMAP", "BOOL"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="BITMAP_BOOL",
+    ),
+    pytest.param(
+        ("BITMAP", "VARCHAR"),
+        marks=pytest.mark.requires_scalar_index_version(4),
+        id="BITMAP_VARCHAR",
+    ),
 ]
 
 
 class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
     """ Test case of insert interface """
 
-    @pytest.fixture(scope="function", params=_json_path_index_params, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params])
+    @pytest.fixture(scope="function", params=_json_path_index_params)
     def json_index_params(self, request):
         yield request.param
 
