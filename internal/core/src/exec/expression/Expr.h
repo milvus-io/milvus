@@ -1870,7 +1870,20 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
         return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, values...);
+            func, false, IndexValidityMode::Default, nullptr, values...);
+    }
+
+    // Execute an index query once for the whole segment and gather only the
+    // requested rows. Unlike ProcessIndexChunksByOffsets, this also supports
+    // JSON indexes whose query APIs return a full row-level bitmap (including
+    // JsonFlatIndexQueryExecutor).
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksAndGatherByOffsets(FUNC func,
+                                         const OffsetVector& offsets,
+                                         const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(
+            func, false, IndexValidityMode::Default, &offsets, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -1881,7 +1894,8 @@ class SegmentExpr : public Expr {
     ProcessIndexChunksWithRowLevel(FUNC func,
                                    IndexValidityMode validity_mode,
                                    const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
+        return ProcessIndexChunksImpl<T>(
+            func, true, validity_mode, nullptr, values...);
     }
 
     TargetBitmap
@@ -1922,6 +1936,7 @@ class SegmentExpr : public Expr {
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
                            IndexValidityMode validity_mode,
+                           const OffsetVector* offsets,
                            const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -2039,6 +2054,20 @@ class SegmentExpr : public Expr {
         // If func already returns row-level bitset, skip element-to-row conversion
         bool need_element_slicing =
             cached_is_nested_index_ && !func_returns_row_level;
+
+        if (offsets != nullptr) {
+            AssertInfo(!need_element_slicing,
+                       "cannot gather row offsets from an element-level "
+                       "index result");
+            AssertInfo(cached_index_chunk_res_->size() ==
+                           static_cast<size_t>(active_count_),
+                       "index result size {} does not match row count {}",
+                       cached_index_chunk_res_->size(),
+                       active_count_);
+            return GatherCachedResultByOffsets(*cached_index_chunk_res_,
+                                               *cached_index_chunk_valid_res_,
+                                               *offsets);
+        }
 
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements

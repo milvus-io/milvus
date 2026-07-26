@@ -127,8 +127,15 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                JsonNumericBoundRequiresPreciseInt64Comparison(
                                    expr_->upper_val_));
 
+            // Keep sparse JsonFlat offset batches candidate-local when raw
+            // JSON is resident.  An index-only segment cannot use the generic
+            // JSON reverse-lookup path, so it must query the typed JsonFlat
+            // executor and gather the requested rows instead.
+            const bool use_json_flat_raw_offsets =
+                exec_path_ == ExprExecPath::ScalarIndex && has_offset_input_ &&
+                PinnedJsonIndexIsFlat() && num_data_chunk_ > 0;
             if (exec_path_ == ExprExecPath::ScalarIndex &&
-                (!has_offset_input_ || !PinnedJsonIndexIsFlat())) {
+                !use_json_flat_raw_offsets) {
                 if (is_numeric) {
                     if (!use_double && PinnedJsonIndexIsFlat()) {
                         result = ExecRangeVisitorImplForIndex<int64_t>(input);
@@ -437,6 +444,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
         return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
     };
     if (input != nullptr) {
+        if (PinnedJsonIndexIsFlat()) {
+            return ProcessIndexChunksAndGatherByOffsets<T>(
+                execute_sub_batch, *input, val1, val2);
+        }
         if (cached_result_ == nullptr) {
             auto scalar_index =
                 dynamic_cast<const Index*>(pinned_index_[0].get());

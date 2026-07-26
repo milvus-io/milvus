@@ -192,6 +192,94 @@ func (s *FillExpressionValueSuite) TestEmptyArrayComparisonNormalization() {
 	}
 }
 
+func (s *FillExpressionValueSuite) TestWholeArrayTemplateMembershipNormalization() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyArray := func() *schemapb.TemplateArrayValue {
+		return &schemapb.TemplateArrayValue{}
+	}
+	intArray := func(values ...int64) *schemapb.TemplateArrayValue {
+		return generateTemplateArrayValue(schemapb.DataType_Int64, values)
+	}
+
+	testcases := []struct {
+		name               string
+		arrays             []*schemapb.TemplateArrayValue
+		expectedLengths    int
+		expectedEqualities int
+	}{
+		{
+			name:            "empty arrays",
+			arrays:          []*schemapb.TemplateArrayValue{emptyArray(), emptyArray()},
+			expectedLengths: 2,
+		},
+		{
+			name: "non-empty arrays",
+			arrays: []*schemapb.TemplateArrayValue{
+				intArray(1, 2),
+				intArray(3, 4),
+			},
+			expectedEqualities: 2,
+		},
+		{
+			name: "mixed empty and non-empty arrays",
+			arrays: []*schemapb.TemplateArrayValue{
+				emptyArray(),
+				intArray(1, 2),
+			},
+			expectedLengths:    1,
+			expectedEqualities: 1,
+		},
+	}
+
+	for _, testcase := range testcases {
+		for _, op := range []string{"in", "not in"} {
+			s.Run(testcase.name+"/"+op, func() {
+				expr, err := ParseExpr(schemaH, "ArrayField "+op+" {arrays}", map[string]*schemapb.TemplateValue{
+					"arrays": generateTemplateValue(schemapb.DataType_Array,
+						generateTemplateArrayValue(schemapb.DataType_Array, testcase.arrays)),
+				})
+				s.NoError(err)
+				s.NotNil(expr)
+				if op == "not in" {
+					s.NotNil(expr.GetUnaryExpr())
+					s.Equal(planpb.UnaryExpr_Not, expr.GetUnaryExpr().GetOp())
+				}
+
+				var arrayLengths int
+				var arrayEqualities int
+				var walk func(*planpb.Expr)
+				walk = func(current *planpb.Expr) {
+					if current == nil {
+						return
+					}
+					s.Nil(current.GetTermExpr(), "whole ARRAY membership must not remain a TermExpr")
+					if arrayLength := current.GetBinaryArithOpEvalRangeExpr(); arrayLength != nil &&
+						arrayLength.GetArithOp() == planpb.ArithOpType_ArrayLength &&
+						arrayLength.GetOp() == planpb.OpType_Equal &&
+						arrayLength.GetValue().GetInt64Val() == 0 {
+						arrayLengths++
+					}
+					if equality := current.GetUnaryRangeExpr(); equality != nil &&
+						equality.GetOp() == planpb.OpType_Equal &&
+						equality.GetValue().GetArrayVal() != nil {
+						arrayEqualities++
+					}
+					if binary := current.GetBinaryExpr(); binary != nil {
+						walk(binary.GetLeft())
+						walk(binary.GetRight())
+					}
+					if unary := current.GetUnaryExpr(); unary != nil {
+						walk(unary.GetChild())
+					}
+				}
+				walk(expr)
+				s.Equal(testcase.expectedLengths, arrayLengths)
+				s.Equal(testcase.expectedEqualities, arrayEqualities)
+			})
+		}
+	}
+}
+
 func (s *FillExpressionValueSuite) TestUnaryRange() {
 	s.Run("normal case", func() {
 		testcases := []testcase{

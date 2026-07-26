@@ -515,6 +515,117 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
     EXPECT_TRUE(precise_result[8]);
 }
 
+TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+
+    const std::vector<std::string> json_strs = {
+        R"({"n": 1})",
+        R"({"n": 2})",
+        R"({"n": 3.5})",
+        R"({"n": "3"})",
+        R"({"other": 4})",
+        R"({"n": null})",
+        R"({"n": 4})",
+        R"({"n": 5})",
+    };
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_strs.size());
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    auto* valid_data = json_field->ValidData();
+    std::fill(valid_data,
+              valid_data + json_field->ValidDataSize(),
+              static_cast<uint8_t>(0));
+    valid_data[0] = 0b01111111;
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw_segment = CreateSealedSegment(schema);
+    auto raw_load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    raw_segment->LoadFieldData(raw_load_info);
+
+    auto flat_segment = CreateSealedSegment(schema);
+    std::vector<int64_t> row_ids(json_strs.size());
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    auto row_id_field_data =
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+    row_id_field_data->FillFieldData(row_ids.data(), row_ids.size());
+    auto row_id_load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, RowFieldID.get(), {row_id_field_data}, cm);
+    flat_segment->LoadFieldData(row_id_load_info);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+    auto json_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("JSON"),
+            .json_path = "",
+        },
+        file_manager_ctx);
+    auto* flat_index = dynamic_cast<index::JsonFlatIndex*>(json_index.get());
+    ASSERT_NE(flat_index, nullptr);
+    flat_index->BuildWithFieldData({json_field});
+    flat_index->finish();
+    flat_index->create_reader(milvus::index::SetBitsetSealed);
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index_params = {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("json_binary_range_flat", std::move(json_index));
+    flat_segment->LoadIndex(load_index_info);
+    ASSERT_FALSE(flat_segment->HasFieldData(json_fid));
+
+    proto::plan::GenericValue lower;
+    lower.set_int64_val(2);
+    proto::plan::GenericValue upper;
+    upper.set_int64_val(4);
+    auto range_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
+        lower,
+        upper,
+        true,
+        true);
+    auto evaluate = [&](const segcore::SegmentInternalInterface* segment,
+                        exec::OffsetVector* offsets) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           range_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment, json_strs.size(), MAX_TIMESTAMP, offsets);
+    };
+
+    exec::OffsetVector offsets = {6, 2, 4, 1, 3, 5, 7, 0, 2};
+    auto raw_result = evaluate(raw_segment.get(), &offsets);
+    ColumnVectorPtr flat_result;
+    EXPECT_NO_THROW(flat_result = evaluate(flat_segment.get(), &offsets));
+    ASSERT_NE(flat_result, nullptr);
+    ASSERT_EQ(raw_result->size(), flat_result->size());
+
+    TargetBitmapView raw_values(raw_result->GetRawData(), raw_result->size());
+    TargetBitmapView raw_validity(raw_result->GetValidRawData(),
+                                  raw_result->size());
+    TargetBitmapView flat_values(flat_result->GetRawData(),
+                                 flat_result->size());
+    TargetBitmapView flat_validity(flat_result->GetValidRawData(),
+                                   flat_result->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(flat_values[i], raw_values[i]) << "candidate " << i;
+        EXPECT_EQ(flat_validity[i], raw_validity[i]) << "candidate " << i;
+    }
+}
+
 TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
