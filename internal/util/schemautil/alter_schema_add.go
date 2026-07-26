@@ -146,6 +146,29 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 	}
 }
 
+// ValidateAddFunctionInputNotText rejects BM25/MinHash backfill from TEXT
+// fields because existing TEXT values are stored as binary LOB references.
+func ValidateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	default:
+		return nil
+	}
+
+	fieldByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		fieldByName[field.GetName()] = field
+	}
+	for _, inputFieldName := range function.GetInputFieldNames() {
+		if field, ok := fieldByName[inputFieldName]; ok && field.GetDataType() == schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg(
+				"adding a %s function with a TEXT input field (%s) is not supported: its output cannot be backfilled into existing segments; use a VARCHAR input field",
+				function.GetType().String(), inputFieldName)
+		}
+	}
+	return nil
+}
+
 func validateAddFunctionFieldAllowed(function *schemapb.FunctionSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:

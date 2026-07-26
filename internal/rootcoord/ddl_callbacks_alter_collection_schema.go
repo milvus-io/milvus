@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
@@ -129,6 +130,12 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
 			return merr.Wrap(err, "invalid function schema")
 		}
+		if err := schemautil.ValidateAddFunctionInputNotText(schema, plan.Function); err != nil {
+			return err
+		}
+		if err := c.rejectAddFunctionInputAnalyzerFileResource(ctx, schema, plan.Function); err != nil {
+			return err
+		}
 	}
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
@@ -183,6 +190,27 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
+	}
+	return nil
+}
+
+// rejectAddFunctionInputAnalyzerFileResource rejects add_function_field when the
+// added function's input-field analyzer references a file resource that DataNode
+// cannot resolve during backfill. Sync mode registers resources globally; ref and
+// close modes do not provide them to the compaction record-materializer.
+func (c *Core) rejectAddFunctionInputAnalyzerFileResource(ctx context.Context, schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
+	analyzerInfos, err := collectFunctionInputAnalyzerInfos(schema, function)
+	if err != nil {
+		return err
+	}
+	resourceIds, err := c.validateAnalyzerInfos(ctx, analyzerInfos)
+	if err != nil {
+		return err
+	}
+	mode := Params.CommonCfg.DNFileResourceMode.GetValue()
+	if len(resourceIds) > 0 && !fileresource.IsSyncMode(mode) {
+		return merr.WrapErrParameterInvalidMsg(
+			"add_function_field with analyzer file resources requires dataNode file-resource sync mode")
 	}
 	return nil
 }

@@ -70,6 +70,20 @@ func createTextIndex(ctx context.Context,
 		mlog.FieldSegmentID(segmentID),
 	)
 
+	// Text indexes are built only for enable_match fields, and the analyzer file
+	// resources below are downloaded solely to build them. If no field enables
+	// match, skip the resource download and all setup entirely.
+	hasMatchField := false
+	for _, field := range plan.GetSchema().GetFields() {
+		if typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+			hasMatchField = true
+			break
+		}
+	}
+	if !hasMatchField {
+		return map[int64]*datapb.TextIndexStats{}, nil
+	}
+
 	fieldBinlogs := lo.GroupBy(segment.GetInsertLogs(), func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})

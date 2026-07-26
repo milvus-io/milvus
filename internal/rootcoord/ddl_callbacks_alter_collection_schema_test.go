@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -768,6 +769,189 @@ func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T)
 	require.Empty(t, coll.FileResourceIds)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 	assertFieldNotExists(t, ctx, core, dbName, collectionName, fieldName)
+}
+
+func TestRejectAddFunctionInputAnalyzerFileResource(t *testing.T) {
+	makeSchema := func(extraFields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+		fields := []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			}},
+			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		}
+		fields = append(fields, extraFields...)
+		return &schemapb.CollectionSchema{
+			Fields: fields,
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "bm25", Type: schemapb.FunctionType_BM25,
+				InputFieldNames: []string{"text"}, InputFieldIds: []int64{100},
+				OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{101},
+			}},
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		mode    string
+		wantErr bool
+	}{
+		{name: "sync mode allows resource-backed analyzer", mode: fileresource.SyncModeStr},
+		{name: "ref mode rejects resource-backed analyzer", mode: fileresource.RefModeStr, wantErr: true},
+		{name: "close mode rejects resource-backed analyzer", mode: fileresource.CloseModeStr, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			paramtable.Get().Save(paramtable.Get().CommonCfg.DNFileResourceMode.Key, tc.mode)
+			defer paramtable.Get().Reset(paramtable.Get().CommonCfg.DNFileResourceMode.Key)
+			schema := makeSchema()
+			mixc := imocks.NewMixCoord(t)
+			mixc.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+				Status:      merr.Success(),
+				ResourceIds: []int64{42},
+			}, nil).Once()
+			c := &Core{mixCoord: mixc}
+			err := c.rejectAddFunctionInputAnalyzerFileResource(context.Background(), schema, schema.GetFunctions()[0])
+			if tc.wantErr {
+				require.ErrorContains(t, err, "requires dataNode file-resource sync mode")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+
+	t.Run("allow when the function input analyzer references no file resource", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.DNFileResourceMode.Key, fileresource.RefModeStr)
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.DNFileResourceMode.Key)
+		schema := makeSchema()
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+			Status:      merr.Success(),
+			ResourceIds: nil,
+		}, nil).Once()
+		c := &Core{mixCoord: mixc}
+		err := c.rejectAddFunctionInputAnalyzerFileResource(context.Background(), schema, schema.GetFunctions()[0])
+		require.NoError(t, err)
+	})
+
+	t.Run("validates only the function input field, ignoring other analyzer fields", func(t *testing.T) {
+		// A second analyzer-bearing field exists but is not the function input, so it must
+		// not be validated and must not contribute to the rejection decision.
+		schema := makeSchema(&schemapb.FieldSchema{
+			FieldID: 102, Name: "other_text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"jieba"}`},
+			},
+		})
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
+			infos := req.GetAnalyzerInfos()
+			return len(infos) == 1 && infos[0].GetField() == "text"
+		})).Return(&querypb.ValidateAnalyzerResponse{
+			Status:      merr.Success(),
+			ResourceIds: nil,
+		}, nil).Once()
+		c := &Core{mixCoord: mixc}
+		err := c.rejectAddFunctionInputAnalyzerFileResource(context.Background(), schema, schema.GetFunctions()[0])
+		require.NoError(t, err)
+	})
+
+	t.Run("minhash disabled analyzer still checks resource-backed params", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.DNFileResourceMode.Key, fileresource.RefModeStr)
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.DNFileResourceMode.Key)
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":{"type":"jieba","dict":["resource://dict"]}}`},
+				}},
+				{FieldID: 101, Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "minhash", Type: schemapb.FunctionType_MinHash,
+				InputFieldIds: []int64{100}, OutputFieldIds: []int64{101},
+			}},
+		}
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
+			infos := req.GetAnalyzerInfos()
+			return len(infos) == 1 && infos[0].GetField() == "text"
+		})).Return(&querypb.ValidateAnalyzerResponse{
+			Status: merr.Success(), ResourceIds: []int64{42},
+		}, nil).Once()
+
+		err := (&Core{mixCoord: mixc}).rejectAddFunctionInputAnalyzerFileResource(context.Background(), schema, schema.GetFunctions()[0])
+		require.ErrorContains(t, err, "requires dataNode file-resource sync mode")
+	})
+
+	t.Run("minhash ignores resource-backed multi analyzer params", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.DNFileResourceMode.Key, fileresource.RefModeStr)
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.DNFileResourceMode.Key)
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: "multi_analyzer_params", Value: `{"by_field":"lang","analyzers":{"default":{"tokenizer":{"type":"jieba","dict":["resource://dict"]}}}}`},
+				}},
+				{FieldID: 101, Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				}},
+				{FieldID: 102, Name: "lang", DataType: schemapb.DataType_VarChar},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "minhash", Type: schemapb.FunctionType_MinHash,
+				InputFieldIds: []int64{100}, OutputFieldIds: []int64{101},
+			}},
+		}
+
+		err := (&Core{}).rejectAddFunctionInputAnalyzerFileResource(context.Background(), schema, schema.GetFunctions()[0])
+		require.NoError(t, err)
+	})
+}
+
+func TestDDLCallbacksAlterCollectionSchemaRejectsTextFunctionInput(t *testing.T) {
+	coll := &model.Collection{
+		CollectionID: 1,
+		Name:         "coll",
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text_input", DataType: schemapb.DataType_Text, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+		},
+	}
+	core := &Core{}
+
+	bm25Req := buildAlterSchemaReq("db", coll.Name, "text_input", "sparse_from_text", "bm25_from_text")
+	bm25Err := core.broadcastAlterCollectionSchemaAdd(context.Background(), nil, coll, bm25Req)
+	require.ErrorIs(t, bm25Err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, bm25Err, "TEXT input field")
+
+	minHashReq := buildAlterSchemaReq("db", coll.Name, "text_input", "hash_from_text", "minhash_from_text")
+	minHashOutput := minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0]
+	minHashOutput.FieldSchema.DataType = schemapb.DataType_BinaryVector
+	minHashOutput.FieldSchema.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4096"}}
+	minHashOutput.ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+		{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+	}
+	minHashFunction := minHashReq.GetAction().GetAddRequest().GetFuncSchema()[0]
+	minHashFunction.Type = schemapb.FunctionType_MinHash
+	minHashFunction.Params = []*commonpb.KeyValuePair{
+		{Key: "num_hashes", Value: "128"},
+		{Key: "shingle_size", Value: "3"},
+		{Key: "hash_function", Value: "xxhash64"},
+		{Key: "seed", Value: "42"},
+	}
+	minHashErr := core.broadcastAlterCollectionSchemaAdd(context.Background(), nil, coll, minHashReq)
+	require.ErrorIs(t, minHashErr, merr.ErrParameterInvalid)
+	// MinHash fails the earlier VarChar-only input type check (its runner never
+	// accepted TEXT); the TEXT backfill gate stays load-bearing for BM25 above.
+	require.ErrorContains(t, minHashErr, "must be a VARCHAR field")
 }
 
 func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyAdd(t *testing.T) {

@@ -22,7 +22,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -30,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type MultiAnalyzerBM25FunctionSuite struct {
@@ -134,6 +138,31 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestNewMultiAnalyzerBM25FunctionRunner(
 	})
 }
 
+func (s *MultiAnalyzerBM25FunctionSuite) TestConstructorRollsBackCreatedAnalyzersOnError() {
+	created := interfaces.NewMockAnalyzer(s.T())
+	created.EXPECT().Destroy().Return().Once()
+	calls := 0
+	patch := mockey.Mock(analyzer.NewAnalyzer).To(func(string, string) (analyzer.Analyzer, error) {
+		calls++
+		if calls == 1 {
+			return created, nil
+		}
+		return nil, errors.New("create analyzer failed")
+	}).Build()
+	defer patch.UnPatch()
+
+	runner, err := NewMultiAnalyzerBM25FunctionRunner(
+		s.collection,
+		s.function,
+		s.collection.Fields[0],
+		s.collection.Fields[2],
+		`{"by_field":"analyzer","analyzers":{"default":{"type":"standard"},"english":{"type":"english"}}}`,
+	)
+	s.Nil(runner)
+	s.ErrorContains(err, "create analyzer")
+	s.Equal(2, calls)
+}
+
 func (s *MultiAnalyzerBM25FunctionSuite) TestBatchRun() {
 	s.Run("normal", func() {
 		runner, err := NewBM25FunctionRunner(s.collection, s.function)
@@ -234,4 +263,42 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestAnalyzeReleasesTokenStreamsPerInput
 
 func TestMultiAnalyzerBm25Function(t *testing.T) {
 	suite.Run(t, new(MultiAnalyzerBM25FunctionSuite))
+}
+
+// getAnalyzer must terminate with an error — not recurse forever — when even the
+// "default" analyzer cannot resolve (missing, or aliased to an undefined name).
+func TestMultiAnalyzerGetAnalyzerTerminalGuard(t *testing.T) {
+	t.Run("dangling default alias returns error instead of recursing", func(t *testing.T) {
+		runner := &MultiAnalyzerBM25FunctionRunner{
+			alias:     map[string]string{"default": "missing"},
+			analyzers: map[string]analyzer.Analyzer{},
+		}
+		_, err := runner.getAnalyzer("en", map[string]analyzer.Analyzer{})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "default analyzer is missing or aliased to an undefined analyzer")
+		// broken persisted configuration, not request content: must classify as
+		// a system-side function failure, not an input error
+		require.ErrorIs(t, err, merr.ErrFunctionFailed)
+	})
+
+	t.Run("unknown name falls back to existing default", func(t *testing.T) {
+		def := interfaces.NewMockAnalyzer(t)
+		def.EXPECT().Clone().Return(def, nil).Once()
+		runner := &MultiAnalyzerBM25FunctionRunner{
+			alias:     map[string]string{"en": "english_typo"},
+			analyzers: map[string]analyzer.Analyzer{"default": def},
+		}
+		got, err := runner.getAnalyzer("en", map[string]analyzer.Analyzer{})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+	})
+
+	t.Run("missing default without alias returns error", func(t *testing.T) {
+		runner := &MultiAnalyzerBM25FunctionRunner{
+			analyzers: map[string]analyzer.Analyzer{},
+		}
+		_, err := runner.getAnalyzer("default", map[string]analyzer.Analyzer{})
+		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrFunctionFailed)
+	})
 }

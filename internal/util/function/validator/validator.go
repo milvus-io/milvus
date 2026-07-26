@@ -189,8 +189,11 @@ func CheckFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return err
 		}
 	case schemapb.FunctionType_MinHash:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR/TEXT field, got %d field with type %s",
+		// VarChar only: the MinHash runner has never accepted TEXT
+		// (ValidateMinHashFunction), so admitting it here produced
+		// collections whose every insert failed at the function executor.
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
+			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
 	default:

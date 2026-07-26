@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -174,6 +175,66 @@ func TestRecordMaterializerWrapFillsNullableMissingTextFieldAsBinary(t *testing.
 	require.Equal(t, 3, column.NullN())
 	cleanupMaterializedRecord(wrapped)
 	require.Equal(t, 0, record.releaseCount)
+}
+
+func TestRecordMaterializerMaterializesFunctionFromMissingNullableInput(t *testing.T) {
+	inputField := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true}
+	outputField := &schemapb.FieldSchema{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "bm25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{100}, OutputFieldIds: []int64{101},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{inputField, outputField}, Functions: []*schemapb.FunctionSchema{functionSchema}}
+	emptyRow := typeutil.CreateSparseFloatRow(nil, nil)
+	runner := &materializerTestFunctionRunner{
+		schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField}, outputFields: []*schemapb.FieldSchema{outputField},
+		outputs: []any{&schemapb.SparseFloatArray{Contents: [][]byte{emptyRow, emptyRow}}},
+	}
+	functionMaterializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	materializer := &RecordMaterializer{
+		schema: schema, materializers: []FunctionMaterializer{functionMaterializer}, missingFields: []*schemapb.FieldSchema{inputField},
+	}
+	defer materializer.Close()
+
+	record := &materializerTestRecord{len: 2}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+	require.Equal(t, []any{[]string{"", ""}}, runner.inputs)
+	require.Equal(t, 2, wrapped.Column(outputField.GetFieldID()).Len())
+	require.Equal(t, 0, record.releaseCount)
+}
+
+func TestRecordMaterializerMaterializesFunctionFromMissingDefaultInput(t *testing.T) {
+	inputField := &schemapb.FieldSchema{
+		FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}},
+	}
+	outputField := &schemapb.FieldSchema{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "bm25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{100}, OutputFieldIds: []int64{101},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{inputField, outputField}, Functions: []*schemapb.FunctionSchema{functionSchema}}
+	emptyRow := typeutil.CreateSparseFloatRow(nil, nil)
+	runner := &materializerTestFunctionRunner{
+		schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField}, outputFields: []*schemapb.FieldSchema{outputField},
+		outputs: []any{&schemapb.SparseFloatArray{Contents: [][]byte{emptyRow, emptyRow}}},
+	}
+	functionMaterializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	materializer := &RecordMaterializer{
+		schema: schema, materializers: []FunctionMaterializer{functionMaterializer}, missingFields: []*schemapb.FieldSchema{inputField},
+	}
+	defer materializer.Close()
+
+	record := &materializerTestRecord{len: 2}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+	require.Equal(t, []any{[]string{"fallback", "fallback"}}, runner.inputs)
+	require.Equal(t, 2, wrapped.Column(outputField.GetFieldID()).Len())
 }
 
 func TestRecordMaterializerWrapWithSelectionMaterializesKeptRowsOnly(t *testing.T) {
@@ -706,37 +767,122 @@ func TestMinHashFunctionMaterializerRejectsNonBinaryOutputField(t *testing.T) {
 	require.ErrorContains(t, err, "output field data type must be binary vector for minhash function materialization")
 }
 
-func TestMinHashFunctionMaterializerRejectsRowCountMismatch(t *testing.T) {
+func TestMinHashFunctionMaterializerRejectsPayloadLengthMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "short payload", payload: []byte{0x01, 0x02, 0x03}},
+		{name: "trailing byte", payload: []byte{0x01, 0x02, 0x03, 0x04, 0x05}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema, functionSchema, inputField, outputField := materializerMinHashSchema()
+			runner := &materializerTestFunctionRunner{
+				schema:       functionSchema,
+				inputFields:  []*schemapb.FieldSchema{inputField},
+				outputFields: []*schemapb.FieldSchema{outputField},
+				outputs: []any{&schemapb.FieldData{
+					Type:    schemapb.DataType_BinaryVector,
+					FieldId: outputField.GetFieldID(),
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  32,
+						Data: &schemapb.VectorField_BinaryVector{BinaryVector: tc.payload},
+					}},
+				}},
+			}
+			materializer, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+			require.NoError(t, err)
+			defer materializer.Close()
+
+			input := newStringArray(t, []string{"hello"})
+			defer input.Release()
+			arrays, err := materializer.Materialize(&materializerTestRecord{
+				len: 1, columns: map[storage.FieldID]arrow.Array{100: input},
+			})
+			require.Nil(t, arrays)
+			require.ErrorIs(t, err, merr.ErrFunctionFailed)
+			require.ErrorContains(t, err, "payload length mismatch")
+		})
+	}
+}
+
+func TestMinHashFunctionMaterializerHandlesZeroRows(t *testing.T) {
 	schema, functionSchema, inputField, outputField := materializerMinHashSchema()
 	runner := &materializerTestFunctionRunner{
-		schema:       functionSchema,
-		inputFields:  []*schemapb.FieldSchema{inputField},
-		outputFields: []*schemapb.FieldSchema{outputField},
+		schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField}, outputFields: []*schemapb.FieldSchema{outputField},
 		outputs: []any{&schemapb.FieldData{
-			Type:    schemapb.DataType_BinaryVector,
-			FieldId: outputField.GetFieldID(),
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: 32,
-					Data: &schemapb.VectorField_BinaryVector{
-						BinaryVector: []byte{0x01, 0x02, 0x03, 0x04},
-					},
-				},
-			},
+			Type: schemapb.DataType_BinaryVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 32, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+			}},
 		}},
 	}
 	materializer, err := newFunctionMaterializer(schema, runner, []int{0}, false)
 	require.NoError(t, err)
 	defer materializer.Close()
 
-	input := newStringArray(t, []string{"hello", "world"})
+	input := newStringArray(t, nil)
 	defer input.Release()
-	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: input}}
+	arrays, err := materializer.Materialize(&materializerTestRecord{len: 0, columns: map[storage.FieldID]arrow.Array{100: input}})
+	require.NoError(t, err)
+	defer releaseArrowArrays(arrays)
+	require.Zero(t, arrays[outputField.GetFieldID()].Len())
+}
 
-	arrays, err := materializer.Materialize(record)
+func TestMinHashFunctionMaterializerRejectsInvalidOutputDim(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dim  int64
+		want string
+	}{
+		{name: "zero", dim: 0, want: "invalid MinHash output dim"},
+		{name: "schema mismatch", dim: 64, want: "output dim mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema, functionSchema, inputField, outputField := materializerMinHashSchema()
+			runner := &materializerTestFunctionRunner{
+				schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField}, outputFields: []*schemapb.FieldSchema{outputField},
+				outputs: []any{&schemapb.FieldData{
+					Type: schemapb.DataType_BinaryVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim: tc.dim, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
+					}},
+				}},
+			}
+			materializer, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+			require.NoError(t, err)
+			defer materializer.Close()
+
+			input := newStringArray(t, []string{"hello"})
+			defer input.Release()
+			arrays, err := materializer.Materialize(&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}})
+			require.Nil(t, arrays)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestMinHashFunctionMaterializerRejectsTypedNilBinaryVector(t *testing.T) {
+	schema, functionSchema, inputField, _ := materializerMinHashSchema()
+	runner := &materializerTestFunctionRunner{
+		schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField},
+		outputs: []any{&schemapb.FieldData{
+			Type: schemapb.DataType_BinaryVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 32, Data: (*schemapb.VectorField_BinaryVector)(nil),
+			}},
+		}},
+	}
+	materializer, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	input := newStringArray(t, []string{"hello"})
+	defer input.Release()
+	arrays, err := materializer.Materialize(&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}})
 	require.Nil(t, arrays)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "minhash function output row count mismatch")
+	require.ErrorIs(t, err, merr.ErrFunctionFailed)
+	require.ErrorContains(t, err, "expected binary vector field data")
 }
 
 func TestRecordMaterializerMaterializesBM25AndMinHashOutputs(t *testing.T) {
@@ -834,4 +980,41 @@ func newInt64Array(t *testing.T, values []int64) *array.Int64 {
 	t.Cleanup(builder.Release)
 	builder.AppendValues(values, nil)
 	return builder.NewInt64Array()
+}
+
+// Regression for the eager-selection existence probe: V2/V3 records are
+// simpleArrowRecord, whose Column PANICS for a field absent from the source
+// (e.g. the output field just added by add_function_field). Selection building
+// must consult existingFields and never probe the record. With the old
+// Column()==nil probe this test panics with "no such field: 101".
+func TestRecordMaterializerSelectionSkipsAbsentFieldOnPanickyRecord(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	pk := newInt64Array(t, []int64{1, 2, 3})
+	defer pk.Release()
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	arrowRecord := array.NewRecord(arrowSchema, []arrow.Array{pk}, 3)
+	defer arrowRecord.Release()
+	record := storage.NewSimpleArrowRecord(arrowRecord, map[storage.FieldID]int{100: 0})
+	selection := &recordSelection{ranges: []rowRange{{start: 1, end: 3}}, length: 2}
+
+	wrapped, err := materializer.WrapWithSelection(record, selection)
+	require.NoError(t, err)
+	require.Equal(t, 2, wrapped.Len())
+
+	pkColumn, ok := wrapped.Column(100).(*array.Int64)
+	require.True(t, ok)
+	require.Equal(t, []int64{2, 3}, []int64{pkColumn.Value(0), pkColumn.Value(1)})
+	addedColumn := wrapped.Column(101)
+	require.NotNil(t, addedColumn)
+	require.Equal(t, 2, addedColumn.Len())
+	require.Equal(t, 2, addedColumn.NullN())
+
+	cleanupMaterializedRecord(wrapped)
 }

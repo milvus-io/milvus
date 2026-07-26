@@ -26,15 +26,18 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ CompactionTask = (*bumpSchemaVersionTask)(nil)
@@ -113,6 +116,26 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
+
+	// set analyzer resource for text match index if use ref mode.
+	// Only the full-rewrite path consumes these (inline createTextIndex, mirroring
+	// sort/mix); which path a segment takes is decided on the datanode, so attach
+	// best-effort: on failure keep building the plan without resources instead of
+	// failing tasks (bump-only / partial backfill) that never need them. A
+	// full-rewrite that does need them fails at createTextIndex resource
+	// resolution, next to the actual consumer.
+	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
+		schemaNeedsTextIndex(taskProto.GetSchema()) &&
+		len(taskProto.GetSchema().GetFileResourceIds()) > 0 {
+		resources, err := t.meta.GetFileResources(context.Background(), taskProto.GetSchema().GetFileResourceIds()...)
+		if err != nil {
+			mlog.Warn(context.TODO(), "get file resources for schema bump compaction failed, building plan without them",
+				mlog.Int64("collectionID", taskProto.GetCollectionID()), mlog.Err(err))
+		} else {
+			plan.FileResources = resources
+		}
+	}
+
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
@@ -145,6 +168,15 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 	plan.BeginLogID = logIDRange.Begin
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	return plan, nil
+}
+
+func schemaNeedsTextIndex(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *bumpSchemaVersionTask) GetSlotUsage() int64 {
