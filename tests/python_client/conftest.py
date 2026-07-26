@@ -9,7 +9,9 @@ import numpy as np
 import pytest
 from check.param_check import ip_check, number_check
 from common.common_func import param_info
+from common.milvus_sys import MilvusSys
 from config.log_config import log_config
+from pymilvus import connections
 from pymilvus.orm.types import CONSISTENCY_STRONG
 from utils.util_log import test_log as log
 from utils.util_pymilvus import gen_binary_default_fields, gen_default_fields, gen_unique_str, get_milvus
@@ -326,6 +328,49 @@ def get_invalid_vector_dict(request):
 def pytest_configure(config):
     # register an additional marker
     config.addinivalue_line("markers", "tag(name): mark test to run only matching the tag")
+    config.addinivalue_line(
+        "markers",
+        "requires_scalar_index_version(version): require DataCoord's resolved scalar index engine version",
+    )
+
+
+@pytest.fixture(scope="session")
+def resolved_scalar_index_version(request, initialize_env):
+    alias = "resolved_scalar_index_version_probe"
+    uri = request.config.getoption("--uri")
+    if not uri:
+        host = request.config.getoption("--host")
+        port = request.config.getoption("--port")
+        uri = f"http://{host}:{port}"
+
+    connections.connect(
+        alias=alias,
+        uri=uri,
+        token=request.config.getoption("--token"),
+        secure=request.config.getoption("--secure"),
+    )
+    try:
+        version = MilvusSys(alias=alias).resolved_scalar_index_version
+    finally:
+        connections.disconnect(alias)
+
+    if version is None:
+        pytest.skip("server does not report resolved scalar index engine version")
+    return version
+
+
+@pytest.fixture(autouse=True)
+def skip_for_unsupported_scalar_index_version(request):
+    marker = request.node.get_closest_marker("requires_scalar_index_version")
+    if marker is None:
+        return
+    if len(marker.args) != 1:
+        pytest.fail("requires_scalar_index_version expects exactly one version")
+
+    required = int(marker.args[0])
+    resolved = request.getfixturevalue("resolved_scalar_index_version")
+    if resolved < required:
+        pytest.skip(f"requires resolved scalar index version >= {required}, got {resolved}")
 
 
 def pytest_runtest_setup(item):

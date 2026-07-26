@@ -496,7 +496,7 @@ class TestJsonFilteringIndexedUnknownSemantics(JsonFilteringUnknownMixin, TestMi
                     (f'not ({json_field}["a"] > 2)', [4]),
                 ],
             ),
-            (
+            pytest.param(
                 "stl_sort_double",
                 [
                     {
@@ -512,6 +512,8 @@ class TestJsonFilteringIndexedUnknownSemantics(JsonFilteringUnknownMixin, TestMi
                     (f'{json_field}["a"] not in [2]', [5]),
                     (f'not ({json_field}["a"] > 2)', [4]),
                 ],
+                marks=pytest.mark.requires_scalar_index_version(4),
+                id="stl_sort_double",
             ),
             (
                 "inverted_varchar",

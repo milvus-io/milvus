@@ -158,6 +158,10 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionTa
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
+	mockVM := NewMockVersionManager(s.T())
+	mockVM.On("ResolveScalarIndexVersion").Return(int32(3))
+	s.ievm = mockVM
+
 	// Add a segment to meta
 	segmentID := int64(101)
 	err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
@@ -198,6 +202,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.Equal(int64(10), plan.GetSegmentBinlogs()[0].GetPartitionID())
 	s.Require().NotNil(plan.GetSchema())
 	s.Equal(task.GetTaskProto().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
+	s.Equal(int32(3), plan.GetCurrentScalarIndexVersion())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestCarriesV3ManifestAndPreAllocatedLogs() {

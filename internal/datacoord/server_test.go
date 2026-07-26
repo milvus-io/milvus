@@ -1016,6 +1016,15 @@ func TestServer_GetMetrics(t *testing.T) {
 func TestServer_getSystemInfoMetrics(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
+	svr.indexEngineVersionManager.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 100,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 4,
+				MaximumIndexVersion: 4,
+			},
+		},
+	})
 
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	assert.NoError(t, err)
@@ -1025,6 +1034,7 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 	var coordTopology metricsinfo.DataCoordTopology
 	err = metricsinfo.UnmarshalTopology(ret, &coordTopology)
 	assert.NoError(t, err)
+	assert.Equal(t, int32(4), coordTopology.Cluster.Self.SystemConfigurations.ResolvedScalarIndexVersion)
 	assert.Equal(t, len(svr.nodeManager.GetClientIDs()), len(coordTopology.Cluster.ConnectedDataNodes))
 	for _, nodeMetrics := range coordTopology.Cluster.ConnectedDataNodes {
 		assert.Equal(t, false, nodeMetrics.HasError)

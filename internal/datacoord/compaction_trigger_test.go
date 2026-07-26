@@ -1828,9 +1828,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	assert.True(t, couldDo)
 
 	mockVersionManager := NewMockVersionManager(t)
-	mockVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(2)).Maybe()
-	mockVersionManager.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
+	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(2)).Maybe()
 	trigger.indexEngineVersionManager = mockVersionManager
 	info4 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -1913,6 +1911,9 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	defer Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "false")
 	Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "5")
 	defer Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "-1")
+	forceRebuildVersionManager := NewMockVersionManager(t)
+	forceRebuildVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
+	trigger.indexEngineVersionManager = forceRebuildVersionManager
 	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300})
 	assert.True(t, couldDo)
 
@@ -3439,8 +3440,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
 
 		mockVM := NewMockVersionManager(t)
-		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
@@ -3463,8 +3463,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
 
 		mockVM := NewMockVersionManager(t)
-		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
