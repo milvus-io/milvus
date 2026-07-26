@@ -5,11 +5,11 @@ import socket
 
 import common.common_func as cf
 import common.common_type as ct
-from common.milvus_sys import MilvusSys
 import numpy as np
 import pytest
 from check.param_check import ip_check, number_check
 from common.common_func import param_info
+from common.milvus_sys import MilvusSys
 from config.log_config import log_config
 from pymilvus import connections
 from pymilvus.orm.types import CONSISTENCY_STRONG
