@@ -54,15 +54,56 @@ func (s *recordSelection) Len() int {
 }
 
 type RecordMaterializer struct {
-	materializers  []FunctionMaterializer
-	missingFields  []*schemapb.FieldSchema
-	schema         *schemapb.CollectionSchema
+	materializers []FunctionMaterializer
+	missingFields []*schemapb.FieldSchema
+	schema        *schemapb.CollectionSchema
+	// existingFields is the set of fields physically present in the source
+	// records. Selection slicing is gated on it: probing a record for a field
+	// it does not carry is not an option, since V2/V3 records panic on Column
+	// for an unknown field instead of returning nil.
 	existingFields map[int64]struct{}
 }
 
+// NewRecordMaterializer builds a full materializer: it computes the absent
+// function outputs and prefills every other schema field existingFields does
+// not carry, so the wrapped record covers the whole schema (full rewrites,
+// sort/mix/clustering, which persist every column).
 func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*RecordMaterializer, error) {
+	materializer, materializedFields, _, err := newRecordMaterializerBase(schema, functions, existingFields)
+	if err != nil {
+		return nil, err
+	}
+	materializer.missingFields = missingNonMaterializedSchemaFields(schema, existingFields, materializedFields)
+	return materializer, nil
+}
+
+// NewFunctionBackfillMaterializer scopes materialization to backfilling the
+// given functions' outputs: it computes those outputs and prefills only their
+// inputs absent from existingFields. Every other absent schema field stays
+// untouched — an added field is nullable by DDL mandate and thus synthesizable
+// at read time, so a version bump never requires materializing it physically
+// (the bump-only path stamps metadata without touching data at all); rewriting
+// compactions materialize such fields only as a byproduct of writing the full
+// schema. existingFields must be the segment's physical storage truth.
+func NewFunctionBackfillMaterializer(schema *schemapb.CollectionSchema, missingFunctions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*RecordMaterializer, error) {
+	materializer, _, activeInputFields, err := newRecordMaterializerBase(schema, missingFunctions, existingFields)
+	if err != nil {
+		return nil, err
+	}
+	materializer.missingFields = absentInputFields(activeInputFields, existingFields)
+	return materializer, nil
+}
+
+// newRecordMaterializerBase sets up the function runners for every function
+// with at least one output to materialize, leaving missingFields (the prefill
+// set) to the exported constructors. The returned input fields are the
+// runner-declared reads of those functions — the runner, not the function
+// schema, is the authority on what gets read: it resolves implicit inputs
+// (e.g. the multi-analyzer by_field column) that InputFieldIds never lists.
+func newRecordMaterializerBase(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*RecordMaterializer, map[int64]struct{}, []*schemapb.FieldSchema, error) {
 	materializer := &RecordMaterializer{schema: schema, existingFields: existingFields}
 	materializedFields := make(map[int64]struct{})
+	var activeInputFields []*schemapb.FieldSchema
 	for _, functionSchema := range functions {
 		outputIndexes := functionOutputIndexesToMaterialize(functionSchema, existingFields)
 		if len(outputIndexes) == 0 {
@@ -75,22 +116,42 @@ func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schem
 		runner, err := function.NewFunctionRunner(schema, functionSchema)
 		if err != nil {
 			materializer.Close()
-			return nil, err
+			return nil, nil, nil, err
 		}
 		if runner == nil {
 			materializer.Close()
-			return nil, merr.WrapErrFunctionFailedMsg("failed to set up function runner for %s", functionSchema.GetName())
+			return nil, nil, nil, merr.WrapErrFunctionFailedMsg("failed to set up function runner for %s", functionSchema.GetName())
 		}
 		functionMaterializer, err := newFunctionMaterializer(schema, runner, outputIndexes, true)
 		if err != nil {
 			runner.Close()
 			materializer.Close()
-			return nil, err
+			return nil, nil, nil, err
 		}
 		materializer.materializers = append(materializer.materializers, functionMaterializer)
+		activeInputFields = append(activeInputFields, runner.GetInputFields()...)
 	}
-	materializer.missingFields = missingNonMaterializedSchemaFields(schema, existingFields, materializedFields)
-	return materializer, nil
+	return materializer, materializedFields, activeInputFields, nil
+}
+
+// absentInputFields returns the input fields existingFields does not carry —
+// the exact set a backfill materializer must prefill before running the
+// functions.
+func absentInputFields(inputFields []*schemapb.FieldSchema, existingFields map[int64]struct{}) []*schemapb.FieldSchema {
+	seen := make(map[int64]struct{})
+	missing := make([]*schemapb.FieldSchema, 0)
+	for _, field := range inputFields {
+		fieldID := field.GetFieldID()
+		if _, ok := existingFields[fieldID]; ok {
+			continue
+		}
+		if _, dup := seen[fieldID]; dup {
+			continue
+		}
+		seen[fieldID] = struct{}{}
+		missing = append(missing, field)
+	}
+	return missing
 }
 
 func (m *RecordMaterializer) Wrap(rec storage.Record) (storage.Record, error) {
@@ -117,8 +178,23 @@ func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *re
 	}
 
 	computed := make(map[int64]arrow.Array)
+	view := &materializedRecord{base: base, computed: computed}
+
+	// Fill ordinary missing fields before running functions. Function inputs may
+	// themselves be fields added by an earlier schema evolution, so runners must
+	// read through this overlay instead of probing the physical source record.
+	for _, field := range m.missingFields {
+		fieldID := field.GetFieldID()
+		arr, err := storage.GenerateEmptyArrayFromSchema(field, base.Len())
+		if err != nil {
+			releaseArrowArrays(computed)
+			cleanupMaterializedRecord(base)
+			return nil, err
+		}
+		computed[fieldID] = arr
+	}
 	for _, materializer := range m.materializers {
-		arrays, err := materializer.Materialize(base)
+		arrays, err := materializer.Materialize(view)
 		if err != nil {
 			releaseArrowArrays(computed)
 			cleanupMaterializedRecord(base)
@@ -128,23 +204,10 @@ func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *re
 			computed[fieldID] = arr
 		}
 	}
-	for _, field := range m.missingFields {
-		fieldID := field.GetFieldID()
-		if _, ok := computed[fieldID]; ok {
-			continue
-		}
-		arr, err := storage.GenerateEmptyArrayFromSchema(field, base.Len())
-		if err != nil {
-			releaseArrowArrays(computed)
-			cleanupMaterializedRecord(base)
-			return nil, err
-		}
-		computed[fieldID] = arr
-	}
 	if len(computed) == 0 {
 		return base, nil
 	}
-	return &materializedRecord{base: base, computed: computed}, nil
+	return view, nil
 }
 
 func (m *RecordMaterializer) Close() {
@@ -340,6 +403,7 @@ type minHashFunctionMaterializer struct {
 	outputFieldIDs       []int64
 	missingOutputIndexes []int
 	outputFields         map[int64]*schemapb.FieldSchema
+	outputDims           map[int64]int64
 	ownRunner            bool
 }
 
@@ -383,6 +447,7 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 	}
 
 	outputFields := make(map[int64]*schemapb.FieldSchema, len(outputFieldIDs))
+	outputDims := make(map[int64]int64, len(outputFieldIDs))
 	for _, outputFieldID := range outputFieldIDs {
 		outputField := typeutil.GetField(schema, outputFieldID)
 		if outputField == nil {
@@ -394,7 +459,15 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 		if outputField.GetNullable() {
 			return nil, merr.WrapErrFunctionFailedMsg("function output field cannot be nullable: function %s, field %s", functionSchema.GetName(), outputField.GetName())
 		}
+		outputDim, err := typeutil.GetDim(outputField)
+		if err != nil {
+			return nil, merr.WrapErrFunctionFailed(err, "failed to read MinHash output field %s dimension", outputField.GetName())
+		}
+		if outputDim <= 0 || outputDim%32 != 0 {
+			return nil, merr.WrapErrFunctionFailedMsg("invalid MinHash output field %s dimension %d", outputField.GetName(), outputDim)
+		}
 		outputFields[outputFieldID] = outputField
+		outputDims[outputFieldID] = outputDim
 	}
 
 	return &minHashFunctionMaterializer{
@@ -403,6 +476,7 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 		outputFieldIDs:       outputFieldIDs,
 		missingOutputIndexes: missingOutputIndexes,
 		outputFields:         outputFields,
+		outputDims:           outputDims,
 		ownRunner:            ownRunner,
 	}, nil
 }
@@ -521,13 +595,35 @@ func (m *minHashFunctionMaterializer) Materialize(rec storage.Record) (map[int64
 			return nil, merr.WrapErrFunctionFailedMsg("unexpected output type from MinHash function runner, expected FieldData, got %T", outputs[outputIndex])
 		}
 		vectorField := outputFieldData.GetVectors()
-		if vectorField == nil || vectorField.GetBinaryVector() == nil {
+		if vectorField == nil {
 			releaseArrowArrays(result)
 			return nil, merr.WrapErrFunctionFailedMsg("unexpected output from MinHash function runner, expected binary vector field data")
 		}
+		binaryVector, ok := vectorField.GetData().(*schemapb.VectorField_BinaryVector)
+		if !ok || binaryVector == nil {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg("unexpected output from MinHash function runner, expected binary vector field data")
+		}
+		outputDim := vectorField.GetDim()
+		if outputDim <= 0 || outputDim%32 != 0 {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg("invalid MinHash output dim %d for field %d", outputDim, outputFieldID)
+		}
+		expectedDim := m.outputDims[outputFieldID]
+		if outputDim != expectedDim {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg("minhash function output dim mismatch for field %d, expected %d, got %d", outputFieldID, expectedDim, outputDim)
+		}
+		expectedBytes := int64(rec.Len()) * outputDim / 8
+		if int64(len(binaryVector.BinaryVector)) != expectedBytes {
+			releaseArrowArrays(result)
+			return nil, merr.WrapErrFunctionFailedMsg(
+				"minhash function output payload length mismatch for field %d, expected %d bytes, got %d",
+				outputFieldID, expectedBytes, len(binaryVector.BinaryVector))
+		}
 		fieldData := &storage.BinaryVectorFieldData{
-			Data: vectorField.GetBinaryVector(),
-			Dim:  int(vectorField.GetDim()),
+			Data: binaryVector.BinaryVector,
+			Dim:  int(outputDim),
 		}
 		if fieldData.RowNum() != rec.Len() {
 			releaseArrowArrays(result)
@@ -620,6 +716,20 @@ func buildSparseFloatVectorArrowArray(field *schemapb.FieldSchema, outputSparseA
 }
 
 func buildArrowArrayFromFieldData(field *schemapb.FieldSchema, fieldData storage.FieldData, rowCount int) (arrow.Array, error) {
+	if rowCount == 0 {
+		outputSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+		arrowSchema, err := storage.ConvertToArrowSchema(outputSchema, true)
+		if err != nil {
+			return nil, err
+		}
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer builder.Release()
+		record := builder.NewRecord()
+		defer record.Release()
+		col := record.Column(0)
+		col.Retain()
+		return col, nil
+	}
 	if fieldData.RowNum() != rowCount {
 		return nil, merr.WrapErrFunctionFailedMsg("function output row count mismatch for field %d, expected %d, got %d", field.GetFieldID(), rowCount, fieldData.RowNum())
 	}

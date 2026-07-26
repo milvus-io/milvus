@@ -19,12 +19,17 @@
 package function
 
 import (
+	"context"
 	"encoding/json"
+	"sort"
 	"sync"
+
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -62,6 +67,15 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 		outputField: outputField,
 		analyzers:   make(map[string]analyzer.Analyzer),
 	}
+	constructed := false
+	defer func() {
+		if constructed {
+			return
+		}
+		for _, created := range runner.analyzers {
+			created.Destroy()
+		}
+	}()
 
 	var m map[string]json.RawMessage
 	var mFileName string
@@ -119,10 +133,37 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 		runner.analyzers[name] = analyzer
 	}
 
+	// A dangling alias is accepted for compatibility. At runtime an ordinary
+	// dangling alias falls back to the default analyzer, while a dangling
+	// "default" alias makes the default unresolvable and fails the request.
+	// Aggregate aliases and rate-limit the constructor warning: compaction may
+	// construct the same runner once per segment and repeat it on task retries.
+	danglingAliases := make([]string, 0)
+	for aliasName, target := range runner.alias {
+		if _, ok := runner.analyzers[target]; !ok {
+			danglingAliases = append(danglingAliases, aliasName+"->"+target)
+		}
+	}
+	if len(danglingAliases) > 0 {
+		sort.Strings(danglingAliases)
+		mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+			"multi analyzer aliases target undefined analyzers; affected values fall back to the default analyzer, or fail at runtime if the default alias itself dangles",
+			mlog.FieldDbName(coll.GetDbName()),
+			mlog.FieldCollectionName(coll.GetName()),
+			mlog.Int32("schemaVersion", coll.GetVersion()),
+			mlog.FieldFieldID(inputField.GetFieldID()),
+			mlog.String("fieldName", inputField.GetName()),
+			mlog.Int64("functionID", schema.GetId()),
+			mlog.String("functionName", schema.GetName()),
+			mlog.Strings("danglingAliases", danglingAliases))
+	}
+
+	constructed = true
 	return runner, nil
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
+	origName := name
 	if alias, ok := v.alias[name]; ok {
 		name = alias
 	}
@@ -140,6 +181,14 @@ func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map
 		return analyzers[name], nil
 	}
 
+	// "default" is the terminal fallback. If even it cannot resolve (missing, or
+	// aliased to an undefined analyzer), fail instead of recursing forever. Guard
+	// on the pre-alias name so a dangling default alias cannot loop. This is a
+	// system-side failure: ordinary unknown names fall back by design, so only a
+	// broken persisted configuration reaches this point — never request content.
+	if origName == "default" {
+		return nil, merr.WrapErrFunctionFailedMsg("multi analyzer cannot resolve analyzer %q: the default analyzer is missing or aliased to an undefined analyzer", name)
+	}
 	return v.getAnalyzer("default", analyzers)
 }
 

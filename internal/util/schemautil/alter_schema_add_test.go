@@ -55,3 +55,24 @@ func TestCheckNoFunctionCascade(t *testing.T) {
 		assert.NoError(t, CheckNoFunctionCascade(existing, nil))
 	})
 }
+
+func TestValidateAddFunctionInputNotText(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "varchar_in", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "text_in", DataType: schemapb.DataType_Text},
+	}}
+	function := func(functionType schemapb.FunctionType, input string) *schemapb.FunctionSchema {
+		return &schemapb.FunctionSchema{
+			Name:            "fn",
+			Type:            functionType,
+			InputFieldNames: []string{input},
+		}
+	}
+
+	for _, functionType := range []schemapb.FunctionType{schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash} {
+		err := ValidateAddFunctionInputNotText(schema, function(functionType, "text_in"))
+		assert.ErrorContains(t, err, "TEXT input field")
+		assert.NoError(t, ValidateAddFunctionInputNotText(schema, function(functionType, "varchar_in")))
+	}
+	assert.NoError(t, ValidateAddFunctionInputNotText(schema, function(schemapb.FunctionType_TextEmbedding, "text_in")))
+}

@@ -935,6 +935,23 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	return nil
 }
 
+// isMinHashInputFieldByName reports whether fieldSchema is a MinHash function
+// input, keyed on the field name. Used in the pre-normalization schema
+// validation path where field IDs are not yet canonical.
+func isMinHashInputFieldByName(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema) bool {
+	for _, fn := range collSchema.GetFunctions() {
+		if fn.GetType() != schemapb.FunctionType_MinHash {
+			continue
+		}
+		for _, name := range fn.GetInputFieldNames() {
+			if name == fieldSchema.GetName() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
 	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
 	for _, field := range collSchema.GetFields() {
@@ -945,8 +962,31 @@ func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.Ana
 	return analyzerInfos, nil
 }
 
+// collectFunctionInputAnalyzerInfos gathers analyzer infos for the given function's
+// input fields only — a subset of collectAnalyzerInfos used to decide whether an
+// added function's input analyzer references a file resource.
+func collectFunctionInputAnalyzerInfos(collSchema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) ([]*querypb.AnalyzerInfo, error) {
+	inputIDs := typeutil.NewSet(function.GetInputFieldIds()...)
+	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
+	for _, field := range collSchema.GetFields() {
+		if !inputIDs.Contain(field.GetFieldID()) {
+			continue
+		}
+		// MinHash consumes only analyzer_params, not multi_analyzer_params.
+		if function.GetType() == schemapb.FunctionType_MinHash {
+			appendAnalyzerParams(field, &analyzerInfos)
+			continue
+		}
+		if err := validateAnalyzer(collSchema, field, &analyzerInfos); err != nil {
+			return nil, err
+		}
+	}
+	return analyzerInfos, nil
+}
+
 // validateAnalyzer validates active match/BM25 fields and fields with
-// enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
+// enable_analyzer=true. Analyzer params are ignored while analyzer is disabled,
+// except for MinHash inputs, which consume them regardless.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
 	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
@@ -954,6 +994,16 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
 	if !h.EnableAnalyzer() {
+		// A MinHash input legally keeps enable_analyzer=false yet its runner
+		// consumes analyzer_params. Collect them so any referenced file
+		// resources reach schema.FileResourceIds and ref-counting — otherwise
+		// the DDL gate admits a dependency the ledger never records and
+		// RemoveFileResource can delete a still-required resource. Match by name:
+		// this runs before assignFieldAndFunctionID, so field/function IDs are not
+		// yet canonical and an ID-based check would miss a stale-ID input.
+		if isMinHashInputFieldByName(collSchema, fieldSchema) {
+			appendAnalyzerParams(fieldSchema, analyzerInfos)
+		}
 		return nil
 	}
 
@@ -968,14 +1018,18 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 		return validateMultiAnalyzerParams(params, collSchema, fieldSchema, analyzerInfos)
 	}
 
+	appendAnalyzerParams(fieldSchema, analyzerInfos)
+	// return nil when use default analyzer
+	return nil
+}
+
+func appendAnalyzerParams(fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) {
 	for _, kv := range fieldSchema.GetTypeParams() {
-		if kv.GetKey() == "analyzer_params" {
+		if kv.GetKey() == common.AnalyzerParamKey {
 			*analyzerInfos = append(*analyzerInfos, &querypb.AnalyzerInfo{
 				Field:  fieldSchema.GetName(),
 				Params: kv.GetValue(),
 			})
 		}
 	}
-	// return nil when use default analyzer
-	return nil
 }
