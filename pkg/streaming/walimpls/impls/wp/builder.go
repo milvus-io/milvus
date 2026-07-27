@@ -118,6 +118,9 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = config.NewByteSize(cfg.SegmentRollingMaxSize.GetAsSize())
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
+	wpConfig.Woodpecker.Client.DirectRead.Enabled = cfg.DirectReadEnabled.GetAsBool()
+	wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize = config.NewByteSize(cfg.DirectReadMaxBatchSize.GetAsSize())
+	wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads = cfg.DirectReadMaxFetchThreads.GetAsInt()
 
 	// quorum configuration
 	setQuorumConfig(wpConfig, cfg)

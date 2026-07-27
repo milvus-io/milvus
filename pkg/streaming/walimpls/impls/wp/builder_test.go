@@ -73,3 +73,41 @@ func TestSetCustomWpConfigBatchParams(t *testing.T) {
 		assert.Equal(t, 1, wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchEntries)
 	})
 }
+
+func TestSetCustomWpConfigDirectReadParams(t *testing.T) {
+	params := paramtable.Get()
+	enabledKey := params.WoodpeckerCfg.DirectReadEnabled.Key
+	batchSizeKey := params.WoodpeckerCfg.DirectReadMaxBatchSize.Key
+	fetchThreadsKey := params.WoodpeckerCfg.DirectReadMaxFetchThreads.Key
+
+	setup := func(t *testing.T, enabled, batchSize, fetchThreads string) *config.Configuration {
+		require.NoError(t, params.Save(enabledKey, enabled))
+		require.NoError(t, params.Save(batchSizeKey, batchSize))
+		require.NoError(t, params.Save(fetchThreadsKey, fetchThreads))
+		t.Cleanup(func() {
+			params.Reset(enabledKey)
+			params.Reset(batchSizeKey)
+			params.Reset(fetchThreadsKey)
+		})
+		wpConfig, err := config.NewConfiguration()
+		require.NoError(t, err)
+		return wpConfig
+	}
+
+	t.Run("MilvusDefaults", func(t *testing.T) {
+		wpConfig, err := config.NewConfiguration()
+		require.NoError(t, err)
+		require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+		assert.True(t, wpConfig.Woodpecker.Client.DirectRead.Enabled)
+		assert.Equal(t, config.NewByteSize(16*1024*1024), wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize)
+		assert.Equal(t, 4, wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads)
+	})
+
+	t.Run("CustomValues", func(t *testing.T) {
+		wpConfig := setup(t, "false", "32M", "8")
+		require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+		assert.False(t, wpConfig.Woodpecker.Client.DirectRead.Enabled)
+		assert.Equal(t, config.NewByteSize(32*1024*1024), wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize)
+		assert.Equal(t, 8, wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads)
+	})
+}
