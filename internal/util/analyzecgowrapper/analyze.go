@@ -89,9 +89,17 @@ func (ca *CgoAnalyze) Delete() error {
 func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, error) {
 	cOffsetMappingFilesPath := make([]unsafe.Pointer, size)
 	cOffsetMappingFilesSize := make([]C.int64_t, size)
-	cCentroidsFilePath := C.CString("")
+	// Out-parameters only: GetAnalyzeResultMeta overwrites this with a pointer
+	// into C++-owned memory (the KmeansClustering object's result meta, valid
+	// until DeleteAnalyze), which Go must not free. Starting from nil rather
+	// than C.CString("") avoids allocating a value that is never read, and
+	// removes the trap in the previous `defer C.free(cCentroidsFilePath)`:
+	// deferred arguments are evaluated at the defer statement, so it freed the
+	// initial empty-string allocation rather than whatever C++ wrote back —
+	// correct only by accident, and it would become a free of C++ memory the
+	// moment someone "fixed" it to evaluate late.
+	var cCentroidsFilePath *C.char
 	cCentroidsFileSize := C.int64_t(0)
-	defer C.free(unsafe.Pointer(cCentroidsFilePath))
 
 	status := C.GetAnalyzeResultMeta(ca.analyzePtr,
 		&cCentroidsFilePath,
