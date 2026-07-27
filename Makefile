@@ -296,6 +296,14 @@ generate-segcore-codes:
 	@echo "Generating segcore error code list from milvus-common ..."
 	@(env bash $(PWD)/scripts/generate_segcore_codes.sh)
 
+# CI gate: regenerate the segcore code list and fail on drift, so a
+# milvus-common pin bump that adds an ErrorCode cannot ship without the
+# generated snapshot (and therefore the classForCode switch) catching up.
+# Mirrors check-proto-product.
+check-segcore-codes-product: generate-segcore-codes
+	@git diff --exit-code -- pkg/util/merr/segcore_codes_gen.go || \
+		(echo "segcore_codes_gen.go is out of date with milvus-common's EasyAssert.h; run 'make generate-segcore-codes' and classify any new code in classForCode" && exit 1)
+
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
