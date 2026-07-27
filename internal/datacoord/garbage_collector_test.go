@@ -2327,6 +2327,69 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
+	// Tickets are not unique: the REST route in restful_mgr_routes.go issues every
+	// pause with an empty ticket. A failed pause must therefore roll back only its
+	// own record -- a ticket-scoped delete would also wipe a concurrent caller's
+	// still-valid pause and silently resume GC while that caller believes it is
+	// paused.
+	s.Run("pause_rollback_preserves_other_empty_ticket_record", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Hour,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		controlDone := make(chan struct{})
+		go func() {
+			defer close(controlDone)
+			gc.startControlLoop(context.Background())
+		}()
+		defer func() {
+			gc.cancel()
+			<-controlDone
+			gc.option.removeObjectPool.Release()
+		}()
+
+		metaCh := gc.controlChannels["meta"]
+		secondSignal := make(chan struct{})
+		go func() {
+			// Ack the first pause so it completes.
+			cmd := <-metaCh
+			close(cmd.done)
+			// Take the second pause's signal but never ack it, parking pause() in
+			// the inner ack wait so its rollback path is the one exercised.
+			<-metaCh
+			close(secondSignal)
+		}()
+
+		// First caller: a successful global pause with an empty ticket.
+		s.NoError(gc.Pause(context.Background(), -1, "", time.Minute))
+		firstUntil := gc.pauseUntil.PauseUntil()
+		s.NotZero(firstUntil)
+
+		// Second caller: same empty ticket, canceled while waiting for the ack.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pauseDone := make(chan error, 1)
+		go func() {
+			pauseDone <- gc.Pause(ctx, -1, "", time.Minute)
+		}()
+
+		select {
+		case <-secondSignal:
+		case <-time.After(time.Second * 5):
+			s.T().Fatal("second pause signal was not delivered to meta worker")
+		}
+		cancel()
+		s.ErrorIs(<-pauseDone, context.Canceled)
+
+		// The first caller's pause must survive the second caller's rollback.
+		s.Equal(firstUntil, gc.pauseUntil.PauseUntil())
+	})
+
 	s.Run("pause_collection", func() {
 		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
 			cli:              s.cli,
