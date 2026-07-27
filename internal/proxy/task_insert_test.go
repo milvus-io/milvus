@@ -177,7 +177,23 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 	require.Greater(t, withIdempotency[0].EstimateSize(), bodyOnly[0].EstimateSize())
 	require.Greater(t, withIdempotency[0].EstimateSize()-1, bodyOnly[0].EstimateSize())
 
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(withIdempotency[0].EstimateSize()-1)))
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
+
+	// Preserve the legacy non-idempotent path: the final streaming-message size
+	// guard exists specifically for the extra idempotency metadata.
+	withoutIdempotency, err := repackInsertDataForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		nil,
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, withoutIdempotency, 1)
+	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
 		[]string{"ch"},
@@ -186,6 +202,80 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 		nil,
 		0,
 		nil,
+		it.idempotentInsertHeaderDecorator(),
+	)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), "after adding streaming headers")
+}
+
+func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempotentHeaders(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.On("GetPartitions", mock.Anything, "db", "coll").Return(map[string]int64{
+		"partition_0": 300,
+		"partition_1": 301,
+	}, nil)
+	cache.On("GetPartitionID", mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
+	cache.On("GetPartitionID", mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = oldCache })
+
+	insertMsg, result := newIdempotentRepackInsertMsg(1)
+	partitionKeys := insertMsg.GetFieldsData()[1]
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 3, Name: "payload", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	bodyOnly, err := repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, bodyOnly, 1)
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
+
+	withoutIdempotency, err := repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, withoutIdempotency, 1)
+	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+
+	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+		context.Background(),
+		[]string{"ch"},
+		insertMsg,
+		result,
+		partitionKeys,
+		nil,
+		schema,
+		0,
 		it.idempotentInsertHeaderDecorator(),
 	)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)

@@ -354,8 +354,10 @@ func repackInsertDataByPartitionForStreamingService(
 		// metadata. Validate the fully built message and split the original row
 		// offsets again when that final envelope crosses the transport limit.
 		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
-			if err := validateStreamingInsertMessageSize(msg); err != nil {
-				return nil, err
+			if decorateHeader != nil {
+				if err := validateStreamingInsertMessageSize(msg); err != nil {
+					return nil, err
+				}
 			}
 			messages = append(messages, msg)
 			continue
