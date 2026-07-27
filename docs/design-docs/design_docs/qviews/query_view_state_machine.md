@@ -78,7 +78,7 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Down | Higher-version view has been Up for the lease period / ReleaseCollection | Persist Down to ETCD; push Down to SN |
+| Down | Higher-version view confirms Up / ReleaseCollection | Persist Down to ETCD; push Down to SN |
 | Unrecoverable | Any node reports Unrecoverable, or a QueryNode is lost while a Preparing sync is pending | Persist Unrecoverable to ETCD |
 
 **Possible Peer States (and Coord's reaction):**
@@ -95,13 +95,20 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 ### 1.4 Down
 
 **Entry Conditions:**
-- Higher-version view has been Up for the lease period (old view expires).
+- Higher-version view confirms Up; Coord immediately transitions the old Up
+  view to Down.
 - ReleaseCollection.
 - Recovery: loaded from ETCD in Down state.
 
 **Automatic Behavior:**
 1. Persist Down to ETCD (if transitioning from Up).
 2. Push Down to SN.
+
+> Query lease ownership: Coord does not wait for a lease period before entering
+> Down and always keeps at most one Up view. After receiving Down, StreamingNode
+> stops generating new query plans from the old view, but query leases/query
+> references keep its resources alive for already-generated queries. Resource
+> release completes only after those references are released.
 
 **Transitions:**
 
@@ -184,13 +191,22 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 ## 2. StreamingNode State Machine
 
-StreamingNode manages growing data and generates query plans. It persists only
-the Up recovery info for crash recovery. The persisted recovery info is the
+StreamingNode manages growing data and generates query plans. It persists Up
+recovery records for crash recovery. Each persisted recovery record is the
 complete `QueryViewOfShard` received from Coord, including both
 `QueryViewOfStreamingNode` and `QueryViewOfQueryNode`; the latter is required to
 rebuild Phase 1 query plans after StreamingNode restart.
 
-Persisted states: **Up** recovery info only (the latest Up view).
+Persisted states: **Up** recovery info only. Every version that has reached Up
+is persisted independently until that view receives Down or Dropped, so
+multiple Up recovery records may coexist.
+
+> **TODO:** Wire StreamingNode resource-preparation and WAL-recovery failures
+> to `snQueryViewStateMachine.OnUnrecoverable`. The current production resource
+> manager reports successful readiness but does not provide an unrecoverable
+> failure callback. Until that callback is introduced, the StreamingNode
+> transitions to Unrecoverable described below are design intent rather than a
+> production-reachable chain.
 
 ### 2.1 Preparing
 
@@ -207,7 +223,7 @@ Persisted states: **Up** recovery info only (the latest Up view).
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord |
+| Unrecoverable | **TODO:** data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord after the failure callback is wired |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -240,7 +256,8 @@ Persisted states: **Up** recovery info only (the latest Up view).
 - Received Up push from Coord.
 
 **Automatic Behavior:**
-1. Persist recovery info (retain only the latest Up view, overwriting previous).
+1. Persist this view's recovery info under its full QueryView version. Recovery
+   records for other Up versions are retained independently.
 2. Activate the view for query plan generation.
 3. Report Up to Coord.
 
@@ -262,12 +279,15 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 (Coord is unaware of UpRecovering and considers the view to be in Up state).
 
 **Entry Conditions:**
-- SN crash recovery: the highest-version Up view is rebuilt from persisted recovery info.
+- SN crash recovery: every persisted Up view is rebuilt into its own
+  UpRecovering state-machine instance.
 - WAL consumption has not yet caught up; growing segment data ([A2] portion) is incomplete.
 
 **Automatic Behavior:**
 1. Replay WAL from the checkpoint position to recover growing segments.
 2. Do NOT serve queries (data is incomplete).
+3. Multiple UpRecovering versions may coexist. After recovery, query planning
+   selects the highest available Up version.
 
 **Transitions:**
 
@@ -275,7 +295,7 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 |---|---|---|
 | Up | WAL consumption catches up to current position | Begin serving queries |
 | Down | Received Down push from Coord | Delete recovery info; abandon WAL catch-up |
-| Unrecoverable | Local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord; retain persisted Up recovery info, and let the query path trigger replacement |
+| Unrecoverable | **TODO:** local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord after the failure callback is wired; retain persisted Up recovery info, and let the query path trigger replacement |
 
 **Possible Coord States (and this node's reaction):**
 - Coord considers this view to be in Up state (Coord is unaware of UpRecovering).
@@ -305,11 +325,13 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 - Coord in Down / Dropping → SN does nothing; normal.
 - Coord pushes Dropped → SN transitions to Dropped.
 
-### 2.6 Unrecoverable
+### 2.6 Unrecoverable (TODO: Production Failure Wiring)
 
 **Entry Conditions:**
-- data_version check failed during Preparing (growing segments already flushed to sealed and released).
-- Local resource failure during UpRecovering (e.g., OOM while replaying WAL to recover growing segments).
+- **TODO:** data_version check failed during Preparing (growing segments already
+  flushed to sealed and released).
+- **TODO:** local resource failure during UpRecovering (e.g., OOM while
+  replaying WAL to recover growing segments).
 
 **Automatic Behavior:**
 1. When entered from Preparing, report Unrecoverable to Coord.
@@ -420,9 +442,3 @@ QueryNode is fully stateless with no persistence and no recovery process. It doe
 3. Report Dropped to Coord.
 
 **Transitions:** None (terminal state; state machine instance destroyed).
-
----
-
-## 4. TODO
-
-1. **Coord Preparing Timeout Eviction**: If a node is stuck in Preparing (neither reporting Ready nor Unrecoverable), Coord's Preparing state blocks indefinitely. This blocks the sole Preparing slot for the shard, preventing new DataVersion views from being generated and preventing lower-version Growing Segments from being released on SN. A Coord-side timeout mechanism should be introduced: after timeout, Coord proactively marks the view as Unrecoverable, releasing the Preparing slot.
