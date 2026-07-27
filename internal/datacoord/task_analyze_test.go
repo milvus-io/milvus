@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -393,6 +394,60 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentStatsPopulated() {
 		}
 		// Clustering params should be populated
 		if req.MaxTrainSizeRatio == 0 || req.MaxClusterSize == 0 || req.TaskSlot == 0 {
+			return false
+		}
+		return true
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_ManifestPropagated() {
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+
+	// Segment 101 becomes a recovered StorageV3 segment: manifest set, no binlogs.
+	s.mt.segments.SetSegment(101, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      1000,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "{\"base_path\":\"root/segments/101\",\"ver\":3}",
+			Binlogs:        nil,
+		},
+	})
+	defer s.mt.segments.SetSegment(101, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 101, CollectionID: s.collID, PartitionID: s.partID,
+			State: commonpb.SegmentState_Flushed, NumOfRows: 1000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 1001}, {LogID: 1002}}},
+			},
+		},
+	})
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		stat101 := req.SegmentStats[101]
+		stat102 := req.SegmentStats[102]
+		if stat101 == nil || stat102 == nil {
+			return false
+		}
+		// V3: manifest set, logIDs empty.
+		if stat101.ManifestPath == "" || len(stat101.LogIDs) != 0 {
+			return false
+		}
+		// V1: manifest empty, logIDs present.
+		if stat102.ManifestPath != "" || len(stat102.LogIDs) != 2 {
 			return false
 		}
 		return true
