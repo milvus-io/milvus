@@ -116,6 +116,18 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 
 	isBackup := importutilv2.IsBackup(req.GetOptions())
 	isL0Import := importutilv2.IsL0Import(req.GetOptions())
+
+	// A binlog or L0 import reads Milvus's own internal storage layout, which
+	// lies outside the target collection's namespace. The collection-level
+	// Import privilege that authorized this RPC does not cover that, so require
+	// a cluster-level privilege on top.
+	if isBackup || isL0Import {
+		if err := CheckClusterPrivilege(ctx,
+			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()); err != nil {
+			return err
+		}
+	}
+
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 
 	var partitionIDs []int64
