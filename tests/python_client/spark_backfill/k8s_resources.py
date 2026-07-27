@@ -37,7 +37,13 @@ def build_ephemeral_secret(name: str, *, access_key: str, secret_key: str, milvu
     }
 
 
-def required_rbac_permissions(*, create_secret: bool) -> list[tuple[str, str, str]]:
+def required_rbac_permissions(*, create_secret: bool, runner_mode: str = "job") -> list[tuple[str, str, str]]:
+    if runner_mode == "toolbox":
+        return [
+            ("", "pods", "get"),
+            ("", "pods", "list"),
+            ("", "pods/exec", "get"),
+        ]
     permissions = [
         ("batch", "jobs", "create"),
         ("batch", "jobs", "get"),
@@ -59,9 +65,18 @@ def required_rbac_permissions(*, create_secret: bool) -> list[tuple[str, str, st
     return permissions
 
 
-def assert_rbac_permissions(authorization_api, namespace: str, *, create_secret: bool) -> None:
+def assert_rbac_permissions(
+    authorization_api,
+    namespace: str,
+    *,
+    create_secret: bool,
+    runner_mode: str = "job",
+) -> None:
     denied = []
-    for group, resource, verb in required_rbac_permissions(create_secret=create_secret):
+    for group, resource, verb in required_rbac_permissions(
+        create_secret=create_secret,
+        runner_mode=runner_mode,
+    ):
         body = {
             "apiVersion": "authorization.k8s.io/v1",
             "kind": "SelfSubjectAccessReview",

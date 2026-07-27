@@ -369,6 +369,39 @@ Snapshot API 如果返回相对对象 key，执行 Backfill 前必须补成：
 s3a://<bucket>/<snapshot-key>
 ```
 
+## 8.1 使用 pytest 直接连接 Toolbox
+
+Spark Backfill pytest 支持通过 Kubernetes exec 复用本 Pod，不需要 Connector bundle URL/SHA。推荐按稳定 label 自动发现 Pod：
+
+```bash
+python3 -m pytest -p no:rerunfailures \
+  'tests/python_client/spark_backfill/test_v3_backfill_e2e.py::test_v3_backfill_modes_publish_and_become_visible[coalesce]' \
+  --run-spark-backfill \
+  --spark-runner-mode toolbox \
+  --spark-k8s-context my-vcluster \
+  --spark-k8s-namespace default \
+  --spark-toolbox-label app=spark-milvus-toolbox \
+  <本机Milvus/MinIO/Management与Pod内Service参数> \
+  -n 0 -v --tb=short
+```
+
+调试时也可以固定 Pod：
+
+```text
+--spark-toolbox-pod spark-milvus-toolbox-<replicaset>-<suffix>
+```
+
+固定 Pod 名在 Pod 重建后会失效，因此 Nightly 和日常重复运行应使用 label。
+
+Runner 会动态写入：
+
+```text
+/workspace/spark-backfill-pytest/contracts.py
+/workspace/spark-backfill-pytest/read_probe.py
+```
+
+不需要修改 ConfigMap 或重建 Toolbox。Runner 只执行 Spark，不管理 Deployment 生命周期。
+
 ## 9. 为什么当前方案还不够稳定
 
 当前下面这些目录都是 `emptyDir`：
