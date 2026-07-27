@@ -278,8 +278,9 @@ class SegmentExpr : public Expr {
 
     void
     MoveCursorForIndex() {
-        AssertInfo(segment_->type() == SegmentType::Sealed,
-                   "index mode only for sealed segment");
+        // The index cursor is a global row position. This holds for sealed
+        // segments and for growing segments with a segment-level scalar
+        // index (the geometry interim R-Tree, see issue #51237).
         auto size =
             std::min(active_count_ - current_index_chunk_pos_, batch_size_);
 
@@ -1011,9 +1012,34 @@ class SegmentExpr : public Expr {
                          int processed_rows) {
         auto data_pos =
             chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
-        auto size = std::min(
-            std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
-            int64_t(chunk_res.size()));
+        // Slice by active_count_ for the same reason as
+        // ProcessIndexOneChunkForValid(): the cached bitmap is segment-global
+        // (a scalar index always has exactly one chunk), while size_per_chunk_
+        // is the raw-data chunk granularity (segcore.chunkRows) and is
+        // unrelated to it. On a sealed segment the two agree --
+        // size_per_chunk() == get_row_count() -- which is why bounding by
+        // size_per_chunk_ has not broken yet; on a growing segment, reachable
+        // through the geometry interim R-Tree index, size_per_chunk_ would
+        // over-run the bitmap exactly as in issue #51237.
+        //
+        // The old third min term was also subtly wrong on its own: it clamped
+        // against the bitmap's FULL length rather than the length remaining
+        // after data_pos, so a bitmap shorter than the row count combined with
+        // data_pos > 0 made append() read past its end. Assert coverage
+        // instead, mirroring the sibling function.
+        auto size =
+            std::min(active_count_ - data_pos, batch_size_ - processed_rows);
+        AssertInfo(int64_t(chunk_res.size()) >= data_pos + size,
+                   "index bitmap covers {} rows, batch needs rows [{}, {})",
+                   chunk_res.size(),
+                   data_pos,
+                   data_pos + size);
+        AssertInfo(
+            int64_t(chunk_valid_res.size()) >= data_pos + size,
+            "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+            chunk_valid_res.size(),
+            data_pos,
+            data_pos + size);
 
         //        result.insert(result.end(),
         //                      chunk_res.begin() + data_pos,
@@ -1305,14 +1331,23 @@ class SegmentExpr : public Expr {
                                  int processed_rows) {
         auto data_pos =
             chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
-        auto size = std::min(
-            std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
-            int64_t(chunk_valid_res.size()));
-        if (field_type_ == DataType::GEOMETRY &&
-            segment_->type() == SegmentType::Growing) {
-            size = std::min(batch_size_ - processed_rows,
-                            int64_t(chunk_valid_res.size()) - data_pos);
-        }
+        // The cached bitmap is segment-global (a scalar index always has
+        // exactly one chunk), so slice it by the rows visible to this query
+        // (active_count_). Bounding by size_per_chunk_ would be wrong on a
+        // growing segment, where size_per_chunk_ is the raw-data chunk
+        // granularity (segcore.chunkRows) and unrelated to the index bitmap.
+        // A growing segment reaches this path through the geometry interim
+        // R-Tree index; its bitmap may also run ahead of active_count_ under
+        // concurrent inserts, so active_count_ -- not the bitmap size --
+        // decides how many rows to emit. See issue #51237.
+        auto size =
+            std::min(active_count_ - data_pos, batch_size_ - processed_rows);
+        AssertInfo(
+            int64_t(chunk_valid_res.size()) >= data_pos + size,
+            "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+            chunk_valid_res.size(),
+            data_pos,
+            data_pos + size);
         valid_result.append(chunk_valid_res, data_pos, size);
         return size;
     }
