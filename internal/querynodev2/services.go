@@ -483,8 +483,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 	defer node.lifetime.Done()
 
-	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// Full and delta loads still require an index. Reopen/Stats carries the
+	// complete collection index snapshot, so an empty list is authoritative and
+	// must be allowed to clear metadata after the last index is dropped.
+	isMetadataOnlyLoad := req.GetLoadScope() == querypb.LoadScope_Reopen || req.GetLoadScope() == querypb.LoadScope_Stats
+	if len(req.GetIndexInfoList()) == 0 && !isMetadataOnlyLoad {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
@@ -536,25 +539,38 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
-	if err != nil {
-		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
-
 	switch req.GetLoadScope() {
+	case querypb.LoadScope_Stats, querypb.LoadScope_Reopen:
+		collection := node.manager.Collection.Get(req.GetCollectionID())
+		if collection == nil {
+			err := merr.WrapErrCollectionNotFound(req.GetCollectionID(), "collection not found before segment reopen")
+			return merr.Status(err), nil
+		}
+		meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), collection.Schema())
+		if err := node.manager.Collection.UpdateIndexMeta(req.GetCollectionID(), meta); err != nil {
+			log.Warn(ctx, "failed to update collection index meta before segment reopen", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Delta:
+		err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+		if err != nil {
+			log.Warn(ctx, "failed to ref collection", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		return node.loadDeltaLogs(ctx, req), nil
-	case querypb.LoadScope_Stats:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
-	case querypb.LoadScope_Reopen:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Full:
+		err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+		if err != nil {
+			log.Warn(ctx, "failed to ref collection", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		// Continue with the full segment load below.
 	case legacyLoadScopeIndex:

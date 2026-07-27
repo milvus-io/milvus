@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -377,6 +378,73 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.True(found,
 		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
 		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestUpdateIndexMetaOnlyChangesNativeMeta() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	schemaBefore, logicalVersionBefore, barrierBefore := coll.SchemaSnapshot()
+	_, segcoreVersionBefore := coll.SchemaAndSegcoreVersion()
+	refCountBefore := coll.refCount.Load()
+	indexMetaBefore := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+
+	updatedIndexMeta := proto.Clone(indexMetaBefore).(*segcorepb.CollectionIndexMeta)
+	updatedIndexMeta.MaxIndexRowCount++
+	s.Require().NotEqual(indexMetaBefore.GetMaxIndexRowCount(), updatedIndexMeta.GetMaxIndexRowCount())
+
+	err := s.cm.UpdateIndexMeta(1, updatedIndexMeta)
+	s.Require().NoError(err)
+
+	indexMetaAfter := coll.GetCCollection().IndexMeta()
+	s.True(proto.Equal(updatedIndexMeta, indexMetaAfter))
+	s.False(proto.Equal(indexMetaBefore, indexMetaAfter))
+
+	schemaAfter, logicalVersionAfter, barrierAfter := coll.SchemaSnapshot()
+	_, segcoreVersionAfter := coll.SchemaAndSegcoreVersion()
+	s.Same(schemaBefore, schemaAfter)
+	s.Equal(logicalVersionBefore, logicalVersionAfter)
+	s.Equal(barrierBefore, barrierAfter)
+	s.Equal(segcoreVersionBefore, segcoreVersionAfter)
+	s.Equal(refCountBefore, coll.refCount.Load())
+}
+
+func (s *CollectionManagerSuite) TestUpdateIndexMetaRefreshesGpuIndexFlag() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	s.False(coll.IsGpuIndex())
+
+	cpuIndexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	s.Require().NotEmpty(cpuIndexMeta.GetIndexMetas())
+
+	gpuIndexMeta := proto.Clone(cpuIndexMeta).(*segcorepb.CollectionIndexMeta)
+	gpuIndexMeta.IndexMetas[0].IndexName = "GPU_IVF_FLAT"
+	gpuIndexMeta.IndexMetas[0].IndexParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "GPU_IVF_FLAT"},
+		{Key: common.MetricTypeKey, Value: "L2"},
+	}
+
+	s.Require().NoError(s.cm.UpdateIndexMeta(1, gpuIndexMeta))
+	s.True(coll.IsGpuIndex())
+
+	// The equal-meta path also recomputes the derived scheduler flag, so a
+	// retry can repair stale Go-side state without rewriting native metadata.
+	coll.isGpuIndex.Store(false)
+	s.Require().NoError(s.cm.UpdateIndexMeta(1, gpuIndexMeta))
+	s.True(coll.IsGpuIndex())
+
+	emptyIndexMeta := &segcorepb.CollectionIndexMeta{MaxIndexRowCount: gpuIndexMeta.GetMaxIndexRowCount()}
+	s.Require().NoError(s.cm.UpdateIndexMeta(1, emptyIndexMeta))
+	s.Empty(coll.GetCCollection().IndexMeta().GetIndexMetas())
+	s.False(coll.IsGpuIndex())
+
+	s.Require().NoError(s.cm.UpdateIndexMeta(1, cpuIndexMeta))
+	s.False(coll.IsGpuIndex())
+}
+
+func (s *CollectionManagerSuite) TestUpdateIndexMetaMissingCollection() {
+	err := s.cm.UpdateIndexMeta(999, &segcorepb.CollectionIndexMeta{})
+	s.ErrorIs(err, merr.ErrCollectionNotFound)
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {

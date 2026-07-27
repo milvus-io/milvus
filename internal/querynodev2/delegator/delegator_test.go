@@ -198,6 +198,36 @@ func (s *DelegatorSuite) TearDownTest() {
 }
 
 func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
+	s.Run("constructor uses one coherent schema snapshot", func() {
+		collectionID := s.collectionID + 9999
+		vchannel := s.vchannelName + "-coherent-snapshot"
+		manager := segments.NewManager()
+		schema := proto.Clone(s.manager.Collection.Get(s.collectionID).Schema()).(*schemapb.CollectionSchema)
+		schema.Name = "coherent-snapshot"
+		schema.Version = 7
+		s.Require().NoError(manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}))
+		defer manager.Collection.Unref(collectionID, 1)
+
+		var snapshotCalls atomic.Int32
+		patch := mockey.Mock((*segments.Collection).SchemaSnapshot).To(
+			func(*segments.Collection) (*schemapb.CollectionSchema, uint64, uint64) {
+				snapshotCalls.Inc()
+				return schema, uint64(schema.GetVersion()), 100
+			}).Build()
+		defer patch.UnPatch()
+
+		delegator, err := NewShardDelegator(context.Background(), collectionID, s.replicaID, vchannel, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		s.Require().NoError(err)
+		defer delegator.Close()
+
+		s.Equal(int32(1), snapshotCalls.Load())
+		delegatorSchema, version := delegator.(*shardDelegator).delegatorSchemaSnapshot()
+		s.True(proto.Equal(schema, delegatorSchema))
+		s.Equal(uint64(schema.GetVersion()), version)
+	})
+
 	s.Run("function runner init failure does not block delegator", func() {
 		collectionID := s.collectionID + 10000
 		vchannel := s.vchannelName + "-init-failure"
@@ -2421,6 +2451,69 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 
 	_, _, err = sd.getIDFOracle().BuildIDF(105, &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}, Dim: 1})
 	require.NoError(t, err)
+}
+
+func TestSharedCollectionUpdateDoesNotSuppressShardRuntimeDDL(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+
+	const collectionID = int64(1000)
+	manager := segments.NewManager()
+	initialSchema := newFunctionRuntimeTestSchemaWithVersion(0)
+	require.NoError(t, manager.Collection.PutOrRef(collectionID, initialSchema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 1}))
+	defer manager.Collection.Unref(collectionID, 1)
+
+	newWorkerManager := func() *cluster.MockManager {
+		worker := cluster.NewMockWorker(t)
+		worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
+		workerManager := cluster.NewMockManager(t)
+		workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+		return workerManager
+	}
+
+	newDelegator := func(channel string, workerManager cluster.Manager) *shardDelegator {
+		delegator, err := NewShardDelegator(
+			context.Background(),
+			collectionID,
+			1,
+			channel,
+			1,
+			workerManager,
+			manager,
+			segments.NewMockLoader(t),
+			100,
+			nil,
+			nil,
+			NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+			nil,
+		)
+		require.NoError(t, err)
+		sd := delegator.(*shardDelegator)
+		sd.Start()
+		return sd
+	}
+
+	first := newDelegator("test-channel-1", newWorkerManager())
+	defer first.Close()
+	second := newDelegator("test-channel-2", newWorkerManager())
+	defer second.Close()
+
+	updatedSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
+	require.NoError(t, first.UpdateSchema(context.Background(), updatedSchema, 100))
+	require.Equal(t, uint64(1), manager.Collection.Get(collectionID).SchemaVersion())
+
+	// The shared Collection is already at V1, but the second shard still has a
+	// V0 served/runtime view and must execute its own WAL DDL side effects.
+	require.NoError(t, second.UpdateSchema(context.Background(), updatedSchema, 100))
+	_, secondVersion := second.delegatorSchemaSnapshot()
+	require.Equal(t, uint64(1), secondVersion)
+	require.NotNil(t, second.getIDFOracle())
+
+	ok, err := function.GetManager().RunWithRunner(context.Background(), collectionID, delegatorFunctionRunnerKey(second.vchannelName), 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {

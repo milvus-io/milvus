@@ -53,6 +53,9 @@ type CollectionManager interface {
 	// version. The manager derives the logical schema version from schema.Version
 	// when a schema payload is present.
 	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	// UpdateIndexMeta updates only the native collection index metadata without
+	// changing the collection schema snapshot or its externally visible refs.
+	UpdateIndexMeta(collectionID int64, meta *segcorepb.CollectionIndexMeta) error
 }
 
 type collectionManager struct {
@@ -184,6 +187,16 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	//   properties-only schema snapshots such as ttl_field changes.
 	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
 	return err
+}
+
+func (m *collectionManager) UpdateIndexMeta(collectionID int64, meta *segcorepb.CollectionIndexMeta) error {
+	collection, ok := m.acquireCollectionLease(collectionID)
+	if !ok {
+		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+	}
+	defer m.Unref(collectionID, 1)
+
+	return collection.updateIndexMeta(meta)
 }
 
 // ShouldUpdateCollectionSchema reports whether an UpdateSchema payload would
@@ -332,7 +345,7 @@ type Collection struct {
 	// if resource group is not updated, the reference count of collection manager works failed.
 	metricType atomic.String // deprecated
 	schema     atomic.Pointer[collectionSchemaSnapshot]
-	isGpuIndex bool
+	isGpuIndex atomic.Bool
 	loadFields typeutil.Set[int64]
 
 	refCount *atomic.Uint32
@@ -412,10 +425,16 @@ func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error 
 	if c.ccollection == nil {
 		return merr.WrapErrServiceInternal("update index meta on released collection")
 	}
+	isGpuIndex := collectionIndexMetaRequiresGPU(meta)
 	if proto.Equal(c.ccollection.IndexMeta(), meta) {
+		c.isGpuIndex.Store(isGpuIndex)
 		return nil
 	}
-	return c.ccollection.UpdateIndexMeta(meta)
+	if err := c.ccollection.UpdateIndexMeta(meta); err != nil {
+		return err
+	}
+	c.isGpuIndex.Store(isGpuIndex)
+	return nil
 }
 
 func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
@@ -534,7 +553,7 @@ func (c *Collection) SchemaVersion() uint64 {
 
 // IsGpuIndex returns a boolean value indicating whether the collection is using a GPU index.
 func (c *Collection) IsGpuIndex() bool {
-	return c.isGpuIndex
+	return c.isGpuIndex.Load()
 }
 
 // getPartitionIDs return partitionIDs of collection
@@ -598,19 +617,13 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		}
 	}
 
-	isGpuIndex := false
+	isGpuIndex := collectionIndexMetaRequiresGPU(indexMeta)
 	req := &segcore.CreateCCollectionRequest{
 		Schema:        loadSchema,
 		LoadFieldList: loadFieldIDs.Collect(),
 	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
-		for _, indexMeta := range indexMeta.GetIndexMetas() {
-			isGpuIndex = gpuIndexRequiresGpu(indexMeta.GetIndexParams())
-			if isGpuIndex {
-				break
-			}
-		}
 	}
 
 	ccollection, err := segcore.CreateCCollection(req)
@@ -627,9 +640,9 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
-		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
 	}
+	coll.isGpuIndex.Store(isGpuIndex)
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
@@ -638,6 +651,15 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	coll.setSchema(schema, logicalSchemaVersion, schemaBarrierTs, initialSegcoreSchemaVersion(logicalSchemaVersion, schemaBarrierTs))
 
 	return coll, nil
+}
+
+func collectionIndexMetaRequiresGPU(indexMeta *segcorepb.CollectionIndexMeta) bool {
+	if indexMeta == nil || len(indexMeta.GetIndexMetas()) == 0 || indexMeta.GetMaxIndexRowCount() <= 0 {
+		return false
+	}
+	return lo.ContainsBy(indexMeta.GetIndexMetas(), func(indexMeta *segcorepb.FieldIndexMeta) bool {
+		return gpuIndexRequiresGpu(indexMeta.GetIndexParams())
+	})
 }
 
 // Only for test
