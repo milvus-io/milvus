@@ -41,6 +41,7 @@ type NamespaceCompactorTestSuite struct {
 func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())
@@ -75,6 +76,7 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 
 func (s *NamespaceCompactorTestSuite) TearDownSuite() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 	initcore.CleanArrowFileSystem()
 }
 

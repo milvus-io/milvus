@@ -394,6 +394,11 @@ func (b *RecordBuilder) Build() Record {
 	}
 
 	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(b.nRows)), field2Col)
+	// NewRecord retained every column; drop the builder-side creator refs so the
+	// record is the sole owner and columns can actually reach refcount zero.
+	for _, arr := range arrays {
+		arr.Release()
+	}
 	b.nRows = 0
 	b.size = 0
 	return rec

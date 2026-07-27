@@ -520,20 +520,17 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		if preMaterializeFilter {
 			selection, _, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField, nil)
 			if err != nil {
-				record.Release()
 				return nil, err
 			}
 			if selection != nil && selection.Len() == 0 {
-				record.Release()
 				continue
 			}
 		}
 
+		// record stays owned by the reader (released on its next Next/Close);
+		// only the derived arrays of the wrapped record are cleaned up here.
 		wrapped, err := materializer.WrapWithSelection(record, selection)
 		if err != nil {
-			if selection == nil {
-				record.Release()
-			}
 			return nil, err
 		}
 		out := overwriteRecordTimestamps(wrapped, segment.GetCommitTimestamp())
@@ -541,7 +538,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			if out != wrapped {
 				out.Release()
 			}
-			releaseWrappedRecord(wrapped, record)
+			cleanupMaterializedRecord(wrapped)
 			return nil, err
 		}
 		if out != wrapped {
@@ -549,7 +546,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 
 		totalRows += int64(wrapped.Len())
-		releaseWrappedRecord(wrapped, record)
+		cleanupMaterializedRecord(wrapped)
 	}
 
 	if err := writer.Close(); err != nil {
@@ -1021,10 +1018,11 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		readDuration += time.Since(readStart)
 
 		computeStart := time.Now()
+		// record stays owned by the reader (released on its next Next/Close);
+		// only the derived arrays of the wrapped record are cleaned up here.
 		wrapped, err := materializer.Wrap(record)
 		computeDuration += time.Since(computeStart)
 		if err != nil {
-			record.Release()
 			span.End()
 			return nil, err
 		}
@@ -1033,7 +1031,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 			outputFieldID := outputField.GetFieldID()
 			outputCol := wrapped.Column(outputFieldID)
 			if outputCol == nil {
-				releaseWrappedRecord(wrapped, record)
+				cleanupMaterializedRecord(wrapped)
 				span.End()
 				return nil, merr.WrapErrServiceInternalMsg("output field %d not found in materialized record", outputFieldID)
 			}
@@ -1041,7 +1039,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 			if stats, ok := statsByField[outputFieldID]; ok {
 				bm25MemSize, err := appendBM25StatsFromArrowArray(stats, outputCol)
 				if err != nil {
-					releaseWrappedRecord(wrapped, record)
+					cleanupMaterializedRecord(wrapped)
 					span.End()
 					return nil, err
 				}
@@ -1052,7 +1050,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 
 		writeStart := time.Now()
 		if err := writerResult.writer.Write(wrapped); err != nil {
-			releaseWrappedRecord(wrapped, record)
+			cleanupMaterializedRecord(wrapped)
 			span.End()
 			return nil, err
 		}
@@ -1064,7 +1062,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		)
 
 		totalRows += int64(wrapped.Len())
-		releaseWrappedRecord(wrapped, record)
+		cleanupMaterializedRecord(wrapped)
 	}
 	span.End()
 

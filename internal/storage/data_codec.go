@@ -1025,7 +1025,6 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 		handleRecord := func() error {
 			rec := rr.Record()
-			defer rec.Release()
 			column := rec.Column(0)
 			for i := 0; i < column.Len(); i++ {
 				strVal := column.ValueStr(i)
