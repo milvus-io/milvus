@@ -38,6 +38,13 @@ namespace milvus {
 
 class ChunkedColumnInterface;
 
+struct ElementRowInfo {
+    int32_t row_id;
+    int32_t element_index;
+    int32_t row_element_start;
+    int32_t row_element_end;
+};
+
 class IArrayOffsets {
  public:
     virtual ~IArrayOffsets() = default;
@@ -54,10 +61,41 @@ class IArrayOffsets {
     virtual std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const = 0;
 
+    // Convert an element ID to its row and return the row's element range in
+    // the same lookup. The growing implementation reads one published
+    // lock-free snapshot; the binary search that finds the row also identifies
+    // row_element_end.
+    virtual ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const = 0;
+
     // Convert row ID to element ID range
     // elements with id in [ret.first, ret.last) belong to row_id
     virtual std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const = 0;
+
+    // Batched row-range lookup. Sealed row IDs must be in [0, row_count).
+    // Growing rejects negative row IDs, but rows not yet committed yield an
+    // empty range so concurrent readers never observe a half-written range.
+    // The growing implementation acquire-loads one publication watermark for
+    // the whole batch, and the caller pays one virtual call instead of one per
+    // row.
+    virtual void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const = 0;
+
+    // Contiguous form for the common sequential-batch case: copy
+    // starts[row_start .. row_start + row_count] into out (row_count + 1
+    // entries), so [out[i], out[i+1]) is row (row_start + i)'s element
+    // range. Sealed is a straight memcpy; growing reads one lock-free snapshot,
+    // copies committed entries per chunk-run, and clamps rows beyond the
+    // committed count to the last committed total (equivalent to the per-row
+    // method's {total, total} for row == committed_row_count_, extended to any
+    // not-yet-committed row).
+    virtual void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const = 0;
 
     // Convert row-level bitsets to element-level bitsets
     // row_start: starting row index (0-based)
@@ -91,6 +129,21 @@ class IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const = 0;
+
+    // Word-wise ANY-semantics reduction of an element-level bitmap to row
+    // level. Bit j of elem_bitset corresponds to global element id
+    // (elem_offset + j). For each i in [0, row_result.size()), sets
+    // row_result[i] = true iff any element bit of row (row_start + i) is set.
+    // Bits in row_result are only ever set, never cleared. elem_bitset must
+    // cover the element ranges of all addressed rows.
+    // This is the hot path used to fold element-level match bits back to
+    // rows (MATCH_ANY over an all-valid element bitmap); it skips zero words
+    // instead of testing element bits one by one.
+    virtual void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -139,8 +192,21 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const override;
 
+    ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const override;
+
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
+
+    void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const override;
+
+    void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
@@ -159,6 +225,12 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const override;
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
@@ -223,8 +295,21 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     std::pair<int32_t, int32_t>
     ElementIDToRowID(int32_t elem_id) const override;
 
+    ElementRowInfo
+    ElementIDToRowInfo(int32_t elem_id) const override;
+
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
+
+    void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const override;
+
+    void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
@@ -243,6 +328,12 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const override;
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
  private:
     struct PendingRow {
@@ -270,6 +361,9 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     LoadStart(int64_t idx) const {
         return starts_chunks_[idx >> kChunkBits][idx & kChunkMask];
     }
+
+    void
+    CopyStartsSlice(int64_t first_idx, int64_t entry_count, int32_t* out) const;
 
     // Writer-side helpers; write_mutex_ must be held.
     void
