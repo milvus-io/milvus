@@ -2110,6 +2110,72 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMixedFields() {
 	s.Equal([]string{"<em>dynamic</em> text"}, result.Results.HighlightResults[1].Datas[0].Fragments)
 }
 
+// Process slices documents by topks without checking that they sum to
+// len(documents), so a $meta payload shorter than the hit count would go out of
+// range there. The dynamic-field branch must reject it up front, the same way
+// the schema branch does.
+func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicFieldRowCountMismatch() {
+	ctx := context.Background()
+
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			s.Fail("Process must not be called with a row-count mismatch")
+			return nil, nil, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockHasDynamicFields := mockey.Mock((*highlight.SemanticHighlight).HasDynamicFields).Return(true).Build()
+	defer mockHasDynamicFields.UnPatch()
+
+	mockDynamicFieldNames := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldNames).Return([]string{"dyn_content"}).Build()
+	defer mockDynamicFieldNames.UnPatch()
+
+	mockDynamicFieldID := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldID).Return(int64(102)).Build()
+	defer mockDynamicFieldID.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Topks says 3 hits, $meta carries only 2 rows.
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			Scores:     []float32{0.9, 0.8, 0.7},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   102,
+					FieldName: "$meta",
+					Type:      schemapb.DataType_JSON,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_JsonData{
+								JsonData: &schemapb.JSONArray{
+									Data: [][]byte{
+										[]byte(`{"dyn_content": "dynamic content 1"}`),
+										[]byte(`{"dyn_content": "dynamic content 2"}`),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.Error(err)
+	s.Nil(results)
+	s.Contains(err.Error(), "dynamic field dyn_content has 2 rows, expected 3")
+}
+
 func (s *SearchPipelineSuite) TestExtractMultipleDynamicFieldTexts() {
 	// Test normal extraction with multiple fields
 	jsonData := [][]byte{
