@@ -985,10 +985,22 @@ If the mix coord is unreachable, their management plane and pprof answer 503
 until it recovers.
 
 Recommended: true for any deployment where the metrics port is reachable from
-untrusted networks. This is Immutable to prevent an attacker with stolen root
-credentials from disabling the gate via /management/config/alter.`,
-		Export:    true,
-		Immutable: true,
+untrusted networks.`,
+		Export: true,
+		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
+		// Immutable key's value into etcd on first startup, and the etcd source
+		// outranks file and env. Since this flag defaults to false, the very
+		// first boot of any cluster would pin "false" there, and an operator
+		// later setting adminAuthEnabled: true in yaml would get no gate and no
+		// warning — the security fix would be inert on exactly the existing
+		// deployments it is meant to protect, and could only be enabled by
+		// deleting the etcd key by hand. Verified against a live cluster.
+		//
+		// Marking it Immutable was intended to stop an attacker from disabling
+		// the gate through /management/config/alter, but reaching that endpoint
+		// already requires root credentials that the gate itself demands, and
+		// such an attacker could stop the component outright anyway. The
+		// protection bought nothing and cost the feature its usability.
 	}
 	p.AdminAuthEnabled.Init(base.mgr)
 

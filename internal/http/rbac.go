@@ -134,15 +134,11 @@ func CheckRootAuth(ctx context.Context, req *http.Request, endpoint string) erro
 			mlog.String("username", username), mlog.String("endpoint", endpoint))
 		return &ErrPermissionDenied{msg: "only root user can access this endpoint"}
 	}
-	verify := getPasswordVerifyFunc()
-	if verify == nil {
-		mlog.Warn(ctx, "no credential verifier registered on this node",
-			mlog.String("endpoint", endpoint))
-		return &ErrServiceUnavailable{msg: "password verification not available on this node"}
-	}
-	if !verify(ctx, username, password) {
-		mlog.Warn(ctx, "invalid root password", mlog.String("endpoint", endpoint))
-		return &ErrAuthentication{msg: "invalid root password"}
+	if err := verifyPassword(ctx, username, password, endpoint); err != nil {
+		if IsAuthenticationError(err) {
+			mlog.Warn(ctx, "invalid root password", mlog.String("endpoint", endpoint))
+		}
+		return err
 	}
 	mlog.Debug(ctx, "root user authenticated", mlog.String("endpoint", endpoint))
 	return nil
@@ -164,13 +160,12 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 	}
 
 	// Verify password
-	verify := getPasswordVerifyFunc()
-	if verify == nil {
-		return &ErrServiceUnavailable{msg: "password verification not available"}
-	}
-	if !verify(ctx, username, password) {
-		mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
-		return &ErrAuthentication{msg: "invalid credentials"}
+	if err := verifyPassword(ctx, username, password, req.URL.Path); err != nil {
+		if IsAuthenticationError(err) {
+			mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
+			return &ErrAuthentication{msg: "invalid credentials"}
+		}
+		return err
 	}
 
 	// Root bypass (unless RootShouldBindRole is enabled)

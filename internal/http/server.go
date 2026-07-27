@@ -60,10 +60,25 @@ var (
 	// the in-process verifiers (proxy, mix coord) in the primary slot and the
 	// RPC-backed worker verifier in the fallback slot makes the outcome
 	// deterministic and always prefers the cheaper local check.
-	fallbackPasswordVerifyFunc func(ctx context.Context, username, password string) bool
+	fallbackPasswordVerifyFunc FallbackVerifier
 
 	passwordVerifyMu sync.RWMutex
 )
+
+// FallbackVerifier checks a credential on a node that has to consult a remote
+// credential store. A nil error means authenticated.
+//
+// It returns an error rather than a bool so that "the credential is wrong" and
+// "the credential could not be checked" stay distinguishable. Collapsing them
+// tells an operator whose cluster is half-down that their correct password is
+// invalid, which is the worst possible message at that moment. Return
+// ErrInvalidCredential for a genuine mismatch; any other error is reported as
+// 503.
+type FallbackVerifier func(ctx context.Context, username, password string) error
+
+// ErrInvalidCredential is what a FallbackVerifier returns when it successfully
+// reached the credential store and the password did not match.
+var ErrInvalidCredential error = &ErrAuthentication{msg: "invalid root password"}
 
 // RegisterPasswordVerifyFunc registers a function to verify user password.
 // This should be called by the proxy package during initialization.
@@ -78,22 +93,65 @@ func RegisterPasswordVerifyFunc(fn func(ctx context.Context, username, password 
 // that the management plane and pprof remain reachable to root once
 // common.security.adminAuthEnabled is turned on; without it those endpoints
 // would fail closed with 503 on every worker.
-func RegisterFallbackPasswordVerifyFunc(fn func(ctx context.Context, username, password string) bool) {
+func RegisterFallbackPasswordVerifyFunc(fn FallbackVerifier) {
 	passwordVerifyMu.Lock()
 	defer passwordVerifyMu.Unlock()
 	fallbackPasswordVerifyFunc = fn
 }
 
-// getPasswordVerifyFunc returns the effective credential verifier, preferring
-// the primary (in-process) one. Returns nil when this node cannot verify
-// credentials at all, which callers must surface as 503 rather than 401.
-func getPasswordVerifyFunc() func(ctx context.Context, username, password string) bool {
+// getVerifiers returns the credential verifiers registered on this node. The
+// primary (in-process) one is preferred; the fallback is used only when there
+// is no primary. Both nil means this node cannot verify credentials at all.
+func getVerifiers() (func(ctx context.Context, username, password string) bool, FallbackVerifier) {
 	passwordVerifyMu.RLock()
 	defer passwordVerifyMu.RUnlock()
 	if passwordVerifyFunc != nil {
-		return passwordVerifyFunc
+		return passwordVerifyFunc, nil
 	}
-	return fallbackPasswordVerifyFunc
+	return nil, fallbackPasswordVerifyFunc
+}
+
+// hasPasswordVerifier reports whether this node can check a credential at all.
+func hasPasswordVerifier() bool {
+	primary, fallback := getVerifiers()
+	return primary != nil || fallback != nil
+}
+
+// verifyPassword checks the credential with whichever verifier this node has.
+// It returns nil on success, an ErrAuthentication for a genuine mismatch, and
+// an ErrServiceUnavailable when the credential could not be checked at all.
+func verifyPassword(ctx context.Context, username, password, endpoint string) error {
+	primary, fallback := getVerifiers()
+	switch {
+	case primary != nil:
+		if !primary(ctx, username, password) {
+			return &ErrAuthentication{msg: "invalid root password"}
+		}
+		return nil
+	case fallback != nil:
+		err := fallback(ctx, username, password)
+		switch {
+		case err == nil:
+			return nil
+		case IsAuthenticationError(err):
+			return err
+		default:
+			// The store was unreachable, not the password wrong. Say so, or the
+			// operator goes hunting for a credential problem that isn't there.
+			//
+			// The cause goes to the log, never into the response body: merr and
+			// cockroachdb/errors render wrapped errors with a stack trace
+			// carrying absolute build paths, and this reply is produced for
+			// callers who have not authenticated.
+			mlog.Warn(ctx, "cannot verify credential on this node",
+				mlog.String("endpoint", endpoint), mlog.Err(err))
+			return &ErrServiceUnavailable{
+				msg: "cannot verify credentials on this node; the credential store is unreachable",
+			}
+		}
+	default:
+		return &ErrServiceUnavailable{msg: "password verification not available on this node"}
+	}
 }
 
 // Embedding all static files of webui folder to binary
@@ -175,7 +233,7 @@ func registerDefaults() {
 			var auth string
 
 			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || getPasswordVerifyFunc() == nil {
+			if !expr.HasRegistered("proxy") || !hasPasswordVerifier() {
 				w.WriteHeader(http.StatusForbidden)
 				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
 				return

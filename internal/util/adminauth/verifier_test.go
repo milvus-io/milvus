@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -63,14 +64,17 @@ func TestVerifier_AcceptsCorrectRootPassword(t *testing.T) {
 	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
 		return clientReturning(t, hashed(t, testPassword)), nil
 	})
-	assert.True(t, verify(context.Background(), "root", testPassword))
+	assert.NoError(t, verify(context.Background(), "root", testPassword))
 }
 
 func TestVerifier_RejectsWrongPassword(t *testing.T) {
 	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
 		return clientReturning(t, hashed(t, testPassword)), nil
 	})
-	assert.False(t, verify(context.Background(), "root", "not-the-password"))
+	err := verify(context.Background(), "root", "not-the-password")
+	assert.ErrorIs(t, err, internalhttp.ErrInvalidCredential)
+	assert.True(t, internalhttp.IsAuthenticationError(err),
+		"a genuine mismatch must be reported as an authentication failure (401), not as unavailable")
 }
 
 func TestVerifier_RejectsNonRootWithoutDialing(t *testing.T) {
@@ -83,7 +87,7 @@ func TestVerifier_RejectsNonRootWithoutDialing(t *testing.T) {
 		return clientReturning(t, hashed(t, testPassword)), nil
 	})
 
-	assert.False(t, verify(context.Background(), "alice", testPassword))
+	assert.ErrorIs(t, verify(context.Background(), "alice", testPassword), internalhttp.ErrInvalidCredential)
 	assert.Zero(t, atomic.LoadInt32(&dials), "must not dial mix coord for a non-root user")
 }
 
@@ -98,8 +102,8 @@ func TestVerifier_DialsLazilyAndReusesClient(t *testing.T) {
 	})
 	assert.Zero(t, atomic.LoadInt32(&dials), "constructing the verifier must not dial")
 
-	assert.True(t, verify(context.Background(), "root", testPassword))
-	assert.True(t, verify(context.Background(), "root", testPassword))
+	assert.NoError(t, verify(context.Background(), "root", testPassword))
+	assert.NoError(t, verify(context.Background(), "root", testPassword))
 	assert.Equal(t, int32(1), atomic.LoadInt32(&dials), "client should be dialed once and reused")
 }
 
@@ -114,8 +118,11 @@ func TestVerifier_FailedDialIsNotCached(t *testing.T) {
 		return clientReturning(t, hashed(t, testPassword)), nil
 	})
 
-	assert.False(t, verify(context.Background(), "root", testPassword))
-	assert.True(t, verify(context.Background(), "root", testPassword),
+	err := verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err),
+		"an unreachable coord must not be reported as a bad password")
+	assert.NoError(t, verify(context.Background(), "root", testPassword),
 		"a later attempt must succeed once the coord is reachable")
 	assert.Equal(t, int32(2), atomic.LoadInt32(&dials))
 }
@@ -127,7 +134,10 @@ func TestVerifier_RejectsOnRPCError(t *testing.T) {
 			Return(nil, errors.New("rpc failed")).Maybe()
 		return cli, nil
 	})
-	assert.False(t, verify(context.Background(), "root", testPassword))
+	err := verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err),
+		"an RPC failure must render 503, not 401")
 }
 
 func TestVerifier_RejectsOnErrorStatus(t *testing.T) {
@@ -141,7 +151,10 @@ func TestVerifier_RejectsOnErrorStatus(t *testing.T) {
 			}, nil).Maybe()
 		return cli, nil
 	})
-	assert.False(t, verify(context.Background(), "root", testPassword))
+	err := verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err),
+		"a non-OK status means the credential could not be checked -> 503")
 }
 
 func TestVerifier_RejectsEmptyStoredHash(t *testing.T) {
@@ -150,6 +163,6 @@ func TestVerifier_RejectsEmptyStoredHash(t *testing.T) {
 	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
 		return clientReturning(t, ""), nil
 	})
-	assert.False(t, verify(context.Background(), "root", ""))
-	assert.False(t, verify(context.Background(), "root", testPassword))
+	assert.Error(t, verify(context.Background(), "root", ""))
+	assert.Error(t, verify(context.Background(), "root", testPassword))
 }
