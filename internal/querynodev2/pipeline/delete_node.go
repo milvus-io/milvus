@@ -19,8 +19,11 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -37,7 +40,10 @@ type deleteNode struct {
 
 	manager   *DataManager
 	delegator delegator.ShardDelegator
+	closed    atomic.Bool
 }
+
+var deleteNodeUpdateSchemaRetryInterval = 200 * time.Millisecond
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
 func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) {
@@ -95,19 +101,43 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 
 	if nodeMsg.schema != nil {
 		ctx := context.TODO()
-		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
-			mlog.Warn(ctx, "failed to update schema in delete node",
-				mlog.Int64("collectionID", dNode.collectionID),
-				mlog.String("channel", dNode.channel),
-				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
-				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
-				mlog.Err(err))
+		if !dNode.updateSchemaUntilApplied(ctx, nodeMsg) {
+			return nil
 		}
 	}
 
 	// update tSafe
 	dNode.delegator.UpdateTSafe(nodeMsg.timeRange.timestampMax)
 	return nil
+}
+
+func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *deleteNodeMsg) bool {
+	for {
+		err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs)
+		if err == nil {
+			return true
+		}
+		mlog.RatedWarn(ctx, rate.Limit(1), "failed to update schema in delete node, retrying before advancing tsafe",
+			mlog.Int64("collectionID", dNode.collectionID),
+			mlog.String("channel", dNode.channel),
+			mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+			mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+			mlog.Err(err))
+
+		if dNode.closed.Load() {
+			return false
+		}
+		timer := time.NewTimer(deleteNodeUpdateSchemaRetryInterval)
+		<-timer.C
+		timer.Stop()
+		if dNode.closed.Load() {
+			return false
+		}
+	}
+}
+
+func (dNode *deleteNode) Close() {
+	dNode.closed.Store(true)
 }
 
 func newDeleteNode(
