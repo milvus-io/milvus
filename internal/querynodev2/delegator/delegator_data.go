@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -449,6 +450,31 @@ func (sd *shardDelegator) addGrowing(entries ...SegmentEntry) {
 	sd.distribution.AddGrowing(entries...)
 }
 
+func (sd *shardDelegator) checkLoadSchemaVersionReady(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	requiredSchema := req.GetSchema()
+	if requiredSchema == nil {
+		return nil
+	}
+
+	requiredVersion := uint64(requiredSchema.GetVersion())
+	_, currentVersion := sd.delegatorSchemaSnapshot()
+	if currentVersion == requiredVersion {
+		return nil
+	}
+
+	err := merr.WrapErrCollectionSchemaVersionNotReadyWithVersion(requiredSchema.GetName(), currentVersion, requiredVersion)
+	sd.getLogger(ctx).RatedInfo(ctx, rate.Limit(10), "delegator rejects load request due to schema version mismatch",
+		mlog.Uint64("currentSchemaVersion", currentVersion),
+		mlog.Uint64("requiredSchemaVersion", requiredVersion),
+		mlog.String("loadScope", req.GetLoadScope().String()),
+		mlog.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 {
+			return info.GetSegmentID()
+		})),
+		mlog.Err(err),
+	)
+	return err
+}
+
 // LoadGrowing load growing segments locally.
 func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	log := sd.getLogger(ctx)
@@ -595,9 +621,9 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 		return nil
 	}
 
-	schema := req.GetSchema()
+	schema, _ := sd.delegatorSchemaSnapshot()
 	if schema == nil {
-		schema = sd.collection.Schema()
+		schema = req.GetSchema()
 	}
 
 	loadMeta := req.GetLoadMeta()
@@ -605,14 +631,17 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 		loadMeta = &querypb.LoadMetaInfo{
 			CollectionID: req.GetCollectionID(),
 		}
+	} else {
+		loadMeta = typeutil.Clone(loadMeta)
 	}
+	loadMeta.SchemaBarrierTs = 0
 
 	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
 	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
 		return err
 	}
 	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
+	return nil
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -632,6 +661,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
 		return merr.WrapErrServiceInternal("load L0 segment is not supported, l0 segment should only be loaded by watchChannel")
+	}
+
+	if err := sd.checkLoadSchemaVersionReady(ctx, req); err != nil {
+		return err
 	}
 
 	// pin all segments to prevent delete buffer has been cleaned up during worker load segments
@@ -692,6 +725,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug(ctx, "work loads segments done")
 
+	if err := sd.checkLoadSchemaVersionReady(ctx, req); err != nil {
+		return err
+	}
+
 	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
 		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
 		return err
@@ -743,8 +780,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 		log.Debug(ctx, "load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
-		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker, entries)
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -775,13 +811,10 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
-	sd.schemaChangeMutex.RLock()
-	defer sd.schemaChangeMutex.RUnlock()
-	if schemaBarrierTs < sd.schemaBarrierTs {
-		return merr.WrapErrServiceInternal("schema barrier changed")
+func (sd *shardDelegator) addDistributionIfLoadSchemaOK(ctx context.Context, req *querypb.LoadSegmentsRequest, entries ...SegmentEntry) error {
+	if err := sd.checkLoadSchemaVersionReady(ctx, req); err != nil {
+		return err
 	}
-
 	// alter distribution
 	sd.distribution.AddDistributions(entries...)
 	return nil
@@ -994,7 +1027,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
-	schemaBarrierTs uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
@@ -1124,7 +1156,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			// Atomically add to distribution while still holding RLock, so no
 			// ProcessDelete can run between "deletes applied" and "segment
 			// visible".
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfLoadSchemaOK(ctx, req, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
@@ -1160,7 +1192,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
 				)
 			}
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfLoadSchemaOK(ctx, req, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
