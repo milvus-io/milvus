@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -63,12 +64,25 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 			mlog.String("targetCluster", cluster.GetClusterId()),
 			mlog.String("authority", authority))
 	}
+	addCDCStreamObservability(config)
 
 	cli, err := milvusclient.New(ctx, config)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to create milvus client")
 	}
 	return cli, nil
+}
+
+func addCDCStreamObservability(config *milvusclient.ClientConfig) {
+	config.DialOptions = append(config.DialOptions,
+		grpc.WithChainStreamInterceptor(cdcStreamInterceptors()...))
+}
+
+func cdcStreamInterceptors() []grpc.StreamClientInterceptor {
+	return []grpc.StreamClientInterceptor{
+		mlog.StreamClientInterceptor(),
+		interceptor.NewObservabilityClientStreamInterceptor(),
+	}
 }
 
 // buildCDCTLSConfig reads per-cluster TLS config from paramtable for CDC outbound connections.

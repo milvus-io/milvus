@@ -28,6 +28,7 @@ import (
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	grpc_interceptors "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors"
 	grpc_logging "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -73,6 +75,10 @@ type logEvents []grpc_logging.LoggableEvent
 
 type fieldFilter struct {
 	fields map[string]struct{}
+}
+
+type milvusStatusResponse interface {
+	GetStatus() *commonpb.Status
 }
 
 // parseMethodFilter parses a comma-separated full-method allowlist. Plain
@@ -440,6 +446,30 @@ func middlewareLogFieldsFromContext(ctx context.Context, call grpc_interceptors.
 	return append(fields, "dstServerID", dstServerID)
 }
 
+func injectMilvusCode(ctx context.Context, resp any) {
+	status := extractMilvusStatus(resp)
+	if status == nil {
+		return
+	}
+
+	code := status.GetCode()
+	if code == 0 && status.GetErrorCode() != commonpb.ErrorCode_Success {
+		code = merr.Code(merr.OldCodeToMerr(status.GetErrorCode()))
+	}
+	grpc_logging.AddFields(ctx, grpc_logging.Fields{"milvus.code", code})
+}
+
+func extractMilvusStatus(resp any) *commonpb.Status {
+	switch resp := resp.(type) {
+	case *commonpb.Status:
+		return resp
+	case milvusStatusResponse:
+		return resp.GetStatus()
+	default:
+		return nil
+	}
+}
+
 func logGRPCMiddlewareEvent(ctx context.Context, level grpc_logging.Level, msg string, fields ...any) {
 	lvl := toMlogLevel(level)
 	if !mlog.LevelEnabled(lvl) {
@@ -499,9 +529,14 @@ func NewObservabilityServerUnaryInterceptor() grpc.UnaryServerInterceptor {
 			return metricsIntercept(ctx, req, info, handler)
 		}
 
-		logIntercept := grpc_logging.UnaryServerInterceptor(middlewareLogger(logCfg.logFields()), middlewareLogOptions(lvl, logCfg.logEvents())...)
+		logFields := logCfg.logFields()
+		logIntercept := grpc_logging.UnaryServerInterceptor(middlewareLogger(logFields), middlewareLogOptions(lvl, logCfg.logEvents())...)
 		return logIntercept(ctx, req, info, func(ctx context.Context, req any) (any, error) {
-			return metricsIntercept(ctx, req, info, handler)
+			resp, err := metricsIntercept(ctx, req, info, handler)
+			if logFields.has("milvus.code") {
+				injectMilvusCode(ctx, resp)
+			}
+			return resp, err
 		})
 	}
 }
@@ -538,9 +573,14 @@ func NewObservabilityClientUnaryInterceptor() grpc.UnaryClientInterceptor {
 			return metricsIntercept(ctx, method, req, reply, cc, invoker, opts...)
 		}
 
-		logIntercept := grpc_logging.UnaryClientInterceptor(middlewareLogger(logCfg.logFields()), middlewareLogOptions(lvl, logCfg.logEvents())...)
+		logFields := logCfg.logFields()
+		logIntercept := grpc_logging.UnaryClientInterceptor(middlewareLogger(logFields), middlewareLogOptions(lvl, logCfg.logEvents())...)
 		return logIntercept(ctx, method, req, reply, cc, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
-			return metricsIntercept(ctx, method, req, reply, cc, invoker, opts...)
+			err := metricsIntercept(ctx, method, req, reply, cc, invoker, opts...)
+			if logFields.has("milvus.code") {
+				injectMilvusCode(ctx, reply)
+			}
+			return err
 		}, opts...)
 	}
 }

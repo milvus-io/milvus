@@ -22,10 +22,23 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestAddCDCStreamObservability(t *testing.T) {
+	existingOption := grpc.EmptyDialOption{}
+	config := &milvusclient.ClientConfig{DialOptions: []grpc.DialOption{existingOption}}
+
+	assert.Len(t, cdcStreamInterceptors(), 2)
+	addCDCStreamObservability(config)
+
+	assert.Len(t, config.DialOptions, 2)
+	assert.Equal(t, existingOption, config.DialOptions[0])
+}
 
 func TestBuildCDCTLSConfig(t *testing.T) {
 	paramtable.Init()

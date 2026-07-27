@@ -1895,7 +1895,7 @@ Set this parameter as the path that you have permission to write.`,
 	}
 	l.GrpcClientLogEvents.Init(base.mgr)
 
-	defaultGRPCLogFields := "protocol,grpc.component,grpc.service,grpc.method,grpc.method_type,peer.address,method,dstServerID,grpc.start_time,grpc.request.deadline,grpc.code,grpc.error,grpc.duration,grpc.send.duration,grpc.recv.duration,grpc.request.type,grpc.response.type"
+	defaultGRPCLogFields := "protocol,grpc.component,grpc.service,grpc.method,grpc.method_type,peer.address,method,dstServerID,grpc.start_time,grpc.request.deadline,grpc.code,milvus.code,grpc.error,grpc.duration,grpc.send.duration,grpc.recv.duration,grpc.request.type,grpc.response.type"
 
 	l.GrpcServerLogFields = ParamItem{
 		Key:          "grpc.log.server.fields",

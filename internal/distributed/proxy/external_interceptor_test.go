@@ -24,6 +24,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
@@ -31,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type mockExternalProxyHook struct {
@@ -78,4 +82,73 @@ func TestExternalProxyUnaryInterceptors_PrivilegeRunsBeforeHook(t *testing.T) {
 		assert.False(t, hookCalled.Load())
 		assert.False(t, handlerCalled)
 	})
+}
+
+func TestExternalProxyStreamInterceptors_RecordMetrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterGRPCMetrics(registry)
+	interceptors := buildExternalProxyStreamInterceptors()
+	assert.Len(t, interceptors, 2)
+	chain := grpc_middleware.ChainStreamServer(interceptors...)
+
+	handlerCalled := false
+	err := chain(
+		nil,
+		&mockExternalServerStream{ctx: context.Background()},
+		&grpc.StreamServerInfo{
+			FullMethod:     milvuspb.MilvusService_CreateReplicateStream_FullMethodName,
+			IsClientStream: true,
+			IsServerStream: true,
+		},
+		func(srv interface{}, stream grpc.ServerStream) error {
+			handlerCalled = true
+			return nil
+		},
+	)
+
+	assert.NoError(t, err)
+	assert.True(t, handlerCalled)
+	metricFamilies, err := registry.Gather()
+	assert.NoError(t, err)
+	assert.True(t, externalMetricHasLabels(metricFamilies, "milvus_grpc_server_handled_total", map[string]string{
+		"grpc_type":    "bidi_stream",
+		"grpc_service": "milvus.proto.milvus.MilvusService",
+		"grpc_method":  "CreateReplicateStream",
+		"grpc_code":    "OK",
+		"node_id":      paramtable.GetStringNodeID(),
+	}))
+}
+
+type mockExternalServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *mockExternalServerStream) Context() context.Context {
+	return s.ctx
+}
+
+func externalMetricHasLabels(metricFamilies []*dto.MetricFamily, name string, labels map[string]string) bool {
+	for _, metricFamily := range metricFamilies {
+		if metricFamily.GetName() != name {
+			continue
+		}
+		for _, metric := range metricFamily.GetMetric() {
+			got := make(map[string]string, len(metric.GetLabel()))
+			for _, label := range metric.GetLabel() {
+				got[label.GetName()] = label.GetValue()
+			}
+			matched := true
+			for key, value := range labels {
+				if got[key] != value {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return true
+			}
+		}
+	}
+	return false
 }
