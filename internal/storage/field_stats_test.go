@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -691,10 +692,8 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 
 	stats2, err := NewFieldStats(1, schemapb.DataType_FloatVector, 1)
 	assert.NoError(t, err)
-	// The error MUST be asserted: dropping it here is why the centroid decode stayed
-	// broken for so long — sonic reported a failure while still filling the slice, so
-	// the assertions below passed and only loadPartitionStats (which checks the error)
-	// ever saw it.
+	// Assert the error: sonic reported a failure while still filling the slice, so
+	// discarding it here kept the assertions below green while the decode was broken.
 	assert.NoError(t, stats2.UnmarshalJSON(bytes))
 	assert.Equal(t, 1, len(stats2.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid}, stats2.Centroids)
@@ -714,11 +713,10 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
 }
 
-// TestVectorFieldStatsDecodeIntoZeroValue covers the path the production code actually
-// takes: a PartitionStatsSnapshot decodes into ZERO-VALUE FieldStats elements inside a
-// slice, with nothing pre-allocated. TestVectorFieldStatsMarshal above missed the bug
-// because it decoded into a FieldStats the test had constructed itself AND discarded
-// the error.
+// TestVectorFieldStatsDecodeIntoZeroValue covers the path production actually takes: a
+// PartitionStatsSnapshot decodes into zero-value FieldStats elements inside a slice,
+// with nothing pre-allocated. TestVectorFieldStatsMarshal missed the bug because it
+// decoded into a FieldStats the test had constructed itself.
 func TestVectorFieldStatsDecodeIntoZeroValue(t *testing.T) {
 	centroid := NewFloatVectorFieldValue([]float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0})
 	centroid2 := NewFloatVectorFieldValue([]float32{9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0})
@@ -752,13 +750,38 @@ func TestVectorFieldStatsDecodeIntoZeroValue(t *testing.T) {
 			got.SegmentStats[1].FieldStats[0].Centroids)
 	})
 
-	t.Run("missing centroids key does not panic", func(t *testing.T) {
+	t.Run("explicit null centroids decodes as empty", func(t *testing.T) {
 		var decoded FieldStats
-		assert.NotPanics(t, func() {
-			err := decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101}`))
-			assert.NoError(t, err)
-		})
+		assert.NoError(t, decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":null}`)))
 		assert.Empty(t, decoded.Centroids)
+	})
+
+	t.Run("missing centroids key is a data integrity error", func(t *testing.T) {
+		var decoded FieldStats
+		var err error
+		// Used to nil-panic on the unguarded deref; a missing key must now be reported
+		// rather than silently yielding an empty centroid set.
+		assert.NotPanics(t, func() {
+			err = decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101}`))
+		})
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("unsupported vector type is rejected", func(t *testing.T) {
+		blob := fmt.Sprintf(`{"fieldID":3,"type":%d,"centroids":[{"value":[1.0,2.0]}]}`,
+			int32(schemapb.DataType_BinaryVector))
+		var decoded FieldStats
+		assert.Error(t, decoded.UnmarshalJSON([]byte(blob)))
+	})
+
+	t.Run("malformed centroid propagates the decode error", func(t *testing.T) {
+		var decoded FieldStats
+		assert.Error(t, decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":[{"value":"nope"}]}`)))
+	})
+
+	t.Run("malformed centroid array propagates the decode error", func(t *testing.T) {
+		var decoded FieldStats
+		assert.Error(t, decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":{"not":"an array"}}`)))
 	})
 }
 

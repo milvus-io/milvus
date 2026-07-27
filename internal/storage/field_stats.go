@@ -171,30 +171,36 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			}
 			stats.BF = bf
 		}
-	} else if value, ok := messageMap["centroids"]; ok && value != nil {
-		// Guarded: an unsupported/vector-less type reaches this branch too, and
-		// dereferencing a missing "centroids" key used to panic.
-		if err := stats.unmarshalCentroids(*value, stats.Type); err != nil {
-			return err
+	} else {
+		// "centroids" carries no omitempty, so a snapshot Milvus wrote always has the
+		// key, null when there is nothing to store. Types without centroid support also
+		// reach this branch, so only a float vector may read a missing key as corruption.
+		value, ok := messageMap["centroids"]
+		switch {
+		case value != nil:
+			if err := stats.unmarshalCentroids(*value, stats.Type); err != nil {
+				return err
+			}
+		case !ok && stats.Type == schemapb.DataType_FloatVector:
+			// Accepting this silently hands segment pruning an empty centroid set,
+			// which degrades to a full scan with no signal.
+			return merr.WrapErrDataIntegrityMsg("field stats of field %d has no centroids key", stats.FieldID)
 		}
 	}
 
 	return nil
 }
 
-// unmarshalCentroids decodes the centroid array into concrete VectorFieldValue
-// implementations chosen by dataType.
+// unmarshalCentroids decodes the centroid array into the concrete VectorFieldValue
+// implementation chosen by dataType.
 //
-// It decodes each centroid explicitly instead of pre-allocating concrete values into
-// the interface slice and letting the decoder reuse them. That older trick depended on
-// the decoder's merge-into-existing-value behaviour, which is NOT portable: this
-// package decodes with `internal/json` (bytedance/sonic), and sonic rejects `null` into
-// a non-empty interface where encoding/json silently leaves it nil. A vector FieldStats
-// always serializes `"bf":null`, so the helper's auxiliary struct — which declared a
-// `bloomfilter.BloomFilterInterface` field it never even read — failed on every vector
-// field, swallowed the error, pre-allocated nothing, and left the real decode below to
-// fail with a misleading "cannot unmarshal into VectorFieldValue". Partition stats with
-// centroids then never loaded, and loadPartitionStats only logs that.
+// Each centroid is decoded explicitly rather than pre-allocating concrete values into
+// the interface slice and letting the decoder fill them in place. That older trick
+// needed a pre-pass over the whole blob, which sonic's arm64 decoder aborts: it rejects
+// null into an interface whose method set carries UnmarshalJSON, and a vector field
+// always serializes "bf" as null. Nothing got pre-allocated, so partition stats with
+// centroids failed to load on arm64 and pruning silently fell back to a full scan
+// (#51869).
 func (stats *FieldStats) unmarshalCentroids(data json.RawMessage, dataType schemapb.DataType) error {
 	var rawCentroids []json.RawMessage
 	if err := json.Unmarshal(data, &rawCentroids); err != nil {
