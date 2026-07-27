@@ -525,12 +525,30 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 // 1. if next target is changed before delegator becomes serviceable, we need to sync the new next target to delegator to support partial search
 // 2. if next target is ready to read, we need to sync the next target to delegator to support full search
 func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel, newVersion int64) bool {
-	var partitions []int64
-	var indexInfo []*indexpb.IndexInfo
-	var schema *schemapb.CollectionSchema
-	var schemaBarrierTs uint64
-	var err error
-	metadataInitialized := false
+	if len(collReadyDelegatorList) == 0 {
+		return true
+	}
+
+	collectionInfo, err := ob.broker.DescribeCollection(ctx, collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "failed to describe collection", mlog.Err(err))
+		return false
+	}
+	schema := collectionInfo.GetSchema()
+	schemaBarrierTs := collectionInfo.GetUpdateTimestamp()
+
+	partitions, err := utils.GetPartitions(ctx, ob.targetMgr, collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "failed to get partitions", mlog.Err(err))
+		return false
+	}
+
+	indexInfo, err := ob.broker.ListIndexes(ctx, collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
+		return false
+	}
+
 	for _, d := range collReadyDelegatorList {
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
 		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
@@ -538,30 +556,6 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			mlog.Warn(ctx, "replica not found", mlog.FieldNodeID(d.Node), mlog.FieldCollectionID(collectionID))
 			// should not happen, don't update current target if replica not found
 			return false
-		}
-		// init all the meta information
-		if !metadataInitialized {
-			collectionInfo, err := ob.broker.DescribeCollection(ctx, collectionID)
-			if err != nil {
-				mlog.Warn(ctx, "failed to describe collection", mlog.Err(err))
-				return false
-			}
-			schema = collectionInfo.GetSchema()
-			schemaBarrierTs = collectionInfo.GetUpdateTimestamp()
-
-			partitions, err = utils.GetPartitions(ctx, ob.targetMgr, collectionID)
-			if err != nil {
-				mlog.Warn(ctx, "failed to get partitions", mlog.Err(err))
-				return false
-			}
-
-			// Get collection index info
-			indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
-			if err != nil {
-				mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
-				return false
-			}
-			metadataInitialized = true
 		}
 
 		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo) {
