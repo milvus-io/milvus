@@ -46,7 +46,11 @@ const (
 	CauseUser   = "user"   // the request itself is at fault: bad arguments, missing auth, no such collection
 	CauseSystem = "system" // Milvus is at fault: component failure, IO error, internal bug
 	CauseCancel = "cancel" // neither party: the client gave up before the request completed
-	CauseNA     = "na"     // no cause applies: the request did not hard-fail
+	// CauseNA is the empty string on purpose: Prometheus treats an empty label
+	// value as equivalent to the label being absent, so success/total/retry/
+	// abandon series carry no meaningful cause and stay byte-identical to what
+	// pre-2.6.19 emitted -- only fail/rejected actually carry user/system/cancel.
+	CauseNA = "" // no cause applies: the request did not hard-fail
 
 	HybridSearchLabel = "hybrid_search"
 
