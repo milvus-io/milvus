@@ -287,10 +287,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFini
 		JobId:        1,
 		CollectionId: 100,
 	})
-	// A non-finished task is now surfaced as a retryable not-ready signal (so a
-	// concurrent aggregator does not fail the job), not a hard error, but the
-	// behavior is unchanged: return an error and do not apply any segment update.
-	assert.ErrorIs(t, err, errExternalRefreshNotReady)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "non-finished task")
 	assert.Equal(t, 0, updateCalls)
 }
 
