@@ -225,6 +225,10 @@ func (s *DelegatorDataSuite) genTextCollection() {
 }
 
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
+	s.genCollectionWithFunctionContext(context.Background())
+}
+
+func (s *DelegatorDataSuite) genCollectionWithFunctionContext(ctx context.Context) {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 		Name:    "TestCollection",
 		Version: 1,
@@ -259,7 +263,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		}},
 	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(ctx, s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 	s.allocFunctionRunnersForTest()

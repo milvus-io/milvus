@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -609,7 +610,7 @@ func segmentLoadInfosWithBM25Stats(infos []*querypb.SegmentLoadInfo) ([]*querypb
 	return infosWithBM25Stats, nil
 }
 
-func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest, reopenRepairs []*reopenBM25RepairEntry) error {
 	log := sd.getLogger(ctx).With(
 		mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 		mlog.String("loadScope", req.GetLoadScope().String()),
@@ -626,6 +627,15 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 				"sync collection %d index metadata after segment post-load", req.GetCollectionID())
 		}
 
+		if req.GetLoadScope() == querypb.LoadScope_Reopen {
+			if err := sd.loadReopenBM25RepairsWithSchemaLease(ctx, reopenRepairs); err != nil {
+				log.Warn(ctx, "failed to repair reopened bm25 stats", mlog.Err(err))
+				return merr.WrapErrCollectionRuntimeNotReadyErr(err,
+					"repair reopened BM25 stats for collection %d", req.GetCollectionID())
+			}
+			return nil
+		}
+
 		infosWithBM25Stats, err := segmentLoadInfosWithBM25Stats(req.GetInfos())
 		if err != nil {
 			log.Warn(ctx, "resolve reopened bm25 stats failed", mlog.Err(err))
@@ -638,6 +648,34 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 		}
 		return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
 	})
+}
+
+// loadReopenBM25RepairsWithSchemaLease runs while handleReopenPostLoad holds
+// schemaChangeMutex.RLock. Each successful or obsolete entry is retired on its
+// own; failed entries remain registered and are started by LoadSegments' defer.
+func (sd *shardDelegator) loadReopenBM25RepairsWithSchemaLease(ctx context.Context, entries []*reopenBM25RepairEntry) error {
+	pool := segments.GetLoadPool()
+	futures := make([]*conc.Future[any], 0, len(entries))
+	seen := make(map[*reopenBM25RepairEntry]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
+		if _, ok := seen[entry]; ok {
+			continue
+		}
+		seen[entry] = struct{}{}
+		entry := entry
+		futures = append(futures, pool.Submit(func() (any, error) {
+			obsolete, err := sd.loadReopenBM25StatsWithSchemaLease(ctx, entry)
+			if obsolete || err == nil {
+				sd.finishReopenBM25Repair(entry)
+				return nil, nil
+			}
+			return nil, err
+		}))
+	}
+	return conc.BlockOnAll(futures...)
 }
 
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
@@ -741,6 +779,28 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	req.Base.TargetID = targetNodeID
 	log.Debug(ctx, "worker loads segments...")
+	// A multi-segment request can partially succeed. Reserve repair state after
+	// each successful worker Reopen, so any later return keeps that segment's
+	// leader-side BM25 work recoverable.
+	var reopenRepairMu sync.Mutex
+	var reopenRepairs []*reopenBM25RepairEntry
+	reserveReopenRepair := func(loadReq *querypb.LoadSegmentsRequest) {
+		if req.GetLoadScope() != querypb.LoadScope_Reopen {
+			return
+		}
+		entries := sd.reserveReopenBM25Repairs(loadReq)
+		reopenRepairMu.Lock()
+		reopenRepairs = append(reopenRepairs, entries...)
+		reopenRepairMu.Unlock()
+	}
+	defer func() {
+		reopenRepairMu.Lock()
+		entries := append([]*reopenBM25RepairEntry(nil), reopenRepairs...)
+		reopenRepairMu.Unlock()
+		for _, entry := range entries {
+			sd.startReopenBM25Repair(entry)
+		}
+	}()
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 		segmentID := req.GetInfos()[0].GetSegmentID()
@@ -765,12 +825,19 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		for _, req := range reqs {
 			req := req
 			group.Go(func() error {
-				return sLoad(ctx, req)
+				err := sLoad(ctx, req)
+				if err == nil {
+					reserveReopenRepair(req)
+				}
+				return err
 			})
 		}
 		err = group.Wait()
 	} else {
 		err = sLoad(ctx, req)
+		if err == nil {
+			reserveReopenRepair(req)
+		}
 	}
 
 	if err != nil {
@@ -784,7 +851,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 
 	if req.GetLoadScope() == querypb.LoadScope_Reopen || req.GetLoadScope() == querypb.LoadScope_Stats {
-		return sd.handleReopenPostLoad(ctx, req)
+		return sd.handleReopenPostLoad(ctx, req, reopenRepairs)
 	}
 
 	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {

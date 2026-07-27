@@ -168,6 +168,13 @@ type shardDelegator struct {
 	distribution *distribution
 	// idfOracle is published once after full initialization and is never replaced.
 	idfOracle atomic.Pointer[idfOracleHolder]
+	// reopenBM25Repairs retries leader-side BM25 post-load work after the worker
+	// has already committed a Reopen. QueryCoord cannot infer this missing local
+	// state from segment distribution alone, so the delegator owns the repair.
+	reopenBM25RepairMu     sync.Mutex
+	reopenBM25Repairs      map[reopenBM25RepairKey]*reopenBM25RepairEntry
+	reopenBM25RepairCtx    context.Context
+	reopenBM25RepairCancel context.CancelFunc
 
 	segmentManager segments.SegmentManager
 	// stream delete buffer
@@ -1479,6 +1486,9 @@ func (w *StatusWrapper) GetStatus() *commonpb.Status {
 func (sd *shardDelegator) Close() {
 	sd.lifetime.SetState(lifetime.Stopped)
 	sd.lifetime.Close()
+	if sd.reopenBM25RepairCancel != nil {
+		sd.reopenBM25RepairCancel()
+	}
 	// broadcast to all waitTsafe to quit
 	sd.tsCond.LockAndBroadcast()
 	sd.tsCond.L.Unlock()
@@ -1597,6 +1607,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 			log.Info(ctx, "resize delegator post-load concurrency", mlog.Int("concurrency", concurrency))
 		}
 	})
+	// WatchDmChannels owns ctx, so detach its cancellation and stop repairs from
+	// Close instead of when the watch RPC returns.
+	reopenBM25RepairCtx, reopenBM25RepairCancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	sd := &shardDelegator{
 		collectionID:      collectionID,
@@ -1620,6 +1633,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		l0ForwardPolicy:            policy,
 		postLoadSem:                postLoadSem,
 		postLoadConfigHandler:      postLoadConfigHandler,
+		reopenBM25Repairs:          make(map[reopenBM25RepairKey]*reopenBM25RepairEntry),
+		reopenBM25RepairCtx:        reopenBM25RepairCtx,
+		reopenBM25RepairCancel:     reopenBM25RepairCancel,
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	for _, opt := range opts {

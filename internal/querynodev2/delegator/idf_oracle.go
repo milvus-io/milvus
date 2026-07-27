@@ -45,12 +45,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const memoryHeadroom = 4 * 1024 * 1024 // 4MB headroom for Insert path, ~50K unique tokens
+const (
+	memoryHeadroom              = 4 * 1024 * 1024 // 4MB headroom for Insert path, ~50K unique tokens
+	segmentLoadLockPollInterval = 10 * time.Millisecond
+)
 
 type IDFOracle interface {
 	SetNext(snapshot *snapshot)
@@ -74,6 +78,16 @@ type IDFOracle interface {
 
 	Start()
 	Close()
+}
+
+type reopenBM25InstallFence func() (unlock func(), obsolete bool, err error)
+
+// reopenBM25IDFOracle keeps the repair-only install fence out of the public
+// IDFOracle contract. Production uses *idfOracle; the narrow extension avoids
+// forcing unrelated test or package-local implementations to expose it.
+type reopenBM25IDFOracle interface {
+	IDFOracle
+	loadSealedForReopenWithFence(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, paths map[int64][]string, cm storage.ChunkManager, fence reopenBM25InstallFence) (obsolete bool, err error)
 }
 
 type bm25FunctionSet map[typeutil.UniqueID]*schemapb.FunctionSchema
@@ -399,8 +413,11 @@ type idfOracle struct {
 	dirPath string
 
 	closeCh chan struct{}
-	sf      conc.Singleflight[any]
-	wg      sync.WaitGroup
+	// Actual same-segment I/O is serialized. Reopen calls do not share results,
+	// because concurrent requests may carry different BM25 fields.
+	segmentLoadLock *lock.KeyLock[int64]
+	sf              conc.Singleflight[any]
+	wg              sync.WaitGroup
 
 	// resource tracking for caching layer
 	resourceMu    sync.Mutex
@@ -408,7 +425,8 @@ type idfOracle struct {
 	chargedDisk   int64
 }
 
-// now only used for test
+// TargetVersion reports the distribution snapshot currently applied by the
+// oracle. Reopen repair uses it to avoid racing a pending IDF distribution sync.
 func (o *idfOracle) TargetVersion() int64 {
 	return o.targetVersion.Load()
 }
@@ -493,10 +511,45 @@ func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 	return nil
 }
 
+func (o *idfOracle) lockSegmentLoad(ctx context.Context, segmentID int64) error {
+	if o.segmentLoadLock.TryLock(segmentID) {
+		if err := ctx.Err(); err != nil {
+			o.segmentLoadLock.Unlock(segmentID)
+			return err
+		}
+		return nil
+	}
+
+	ticker := time.NewTicker(segmentLoadLockPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if o.segmentLoadLock.TryLock(segmentID) {
+				if err := ctx.Err(); err != nil {
+					o.segmentLoadLock.Unlock(segmentID)
+					return err
+				}
+				return nil
+			}
+		}
+	}
+}
+
+func (o *idfOracle) withSegmentLoad(ctx context.Context, segmentID int64, load func() (any, error)) (any, error) {
+	if err := o.lockSegmentLoad(ctx, segmentID); err != nil {
+		return nil, err
+	}
+	defer o.segmentLoadLock.Unlock(segmentID)
+	return load()
+}
+
 // LoadSealed loads BM25 stats for a sealed segment from remote storage to local disk.
 // Idempotent: skips if segment already loaded.
 func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
-	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
+	load := func() (any, error) {
 		if o.sealed.Contain(segmentID) {
 			return nil, nil
 		}
@@ -544,19 +597,53 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 
 		o.syncResource()
 		return nil, nil
+	}
+	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
+		return o.withSegmentLoad(ctx, segmentID, load)
 	})
 	return err
 }
 
 func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager, activateIfReadable bool) error {
-	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
-	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
-	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
+	_, err := o.loadSealedForReopen(ctx, segmentID, loadInfo, nil, cm, activateIfReadable, nil)
+	return err
+}
+
+func (o *idfOracle) loadSealedForReopenWithFence(
+	ctx context.Context,
+	segmentID int64,
+	loadInfo *querypb.SegmentLoadInfo,
+	paths map[int64][]string,
+	cm storage.ChunkManager,
+	fence reopenBM25InstallFence,
+) (bool, error) {
+	return o.loadSealedForReopen(ctx, segmentID, loadInfo, paths, cm, true, fence)
+}
+
+func (o *idfOracle) loadSealedForReopen(
+	ctx context.Context,
+	segmentID int64,
+	loadInfo *querypb.SegmentLoadInfo,
+	paths map[int64][]string,
+	cm storage.ChunkManager,
+	activateIfReadable bool,
+	fence reopenBM25InstallFence,
+) (bool, error) {
+	// Reopen is additive here: it installs BM25 fields missing from the local
+	// sealed entry. Replacing an already-installed field generation requires a
+	// separate atomic swap/rollback protocol and is intentionally not inferred
+	// from DataVersion or manifest version in this path.
+	obsolete := false
+	_, err := o.withSegmentLoad(ctx, segmentID, func() (any, error) {
 		logger := mlog.With(mlog.FieldSegmentID(segmentID))
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
-		if err != nil {
-			logger.Warn(ctx, "load remote segment bm25 stats for reopen failed", mlog.Err(err))
-			return nil, err
+		logpaths := paths
+		if logpaths == nil {
+			var err error
+			logpaths, err = packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+			if err != nil {
+				logger.Warn(ctx, "load remote segment bm25 stats for reopen failed", mlog.Err(err))
+				return nil, err
+			}
 		}
 		if len(logpaths) == 0 {
 			return nil, nil
@@ -571,6 +658,22 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			missingPaths[fieldID] = paths
 		}
 		if len(missingPaths) == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if fence != nil {
+				unlock, fenced, err := fence()
+				if err != nil {
+					return nil, err
+				}
+				if fenced {
+					obsolete = true
+					return nil, nil
+				}
+				if unlock != nil {
+					defer unlock()
+				}
+			}
 			if existedBeforeLoad && activateIfReadable && !segStats.activate.Load() {
 				existingStats, err := segStats.FetchStats()
 				if err != nil {
@@ -605,6 +708,22 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 		if err != nil {
 			return nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if fence != nil {
+			unlock, fenced, err := fence()
+			if err != nil {
+				return nil, err
+			}
+			if fenced {
+				obsolete = true
+				return nil, nil
+			}
+			if unlock != nil {
+				defer unlock()
+			}
+		}
 
 		var existingStats bm25Stats
 		if existedBeforeLoad && activateIfReadable && !segStats.activate.Load() {
@@ -637,6 +756,9 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 				}
 			}
 			if len(installedFields) == 0 {
+				// Another registration path already owns these files. Do not let
+				// the deferred failure cleanup remove its installed field dirs.
+				installed = true
 				segStats.Unlock()
 				o.Unlock()
 				return nil, nil
@@ -677,7 +799,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 		o.syncResource()
 		return nil, nil
 	})
-	return err
+	return obsolete, err
 }
 
 type streamLoadResult struct {
@@ -1139,15 +1261,16 @@ func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][
 
 func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracle {
 	return &idfOracle{
-		channel:        channel,
-		targetVersion:  atomic.NewInt64(0),
-		current:        newBm25Stats(functions),
-		growing:        make(map[int64]*growingBm25Stats),
-		sealed:         typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
-		sealedDiskSize: atomic.NewInt64(0),
-		dirPath:        path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),
-		syncNotify:     make(chan struct{}, 1),
-		closeCh:        make(chan struct{}),
-		sf:             conc.Singleflight[any]{},
+		channel:         channel,
+		targetVersion:   atomic.NewInt64(0),
+		current:         newBm25Stats(functions),
+		growing:         make(map[int64]*growingBm25Stats),
+		sealed:          typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
+		sealedDiskSize:  atomic.NewInt64(0),
+		dirPath:         path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),
+		syncNotify:      make(chan struct{}, 1),
+		closeCh:         make(chan struct{}),
+		segmentLoadLock: lock.NewKeyLock[int64](),
+		sf:              conc.Singleflight[any]{},
 	}
 }
