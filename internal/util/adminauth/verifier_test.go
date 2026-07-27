@@ -49,6 +49,7 @@ func hashed(t *testing.T, password string) string {
 func clientReturning(t *testing.T, passwordHash string) types.MixCoordClient {
 	t.Helper()
 	cli := mocks.NewMockMixCoordClient(t)
+	cli.EXPECT().Close().Return(nil).Maybe()
 	cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, req *rootcoordpb.GetCredentialRequest, _ ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 			return &rootcoordpb.GetCredentialResponse{
@@ -60,17 +61,30 @@ func clientReturning(t *testing.T, passwordHash string) types.MixCoordClient {
 	return cli
 }
 
-func TestVerifier_AcceptsCorrectRootPassword(t *testing.T) {
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
-		return clientReturning(t, hashed(t, testPassword)), nil
+func newTestVerifier(
+	t *testing.T,
+	lifetimeCtx context.Context,
+	newClient func(context.Context) (types.MixCoordClient, error),
+) *RootCredentialVerifier {
+	t.Helper()
+	verifier := NewRootCredentialVerifier(lifetimeCtx, newClient)
+	t.Cleanup(func() {
+		assert.NoError(t, verifier.Close())
 	})
+	return verifier
+}
+
+func TestVerifier_AcceptsCorrectRootPassword(t *testing.T) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		return clientReturning(t, hashed(t, testPassword)), nil
+	}).Verify
 	assert.NoError(t, verify(context.Background(), "root", testPassword))
 }
 
 func TestVerifier_RejectsWrongPassword(t *testing.T) {
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		return clientReturning(t, hashed(t, testPassword)), nil
-	})
+	}).Verify
 	err := verify(context.Background(), "root", "not-the-password")
 	assert.ErrorIs(t, err, internalhttp.ErrInvalidCredential)
 	assert.True(t, internalhttp.IsAuthenticationError(err),
@@ -82,10 +96,10 @@ func TestVerifier_RejectsNonRootWithoutDialing(t *testing.T) {
 	// root-only, so dialing the coord to check another user's password would be
 	// wasted work and would let an unauthenticated caller drive load onto coord.
 	var dials int32
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		atomic.AddInt32(&dials, 1)
 		return clientReturning(t, hashed(t, testPassword)), nil
-	})
+	}).Verify
 
 	assert.ErrorIs(t, verify(context.Background(), "alice", testPassword), internalhttp.ErrInvalidCredential)
 	assert.Zero(t, atomic.LoadInt32(&dials), "must not dial mix coord for a non-root user")
@@ -96,10 +110,10 @@ func TestVerifier_DialsLazilyAndReusesClient(t *testing.T) {
 	// off every node's boot path and makes it free while adminAuthEnabled is
 	// false. Once dialed, the client is reused.
 	var dials int32
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		atomic.AddInt32(&dials, 1)
 		return clientReturning(t, hashed(t, testPassword)), nil
-	})
+	}).Verify
 	assert.Zero(t, atomic.LoadInt32(&dials), "constructing the verifier must not dial")
 
 	assert.NoError(t, verify(context.Background(), "root", testPassword))
@@ -111,12 +125,12 @@ func TestVerifier_FailedDialIsNotCached(t *testing.T) {
 	// A coord that is unreachable while a node boots must not permanently
 	// disable management access on that node, so a failed dial is retried.
 	var dials int32
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		if atomic.AddInt32(&dials, 1) == 1 {
 			return nil, errors.New("coord unreachable")
 		}
 		return clientReturning(t, hashed(t, testPassword)), nil
-	})
+	}).Verify
 
 	err := verify(context.Background(), "root", testPassword)
 	assert.Error(t, err)
@@ -128,12 +142,13 @@ func TestVerifier_FailedDialIsNotCached(t *testing.T) {
 }
 
 func TestVerifier_RejectsOnRPCError(t *testing.T) {
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		cli := mocks.NewMockMixCoordClient(t)
+		cli.EXPECT().Close().Return(nil).Maybe()
 		cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
 			Return(nil, errors.New("rpc failed")).Maybe()
 		return cli, nil
-	})
+	}).Verify
 	err := verify(context.Background(), "root", testPassword)
 	assert.Error(t, err)
 	assert.False(t, internalhttp.IsAuthenticationError(err),
@@ -143,14 +158,15 @@ func TestVerifier_RejectsOnRPCError(t *testing.T) {
 func TestVerifier_RejectsOnErrorStatus(t *testing.T) {
 	// A non-OK Status must fail closed. Without checking it, a response whose
 	// Password field is empty would be compared against an empty hash.
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		cli := mocks.NewMockMixCoordClient(t)
+		cli.EXPECT().Close().Return(nil).Maybe()
 		cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
 			Return(&rootcoordpb.GetCredentialResponse{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "boom"},
 			}, nil).Maybe()
 		return cli, nil
-	})
+	}).Verify
 	err := verify(context.Background(), "root", testPassword)
 	assert.Error(t, err)
 	assert.False(t, internalhttp.IsAuthenticationError(err),
@@ -160,9 +176,110 @@ func TestVerifier_RejectsOnErrorStatus(t *testing.T) {
 func TestVerifier_RejectsEmptyStoredHash(t *testing.T) {
 	// Defense in depth against an OK response carrying no credential: bcrypt
 	// must never be asked to treat "" as a valid hash for "".
-	verify := NewRootCredentialVerifier(func(context.Context) (types.MixCoordClient, error) {
+	verify := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
 		return clientReturning(t, ""), nil
-	})
+	}).Verify
 	assert.Error(t, verify(context.Background(), "root", ""))
 	assert.Error(t, verify(context.Background(), "root", testPassword))
+}
+
+func TestVerifier_RPCFailureDoesNotCancelClientContext(t *testing.T) {
+	// mix.NewClient does not dial immediately. The first actual RPC may fail
+	// while MixCoord is unavailable, but the cached client must retain a live
+	// service-discovery context so its next RPC can reconnect after recovery.
+	var creates int32
+	var calls int32
+	var clientCtx context.Context
+	passwordHash := hashed(t, testPassword)
+
+	cli := mocks.NewMockMixCoordClient(t)
+	cli.EXPECT().Close().Return(nil).Maybe()
+	cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, req *rootcoordpb.GetCredentialRequest, _ ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+			if err := clientCtx.Err(); err != nil {
+				return nil, err
+			}
+			if atomic.AddInt32(&calls, 1) == 1 {
+				return nil, errors.New("mix coord unavailable")
+			}
+			return &rootcoordpb.GetCredentialResponse{
+				Status:   merr.Success(),
+				Username: req.GetUsername(),
+				Password: passwordHash,
+			}, nil
+		}).Twice()
+
+	verifier := newTestVerifier(t, context.Background(), func(ctx context.Context) (types.MixCoordClient, error) {
+		atomic.AddInt32(&creates, 1)
+		clientCtx = ctx
+		return cli, nil
+	})
+
+	err := verifier.Verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err))
+	assert.NoError(t, clientCtx.Err(), "finishing one HTTP request must not cancel the cached client")
+	assert.NoError(t, verifier.Verify(context.Background(), "root", testPassword),
+		"the cached client must recover once MixCoord is reachable")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&creates))
+}
+
+func TestVerifier_CanceledRequestDoesNotPoisonClient(t *testing.T) {
+	var calls int32
+	var clientCtx context.Context
+	passwordHash := hashed(t, testPassword)
+
+	cli := mocks.NewMockMixCoordClient(t)
+	cli.EXPECT().Close().Return(nil).Maybe()
+	cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, _ ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+			if atomic.AddInt32(&calls, 1) == 1 {
+				return nil, ctx.Err()
+			}
+			return &rootcoordpb.GetCredentialResponse{
+				Status:   merr.Success(),
+				Username: req.GetUsername(),
+				Password: passwordHash,
+			}, nil
+		}).Twice()
+
+	verifier := newTestVerifier(t, context.Background(), func(ctx context.Context) (types.MixCoordClient, error) {
+		clientCtx = ctx
+		return cli, nil
+	})
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+	err := verifier.Verify(requestCtx, "root", testPassword)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NoError(t, clientCtx.Err(), "request cancellation must not cancel the cached client")
+	assert.NoError(t, verifier.Verify(context.Background(), "root", testPassword))
+}
+
+func TestVerifier_CloseReleasesClientAndStopsNewChecks(t *testing.T) {
+	var creates int32
+	var clientCtx context.Context
+	cli := mocks.NewMockMixCoordClient(t)
+	cli.EXPECT().GetCredential(mock.Anything, mock.Anything).
+		Return(&rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: "root",
+			Password: hashed(t, testPassword),
+		}, nil).Once()
+	cli.EXPECT().Close().Return(nil).Once()
+
+	verifier := newTestVerifier(t, context.Background(), func(ctx context.Context) (types.MixCoordClient, error) {
+		atomic.AddInt32(&creates, 1)
+		clientCtx = ctx
+		return cli, nil
+	})
+	assert.NoError(t, verifier.Verify(context.Background(), "root", testPassword))
+	assert.NoError(t, verifier.Close())
+	assert.ErrorIs(t, clientCtx.Err(), context.Canceled)
+
+	err := verifier.Verify(context.Background(), "root", testPassword)
+	assert.Error(t, err)
+	assert.False(t, internalhttp.IsAuthenticationError(err))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&creates), "a closed verifier must not recreate its client")
+	assert.NoError(t, verifier.Close(), "Close should be idempotent")
 }

@@ -892,12 +892,13 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Key:          "common.security.adminAuthEnabled",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc: `Whether to require HTTP Basic Auth with root credentials for the
-management plane on the metrics port (default 9091): /management/*, /log/level,
-/eventlog and /debug/pprof/*.
-When false (default), these endpoints are unauthenticated, matching the
-historical behavior; this assumes the metrics port is reachable only from
-trusted networks.
+		Doc: `Whether to require HTTP Basic Auth with root credentials for operator
+endpoints. This covers /management/*, /log/level, /eventlog and /debug/pprof/*
+on the metrics port (default 9091), plus proxy config views and telemetry
+operator routes under /api/v1.
+When false (default, for upgrade compatibility), these endpoints are
+unauthenticated. Treat this as an opt-in mitigation, not as a network security
+boundary.
 When true, requests must provide the milvus root user's credentials via HTTP
 Basic Auth. The auth check is independent of common.security.authorizationEnabled,
 so deployments may run with the data-plane (gRPC, /api/v1/*) authenticated
@@ -910,8 +911,10 @@ metadata, so when this is true they verify the password through the mix coord.
 If the mix coord is unreachable, their management plane and pprof answer 503
 until it recovers.
 
-Recommended: true for any deployment where the metrics port is reachable from
-untrusted networks.`,
+Recommended: true whenever the metrics port is exposed beyond localhost. Port
+9091 uses plaintext HTTP, so expose it only on a trusted private network or
+behind a TLS-terminating proxy, and rotate the default root password before
+enabling this option.`,
 		Export: true,
 		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
 		// Immutable key's value into etcd on first startup, and the etcd source
@@ -937,7 +940,6 @@ untrusted networks.`,
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
-		Immutable:    true,
 		Sensitive:    true,
 	}
 	p.SuperUsers.Init(base.mgr)
@@ -992,7 +994,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "false",
 		Doc:          "Whether to enable the /expr endpoint for debugging.",
 		Export:       true,
-		Immutable:    true,
 	}
 	p.ExprEnabled.Init(base.mgr)
 
@@ -1647,10 +1648,11 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.SampleFraction.Init(base.mgr)
 
 	t.JaegerURL = ParamItem{
-		Key:     "trace.jaeger.url",
-		Version: "2.3.0",
-		Doc:     "when exporter is jaeger should set the jaeger's URL",
-		Export:  true,
+		Key:       "trace.jaeger.url",
+		Version:   "2.3.0",
+		Doc:       "when exporter is jaeger should set the jaeger's URL",
+		Export:    true,
+		Sensitive: true,
 	}
 	t.JaegerURL.Init(base.mgr)
 
@@ -1686,6 +1688,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
+		Sensitive:    true,
 	}
 	t.OtlpHeaders.Init(base.mgr)
 

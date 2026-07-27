@@ -23,25 +23,32 @@ import (
 
 func TestHideSensitive(t *testing.T) {
 	visibleConfigs := map[string]string{
-		"dummy":      "secretAccessKey",
-		"Foo":        "password",
-		"api":        "apikey",
-		"access":     "XXX",
-		"key":        "XXX",
-		"credential": "XXX",
+		// Classification is based on the declared key, not on the value.
+		"common.security.authorizationEnabled": "password",
+		"queryNode.gracefulStopTimeout":        "secretAccessKey",
 	}
 	invisibleConfigs := map[string]string{
-		"MyPassword":                          "123456",
-		"your_secret_access_Key":              "ABCD",
-		"SECRETACCESSKEY2":                    "XXX",
-		"minio.secretAccessKey":               "secretAccessKey",
-		"common.security.defaultRootPassword": "milvus",
-		"credentialaksk1secretaccesskey":      "XXX",
-		"credential.aksk1.secret_access_key":  "XXX",
-		"credentialapikey1apikey":             "apikey",
-		"credential.apikey1.apikey":           "apikey",
-		"credentialgcp1credentialjson":        "credential",
-		"credential.gcp1.credentialjson":      "credential",
+		"MyPassword":                                     "123456",
+		"your_secret_access_Key":                         "ABCD",
+		"SECRETACCESSKEY2":                               "XXX",
+		"minio.secretAccessKey":                          "secretAccessKey",
+		"common.security.defaultRootPassword":            "milvus",
+		"credentialaksk1secretaccesskey":                 "XXX",
+		"credential.aksk1.secret_access_key":             "XXX",
+		"credentialapikey1apikey":                        "apikey",
+		"credential.apikey1.apikey":                      "apikey",
+		"credentialgcp1credentialjson":                   "credential",
+		"credential.gcp1.credentialjson":                 "credential",
+		"credential":                                     "XXX",
+		"OPAQUE_RUNTIME_VALUE":                           "vendor-secret-with-an-opaque-name",
+		"kafka.consumer.ssl.key.pem":                     "inline-private-key",
+		"function.analyzer.lindera.download_urls.ipadic": "https://example.invalid/dict?signature=secret",
+		"pulsar.authParams":                              "token:broker-secret",
+		// These keys contain none of the legacy password/secret/token name
+		// fragments. They are redacted because their ParamItems are explicitly
+		// marked Sensitive, which keeps the WebUI aligned with config/get.
+		"minio.address":  "object-store.internal",
+		"etcd.endpoints": "etcd.internal:2379",
 	}
 
 	copiedConfigs := make(map[string]string)
@@ -69,13 +76,13 @@ func TestGetConfigs(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	configs := map[string]string{"key": "value"}
+	configs := map[string]string{"common.security.authorizationEnabled": "false"}
 	handler := getConfigs(configs)
 	handler(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "key")
-	assert.Contains(t, w.Body.String(), "value")
+	assert.Contains(t, w.Body.String(), "common.security.authorizationEnabled")
+	assert.Contains(t, w.Body.String(), "false")
 }
 
 func TestGetClusterInfo(t *testing.T) {

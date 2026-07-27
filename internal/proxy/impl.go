@@ -6457,14 +6457,20 @@ func DeregisterSubLabel(subLabel string) {
 
 // RegisterRestRouter registers the router for the proxy
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
+	adminAuth := adminAuthMiddleware()
+
 	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
-	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView()))
+	// Cluster configs include credentials and security posture. Keep this Gin
+	// route behind the same optional root gate as /management/config/get.
+	router.GET(http.ClusterConfigsPath, adminAuth, getConfigs(paramtable.Get().GetConfigsView()))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
-	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	// Hook configuration is plugin-defined and may contain credentials under
+	// names the core cannot classify. Hide unknown values and require the same
+	// optional root gate as the cluster config view.
+	router.GET(http.HookConfigsPath, adminAuth, getConfigs(paramtable.GetHookParams().GetAll()))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
@@ -6502,14 +6508,19 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.CollectionListPath, listCollection(node))
 	router.GET(http.CollectionDescPath, describeCollection(node))
 
-	// Telemetry and command management API (with authentication middleware)
+	// Telemetry and command management API.
 	telemetryAuth := TelemetryAuthMiddleware()
-	router.GET(http.TelemetryClientsPath, telemetryAuth, getTelemetryClients(node))
-	router.GET(http.TelemetryClientsPath+"/:clientId", telemetryAuth, getTelemetryClientMetrics(node))
-	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, getTelemetryClientConfig(node))
-	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, getTelemetryClientHistory(node))
-	router.POST(http.TelemetryCommandsPath, telemetryAuth, postTelemetryCommand(node))
-	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, deleteTelemetryCommand(node))
+	// Telemetry responses can include command payloads/replies and client
+	// configuration, while command routes mutate connected clients. Keep the
+	// whole operator surface behind the optional root gate; the generic
+	// telemetry middleware alone permits any valid user when data-plane auth is
+	// enabled and permits everyone when it is disabled.
+	router.GET(http.TelemetryClientsPath, telemetryAuth, adminAuth, getTelemetryClients(node))
+	router.GET(http.TelemetryClientsPath+"/:clientId", telemetryAuth, adminAuth, getTelemetryClientMetrics(node))
+	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, adminAuth, getTelemetryClientConfig(node))
+	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, adminAuth, getTelemetryClientHistory(node))
+	router.POST(http.TelemetryCommandsPath, telemetryAuth, adminAuth, postTelemetryCommand(node))
+	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, adminAuth, deleteTelemetryCommand(node))
 }
 
 func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {

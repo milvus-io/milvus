@@ -464,7 +464,13 @@ func (mr *MilvusRoles) Run() {
 	// pprof would answer 503 to root as well as to attackers. This occupies the
 	// fallback slot only: proxy and mix coord register in-process verifiers that
 	// take precedence, so single-process standalone never makes this RPC.
-	http.RegisterFallbackPasswordVerifyFunc(adminauth.NewRootCredentialVerifier(mix.NewClient))
+	rootCredentialVerifier := adminauth.NewRootCredentialVerifier(ctx, mix.NewClient)
+	http.RegisterFallbackPasswordVerifyFunc(rootCredentialVerifier.Verify)
+	defer func() {
+		if err := rootCredentialVerifier.Close(); err != nil {
+			mlog.Warn(ctx, "close root credential verifier failed", mlog.Err(err))
+		}
+	}()
 
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)

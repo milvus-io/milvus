@@ -1088,16 +1088,19 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
-    # Whether to require HTTP Basic Auth with root credentials for the management
-    # plane on the metrics port (default 9091): /management/*, /log/level,
-    # /eventlog and /debug/pprof/*.
-    # When false (default), these endpoints are unauthenticated, matching the
-    # historical behavior; this assumes the metrics port is reachable only from
-    # trusted networks.
+    # Whether to require HTTP Basic Auth with root credentials for operator
+    # endpoints. This covers /management/*, /log/level, /eventlog and
+    # /debug/pprof/* on the metrics port (default 9091), plus proxy config views
+    # and telemetry operator routes under /api/v1.
+    # When false (default, for upgrade compatibility), these endpoints are
+    # unauthenticated. Treat this as an opt-in mitigation, not as a network
+    # security boundary.
     # /healthz, /livez, /metrics and /management/check/ready stay open either
     # way, so k8s probes and Prometheus are unaffected.
-    # Recommended: true for any deployment where the metrics port is reachable
-    # from untrusted networks.
+    # Recommended: true whenever the metrics port is exposed beyond localhost.
+    # Port 9091 uses plaintext HTTP, so expose it only on a trusted private
+    # network or behind a TLS-terminating proxy, and rotate the default root
+    # password before enabling this option.
     adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
