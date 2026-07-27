@@ -56,6 +56,7 @@
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -567,6 +568,21 @@ CheckNullableStructExpressions(SegmentInternalInterface* segment,
         RetrieveOffsets(
             segment, schema, "not match_any(struct_array, $[sub_int] >= 9000)"),
         (std::set<int64_t>{0, 2}));
+    EXPECT_TRUE(RetrieveOffsets(segment,
+                                schema,
+                                "match_any(struct_array, "
+                                "$[sub_int] == 2147483648)")
+                    .empty());
+    EXPECT_EQ(RetrieveOffsets(segment,
+                              schema,
+                              "match_all(struct_array, "
+                              "$[sub_int] != 2147483648)"),
+              (std::set<int64_t>{0, 2, 3}));
+    EXPECT_TRUE(RetrieveOffsets(segment,
+                                schema,
+                                "match_any(struct_array, "
+                                "2147483648 < $[sub_int] < 2147483649)")
+                    .empty());
     EXPECT_EQ(
         RetrieveOffsets(
             segment, schema, "json_contains_all(struct_array[sub_int], [])"),
@@ -663,6 +679,11 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
         CreateTestCacheIndex("nullable_sub_int", std::move(index));
     segment->LoadIndex(info);
 
+    EXPECT_EQ(RetrieveOffsets(segment.get(),
+                              schema,
+                              "match_all(struct_array, "
+                              "$[sub_int] != 2147483648)"),
+              (std::set<int64_t>{0, 2, 3}));
     EXPECT_EQ(
         RetrieveOffsets(segment.get(),
                         schema,
@@ -1533,6 +1554,30 @@ TEST_F(SealedMatchExprTest, RetrieveMatchAnyWithIndex) {
         });
 }
 
+TEST_F(SealedMatchExprTest, RetrieveMatchAnyOverflowWithIndex) {
+    auto result =
+        ExecuteRetrieve("match_any(struct_array, $[sub_int] == 2147483648)");
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->offset_size(), 0);
+}
+
+TEST_F(SealedMatchExprTest, OverflowShortcutWithIndexFollowsMovedCursor) {
+    // With 128-row batches, the numeric predicate skips Match evaluation for
+    // the first seven batches.  The overflow shortcut is evaluated only for
+    // the final 104 rows, after its cursor has been advanced via MoveCursor().
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(128);
+
+    for (const auto& predicate : {
+             "$[sub_int] == 2147483648",
+             "2147483648 < $[sub_int] < 2147483649",
+         }) {
+        auto result = ExecuteRetrieve("id >= 896 && match_any(struct_array, " +
+                                      std::string(predicate) + ")");
+        ASSERT_NE(result, nullptr);
+        EXPECT_EQ(result->offset_size(), 0);
+    }
+}
+
 TEST_F(SealedMatchExprTest, RetrieveMatchAllWithIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
@@ -1808,6 +1853,70 @@ TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchExactPartialIndex) {
         });
 }
 
+TEST_F(SealedMatchExprTestNoIndex, OverflowShortcutWithOffsetInput) {
+    exec::OffsetVector offsets = {1, 123, 999};
+
+    auto evaluate = [&](const std::string& filter) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.ParseSearch(
+            filter, "vec", 10, "L2", R"({"nprobe": 10})", 3);
+        auto plan =
+            CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+
+        auto filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get();
+        return test::gen_filter_res(
+            filter_node, seg_.get(), N_, MAX_TIMESTAMP, &offsets);
+    };
+
+    auto equal_overflow =
+        evaluate("match_any(struct_array, $[sub_int] == 2147483648)");
+    ASSERT_EQ(equal_overflow->size(), offsets.size());
+    TargetBitmapView equal_view(equal_overflow->GetRawData(),
+                                equal_overflow->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_FALSE(equal_view[i]);
+        EXPECT_TRUE(equal_overflow->ValidAt(i));
+    }
+
+    auto not_equal_overflow =
+        evaluate("match_all(struct_array, $[sub_int] != 2147483648)");
+    ASSERT_EQ(not_equal_overflow->size(), offsets.size());
+    TargetBitmapView not_equal_view(not_equal_overflow->GetRawData(),
+                                    not_equal_overflow->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_TRUE(not_equal_view[i]);
+        EXPECT_TRUE(not_equal_overflow->ValidAt(i));
+    }
+
+    auto range_overflow = evaluate(
+        "match_any(struct_array, 2147483648 < $[sub_int] < 2147483649)");
+    ASSERT_EQ(range_overflow->size(), offsets.size());
+    TargetBitmapView range_view(range_overflow->GetRawData(),
+                                range_overflow->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_FALSE(range_view[i]);
+        EXPECT_TRUE(range_overflow->ValidAt(i));
+    }
+}
+
+TEST_F(SealedMatchExprTestNoIndex,
+       OverflowShortcutWithoutIndexFollowsMovedCursor) {
+    // Exercise the same skipped-batch transition through the raw-data cursor.
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(128);
+
+    for (const auto& predicate : {
+             "$[sub_int] == 2147483648",
+             "2147483648 < $[sub_int] < 2147483649",
+         }) {
+        auto result = ExecuteRetrieve("id >= 896 && match_any(struct_array, " +
+                                      std::string(predicate) + ")");
+        ASSERT_NE(result, nullptr);
+        EXPECT_EQ(result->offset_size(), 0);
+    }
+}
+
 // Test combining match expression with other expressions (id % 2 == 0 && match_any)
 TEST_F(SealedMatchExprTestNoIndex, MatchWithOtherExpr) {
     std::string target_str = "aaa";
@@ -2042,6 +2151,20 @@ class SealedMatchExprIntTypeTest
         return "";
     }
 
+    std::string
+    OverflowLiteral() const {
+        switch (int_type_) {
+            case DataType::INT8:
+                return "128";
+            case DataType::INT16:
+                return "32768";
+            case DataType::INT32:
+                return "2147483648";
+            default:
+                return "0";
+        }
+    }
+
     std::unique_ptr<proto::segcore::RetrieveResults>
     ExecuteRetrieve(const std::string& filter_expr) {
         ScopedSchemaHandle schema_handle(*schema_);
@@ -2154,6 +2277,17 @@ TEST_P(SealedMatchExprIntTypeTest, MatchAnyBruteForce) {
         << param.type_name << " row count mismatch";
 
     std::cout << "==============================" << std::endl;
+}
+
+TEST_P(SealedMatchExprIntTypeTest, MatchAnyOverflowShortcutReturnsNoRows) {
+    auto param = GetParam();
+    auto filter_expr =
+        "match_any(struct_array, $[sub_int] == " + OverflowLiteral() + ")";
+    auto result = ExecuteRetrieve(filter_expr);
+
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->offset_size(), 0)
+        << param.type_name << " overflow equality should match no rows";
 }
 
 TEST_P(SealedMatchExprIntTypeTest, MatchLeastBruteForce) {

@@ -301,6 +301,10 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                "Match result should be ColumnVector");
     AssertInfo(match_result_col_vec->IsBitmap(),
                "Match result should be bitmap");
+    AssertInfo(match_result_col_vec->size() == elem_count,
+               "Match predicate result size {} should equal element count {}",
+               match_result_col_vec->size(),
+               elem_count);
     TargetBitmapView match_result_bitset_view(
         match_result_col_vec->GetRawData(), match_result_col_vec->size());
     TargetBitmapView match_result_valid_view(
