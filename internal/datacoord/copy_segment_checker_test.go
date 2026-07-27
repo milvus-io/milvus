@@ -1307,6 +1307,69 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_SkipsWhenJobAlreadyTerminal() {
 	s.Zero(saved.GetTotalRows())
 }
 
+// TestFinishJob_TerminalJobDoesNotFlushSegments: finishJob makes segments
+// queryable in Step 2, before the guarded Completed transition in Step 4. If
+// the job went terminal since the checker round's snapshot was taken
+// (tryTimeoutJob fired, or a sibling's markTaskAndJobFailed landed), the guard
+// correctly refuses the transition — but the visibility would already be
+// committed and is never undone. Re-check liveness before flushing anything.
+func (s *CopySegmentCheckerSuite) TestFinishJob_TerminalJobDoesNotFlushSegments() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	seg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3001, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Importing, NumOfRows: 100, InsertChannel: "ch1",
+	})
+	s.NoError(s.meta.AddSegment(context.TODO(), seg))
+
+	// The job in meta has already gone terminal on another path.
+	s.NoError(s.copyMeta.AddJob(context.TODO(), &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+			Reason:       "timeout",
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}))
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1009,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		NodeId:       NullNodeID,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 3001, PartitionId: 10},
+		},
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	// finishJob still holds the pre-failure Executing snapshot.
+	staleJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.checker.finishJob(staleJob, 123)
+
+	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(context.TODO(), 3001).GetState(),
+		"a job that already failed must not have its segments made queryable")
+	saved := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, saved.GetState())
+	s.Equal("timeout", saved.GetReason())
+}
+
 // TestTryTimeoutJob_CatalogErrorKeepsState: a failed persist of the timeout
 // transition must leave the job state unchanged (retried next round) and must
 // not report a timeout that did not commit.

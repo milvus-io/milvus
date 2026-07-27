@@ -495,6 +495,19 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	// A success response can arrive after a sibling task already failed the
+	// parent job and checkFailedJob converged this task to Failed — the
+	// scheduler polls once more before it inspects the task's state. Applying it
+	// then would flip the target segments to Flushed (queryable) and resurrect
+	// the task out of its terminal state, exposing part of a restore that never
+	// succeeded. Discard the stale result instead; the inspector drops the
+	// target segments of a failed job, and the scheduler drops the worker task.
+	if !t.copyMeta.TaskAcceptsWorkerResult(context.TODO(), t.GetTaskId()) {
+		mlog.Info(context.TODO(), "discard stale copy segment result: task no longer in progress or job no longer active",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		return
+	}
+
 	// Sync task state and binlog info
 	err = SyncCopySegmentTask(t, resp, t.copyMeta, t.meta)
 	if err != nil {
@@ -851,9 +864,17 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				mlog.Duration("taskTimeCost/copying", copyingDuration),
 				mlog.Duration("taskTimeCost/total", totalDuration))...)
 
-		return copyMeta.UpdateTask(ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted),
-			UpdateCopyTaskCompleteTs(completeTs))
+		// Guarded: the job can go terminal while the result is being applied, and
+		// a task must never be resurrected out of a terminal state.
+		applied, err := copyMeta.CompleteTaskIfActive(ctx, task.GetTaskId(), completeTs)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			mlog.Info(context.TODO(), "copy segment task went terminal while its result was applied, skip marking it completed",
+				WrapCopySegmentTaskLog(task)...)
+		}
+		return nil
 
 	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 		return copyMeta.UpdateTask(ctx, task.GetTaskId(),

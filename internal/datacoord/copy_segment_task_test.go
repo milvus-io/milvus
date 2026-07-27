@@ -862,6 +862,12 @@ func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmen
 	}
 	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
 	assert.NoError(t, err)
+	// Every task has a parent job in production (the checker creates the job
+	// first), and the result-commit guards key off that job's state. Default it
+	// to Executing; tests that need another state re-AddJob the same ID, which
+	// replaces this one.
+	assert.NoError(t, copyMeta.AddJob(ctx, newTestCopyJob(task.GetJobId(),
+		datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 	assert.NoError(t, copyMeta.AddTask(ctx, task))
 	return copyMeta, m
 }
@@ -1652,6 +1658,111 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossSkippedResolution
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
 	s.EqualValues(10, updatedTask.GetNodeId())
+}
+
+// TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterJobFailed is the
+// regression for the stale-result race: for a restore split across tasks A and
+// B, A fails -> markTaskAndJobFailed puts the job in Failed -> the next checker
+// tick's checkFailedJob converges still-InProgress B to Failed. B is however
+// still in the scheduler's running set, and the scheduler calls
+// QueryTaskOnWorker BEFORE it inspects the task state, so B gets polled once
+// more and its worker answers Completed. Applying that result would flip B's
+// target segments to Flushed — queryable — and resurrect B Failed -> Completed
+// underneath a job that already failed, serving part of a restore that never
+// succeeded.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterJobFailed() {
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			SegmentResults: []*datapb.CopySegmentResult{
+				{SegmentId: 2001, ImportedRows: 100, Binlogs: makeTestCopySegmentBinlogs()},
+			},
+		},
+		nil,
+	)
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(m.AddSegment(context.Background(), newTestCopySegment(2001)))
+
+	// A sibling failed the job, and checkFailedJob converged this task to Failed.
+	s.NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed)))
+	s.NoError(copyMeta.UpdateTask(context.Background(), 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskReason("sibling task failed")))
+
+	task.QueryTaskOnWorker(cluster)
+
+	// The target segment must NOT become queryable.
+	s.Equal(commonpb.SegmentState_Importing, m.GetSegment(context.Background(), 2001).GetState(),
+		"a stale success must not expose the segments of a failed restore")
+
+	// And the task must stay in its terminal state, not be resurrected.
+	updated := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updated.GetState())
+	s.Equal("sibling task failed", updated.GetReason())
+}
+
+// TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterTaskLeftInProgress:
+// the same guard also covers a task that left InProgress on its own while the
+// job is still active.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterTaskLeftInProgress() {
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			SegmentResults: []*datapb.CopySegmentResult{
+				{SegmentId: 2001, ImportedRows: 100, Binlogs: makeTestCopySegmentBinlogs()},
+			},
+		},
+		nil,
+	)
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(m.AddSegment(context.Background(), newTestCopySegment(2001)))
+	s.NoError(copyMeta.UpdateTask(context.Background(), 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending)))
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(commonpb.SegmentState_Importing, m.GetSegment(context.Background(), 2001).GetState())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		copyMeta.GetTask(context.Background(), 1001).GetState())
+}
+
+// TestSyncCopySegmentTask_JobGoesTerminalMidApplyKeepsTaskTerminal covers the
+// residual window: the pre-check passed, but the job went terminal while the
+// result was being applied. The final task write is guarded under the meta
+// lock, so the task must not be resurrected out of Failed. The segments it
+// already flushed are the inspector's job-scoped cleanup to reclaim.
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_JobGoesTerminalMidApplyKeepsTaskTerminal() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(m.AddSegment(ctx, newTestCopySegment(2001)))
+
+	// The race lands between the pre-check and the state write.
+	s.NoError(copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed)))
+	s.NoError(copyMeta.UpdateTask(ctx, 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed)))
+
+	resp := &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{
+			{SegmentId: 2001, ImportedRows: 100, Binlogs: makeTestCopySegmentBinlogs()},
+		},
+	}
+	s.NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+
+	updated := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updated.GetState())
+	s.Zero(updated.(*copySegmentTask).task.Load().GetCompleteTs())
 }
 
 func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ClearNodeAssignmentFailureKeepsAssignment() {

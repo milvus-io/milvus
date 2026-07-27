@@ -551,6 +551,19 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	}
 
 	// Step 2: Update segment states to Flushed (make them visible for query)
+	//
+	// `job` is the snapshot the checker round started with. Re-read it right
+	// before making anything visible: a concurrent path (tryTimeoutJob, or a
+	// sibling's markTaskAndJobFailed) may have finished the job since, and the
+	// guarded transition in Step 4 would then reject the Completed transition —
+	// but only after these flushes were already committed, leaving the segments
+	// of a failed restore queryable. Losing this race means the job is failed,
+	// so the inspector's job-scoped cleanup owns the segments from here.
+	if current := c.copyMeta.GetJob(c.ctx, job.GetJobId()); current == nil || isTerminalCopyJobState(current.GetState()) {
+		log.Info(c.ctx, "skip finishing copy segment job: already in terminal state, leaving segment cleanup to the inspector")
+		return
+	}
+
 	var flushFailures int
 	if len(targetSegmentIDs) > 0 {
 		for _, segID := range targetSegmentIDs {

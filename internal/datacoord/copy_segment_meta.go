@@ -92,6 +92,8 @@ type CopySegmentMeta interface {
 	AddTask(ctx context.Context, task CopySegmentTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
 	ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error)
+	TaskAcceptsWorkerResult(ctx context.Context, taskID int64) bool
+	CompleteTaskIfActive(ctx context.Context, taskID int64, completeTs uint64) (bool, error)
 	GetTask(ctx context.Context, taskID int64) CopySegmentTask
 	GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
@@ -759,6 +761,62 @@ func (m *copySegmentMeta) ResolveTaskOnWorkerLoss(ctx context.Context, taskID in
 		return workerLossSkipped, err
 	}
 	return workerLossFailed, nil
+}
+
+// taskAcceptsResultLocked reports whether a worker result for taskID may still
+// be committed: the task must still be InProgress and its parent job must still
+// be active. Callers must hold m.mu.
+func (m *copySegmentMeta) taskAcceptsResultLocked(taskID int64) bool {
+	task := m.tasks.get(taskID)
+	if task == nil || task.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskInProgress {
+		return false
+	}
+	job, ok := m.jobs[task.GetJobId()]
+	return ok && !isTerminalCopyJobState(job.GetState())
+}
+
+// TaskAcceptsWorkerResult reports whether a worker result for taskID is still
+// relevant, i.e. the task is InProgress under an active job.
+//
+// A worker response can arrive long after the query that asked for it. In the
+// meantime a sibling task may have failed the parent job, and the next checker
+// round converges every Pending/InProgress task of a failed job to Failed
+// (checkFailedJob). The scheduler nonetheless polls the task once more — it
+// calls QueryTaskOnWorker before inspecting the task's state — so without this
+// check a stale Completed response would flip the task's target segments to
+// Flushed (queryable) and resurrect the task Failed -> Completed underneath a
+// job that has already failed, exposing part of a restore that never succeeded.
+//
+// This is a check, not a reservation: the caller acts on the result outside
+// m.mu, so an instantaneous overlap with a concurrent failure is still possible.
+// CompleteTaskIfActive re-checks under the lock before the state write, and the
+// inspector's job-scoped cleanup drops the target segments of a failed job on
+// its next round, so the residual window converges on its own.
+func (m *copySegmentMeta) TaskAcceptsWorkerResult(ctx context.Context, taskID int64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.taskAcceptsResultLocked(taskID)
+}
+
+// CompleteTaskIfActive marks a task Completed only if it is still InProgress
+// under an active job, with the check and the write under one lock.
+//
+// Returns (false, nil) when the transition was skipped because the result went
+// stale while it was being applied — the task keeps whatever terminal state the
+// winning path gave it, and is never resurrected out of it.
+func (m *copySegmentMeta) CompleteTaskIfActive(ctx context.Context, taskID int64, completeTs uint64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.taskAcceptsResultLocked(taskID) {
+		return false, nil
+	}
+	if err := m.updateTaskLocked(ctx, m.tasks.get(taskID),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted),
+		UpdateCopyTaskCompleteTs(completeTs)); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetTask retrieves a task by ID from in-memory cache.
