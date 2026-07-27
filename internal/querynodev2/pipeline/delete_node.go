@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -41,6 +43,8 @@ type deleteNode struct {
 	manager   *DataManager
 	delegator delegator.ShardDelegator
 	closed    atomic.Bool
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 var deleteNodeUpdateSchemaRetryInterval = 200 * time.Millisecond
@@ -113,10 +117,28 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 
 func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *deleteNodeMsg) bool {
 	for {
+		if dNode.closed.Load() {
+			return false
+		}
 		err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs)
 		if err == nil {
 			return true
 		}
+
+		if dNode.closed.Load() {
+			return false
+		}
+		if !merr.IsRetryableErr(err) {
+			wrapped := merr.Wrap(err, "non-retryable schema update failure in delete node")
+			mlog.Error(ctx, "non-retryable schema update failure in delete node, stop process to replay WAL after restart",
+				mlog.Int64("collectionID", dNode.collectionID),
+				mlog.String("channel", dNode.channel),
+				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+				mlog.Err(wrapped))
+			panic(wrapped)
+		}
+
 		mlog.RatedWarn(ctx, rate.Limit(1), "failed to update schema in delete node, retrying before advancing tsafe",
 			mlog.Int64("collectionID", dNode.collectionID),
 			mlog.String("channel", dNode.channel),
@@ -128,17 +150,24 @@ func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *
 			return false
 		}
 		timer := time.NewTimer(deleteNodeUpdateSchemaRetryInterval)
-		<-timer.C
-		timer.Stop()
-		if dNode.closed.Load() {
+		select {
+		case <-timer.C:
+		case <-dNode.closeCh:
+			timer.Stop()
 			return false
 		}
+		timer.Stop()
 	}
 }
 
-func (dNode *deleteNode) Close() {
-	dNode.closed.Store(true)
+func (dNode *deleteNode) PreClose() {
+	dNode.closeOnce.Do(func() {
+		dNode.closed.Store(true)
+		close(dNode.closeCh)
+	})
 }
+
+func (dNode *deleteNode) Close() { dNode.PreClose() }
 
 func newDeleteNode(
 	collectionID UniqueID, channel string,
@@ -151,5 +180,6 @@ func newDeleteNode(
 		channel:      channel,
 		manager:      manager,
 		delegator:    delegator,
+		closeCh:      make(chan struct{}),
 	}
 }

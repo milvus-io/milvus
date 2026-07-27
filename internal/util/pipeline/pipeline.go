@@ -77,6 +77,14 @@ func (p *pipeline) Close() {
 	}
 }
 
+func (p *pipeline) PreClose() {
+	for _, node := range p.nodes {
+		if preCloser, ok := node.node.(preCloser); ok {
+			preCloser.PreClose()
+		}
+	}
+}
+
 func (p *pipeline) process() {
 	if len(p.nodes) == 0 {
 		return

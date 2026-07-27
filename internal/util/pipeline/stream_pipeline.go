@@ -161,6 +161,7 @@ func (p *streamPipeline) Close() {
 		p.dispatcher.Deregister(p.vChannel)
 		// close stream input
 		close(p.closeCh)
+		p.pipeline.PreClose()
 		p.closeWg.Wait()
 		if p.scanner != nil {
 			p.scanner.Close()
