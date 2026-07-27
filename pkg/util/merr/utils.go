@@ -177,7 +177,7 @@ func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 
 func oldCode(code int32) commonpb.ErrorCode {
 	switch code {
-	case ErrServiceNotReady.code(), ErrCollectionSchemaVersionNotReady.code():
+	case ErrServiceNotReady.code(), ErrCollectionSchemaVersionNotReady.code(), ErrCollectionRuntimeNotReady.code():
 		return commonpb.ErrorCode_NotReadyServe
 
 	case ErrCollectionNotFound.code():
@@ -688,6 +688,22 @@ func WrapErrCollectionSchemaVersionNotReadyWithVersion(collection any, currentVe
 		fmt.Sprintf("current schema version %d, required schema version %d", currentVersion, requiredVersion),
 		value("collection", collection),
 	)
+}
+
+func WrapErrCollectionRuntimeNotReadyMsg(format string, args ...any) error {
+	return wrapMsg(ErrCollectionRuntimeNotReady, format, args...)
+}
+
+// WrapErrCollectionRuntimeNotReadyErr deliberately relabels a post-worker-load
+// runtime repair failure as a retriable collection-not-ready condition.
+// QueryCoord uses this signal to keep the same segment task active instead of
+// relying on a distribution checker to rediscover work after the worker
+// already reopened.
+func WrapErrCollectionRuntimeNotReadyErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrCollectionRuntimeNotReadyMsg(format, args...)
+	}
+	return wrapInner(ErrCollectionRuntimeNotReady, formatMsg(format, args...), err)
 }
 
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {

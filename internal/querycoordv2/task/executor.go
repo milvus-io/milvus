@@ -218,6 +218,11 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 	}
 }
 
+func shouldKeepLoadTaskPending(err error) bool {
+	return errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) ||
+		errors.Is(err, merr.ErrCollectionRuntimeNotReady)
+}
+
 // loadSegment commits the request to merger,
 // not really executes the request
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
@@ -233,7 +238,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			if shouldKeepLoadTaskPending(err) {
 				markRPCReturned = false
 				task.SetReason(err.Error())
 			} else {
@@ -288,8 +293,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
-		if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
-			mlog.Info(ctx, "load segment waits for delegator schema version", mlog.Err(err))
+		if shouldKeepLoadTaskPending(err) {
+			mlog.Info(ctx, "load segment waits for delegator schema or runtime repair", mlog.Err(err))
 		} else {
 			mlog.Warn(ctx, "failed to load segment", mlog.Err(err))
 		}

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -812,16 +814,21 @@ func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
 func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 	paramtable.Init()
 
-	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
-	schema.Version = 1
+	servedSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	servedSchema.Version = 1
+	effectiveSchema := proto.Clone(servedSchema).(*schemapb.CollectionSchema)
+	effectiveSchema.Properties = append(effectiveSchema.Properties, &commonpb.KeyValuePair{
+		Key:   common.MmapEnabledKey,
+		Value: "true",
+	})
 
 	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection.setSchema(servedSchema, 1, 100, 101)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
-			return request.Schema == schema && request.SchemaVersion == 101
+			return request.Schema == effectiveSchema && request.SchemaVersion == 101
 		})).
 		Return(nil)
 
@@ -845,7 +852,112 @@ func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
+	assert.NoError(t, segment.Reopen(context.Background(), loadInfo, effectiveSchema))
+}
+
+func TestLocalSegmentReopenRejectsWorkerSchemaVersionMismatch(t *testing.T) {
+	paramtable.Init()
+
+	servedSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	servedSchema.Version = 1
+	requiredSchema := proto.Clone(servedSchema).(*schemapb.CollectionSchema)
+	requiredSchema.Version = 2
+
+	collection := &Collection{}
+	collection.setSchema(servedSchema, 1, 100, 101)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  10,
+		SegmentID:     20,
+		PartitionID:   30,
+		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
+	}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(loadInfo),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       mock_segcore.NewMockCSegment(t),
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	err := segment.Reopen(context.Background(), loadInfo, requiredSchema)
+	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+}
+
+func TestLocalSegmentReopenHoldsCollectionSchemaEpochUntilCommit(t *testing.T) {
+	paramtable.Init()
+
+	servedSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	servedSchema.Version = 1
+	nextSchema := proto.Clone(servedSchema).(*schemapb.CollectionSchema)
+	nextSchema.Version = 2
+
+	collection := &Collection{}
+	collection.setSchema(servedSchema, 1, 100, 101)
+
+	reopenEntered := make(chan struct{})
+	releaseReopen := make(chan struct{})
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.AnythingOfType("*segcore.ReopenRequest")).
+		Run(func(context.Context, *segcore.ReopenRequest) {
+			close(reopenEntered)
+			<-releaseReopen
+		}).
+		Return(nil)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  10,
+		SegmentID:     20,
+		PartitionID:   30,
+		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
+		DataVersion:   2,
+	}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(&querypb.SegmentLoadInfo{DataVersion: 1}),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	reopenDone := make(chan error, 1)
+	go func() {
+		reopenDone <- segment.Reopen(context.Background(), loadInfo, servedSchema)
+	}()
+	<-reopenEntered
+
+	updateStarted := make(chan struct{})
+	updateDone := make(chan error, 1)
+	go func() {
+		close(updateStarted)
+		_, _, err := collection.applySchemaUpdate(nextSchema, 2, 200)
+		updateDone <- err
+	}()
+	<-updateStarted
+
+	select {
+	case err := <-updateDone:
+		t.Fatalf("schema update crossed an in-flight reopen epoch: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseReopen)
+	require.NoError(t, <-reopenDone)
+	require.Error(t, <-updateDone) // Test collection has no native CCollection.
+	assert.Equal(t, int32(2), segment.LoadInfo().GetDataVersion())
 }
 
 func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
@@ -890,7 +1002,7 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	err := segment.Reopen(context.Background(), newLoadInfo)
+	err := segment.Reopen(context.Background(), newLoadInfo, nil)
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
 }
@@ -960,7 +1072,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo))
+	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo, nil))
 	require.NotNil(t, captured)
 	require.Len(t, captured.GetIndexInfos(), 1)
 

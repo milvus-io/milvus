@@ -25,11 +25,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -248,4 +255,184 @@ func TestFilterNodePreservesTraceContext(t *testing.T) {
 	sc := trace.SpanContextFromContext(insertMsg.TraceCtx())
 	require.Equal(t, expectedTraceID, sc.TraceID())
 	require.Equal(t, expectedSpanID, sc.SpanID())
+}
+
+func TestVersionedSchemaPayloadFlowsFromWALToDelegator(t *testing.T) {
+	paramtable.Init()
+
+	const (
+		collectionID = int64(111)
+		channel      = "test-channel"
+		timeTick     = uint64(10)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name:    "ttl_collection",
+		Version: 2,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		},
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
+	}
+	walMessage := message.NewAlterCollectionMessageBuilderV2().
+		WithVChannel(channel).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{message.FieldMaskCollectionSchema},
+			},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{Schema: schema},
+		}).
+		MustBuildMutable().
+		WithTimeTick(timeTick).
+		IntoImmutableMessage(nil)
+	alterMessage, err := adaptor.NewAlterCollectionMessageBody(walMessage)
+	require.NoError(t, err)
+
+	collection := segments.NewTestCollection(collectionID, querypb.LoadType_LoadCollection, nil)
+	collectionManager := segments.NewMockCollectionManager(t)
+	collectionManager.EXPECT().Get(collectionID).Return(collection).Once()
+	mockDelegator := delegator.NewMockShardDelegator(t)
+	mockDelegator.EXPECT().TryCleanExcludedSegments(timeTick).Once()
+	mockDelegator.EXPECT().UpdateSchema(mock.Anything, mock.MatchedBy(func(actual *schemapb.CollectionSchema) bool {
+		return actual.GetVersion() == schema.GetVersion() && actual.GetProperties()[0].GetValue() == "ttl"
+	}), timeTick).Return(nil).Once()
+	mockDelegator.EXPECT().UpdateTSafe(timeTick).Once()
+	manager := &segments.Manager{
+		Collection: collectionManager,
+		Segment:    segments.NewMockSegmentManager(t),
+	}
+
+	filter := newFilterNode(collectionID, channel, manager, mockDelegator, 8)
+	filtered := filter.Operate(&msgstream.MsgPack{
+		BeginTs: timeTick,
+		EndTs:   timeTick,
+		Msgs:    []msgstream.TsMsg{alterMessage},
+	})
+	insert, err := newInsertNode(collectionID, channel, manager, mockDelegator, schema, 8)
+	require.NoError(t, err)
+	t.Cleanup(insert.Close)
+	deleteMessage := insert.Operate(filtered)
+	deleteNode := newDeleteNode(collectionID, channel, manager, mockDelegator, 8)
+	require.Nil(t, deleteNode.Operate(deleteMessage))
+}
+
+func TestFilterNodeFailStopsOnCorruptDDL(t *testing.T) {
+	paramtable.Init()
+
+	const (
+		collectionID = int64(111)
+		channel      = "test-channel"
+	)
+
+	tests := []struct {
+		name     string
+		buildMsg func(t *testing.T) msgstream.TsMsg
+	}{
+		{
+			name: "schema_change",
+			buildMsg: func(t *testing.T) msgstream.TsMsg {
+				valid := message.NewSchemaChangeMessageBuilderV2().
+					WithVChannel(channel).
+					WithHeader(&message.SchemaChangeMessageHeader{CollectionId: collectionID}).
+					WithBody(&message.SchemaChangeMessageBody{}).
+					MustBuildMutable().
+					WithTimeTick(1)
+				messageProto := valid.IntoMessageProto()
+				corrupt := message.NewImmutableMesasge(nil, []byte{0xff}, messageProto.GetProperties())
+				schemaMsg, err := adaptor.NewSchemaChangeMessageBody(corrupt)
+				require.NoError(t, err)
+				return schemaMsg
+			},
+		},
+		{
+			name: "schema_change_missing_schema",
+			buildMsg: func(t *testing.T) msgstream.TsMsg {
+				valid := message.NewSchemaChangeMessageBuilderV2().
+					WithVChannel(channel).
+					WithHeader(&message.SchemaChangeMessageHeader{CollectionId: collectionID}).
+					WithBody(&message.SchemaChangeMessageBody{}).
+					MustBuildMutable().
+					WithTimeTick(1).
+					IntoImmutableMessage(nil)
+				schemaMsg, err := adaptor.NewSchemaChangeMessageBody(valid)
+				require.NoError(t, err)
+				return schemaMsg
+			},
+		},
+		{
+			name: "alter_collection_schema",
+			buildMsg: func(t *testing.T) msgstream.TsMsg {
+				valid := message.NewAlterCollectionMessageBuilderV2().
+					WithVChannel(channel).
+					WithHeader(&message.AlterCollectionMessageHeader{
+						CollectionId: collectionID,
+						UpdateMask: &fieldmaskpb.FieldMask{
+							Paths: []string{message.FieldMaskCollectionSchema},
+						},
+					}).
+					WithBody(&message.AlterCollectionMessageBody{}).
+					MustBuildMutable().
+					WithTimeTick(1)
+				messageProto := valid.IntoMessageProto()
+				corrupt := message.NewImmutableMesasge(nil, []byte{0xff}, messageProto.GetProperties())
+				alterMsg, err := adaptor.NewAlterCollectionMessageBody(corrupt)
+				require.NoError(t, err)
+				return alterMsg
+			},
+		},
+		{
+			name: "alter_collection_schema_missing_schema",
+			buildMsg: func(t *testing.T) msgstream.TsMsg {
+				valid := message.NewAlterCollectionMessageBuilderV2().
+					WithVChannel(channel).
+					WithHeader(&message.AlterCollectionMessageHeader{
+						CollectionId: collectionID,
+						UpdateMask: &fieldmaskpb.FieldMask{
+							Paths: []string{message.FieldMaskCollectionSchema},
+						},
+					}).
+					WithBody(&message.AlterCollectionMessageBody{}).
+					MustBuildMutable().
+					WithTimeTick(1).
+					IntoImmutableMessage(nil)
+				alterMsg, err := adaptor.NewAlterCollectionMessageBody(valid)
+				require.NoError(t, err)
+				return alterMsg
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			collection := segments.NewTestCollection(collectionID, querypb.LoadType_LoadCollection, nil)
+			mockCollectionManager := segments.NewMockCollectionManager(t)
+			mockCollectionManager.EXPECT().Get(collectionID).Return(collection).Once()
+			mockDelegator := delegator.NewMockShardDelegator(t)
+			node := newFilterNode(collectionID, channel, &segments.Manager{
+				Collection: mockCollectionManager,
+				Segment:    segments.NewMockSegmentManager(t),
+			}, mockDelegator, 8)
+
+			var panicValue any
+			func() {
+				defer func() {
+					panicValue = recover()
+				}()
+				node.Operate(&msgstream.MsgPack{
+					BeginTs: 1,
+					EndTs:   1,
+					Msgs:    []msgstream.TsMsg{test.buildMsg(t)},
+				})
+			}()
+
+			panicErr, ok := panicValue.(error)
+			require.True(t, ok, "expected an error panic, got %T", panicValue)
+			require.ErrorIs(t, panicErr, merr.ErrDataIntegrity)
+			mockDelegator.AssertNotCalled(t, "TryCleanExcludedSegments", mock.Anything)
+			mockDelegator.AssertNotCalled(t, "UpdateTSafe", mock.Anything)
+		})
+	}
 }

@@ -58,14 +58,25 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		if err != nil {
 			return err
 		}
-		msg.schema = body.GetSchema()
+		schema := body.GetSchema()
+		if schema == nil {
+			return merr.WrapErrDataIntegrityMsg("schema change WAL message is missing collection schema")
+		}
+		msg.schema = schema
 		msg.schemaBarrierTs = taskMsg.BeginTs()
 	case commonpb.MsgType_AlterCollection:
 		putCollectionMsg := taskMsg.(*adaptor.AlterCollectionMessageBody)
 		header := putCollectionMsg.AlterCollectionMessage.Header()
 		if messageutil.IsSchemaChange(header) {
-			body := putCollectionMsg.AlterCollectionMessage.MustBody()
-			msg.schema = body.GetUpdates().GetSchema()
+			body, err := putCollectionMsg.AlterCollectionMessage.Body()
+			if err != nil {
+				return err
+			}
+			schema := body.GetUpdates().GetSchema()
+			if schema == nil {
+				return merr.WrapErrDataIntegrityMsg("alter collection schema WAL message is missing collection schema")
+			}
+			msg.schema = schema
 			msg.schemaBarrierTs = taskMsg.BeginTs()
 		}
 	case commonpb.MsgType_ManualFlush:

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -43,6 +44,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestValidateAlterCollectionSchemaPayloadVersion(t *testing.T) {
+	header := &messagespb.AlterCollectionMessageHeader{
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{message.FieldMaskCollectionSchema},
+		},
+	}
+
+	require.NoError(t, validateAlterCollectionSchemaPayloadVersion(10, nil, nil))
+	require.NoError(t, validateAlterCollectionSchemaPayloadVersion(10, &messagespb.AlterCollectionMessageHeader{}, nil))
+	require.Error(t, validateAlterCollectionSchemaPayloadVersion(10, header, nil))
+	require.Error(t, validateAlterCollectionSchemaPayloadVersion(10, header, &messagespb.AlterCollectionMessageUpdates{
+		Schema: &schemapb.CollectionSchema{Version: 10},
+	}))
+	require.NoError(t, validateAlterCollectionSchemaPayloadVersion(10, header, &messagespb.AlterCollectionMessageUpdates{
+		Schema: &schemapb.CollectionSchema{Version: 11},
+	}))
+}
 
 func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	core := initStreamingSystemAndCore(t)

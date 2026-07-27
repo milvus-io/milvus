@@ -209,6 +209,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	// fill the put load config if rg or replica number is changed.
 	udpates.AlterLoadConfig = c.getAlterLoadConfigOfAlterCollection(coll.Properties, udpates.Properties)
 
+	if err := validateAlterCollectionSchemaPayloadVersion(coll.SchemaVersion, header, udpates); err != nil {
+		return err
+	}
+
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
@@ -221,6 +225,23 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAlterCollectionSchemaPayloadVersion(currentVersion int32, header *messagespb.AlterCollectionMessageHeader, updates *messagespb.AlterCollectionMessageUpdates) error {
+	if header == nil || header.GetUpdateMask() == nil || !funcutil.SliceContain(header.GetUpdateMask().GetPaths(), message.FieldMaskCollectionSchema) {
+		return nil
+	}
+	if updates == nil || updates.GetSchema() == nil {
+		return merr.WrapErrServiceInternalMsg("alter collection schema update mask requires schema payload")
+	}
+	if updates.GetSchema().GetVersion() <= currentVersion {
+		return merr.WrapErrServiceInternalMsg(
+			"alter collection schema payload must advance schema version, current=%d, payload=%d",
+			currentVersion,
+			updates.GetSchema().GetVersion(),
+		)
 	}
 	return nil
 }

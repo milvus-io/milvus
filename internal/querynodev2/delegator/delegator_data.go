@@ -479,6 +479,17 @@ func (sd *shardDelegator) checkLoadSchemaVersionReadyWithVersion(ctx context.Con
 	return err
 }
 
+func (sd *shardDelegator) withLoadSchemaReadLease(ctx context.Context, req *querypb.LoadSegmentsRequest, fn func() error) error {
+	sd.schemaChangeMutex.RLock()
+	defer sd.schemaChangeMutex.RUnlock()
+
+	_, currentVersion := sd.delegatorSchemaSnapshotLocked()
+	if err := sd.checkLoadSchemaVersionReadyWithVersion(ctx, req, currentVersion); err != nil {
+		return err
+	}
+	return fn()
+}
+
 // LoadGrowing load growing segments locally.
 func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	log := sd.getLogger(ctx)
@@ -532,6 +543,15 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
+		infosWithBM25Stats, err := segmentLoadInfosWithBM25Stats(infos)
+		if err != nil {
+			return merr.WrapErrCollectionRuntimeNotReadyErr(err,
+				"resolve BM25 stats for collection %d full load", req.GetCollectionID())
+		}
+		if len(infosWithBM25Stats) > 0 {
+			return merr.WrapErrCollectionRuntimeNotReadyMsg(
+				"full load contains BM25 stats before collection %d IDF oracle is initialized", req.GetCollectionID())
+		}
 		return nil
 	}
 
@@ -549,6 +569,19 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 					mlog.Err(err))
 				return nil, err
 			}
+			// LoadSealed is intentionally cheap for the first load and skips an
+			// existing segment. A schema change can land after this read lease and
+			// before the final distribution publish; on task retry, repair any
+			// newly-required field that the idempotent first-load path skipped.
+			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
+			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable); err != nil {
+				mlog.Warn(ctx, "failed to repair bm25 stats for loaded segment",
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Bool("activateIfReadable", activateIfReadable),
+					mlog.Err(err))
+				return nil, err
+			}
 			return nil, nil
 		}))
 	}
@@ -556,9 +589,24 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	err := conc.BlockOnAll(futures...)
 	if err != nil {
 		mlog.Warn(ctx, "failed to load bm25 stats", mlog.Err(err))
-		return err
+		return merr.WrapErrCollectionRuntimeNotReadyErr(err,
+			"load BM25 stats for collection %d after worker segment load", req.GetCollectionID())
 	}
 	return nil
+}
+
+func segmentLoadInfosWithBM25Stats(infos []*querypb.SegmentLoadInfo) ([]*querypb.SegmentLoadInfo, error) {
+	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(infos))
+	for _, info := range infos {
+		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+		if err != nil {
+			return nil, err
+		}
+		if len(bm25Paths) > 0 {
+			infosWithBM25Stats = append(infosWithBM25Stats, info)
+		}
+	}
+	return infosWithBM25Stats, nil
 }
 
 func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
@@ -567,28 +615,36 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 		mlog.String("loadScope", req.GetLoadScope().String()),
 	)
 
-	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
-	for _, info := range req.GetInfos() {
-		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
-		if err != nil {
-			log.Warn(ctx, "resolve reopened bm25 stats failed", mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))
-			return err
+	// The final version check and IDF repair share one read lease. Otherwise a
+	// V3 SyncFunctions can prune V2 fields after the check, only for the V2
+	// reopen to write them back after the schema change commits.
+	return sd.withLoadSchemaReadLease(ctx, req, func() error {
+		schema, _ := sd.delegatorSchemaSnapshotLocked()
+		if err := sd.syncCollectionIndexMetaWithSchema(ctx, req, schema); err != nil {
+			log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
+			return merr.WrapErrCollectionRuntimeNotReadyErr(err,
+				"sync collection %d index metadata after segment post-load", req.GetCollectionID())
 		}
-		if len(bm25Paths) > 0 {
-			infosWithBM25Stats = append(infosWithBM25Stats, info)
-		}
-	}
 
-	if len(infosWithBM25Stats) == 0 {
-		return nil
-	}
-	return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
+		infosWithBM25Stats, err := segmentLoadInfosWithBM25Stats(req.GetInfos())
+		if err != nil {
+			log.Warn(ctx, "resolve reopened bm25 stats failed", mlog.Err(err))
+			return merr.WrapErrCollectionRuntimeNotReadyErr(err,
+				"resolve reopened BM25 stats for collection %d", req.GetCollectionID())
+		}
+
+		if len(infosWithBM25Stats) == 0 {
+			return nil
+		}
+		return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
+	})
 }
 
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
-		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+		return merr.WrapErrCollectionRuntimeNotReadyMsg(
+			"reopen contains BM25 stats before collection %d IDF oracle is initialized", req.GetCollectionID())
 	}
 
 	pool := segments.GetLoadPool()
@@ -612,7 +668,8 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 
 	if err := conc.BlockOnAll(futures...); err != nil {
 		mlog.Warn(ctx, "failed to load reopened bm25 stats", mlog.Err(err))
-		return err
+		return merr.WrapErrCollectionRuntimeNotReadyErr(err,
+			"repair reopened BM25 stats for collection %d", req.GetCollectionID())
 	}
 	return nil
 }
@@ -621,31 +678,24 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 // forwarded worker load. Worker LoadSegments already updates IndexMeta on the target
 // worker, but the delegator (which executes growing search locally) must stay in sync.
 func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	schema, _ := sd.delegatorSchemaSnapshot()
+	return sd.syncCollectionIndexMetaWithSchema(ctx, req, schema)
+}
+
+func (sd *shardDelegator) syncCollectionIndexMetaWithSchema(ctx context.Context, req *querypb.LoadSegmentsRequest, schema *schemapb.CollectionSchema) error {
 	if len(req.GetIndexInfoList()) == 0 {
 		return nil
 	}
 
-	schema, _ := sd.delegatorSchemaSnapshot()
 	if schema == nil {
 		schema = req.GetSchema()
 	}
-
-	loadMeta := req.GetLoadMeta()
-	if loadMeta == nil {
-		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID: req.GetCollectionID(),
-		}
-	} else {
-		loadMeta = typeutil.Clone(loadMeta)
+	if schema == nil {
+		return merr.WrapErrServiceInternal("cannot update collection index metadata without schema")
 	}
-	loadMeta.SchemaBarrierTs = 0
 
 	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
-	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
-		return err
-	}
-	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return nil
+	return segments.UpdateCollectionIndexMeta(sd.collection, uint64(schema.GetVersion()), meta)
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -733,13 +783,13 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
+	if req.GetLoadScope() == querypb.LoadScope_Reopen || req.GetLoadScope() == querypb.LoadScope_Stats {
+		return sd.handleReopenPostLoad(ctx, req)
+	}
+
 	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
 		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
 		return err
-	}
-
-	if req.GetLoadScope() == querypb.LoadScope_Reopen {
-		return sd.handleReopenPostLoad(ctx, req)
 	}
 
 	return sd.withPostLoadLimit(ctx, func() error {
@@ -753,8 +803,13 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			return err
 		}
 
-		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
-		err = sd.loadBM25Stats(ctx, infos, req)
+		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before the
+		// segment becomes visible. The install itself holds a schema read lease;
+		// if the epoch changes before loadStreamDelete's final publish check, the
+		// task retries and LoadSealedForReopen above repairs newly-required fields.
+		err = sd.withLoadSchemaReadLease(ctx, req, func() error {
+			return sd.loadBM25Stats(ctx, infos, req)
+		})
 		if err != nil {
 			log.Warn(ctx, "failed to load BM25 stats", mlog.Err(err))
 			return err

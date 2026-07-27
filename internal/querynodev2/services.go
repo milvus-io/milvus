@@ -261,6 +261,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.chunkManager,
 		queryView,
 		node.binlogSaver,
+		delegator.WithInitialSchema(req.GetSchema()),
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
 	)
 	if err != nil {
@@ -536,6 +537,37 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
+	switch req.GetLoadScope() {
+	case querypb.LoadScope_Stats, querypb.LoadScope_Reopen:
+		// Reopen is not a schema-authority path. The WAL-driven UpdateSchema RPC
+		// must reach this worker first; this request may only refresh index meta
+		// and reopen segment-local state with its effective schema snapshot.
+		schema := req.GetSchema()
+		if schema == nil {
+			err := merr.WrapErrServiceInternal("reopen segment request has no collection schema")
+			return merr.Status(err), nil
+		}
+		if !node.manager.Collection.Ref(req.GetCollectionID(), 1) {
+			err := merr.WrapErrCollectionNotFound(req.GetCollectionID(), "collection not found while reopening segments")
+			return merr.Status(err), nil
+		}
+		defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
+
+		collection := node.manager.Collection.Get(req.GetCollectionID())
+		err := segments.UpdateCollectionIndexMeta(
+			collection,
+			uint64(schema.GetVersion()),
+			segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema),
+		)
+		if err != nil {
+			log.Warn(ctx, "failed to prepare collection index meta for segment reopen", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
+		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		return node.reopenSegments(ctx, req), nil
+	}
+
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	if err != nil {
@@ -548,12 +580,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	case querypb.LoadScope_Delta:
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		return node.loadDeltaLogs(ctx, req), nil
-	case querypb.LoadScope_Stats:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
-	case querypb.LoadScope_Reopen:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Full:
 		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		// Continue with the full segment load below.

@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -182,6 +183,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLoadSegmentTaskNotIndex",
 		"TestSegmentTaskWaitsDistAfterLoadRPC",
 		"TestLoadSegmentTaskWaitsDelegatorSchema",
+		"TestReopenSegmentTaskRetriesDelegatorIDFRepair",
 		"TestLoadSegmentTaskFailed",
 		"TestTaskCanceled",
 		"TestMoveSegmentTask",
@@ -651,22 +653,24 @@ func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
 		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
+	var describeCalls atomic.Int32
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		version := describeCalls.Add(1)
 		return &milvuspb.DescribeCollectionResponse{
 			Schema: &schemapb.CollectionSchema{
 				Name:    "TestLoadSegmentTaskWaitsDelegatorSchema",
-				Version: 1,
+				Version: version,
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 				},
 			},
 		}, nil
-	})
+	}).Twice()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, nil).Twice()
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 		{
 			ID:            segment,
@@ -674,10 +678,15 @@ func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
 			PartitionID:   partition,
 			InsertChannel: channel.ChannelName,
 		},
-	}, nil)
-	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
+	}, nil).Twice()
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil).Twice()
 	schemaErr := merr.WrapErrCollectionSchemaVersionNotReadyWithVersion("TestLoadSegmentTaskWaitsDelegatorSchema", 0, 1)
-	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(schemaErr), nil).Once()
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+		return req.GetSchema().GetVersion() == 1
+	})).Return(merr.Status(schemaErr), nil).Once()
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+		return req.GetSchema().GetVersion() == 2
+	})).Return(merr.Success(), nil).Once()
 
 	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
 		VchannelInfo: channel,
@@ -718,6 +727,111 @@ func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
 	suite.Contains(task.GetReason(), "collection schema version not ready")
 	action := task.Actions()[0].(*SegmentAction)
 	suite.False(action.rpcReturned.Load())
+
+	// A pending action is repacked from current coordinator metadata on the
+	// next dispatch. Once the delegator accepts the refreshed schema, the same
+	// task completes without being recreated.
+	suite.dispatchAndWait(targetNode)
+	suite.True(action.rpcReturned.Load())
+	suite.dist.SegmentDistManager.Update(targetNode, meta.SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            segment,
+		CollectionID:  suite.collection,
+		PartitionID:   partition,
+		InsertChannel: channel.ChannelName,
+	}))
+	suite.dispatchAndWait(targetNode)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
+}
+
+func (suite *TaskSuite) TestReopenSegmentTaskRetriesDelegatorIDFRepair() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segment := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name:    "TestReopenSegmentTaskRetriesDelegatorIDFRepair",
+			Version: 1,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		},
+	}, nil).Twice()
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{
+		CollectionID: suite.collection,
+	}}, nil).Twice()
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{{
+		ID:            segment,
+		CollectionID:  suite.collection,
+		PartitionID:   partition,
+		InsertChannel: channel.ChannelName,
+	}}, nil).Twice()
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil).Twice()
+	idfErr := merr.WrapErrCollectionRuntimeNotReadyErr(
+		merr.WrapErrIoTooManyRequests("bm25/stats", errors.New("throttled")),
+		"repair reopened segment %d", segment,
+	)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(idfErr), nil).Once()
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReopen, channel.GetChannelName(), segment),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task))
+
+	segments := []*datapb.SegmentInfo{{
+		ID:            segment,
+		InsertChannel: channel.ChannelName,
+		PartitionID:   partition,
+	}}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	suite.dispatchAndWait(targetNode)
+	suite.Equal(TaskStatusStarted, task.Status())
+	suite.NoError(task.Err())
+	suite.Contains(task.GetReason(), "repair reopened segment")
+	action := task.Actions()[0].(*SegmentAction)
+	suite.False(action.rpcReturned.Load())
+
+	// The scheduler retries the same action after the transient IDF repair
+	// failure; a successful second RPC makes the action finish normally.
+	suite.dispatchAndWait(targetNode)
+	suite.True(action.rpcReturned.Load())
+	suite.dist.SegmentDistManager.Update(targetNode, meta.SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            segment,
+		CollectionID:  suite.collection,
+		PartitionID:   partition,
+		InsertChannel: channel.ChannelName,
+	}))
+	suite.dispatchAndWait(targetNode)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
 }
 
 func (suite *TaskSuite) TestLoadSegmentTaskFailed() {

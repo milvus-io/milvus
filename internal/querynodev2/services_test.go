@@ -943,10 +943,12 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 
 	tests := []struct {
 		name      string
+		loadScope querypb.LoadScope
 		reopenErr error
 	}{
-		{name: "success"},
-		{name: "error", reopenErr: errors.New("mocked reopen error")},
+		{name: "reopen_success", loadScope: querypb.LoadScope_Reopen},
+		{name: "stats_success", loadScope: querypb.LoadScope_Stats},
+		{name: "reopen_error", loadScope: querypb.LoadScope_Reopen, reopenErr: errors.New("mocked reopen error")},
 	}
 
 	for _, test := range tests {
@@ -960,6 +962,15 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 			suite.node.loader = mockLoader
 			defer func() { suite.node.loader = loader }()
 
+			collection := suite.node.manager.Collection.Get(suite.collectionID)
+			suite.Require().NotNil(collection)
+			servedSchema, servedVersion, servedBarrier := collection.SchemaSnapshot()
+			effectiveSchema := proto.Clone(servedSchema).(*schemapb.CollectionSchema)
+			effectiveSchema.Properties = append(effectiveSchema.Properties, &commonpb.KeyValuePair{
+				Key:   common.MmapEnabledKey,
+				Value: "true",
+			})
+
 			req := &querypb.LoadSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgID:    rand.Int63(),
@@ -968,12 +979,15 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 				CollectionID:  suite.collectionID,
 				DstNodeID:     suite.node.session.ServerID,
 				Infos:         infos,
-				Schema:        schema,
+				Schema:        effectiveSchema,
 				NeedTransfer:  false,
-				LoadScope:     querypb.LoadScope_Reopen,
+				LoadScope:     test.loadScope,
 				IndexInfoList: indexInfos,
+				LoadMeta: &querypb.LoadMetaInfo{
+					SchemaBarrierTs: servedBarrier + 1000,
+				},
 			}
-			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos(), req.GetSchema()).Return(test.reopenErr).Once()
 
 			time.Sleep(time.Nanosecond)
 			status, err := suite.node.LoadSegments(ctx, req)
@@ -984,6 +998,11 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 				suite.NotEqual(commonpb.ErrorCode_Success, status.GetErrorCode())
 				suite.Contains(status.GetReason(), test.reopenErr.Error())
 			}
+
+			afterSchema, afterVersion, afterBarrier := collection.SchemaSnapshot()
+			suite.Same(servedSchema, afterSchema)
+			suite.Equal(servedVersion, afterVersion)
+			suite.Equal(servedBarrier, afterBarrier)
 
 			deltaResp := suite.getDataDistributionWithDeltaSupport(ctx, fullResp.GetLastModifyTs())
 			suite.Require().True(deltaResp.GetIsDelta())

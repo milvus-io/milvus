@@ -379,6 +379,34 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 		newVecFieldID)
 }
 
+func (s *CollectionManagerSuite) TestUpdateIndexMetaDoesNotAdvanceSchema() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	beforeSchema, beforeVersion, beforeBarrier := coll.SchemaSnapshot()
+	_, _, _, beforeSegcoreVersion := coll.schemaSnapshotWithSegcoreSchemaVersion()
+	beforeNativeSchema := proto.Clone(coll.GetCCollection().Schema()).(*schemapb.CollectionSchema)
+
+	newIndexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	newIndexMeta.MaxIndexRowCount++
+	s.Require().NoError(UpdateCollectionIndexMeta(coll, beforeVersion, newIndexMeta))
+
+	afterSchema, afterVersion, afterBarrier := coll.SchemaSnapshot()
+	_, _, _, afterSegcoreVersion := coll.schemaSnapshotWithSegcoreSchemaVersion()
+	s.Same(beforeSchema, afterSchema)
+	s.Equal(beforeVersion, afterVersion)
+	s.Equal(beforeBarrier, afterBarrier)
+	s.Equal(beforeSegcoreVersion, afterSegcoreVersion)
+	s.True(proto.Equal(beforeNativeSchema, coll.GetCCollection().Schema()))
+	s.True(proto.Equal(newIndexMeta, coll.GetCCollection().IndexMeta()))
+
+	staleIndexMeta := proto.Clone(newIndexMeta).(*segcorepb.CollectionIndexMeta)
+	staleIndexMeta.MaxIndexRowCount++
+	err := UpdateCollectionIndexMeta(coll, beforeVersion+1, staleIndexMeta)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+	s.True(proto.Equal(newIndexMeta, coll.GetCCollection().IndexMeta()))
+}
+
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {
 	coll := s.cm.Get(1)
 	s.Require().NotNil(coll)

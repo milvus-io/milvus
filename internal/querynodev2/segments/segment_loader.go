@@ -90,9 +90,12 @@ type Loader interface {
 	// GetChunkManager returns the chunk manager for remote storage access.
 	GetChunkManager() storage.ChunkManager
 
-	// ReopenSegments update segment data according to new load info.
+	// ReopenSegments updates segment data according to new load info. schema is
+	// the request's effective schema snapshot and is applied only to segments;
+	// collection schema ownership remains with the WAL UpdateSchema path.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
+		schema *schemapb.CollectionSchema,
 	) error
 }
 
@@ -2443,6 +2446,7 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
+	schema *schemapb.CollectionSchema,
 ) error {
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
@@ -2464,12 +2468,18 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			mlog.Warn(context.TODO(), "failed to reopen segment, segment not loaded", mlog.Int64("segmentID", info.GetSegmentID()))
 			continue
 		}
-		collection := loader.manager.Collection.Get(info.GetCollectionID())
-		if collection != nil {
-			configureUseTakeForOutput(info, collection.Schema())
+		effectiveSchema := schema
+		if effectiveSchema == nil {
+			collection := loader.manager.Collection.Get(info.GetCollectionID())
+			if collection != nil {
+				effectiveSchema = collection.Schema()
+			}
+		}
+		if effectiveSchema != nil {
+			configureUseTakeForOutput(info, effectiveSchema)
 		}
 
-		err := segment.Reopen(ctx, info)
+		err := segment.Reopen(ctx, info, schema)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))
 			return err
