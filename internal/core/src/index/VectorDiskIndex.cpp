@@ -778,6 +778,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                 search_config, DISK_ANN_QUERY_PQ_BEAMWIDTH);
             search_config[DISK_ANN_QUERY_PQ_BEAMWIDTH] =
                 vectors_beamwidth.value();
+        } else {
+            search_config[DISK_ANN_QUERY_PQ_BEAMWIDTH] =
+                int(search_vectors_beamwidth_);
         }
         // set json reset field, will be removed later
         search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
