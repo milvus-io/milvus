@@ -174,14 +174,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 		Return(nil, nil).Build()
 	defer mockSourceDeltas.UnPatch()
 
-	var patchedSegManifest string
-	var patchedAdoptionBase string
+	var patchedBaseManifest string
 	var patchedFragments []packed.Fragment
 	var patchedColumns []string
 	mockPatch := mockey.Mock(mockey.GetMethod(task, "patchSegmentForMissingColumns")).
-		To(func(ctx context.Context, seg *datapb.SegmentInfo, fragments []packed.Fragment, missingColumns []string, baseManifest string) (*datapb.SegmentInfo, error) {
-			patchedSegManifest = seg.GetManifestPath()
-			patchedAdoptionBase = baseManifest
+		To(func(ctx context.Context, seg *datapb.SegmentInfo, fragments []packed.Fragment, missingColumns []string) (*datapb.SegmentInfo, error) {
+			patchedBaseManifest = seg.GetManifestPath()
 			patchedFragments = append([]packed.Fragment(nil), fragments...)
 			patchedColumns = append([]string(nil), missingColumns...)
 			return &datapb.SegmentInfo{
@@ -203,12 +201,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	s.Require().Len(updated, 1)
 	s.Equal(finalManifest, updated[0].GetManifestPath())
 	s.Equal(updated, result)
-	// The column append builds on the intermediate (deltalog-refreshed) manifest...
-	s.Equal(refreshedManifest, patchedSegManifest)
-	// ...but the adoption base carried to DataCoord is the ORIGINAL dispatch-time
-	// manifest, so the CAS matches what DataCoord holds instead of an unseen
-	// intermediate manifest.
-	s.Equal(oldManifest, patchedAdoptionBase)
+	s.Equal(refreshedManifest, patchedBaseManifest)
 	s.Equal(newFragments, patchedFragments)
 	s.Equal([]string{"vec"}, patchedColumns)
 }
