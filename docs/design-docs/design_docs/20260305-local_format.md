@@ -84,7 +84,8 @@ validates it as a field type parameter.
 
 Validation rules:
 
-- Missing `local_format` means `raw`.
+- Missing `local_format` uses the server default, which initially resolves to
+  `raw`.
 - `local_format=vortex` is accepted for non-primary-key, non-vector fields.
 - Primary-key fields reject `local_format=vortex`.
 - Vector fields reject `local_format=vortex`.
@@ -94,10 +95,14 @@ Validation rules:
 
 `local_format` is only effective for Storage V3 sealed segments.
 
-For write-time column group planning, fields marked `local_format=vortex` are
-partitioned away from fields using the raw local format. A column group whose
-remaining fields all use Vortex local format is written with physical format
-`vortex`; other column groups use the normal fallback storage format.
+For write-time column group planning, fields with a default (empty), `raw`, or
+`vortex` local format are partitioned away from each other. The default value
+remains a separate partition so a future server-level default can be changed
+without mixing fields that explicitly requested `raw` or `vortex`.
+
+Local format does not select the physical writer format. New column groups use
+the writer's configured format, and existing column groups preserve the format
+recorded in the Storage V3 manifest.
 
 For read-time loading, Vortex local format is used only when both conditions are
 true:
@@ -162,18 +167,18 @@ The key ownership split is:
 
 ### Column Group Splitting
 
-Column group splitting partitions fields by `local_format` before subsequent
-split policies finalize physical groups. This prevents raw and Vortex local
-format fields from sharing one physical column group.
+Column group splitting partitions fields by the default (empty), `raw`, or
+`vortex` `local_format` value before subsequent split policies finalize physical
+groups. This gives each physical group an unambiguous local-format intent while
+keeping physical writer-format selection independent.
 
 The split policy behavior is:
 
-1. Partition pending fields by `local_format`.
-2. Keep the partition's format metadata through later split policies.
-3. Emit physical column groups with `Format=vortex` only for Vortex local format
-   groups.
-4. Leave raw groups with an empty format override so they use the configured
-   fallback storage format.
+1. Partition pending fields by the exact `local_format` value, keeping default
+   (empty), `raw`, and `vortex` separate.
+2. Keep the partition boundary through later split policies.
+3. Leave the resulting column group's writer `Format` unset so normal writer
+   configuration or existing manifest metadata determines the physical format.
 
 System, vector, text, average-size, and remanent-short split policies still
 apply after the local-format partitioning. They split within the current local
@@ -479,11 +484,11 @@ level so all field proxies in the same physical group share the same state.
 
 ## Compatibility, Deprecation, and Migration Plan
 
-- Backward compatible by default: fields without `local_format` behave as
-  `raw`.
+- Backward compatible by default: fields without `local_format` use the server
+  default, which initially behaves as `raw`.
 - Existing non-Vortex segments continue to load through the raw path.
-- A schema can contain both raw and Vortex local format fields; column group
-  splitting keeps them physically separate.
+- A schema can contain default (empty), raw, and Vortex local format fields;
+  column group splitting keeps the three intents physically separate.
 - During the transition, QueryNode keeps both access paths: raw fields continue
   to use the `ChunkedBase` chunk-oriented path, while Vortex fields use the
   `ChunkedColumnInterface` column-oriented path.
