@@ -2362,6 +2362,27 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
 
 namespace {
 
+// Reopening a file this segment already read once fails for two very different
+// reasons, and the query path has to tell them apart: object storage being
+// briefly unavailable (throttled, timed out, connection dropped) is worth a
+// retry, anything else is not. AssertInfo would raise UnexpectedError (2001),
+// which the Go side treats as permanent -- so a throttled GET on the lazy
+// footer path would fail the query outright instead of being retried or
+// rerouted. Arrow reports transient object-storage conditions as IOError, and
+// on a file that was readable moments ago that is what "cannot read it now"
+// almost always means, so map IOError to the retriable storage fallback and
+// everything else to the permanent one.
+[[noreturn]] void
+ThrowFooterReopenError(const std::string& what, const arrow::Status& status) {
+    if (status.IsIOError()) {
+        ThrowInfo(ErrorCode::StorageTransientError,
+                  "{}: {}",
+                  what,
+                  status.ToString());
+    }
+    ThrowInfo(ErrorCode::StorageError, "{}: {}", what, status.ToString());
+}
+
 // A column group or field-binlog group may contain multiple fields but has only
 // one translator warmup policy. Accumulate per-field policies into the most
 // aggressive group policy: sync > async > disable. Empty means no field has
@@ -2469,23 +2490,27 @@ class GroupFooterCache {
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] {} failed to reopen {} for skip index "
-                       "statistics: {}",
-                       debug_key_,
-                       files_[file_idx],
-                       result.status().ToString());
+            if (!result.ok()) {
+                ThrowFooterReopenError(
+                    fmt::format("[StorageV2] {} failed to reopen {} for skip "
+                                "index statistics",
+                                debug_key_,
+                                files_[file_idx]),
+                    result.status());
+            }
             auto reader = result.ValueOrDie();
             // The footer outlives the reader: PackedFileMetadata owns the
             // parsed thrift metadata via shared_ptr, so closing the reader
             // does not invalidate the statistics we read out of it.
             metas_[file_idx] = reader->file_metadata();
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "[StorageV2] {} failed to close {}: {}",
-                       debug_key_,
-                       files_[file_idx],
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowFooterReopenError(
+                    fmt::format("[StorageV2] {} failed to close {}",
+                                debug_key_,
+                                files_[file_idx]),
+                    status);
+            }
         }
         return metas_[file_idx];
     }
@@ -2586,9 +2611,14 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowFooterReopenError(
+                    fmt::format("[StorageV2] metadata loader {} failed to open "
+                                "file row group reader for {}",
+                                debug_key,
+                                file),
+                    result.status());
+            }
 
             auto reader = result.ValueOrDie();
             // Keep the parsed footer: the skip index reuses it instead of
@@ -2597,12 +2627,14 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
             auto file_metadata = reader->file_metadata();
             auto row_group_meta = file_metadata->GetRowGroupMetadataVector();
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "[StorageV2] metadata loader {} failed to close "
-                       "file reader for {} with error {}",
-                       debug_key,
-                       file,
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowFooterReopenError(
+                    fmt::format("[StorageV2] metadata loader {} failed to "
+                                "close file reader for {}",
+                                debug_key,
+                                file),
+                    status);
+            }
             return std::make_pair(std::move(row_group_meta),
                                   std::move(file_metadata));
         }));

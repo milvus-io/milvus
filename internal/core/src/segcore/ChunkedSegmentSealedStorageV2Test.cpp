@@ -2004,6 +2004,45 @@ UnaryRangePlan(FieldId fid, proto::plan::OpType op, int64_t threshold) {
     return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 }
 
+// The same measurement over offset input -- the path iterative filter runs
+// (IterativeFilterNode installs an offset vector on the EvalCtx), which reaches
+// ProcessDataByOffsets instead of the sequential ProcessDataChunks. test::
+// gen_filter_res drives that path but builds its own QueryContext with no
+// OpContext, so nothing records traffic; this attaches one.
+ScanTraffic
+RunByOffsetsWithStorageUsage(
+    const std::shared_ptr<milvus::plan::PlanNode>& plannode,
+    const milvus::segcore::SegmentInternalInterface* segment,
+    int64_t active_count,
+    milvus::exec::OffsetVector& offsets) {
+    auto filter_node =
+        std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(plannode);
+    AssertInfo(filter_node != nullptr, "expected a FilterBitsNode");
+    std::vector<milvus::expr::TypedExprPtr> filters{filter_node->filter()};
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    milvus::OpContext op_context;
+    query_context->set_op_context(&op_context);
+
+    auto exec_context =
+        std::make_unique<milvus::exec::ExecContext>(query_context.get());
+    auto exprs =
+        std::make_unique<milvus::exec::ExprSet>(filters, exec_context.get());
+    std::vector<VectorPtr> results;
+    milvus::exec::EvalCtx eval_ctx(exec_context.get(), &offsets);
+    exprs->Eval(0, 1, true, eval_ctx, results);
+
+    auto col_vec = milvus::test::GetColumnVectorForTest(results[0]);
+    // Unlike ExecuteQueryExpr, whose bitmap marks the rows filtered out, an
+    // ExprSet evaluated directly returns the match set (this is how
+    // ExprArithOpTest reads gen_filter_res), so it is counted as-is.
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    return ScanTraffic{static_cast<int64_t>(view.count()),
+                       op_context.storage_usage.scanned_total_bytes.load(),
+                       op_context.storage_usage.scanned_cold_bytes.load()};
+}
+
 }  // namespace
 
 // Sealed VARCHAR IN must prune on the path the query actually takes. The
@@ -2136,6 +2175,67 @@ TEST(SkipIndexPr51441, PrunedCellsAreNotTouchedByTheScan) {
     // every query here is a cache hit and cold_bytes is 0 across the board.
     // total_bytes is what distinguishes "did not touch the cell" from
     // "touched a resident cell", which is exactly the fix under test.
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// The sequential scan is not the only way a filter reads a column. Iterative
+// filter evaluates over an offset vector, which reaches ProcessDataByOffsets --
+// a path that used to pin the chunk first and consult the skip index after, so
+// a pruned cell was materialized anyway and none of the IO the skip index was
+// supposed to save materialized either. Measured the same way as the sequential
+// case, on offsets spread across every cell so a chunk-at-a-time reader has to
+// visit them all.
+TEST(SkipIndexPr51441, PrunedCellsAreNotTouchedByOffsetInput) {
+    DriverPrefetchGuard driver_prefetch_guard(false);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    StorageUsageTrackingGuard tracking_guard(true);
+
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_offset_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1)
+        << "need multiple cells for offset input to span more than one";
+
+    milvus::exec::OffsetVector offsets;
+    const int64_t stride = std::max<int64_t>(1, N / 500);
+    for (int64_t i = 0; i < N; i += stride) {
+        offsets.push_back(static_cast<int32_t>(i));
+    }
+
+    // val > N matches nothing, so every cell the offsets land in is prunable.
+    auto all_pruned = RunByOffsetsWithStorageUsage(
+        UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, N),
+        segment.get(),
+        N,
+        offsets);
+    // val > -1 matches everything: the cost of reaching those same offsets
+    // without pruning.
+    auto full = RunByOffsetsWithStorageUsage(
+        UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, -1),
+        segment.get(),
+        N,
+        offsets);
+
+    EXPECT_EQ(all_pruned.count, 0);
+    EXPECT_EQ(full.count, static_cast<int64_t>(offsets.size()));
+    ASSERT_GT(full.total_bytes, 0)
+        << "storage usage tracking did not accumulate on the offset path -- "
+           "the flag must be on before the segment is loaded";
+
+    EXPECT_EQ(all_pruned.total_bytes, 0)
+        << "an offset-input filter that prunes every cell still touched "
+        << all_pruned.total_bytes << " bytes against " << full.total_bytes
+        << " for the unpruned one: the offset path is pinning chunks the skip "
+           "index already ruled out, so iterative filter pays IO the "
+           "sequential scan no longer does";
 
     SetDefaultEnableParquetStatsSkipIndex(false);
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();

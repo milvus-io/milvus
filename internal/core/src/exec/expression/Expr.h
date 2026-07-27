@@ -335,9 +335,19 @@ class SegmentExpr : public Expr {
     // right here) would answer that directly and is a follow-up; it would also
     // be comparable with cache_cell_access_{hit,miss}_bytes_total, which is
     // always collected and is what the proxy-side StorageCost derives from.
+    //
+    // The skip index is passed in rather than re-fetched so this stays the one
+    // place that decides what counts as "judged". A field with no metrics
+    // installed still answers every CanSkip* query (GetFieldChunkMetrics hands
+    // back a shared NoneFieldChunkMetrics that never skips), so counting those
+    // chunks would report a 0% prune ratio for every numeric and VARCHAR
+    // expression on a default (flag off) or storage v3 deployment -- inflating
+    // the scanned counter and burying the collections that really do prune.
     void
-    RecordSkipIndexEffect(int64_t chunks_judged, int64_t chunks_pruned) const {
-        if (chunks_judged <= 0) {
+    RecordSkipIndexEffect(const milvus::SkipIndex& skip_index,
+                          int64_t chunks_judged,
+                          int64_t chunks_pruned) const {
+        if (chunks_judged <= 0 || !skip_index.HasFieldMetrics(field_id_)) {
             return;
         }
         milvus::monitor::internal_core_skipindex_chunks_scanned(
@@ -834,15 +844,39 @@ class SegmentExpr : public Expr {
                         batch_offsets.push_back(int32_t(chunk_offset));
                         ++i;
                     }
+                    // Decide before fetching. Offset input is the path
+                    // iterative filter takes (IterativeFilterNode installs it),
+                    // so fetching the run's views first would materialize
+                    // exactly the cells the skip index just ruled out -- the
+                    // cost the sequential scan stopped paying. A pruned run is
+                    // still fetched while its validity remains observable, the
+                    // same gate ProcessDataChunksForMultipleChunk uses.
+                    const bool skip =
+                        skip_func &&
+                        skip_func(*skip_index, field_id_, run_chunk_id);
+                    if (skip && !(is_nullable_ && !null_rejecting_)) {
+                        // Nothing to read: drive the callback on a null batch
+                        // per row so cursor-tracking callbacks stay aligned.
+                        for (size_t j = 0; j < batch_offsets.size(); ++j) {
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1,
+                                    res + processed_size,
+                                    valid_res + processed_size,
+                                    values...);
+                            processed_size++;
+                        }
+                        continue;
+                    }
                     auto pw = segment_->get_views_by_offsets<T>(
                         op_ctx_, field_id_, run_chunk_id, batch_offsets);
                     // Bind by reference: get() returns the pinned pair by
                     // reference; copying it would duplicate the whole run's
                     // view vector + validity vector on every run.
                     const auto& [data_vec, valid_data] = pw.get();
-                    const bool skip =
-                        skip_func &&
-                        skip_func(*skip_index, field_id_, run_chunk_id);
                     for (size_t j = 0; j < batch_offsets.size(); ++j) {
                         if (!skip) {
                             const bool* valid_ptr = valid_data.empty()
@@ -897,18 +931,32 @@ class SegmentExpr : public Expr {
                 auto [chunk_id, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, offset);
                 if (chunk_id != cached_chunk_id) {
-                    pw.emplace(
-                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
-                    auto chunk = pw->get();
-                    chunk_base = chunk.data();
-                    chunk_valid_base = chunk.valid_data();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
-                    // chunk instead of once per row.
+                    // chunk instead of once per row -- and before pinning, so a
+                    // pruned chunk is never materialized. Offset input is the
+                    // path iterative filter takes (IterativeFilterNode installs
+                    // it), so pinning first would pay for exactly the cells the
+                    // skip index just ruled out, which is what the sequential
+                    // scan stopped doing. Same validity gate as
+                    // ProcessDataChunksForMultipleChunk: a skipped chunk is
+                    // still fetched while its validity remains observable.
                     cached_skip = skip_func &&
                                   skip_func(*skip_index, field_id_, chunk_id);
+                    if (!cached_skip || (is_nullable_ && !null_rejecting_)) {
+                        pw.emplace(segment_->chunk_data<T>(
+                            op_ctx_, field_id_, chunk_id));
+                        auto chunk = pw->get();
+                        chunk_base = chunk.data();
+                        chunk_valid_base = chunk.valid_data();
+                    } else {
+                        pw.reset();
+                        chunk_base = nullptr;
+                        chunk_valid_base = nullptr;
+                    }
                     cached_chunk_id = chunk_id;
                 }
-                const T* data = chunk_base + chunk_offset;
+                const T* data =
+                    chunk_base != nullptr ? chunk_base + chunk_offset : nullptr;
                 const bool* valid_data = chunk_valid_base != nullptr
                                              ? chunk_valid_base + chunk_offset
                                              : nullptr;
@@ -1669,7 +1717,7 @@ class SegmentExpr : public Expr {
                 }
                 pf_chunk_ids.push_back(i);
             }
-            RecordSkipIndexEffect(judged, pruned);
+            RecordSkipIndexEffect(*skip_index, judged, pruned);
             segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
             prefetched_ = true;
         }

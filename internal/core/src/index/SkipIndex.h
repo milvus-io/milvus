@@ -239,6 +239,20 @@ class SkipIndex {
         fieldChunkMetrics_.erase(field_id);
     }
 
+    // Whether this field has skip metrics at all. A field with none still
+    // answers every CanSkip* query -- GetFieldChunkMetrics hands back a shared
+    // NoneFieldChunkMetrics that never skips -- so a caller cannot tell "judged
+    // and found nothing to prune" from "there was nothing to judge with". That
+    // distinction only matters to the effectiveness metrics: counting the
+    // second case would report a 0% prune ratio for every numeric and VARCHAR
+    // expression on a default (flag off) or storage v3 deployment, where no
+    // metrics are installed at all, and bury the collections that do have them.
+    bool
+    HasFieldMetrics(FieldId field_id) const {
+        std::shared_lock lck(mutex_);
+        return fieldChunkMetrics_.find(field_id) != fieldChunkMetrics_.end();
+    }
+
     template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
     CanSkipUnaryRange(milvus::OpContext* op_ctx,
