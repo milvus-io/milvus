@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -222,15 +223,14 @@ func TestGetPasswordVerifyFunc_PrimaryWinsOverFallback(t *testing.T) {
 	setVerifyFunc(t, func(_ context.Context, _, password string) bool {
 		return password == "primary-accepts"
 	})
-	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, _, _ string) bool {
+	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, _, _ string) error {
 		t.Fatal("fallback verifier must not be consulted while a primary exists")
-		return false
+		return nil
 	})
 
-	verify := getPasswordVerifyFunc()
-	assert.NotNil(t, verify)
-	assert.True(t, verify(context.Background(), "root", "primary-accepts"))
-	assert.False(t, verify(context.Background(), "root", "fallback-accepts"))
+	assert.NoError(t, verifyPassword(context.Background(), "root", "primary-accepts", "/test"))
+	assert.True(t, IsAuthenticationError(
+		verifyPassword(context.Background(), "root", "fallback-accepts", "/test")))
 }
 
 func TestGetPasswordVerifyFunc_FallbackUsedWhenNoPrimary(t *testing.T) {
@@ -238,13 +238,16 @@ func TestGetPasswordVerifyFunc_FallbackUsedWhenNoPrimary(t *testing.T) {
 	// what keeps /management/* and /debug/pprof reachable by root once
 	// adminAuthEnabled is on.
 	setVerifyFunc(t, nil)
-	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, _, password string) bool {
-		return password == "fallback-accepts"
+	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, _, password string) error {
+		if password == "fallback-accepts" {
+			return nil
+		}
+		return ErrInvalidCredential
 	})
 
-	verify := getPasswordVerifyFunc()
-	assert.NotNil(t, verify)
-	assert.True(t, verify(context.Background(), "root", "fallback-accepts"))
+	assert.NoError(t, verifyPassword(context.Background(), "root", "fallback-accepts", "/test"))
+	assert.True(t, IsAuthenticationError(
+		verifyPassword(context.Background(), "root", "nope", "/test")))
 }
 
 func TestWrapAdminAuth_FallbackVerifierAuthenticates(t *testing.T) {
@@ -253,8 +256,11 @@ func TestWrapAdminAuth_FallbackVerifierAuthenticates(t *testing.T) {
 	// This is the regression the reviewer flagged — before the fallback slot
 	// existed, every worker node rejected even valid root credentials.
 	setVerifyFunc(t, nil)
-	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, username, password string) bool {
-		return username == "root" && password == "correct-horse"
+	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, username, password string) error {
+		if username == "root" && password == "correct-horse" {
+			return nil
+		}
+		return ErrInvalidCredential
 	})
 
 	inv := &invoked{}
@@ -267,4 +273,56 @@ func TestWrapAdminAuth_FallbackVerifierAuthenticates(t *testing.T) {
 
 	assert.True(t, inv.called, "valid root credentials must pass via the fallback verifier")
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestWrapAdminAuth_UnreachableCredentialStoreReturns503(t *testing.T) {
+	// A worker node whose mix coord is down cannot judge the password. It must
+	// answer 503, not 401: the operator is usually holding a correct password
+	// and debugging a half-down cluster, and "invalid root password" would send
+	// them chasing a credential problem that does not exist.
+	//
+	// This is a regression test for real behavior observed against a live
+	// cluster: with the verifier returning a bare bool, an unreachable coord was
+	// indistinguishable from a wrong password and surfaced as 401.
+	setVerifyFunc(t, nil)
+	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, _, _ string) error {
+		return errors.New("mix coord client unavailable: connection refused")
+	})
+
+	inv := &invoked{}
+	wrapped := wrapAdminAuth(inv.handler(), AuthAlways)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.SetBasicAuth("root", "correct-horse")
+	wrapped.ServeHTTP(rec, req)
+
+	assert.False(t, inv.called)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "invalid root password")
+}
+
+func TestWrapAdminAuth_ErrorBodyLeaksNoInternals(t *testing.T) {
+	// The 503 body is returned to a caller who has not authenticated, so it must
+	// not carry the underlying cause. merr and cockroachdb/errors render wrapped
+	// errors with a stack trace containing absolute build paths; a live cluster
+	// returned exactly that before this was fixed.
+	setVerifyFunc(t, nil)
+	RegisterFallbackPasswordVerifyFunc(func(_ context.Context, _, _ string) error {
+		return errors.Wrap(
+			errors.New("stack trace: /home/builder/milvus/pkg/tracer/stack_trace.go:51"),
+			"GetCredential failed")
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.SetBasicAuth("root", "correct-horse")
+	wrapAdminAuth((&invoked{}).handler(), AuthAlways).ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.NotContains(t, body, "stack trace")
+	assert.NotContains(t, body, "/home/builder")
+	assert.NotContains(t, body, "GetCredential")
+	assert.Contains(t, body, "credential store is unreachable")
 }

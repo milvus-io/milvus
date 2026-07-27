@@ -23,10 +23,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/crypto/bcrypt"
 
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -65,7 +66,7 @@ const verifyTimeout = 5 * time.Second
 // profileable while coord is healthy; if coord is down, /debug/pprof on that
 // worker answers 503 rather than serving a profile. Turning the flag off
 // restores unauthenticated access.
-func NewRootCredentialVerifier(newClient func(ctx context.Context) (types.MixCoordClient, error)) func(ctx context.Context, username, password string) bool {
+func NewRootCredentialVerifier(newClient func(ctx context.Context) (types.MixCoordClient, error)) internalhttp.FallbackVerifier {
 	var (
 		mu     sync.Mutex
 		client types.MixCoordClient
@@ -85,34 +86,44 @@ func NewRootCredentialVerifier(newClient func(ctx context.Context) (types.MixCoo
 		return client, nil
 	}
 
-	return func(ctx context.Context, username, password string) bool {
+	return func(ctx context.Context, username, password string) error {
 		if username != util.UserRoot {
-			return false
+			return internalhttp.ErrInvalidCredential
 		}
 
 		ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
 		defer cancel()
 
+		// Every failure below except the bcrypt mismatch means "could not
+		// check", not "wrong password", and is returned as a plain error so the
+		// caller renders 503 rather than telling the operator their correct
+		// password is invalid while the coord is down.
 		cli, err := getClient(ctx)
 		if err != nil {
-			mlog.Warn(ctx, "cannot verify root credential: mix coord client unavailable", mlog.Err(err))
-			return false
+			return errors.Wrap(err, "mix coord client unavailable")
 		}
 
 		resp, err := cli.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
 			Username: username,
 		})
 		if err != nil {
-			mlog.Warn(ctx, "cannot verify root credential: GetCredential failed", mlog.Err(err))
-			return false
+			return errors.Wrap(err, "GetCredential failed")
 		}
 		if err := merr.Error(resp.GetStatus()); err != nil {
-			mlog.Warn(ctx, "cannot verify root credential: GetCredential returned error", mlog.Err(err))
-			return false
+			return errors.Wrap(err, "GetCredential returned error")
+		}
+		if resp.GetPassword() == "" {
+			// Not a wrong password: the store answered OK but carried no hash,
+			// which is an internal inconsistency. Reporting it as unverifiable
+			// (503) also stops bcrypt from being handed an empty hash.
+			return merr.WrapErrServiceInternal("credential store returned an empty hash for root")
 		}
 
-		// Don't log the mismatch here; the caller logs it together with the
-		// request path, which is more useful for triage.
-		return bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) == nil
+		if bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) != nil {
+			// Don't log here; the caller logs the mismatch together with the
+			// request path, which is more useful for triage.
+			return internalhttp.ErrInvalidCredential
+		}
+		return nil
 	}
 }
