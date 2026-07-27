@@ -322,4 +322,4 @@ replace (
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
 
-replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727084728-a58408f49811
+replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727093850-fbdc96f0e201
