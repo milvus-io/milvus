@@ -651,6 +651,140 @@ func TestDiskIndexParams(t *testing.T) {
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 	})
+
+	t.Run("AutoIndex DISKANN omits disk_pq_code_budget_gb_ratio when not configured", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+
+		// ExtraParams without disk_pq_code_budget_gb → DiskPQCodeBudgetGBRatio defaults to 0.25
+		// but for DISKANN we should NOT share AISAQ's default.
+		// When ExtraParams doesn't specify disk_pq_code_budget_gb, it gets the struct default (0.25).
+		// Let's test with an ExtraParams that explicitly has disk_pq_code_budget_gb = 0 to confirm omission.
+		mapString := make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"disk_pq_code_budget_gb\": 0, \"num_threads\": 1}"
+		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
+		str, err := json.Marshal(mapString)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
+
+		autoIndexParams := make(map[string]string)
+		autoIndexParams[MaxDegreeKey] = "56"
+		autoIndexParams[SearchListSizeKey] = "100"
+		autoIndexParams[common.IndexTypeKey] = "DISKANN"
+		str, err = json.Marshal(autoIndexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams := make(map[string]string)
+		indexParams[common.IndexTypeKey] = "DISKANN"
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		// DiskPQCodeBudgetRatioKey must NOT be present (or must not be empty string)
+		val, exists := indexParams[DiskPQCodeBudgetRatioKey]
+		assert.False(t, exists, "DiskPQCodeBudgetRatioKey should not be set when ratio is 0")
+		assert.Equal(t, "", val)
+
+		// Now SetDiskIndexBuildParams should succeed without the key
+		indexParams[PQCodeBudgetRatioKey] = "0.125"
+		indexParams[NumBuildThreadRatioKey] = "1.0"
+		indexParams[common.DimKey] = "128"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.NoError(t, err)
+		// disk_pq_dims should be 0 (no disk PQ)
+		assert.Equal(t, "0", indexParams[DiskPQDimsKey])
+	})
+
+	t.Run("AutoIndex DISKANN writes disk_pq_code_budget_gb_ratio when explicitly configured", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+
+		mapString := make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"disk_pq_code_budget_gb\": 0.2, \"num_threads\": 1}"
+		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
+		str, err := json.Marshal(mapString)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
+
+		autoIndexParams := make(map[string]string)
+		autoIndexParams[MaxDegreeKey] = "56"
+		autoIndexParams[SearchListSizeKey] = "100"
+		autoIndexParams[common.IndexTypeKey] = "DISKANN"
+		str, err = json.Marshal(autoIndexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams := make(map[string]string)
+		indexParams[common.IndexTypeKey] = "DISKANN"
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		// DiskPQCodeBudgetRatioKey must be present with the configured value
+		val, exists := indexParams[DiskPQCodeBudgetRatioKey]
+		assert.True(t, exists, "DiskPQCodeBudgetRatioKey should be set when ratio is non-zero")
+		ratio, err := strconv.ParseFloat(val, 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 0.2, ratio)
+	})
+
+	t.Run("AutoIndex AISAQ omits optional params not in AutoIndex config", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+
+		// ExtraParams with disk_pq_code_budget_gb = 0 (no disk PQ for this test)
+		mapString := make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"disk_pq_code_budget_gb\": 0, \"num_threads\": 1}"
+		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
+		str, err := json.Marshal(mapString)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
+
+		// AutoIndex config only has required params + pq_cache_size (no optional AISAQ params)
+		autoIndexParams := make(map[string]string)
+		autoIndexParams[MaxDegreeKey] = "56"
+		autoIndexParams[SearchListSizeKey] = "100"
+		autoIndexParams[PQCacheSizeKey] = "512"
+		autoIndexParams[common.IndexTypeKey] = "AISAQ"
+		str, err = json.Marshal(autoIndexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams := make(map[string]string)
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		// None of the optional params should be present
+		_, exists := indexParams[DiskPQCodeBudgetRatioKey]
+		assert.False(t, exists, "DiskPQCodeBudgetRatioKey should not be set when ratio is 0")
+		_, exists = indexParams[VectorsBeamWidthKey]
+		assert.False(t, exists, "VectorsBeamWidthKey should not be set when not in config")
+		_, exists = indexParams[InlinePQKey]
+		assert.False(t, exists, "InlinePQKey should not be set when not in config")
+		_, exists = indexParams[PQReadPageCacheSizeKey]
+		assert.False(t, exists, "PQReadPageCacheSizeKey should not be set when not in config")
+		_, exists = indexParams[RearrangeKey]
+		assert.False(t, exists, "RearrangeKey should not be set when not in config")
+		_, exists = indexParams[NumEntryPointsKey]
+		assert.False(t, exists, "NumEntryPointsKey should not be set when not in config")
+	})
+
+	t.Run("SetDiskIndexBuildParams handles empty string DiskPQCodeBudgetRatioKey", func(t *testing.T) {
+		// Simulates a legacy scenario where the key exists with an empty value
+		indexParams := make(map[string]string)
+		indexParams[DiskPQCodeBudgetRatioKey] = "" // empty string
+		indexParams[PQCodeBudgetRatioKey] = "0.125"
+		indexParams[NumBuildThreadRatioKey] = "1.0"
+		indexParams[common.IndexTypeKey] = "DISKANN"
+		indexParams[common.DimKey] = "128"
+		err := SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.NoError(t, err)
+		// disk_pq_dims should be 0 (treated as no disk PQ)
+		assert.Equal(t, "0", indexParams[DiskPQDimsKey])
+	})
 }
 
 func TestBigDataIndex_parse(t *testing.T) {
@@ -882,4 +1016,285 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["build_algo"], "NN_DESCENT")
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
+}
+
+// TestDiskIndexParamsPipelineE2E exercises the full parameter pipeline:
+//
+//	Proxy (FillDiskIndexParams) → DataNode (SetDiskIndexBuildParams) → QueryNode (SetDiskIndexLoadParams)
+//
+// for two different configurations and asserts that the final build and load
+// output maps are actually different — proving that different input configs
+// propagate end-to-end rather than being flattened by defaults.
+func TestDiskIndexParamsPipelineE2E(t *testing.T) {
+	const (
+		dim         = int64(128)
+		numRows     = int64(100000)
+		fieldDataSz = 4 * dim * numRows // float32 vectors
+	)
+
+	// runPipeline simulates the full lifecycle of index parameter handling:
+	//   1. FillDiskIndexParams (proxy, CreateIndex time)
+	//   2. SetDiskIndexBuildParams (DataNode, build time)
+	//   3. SetDiskIndexLoadParams (QueryNode, load time)
+	// It returns the indexParams map at each stage for assertion.
+	type stageResults struct {
+		afterFill  map[string]string
+		afterBuild map[string]string
+		afterLoad  map[string]string
+	}
+	runPipeline := func(t *testing.T, params *paramtable.ComponentParam, indexType string) stageResults {
+		t.Helper()
+		indexParams := map[string]string{
+			common.IndexTypeKey: indexType,
+		}
+		// Stage 1: Proxy — FillDiskIndexParams
+		err := FillDiskIndexParams(params, indexParams)
+		assert.NoError(t, err)
+		afterFill := copyMap(indexParams)
+
+		// Stage 2: DataNode — SetDiskIndexBuildParams
+		// Add dim (normally added by the proxy before persisting)
+		indexParams[common.DimKey] = strconv.FormatInt(dim, 10)
+		err = SetDiskIndexBuildParams(indexParams, fieldDataSz, schemapb.DataType_FloatVector)
+		assert.NoError(t, err)
+		afterBuild := copyMap(indexParams)
+
+		// Stage 3: QueryNode — SetDiskIndexLoadParams
+		err = SetDiskIndexLoadParams(params, indexParams, numRows)
+		assert.NoError(t, err)
+		afterLoad := copyMap(indexParams)
+
+		return stageResults{afterFill: afterFill, afterBuild: afterBuild, afterLoad: afterLoad}
+	}
+
+	t.Run("two DISKANN configs produce different build and load params", func(t *testing.T) {
+		// Config A: small PQ budget, low thread ratio, low cache
+		var paramsA paramtable.ComponentParam
+		paramsA.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsA.Save(paramsA.CommonCfg.PQCodeBudgetGBRatio.Key, "0.05")
+		paramsA.Save(paramsA.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.05")
+		paramsA.Save(paramsA.CommonCfg.BuildNumThreadsRatio.Key, "0.5")
+		paramsA.Save(paramsA.CommonCfg.LoadNumThreadRatio.Key, "0.1")
+		paramsA.Save(paramsA.CommonCfg.BeamWidthRatio.Key, "0.1")
+
+		// Config B: large PQ budget, high thread ratio, high cache
+		var paramsB paramtable.ComponentParam
+		paramsB.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsB.Save(paramsB.CommonCfg.PQCodeBudgetGBRatio.Key, "0.25")
+		paramsB.Save(paramsB.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.20")
+		paramsB.Save(paramsB.CommonCfg.BuildNumThreadsRatio.Key, "2.0")
+		paramsB.Save(paramsB.CommonCfg.LoadNumThreadRatio.Key, "0.5")
+		paramsB.Save(paramsB.CommonCfg.BeamWidthRatio.Key, "0.5")
+
+		resA := runPipeline(t, &paramsA, "DISKANN")
+		resB := runPipeline(t, &paramsB, "DISKANN")
+
+		// Build stage: pq_code_budget_gb and num_build_thread must differ
+		assert.NotEqual(t, resA.afterBuild[PQCodeBudgetKey], resB.afterBuild[PQCodeBudgetKey],
+			"pq_code_budget_gb should differ between configs")
+		assert.NotEqual(t, resA.afterBuild[NumBuildThreadKey], resB.afterBuild[NumBuildThreadKey],
+			"num_build_thread should differ between configs")
+
+		// Load stage: search_cache_budget_gb, num_load_thread, beamwidth must differ
+		assert.NotEqual(t, resA.afterLoad[SearchCacheBudgetKey], resB.afterLoad[SearchCacheBudgetKey],
+			"search_cache_budget_gb should differ between configs")
+		assert.NotEqual(t, resA.afterLoad[NumLoadThreadKey], resB.afterLoad[NumLoadThreadKey],
+			"num_load_thread should differ between configs")
+		assert.NotEqual(t, resA.afterLoad[BeamWidthKey], resB.afterLoad[BeamWidthKey],
+			"beamwidth should differ between configs")
+	})
+
+	t.Run("two DISKANN AutoIndex configs produce different build and load params", func(t *testing.T) {
+		// Config A: low ratios
+		var paramsA paramtable.ComponentParam
+		paramsA.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsA.Save(paramsA.AutoIndexConfig.Enable.Key, "true")
+		extraA := map[string]string{
+			BuildRatioKey:     `{"pq_code_budget_gb": 0.05, "num_threads": 0.5}`,
+			PrepareRatioKey:   `{"search_cache_budget_gb": 0.05, "num_threads": 0.1}`,
+			BeamWidthRatioKey: "0.1",
+		}
+		strA, _ := json.Marshal(extraA)
+		paramsA.Save(paramsA.AutoIndexConfig.ExtraParams.Key, string(strA))
+		autoIdxA := map[string]string{MaxDegreeKey: "48", SearchListSizeKey: "64", common.IndexTypeKey: "DISKANN"}
+		strAIdx, _ := json.Marshal(autoIdxA)
+		paramsA.Save(paramsA.AutoIndexConfig.IndexParams.Key, string(strAIdx))
+
+		// Config B: high ratios
+		var paramsB paramtable.ComponentParam
+		paramsB.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsB.Save(paramsB.AutoIndexConfig.Enable.Key, "true")
+		extraB := map[string]string{
+			BuildRatioKey:     `{"pq_code_budget_gb": 0.25, "num_threads": 2.0}`,
+			PrepareRatioKey:   `{"search_cache_budget_gb": 0.20, "num_threads": 0.5}`,
+			BeamWidthRatioKey: "0.5",
+		}
+		strB, _ := json.Marshal(extraB)
+		paramsB.Save(paramsB.AutoIndexConfig.ExtraParams.Key, string(strB))
+		autoIdxB := map[string]string{MaxDegreeKey: "64", SearchListSizeKey: "128", common.IndexTypeKey: "DISKANN"}
+		strBIdx, _ := json.Marshal(autoIdxB)
+		paramsB.Save(paramsB.AutoIndexConfig.IndexParams.Key, string(strBIdx))
+
+		resA := runPipeline(t, &paramsA, "DISKANN")
+		resB := runPipeline(t, &paramsB, "DISKANN")
+
+		// Fill stage: ratios must differ
+		assert.NotEqual(t, resA.afterFill[PQCodeBudgetRatioKey], resB.afterFill[PQCodeBudgetRatioKey])
+		assert.NotEqual(t, resA.afterFill[NumBuildThreadRatioKey], resB.afterFill[NumBuildThreadRatioKey])
+		assert.NotEqual(t, resA.afterFill[SearchCacheBudgetRatioKey], resB.afterFill[SearchCacheBudgetRatioKey])
+
+		// Build stage: absolute values must differ
+		assert.NotEqual(t, resA.afterBuild[PQCodeBudgetKey], resB.afterBuild[PQCodeBudgetKey])
+		assert.NotEqual(t, resA.afterBuild[NumBuildThreadKey], resB.afterBuild[NumBuildThreadKey])
+
+		// Load stage: absolute values must differ
+		assert.NotEqual(t, resA.afterLoad[SearchCacheBudgetKey], resB.afterLoad[SearchCacheBudgetKey])
+		assert.NotEqual(t, resA.afterLoad[NumLoadThreadKey], resB.afterLoad[NumLoadThreadKey])
+		assert.NotEqual(t, resA.afterLoad[BeamWidthKey], resB.afterLoad[BeamWidthKey])
+	})
+
+	t.Run("DISKANN with and without disk PQ produce different disk_pq_dims", func(t *testing.T) {
+		// Config A: no disk PQ (ratio = 0)
+		var paramsA paramtable.ComponentParam
+		paramsA.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsA.Save(paramsA.AutoIndexConfig.Enable.Key, "true")
+		extraA := map[string]string{
+			BuildRatioKey:   `{"pq_code_budget_gb": 0.125, "disk_pq_code_budget_gb": 0, "num_threads": 1}`,
+			PrepareRatioKey: `{"search_cache_budget_gb": 0.10, "num_threads": 4}`,
+		}
+		strA, _ := json.Marshal(extraA)
+		paramsA.Save(paramsA.AutoIndexConfig.ExtraParams.Key, string(strA))
+		autoIdx := map[string]string{MaxDegreeKey: "56", SearchListSizeKey: "100", common.IndexTypeKey: "DISKANN"}
+		strIdx, _ := json.Marshal(autoIdx)
+		paramsA.Save(paramsA.AutoIndexConfig.IndexParams.Key, string(strIdx))
+
+		// Config B: with disk PQ (ratio = 0.25)
+		var paramsB paramtable.ComponentParam
+		paramsB.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsB.Save(paramsB.AutoIndexConfig.Enable.Key, "true")
+		extraB := map[string]string{
+			BuildRatioKey:   `{"pq_code_budget_gb": 0.125, "disk_pq_code_budget_gb": 0.25, "num_threads": 1}`,
+			PrepareRatioKey: `{"search_cache_budget_gb": 0.10, "num_threads": 4}`,
+		}
+		strB, _ := json.Marshal(extraB)
+		paramsB.Save(paramsB.AutoIndexConfig.ExtraParams.Key, string(strB))
+		paramsB.Save(paramsB.AutoIndexConfig.IndexParams.Key, string(strIdx))
+
+		resA := runPipeline(t, &paramsA, "DISKANN")
+		resB := runPipeline(t, &paramsB, "DISKANN")
+
+		// Without disk PQ: disk_pq_dims = 0
+		assert.Equal(t, "0", resA.afterBuild[DiskPQDimsKey],
+			"disk_pq_dims should be 0 when disk PQ is disabled")
+		// With disk PQ: disk_pq_dims > 0
+		diskPQDimsB, err := strconv.Atoi(resB.afterBuild[DiskPQDimsKey])
+		assert.NoError(t, err)
+		assert.Greater(t, diskPQDimsB, 0,
+			"disk_pq_dims should be > 0 when disk PQ is enabled")
+		// They must differ
+		assert.NotEqual(t, resA.afterBuild[DiskPQDimsKey], resB.afterBuild[DiskPQDimsKey])
+	})
+
+	t.Run("AISAQ AutoIndex with different ExtraParams produces different outputs", func(t *testing.T) {
+		// Config A
+		var paramsA paramtable.ComponentParam
+		paramsA.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsA.Save(paramsA.AutoIndexConfig.Enable.Key, "true")
+		extraA := map[string]string{
+			BuildRatioKey:     `{"pq_code_budget_gb": 0.05, "disk_pq_code_budget_gb": 0.15, "num_threads": 0.5}`,
+			PrepareRatioKey:   `{"search_cache_budget_gb": 0.05, "num_threads": 0.1}`,
+			BeamWidthRatioKey: "0.1",
+		}
+		strA, _ := json.Marshal(extraA)
+		paramsA.Save(paramsA.AutoIndexConfig.ExtraParams.Key, string(strA))
+		autoIdxA := map[string]string{
+			MaxDegreeKey: "48", SearchListSizeKey: "64",
+			PQCacheSizeKey: "256", common.IndexTypeKey: "AISAQ",
+		}
+		strAIdx, _ := json.Marshal(autoIdxA)
+		paramsA.Save(paramsA.AutoIndexConfig.IndexParams.Key, string(strAIdx))
+
+		// Config B
+		var paramsB paramtable.ComponentParam
+		paramsB.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		paramsB.Save(paramsB.AutoIndexConfig.Enable.Key, "true")
+		extraB := map[string]string{
+			BuildRatioKey:     `{"pq_code_budget_gb": 0.25, "disk_pq_code_budget_gb": 0.30, "num_threads": 2.0}`,
+			PrepareRatioKey:   `{"search_cache_budget_gb": 0.20, "num_threads": 0.5}`,
+			BeamWidthRatioKey: "0.5",
+		}
+		strB, _ := json.Marshal(extraB)
+		paramsB.Save(paramsB.AutoIndexConfig.ExtraParams.Key, string(strB))
+		autoIdxB := map[string]string{
+			MaxDegreeKey: "64", SearchListSizeKey: "128",
+			PQCacheSizeKey: "512", common.IndexTypeKey: "AISAQ",
+		}
+		strBIdx, _ := json.Marshal(autoIdxB)
+		paramsB.Save(paramsB.AutoIndexConfig.IndexParams.Key, string(strBIdx))
+
+		resA := runPipeline(t, &paramsA, "AISAQ")
+		resB := runPipeline(t, &paramsB, "AISAQ")
+
+		// Build stage
+		assert.NotEqual(t, resA.afterBuild[PQCodeBudgetKey], resB.afterBuild[PQCodeBudgetKey])
+		assert.NotEqual(t, resA.afterBuild[NumBuildThreadKey], resB.afterBuild[NumBuildThreadKey])
+		assert.NotEqual(t, resA.afterBuild[DiskPQDimsKey], resB.afterBuild[DiskPQDimsKey])
+
+		// Load stage
+		assert.NotEqual(t, resA.afterLoad[SearchCacheBudgetKey], resB.afterLoad[SearchCacheBudgetKey])
+		assert.NotEqual(t, resA.afterLoad[NumLoadThreadKey], resB.afterLoad[NumLoadThreadKey])
+		assert.NotEqual(t, resA.afterLoad[BeamWidthKey], resB.afterLoad[BeamWidthKey])
+	})
+
+	t.Run("persisted ratios are respected at load time over global config", func(t *testing.T) {
+		// This tests that SetDiskIndexLoadParams reads persisted values from indexParams
+		// rather than always re-reading global config.
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		// Set global config to specific values
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.10")
+		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "4.0")
+		params.Save(params.CommonCfg.BeamWidthRatio.Key, "4.0")
+
+		// Simulate indexParams as persisted with DIFFERENT ratio values
+		indexParams := map[string]string{
+			common.IndexTypeKey:       "DISKANN",
+			common.DimKey:             strconv.FormatInt(dim, 10),
+			SearchCacheBudgetRatioKey: "0.30",
+			NumLoadThreadRatioKey:     "1.0",
+			BeamWidthRatioKey:         "1.0",
+		}
+
+		err := SetDiskIndexLoadParams(&params, indexParams, numRows)
+		assert.NoError(t, err)
+
+		// Verify it used the persisted 0.30, not the global 0.10
+		expectedCacheBudget := fmt.Sprintf("%f",
+			float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(0.30)/(1<<30))
+		assert.Equal(t, expectedCacheBudget, indexParams[SearchCacheBudgetKey],
+			"should use persisted search_cache_budget_gb_ratio, not global config")
+
+		// Verify thread/beamwidth used persisted 1.0, not global 4.0
+		expectedThreads := int(float32(hardware.GetCPUNum()) * 1.0)
+		if expectedThreads > MaxLoadThread {
+			expectedThreads = MaxLoadThread
+		}
+		assert.Equal(t, strconv.Itoa(expectedThreads), indexParams[NumLoadThreadKey],
+			"should use persisted num_load_thread_ratio, not global config")
+
+		expectedBeam := int(float32(hardware.GetCPUNum()) * 1.0)
+		if expectedBeam > MaxBeamWidth {
+			expectedBeam = MaxBeamWidth
+		}
+		assert.Equal(t, strconv.Itoa(expectedBeam), indexParams[BeamWidthKey],
+			"should use persisted beamwidth_ratio, not global config")
+	})
+}
+
+func copyMap(m map[string]string) map[string]string {
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
 }
