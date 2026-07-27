@@ -204,22 +204,23 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 func (stats *FieldStats) unmarshalCentroids(data json.RawMessage, dataType schemapb.DataType) error {
 	var rawCentroids []json.RawMessage
 	if err := json.Unmarshal(data, &rawCentroids); err != nil {
-		return err
+		return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroids array", stats.FieldID)
 	}
 
 	centroids := make([]VectorFieldValue, 0, len(rawCentroids))
-	for _, rawCentroid := range rawCentroids {
+	for i, rawCentroid := range rawCentroids {
 		switch dataType {
 		case schemapb.DataType_FloatVector:
 			centroid := &FloatVectorFieldValue{}
 			if err := json.Unmarshal(rawCentroid, centroid); err != nil {
-				return err
+				return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroid at index %d", stats.FieldID, i)
 			}
 			centroids = append(centroids, centroid)
 		default:
 			// Fail loudly rather than dropping the centroids: a silently empty
 			// snapshot degrades segment pruning to a full scan with no signal.
-			return merr.WrapErrServiceInternalMsg("unsupported data type %s for field stats centroids", dataType.String())
+			return merr.WrapErrDataIntegrityMsg("field stats of field %d has centroids for unsupported data type %s",
+				stats.FieldID, dataType.String())
 		}
 	}
 

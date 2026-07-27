@@ -767,21 +767,26 @@ func TestVectorFieldStatsDecodeIntoZeroValue(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	})
 
+	// Everything below is the same failure in the caller's eyes: the stats buffer on
+	// disk does not match the expected shape. They must all carry ErrDataIntegrity so
+	// loadPartitionStats can classify them without string matching.
 	t.Run("unsupported vector type is rejected", func(t *testing.T) {
 		blob := fmt.Sprintf(`{"fieldID":3,"type":%d,"centroids":[{"value":[1.0,2.0]}]}`,
 			int32(schemapb.DataType_BinaryVector))
 		var decoded FieldStats
-		assert.Error(t, decoded.UnmarshalJSON([]byte(blob)))
+		assert.ErrorIs(t, decoded.UnmarshalJSON([]byte(blob)), merr.ErrDataIntegrity)
 	})
 
-	t.Run("malformed centroid propagates the decode error", func(t *testing.T) {
+	t.Run("malformed centroid is a data integrity error", func(t *testing.T) {
 		var decoded FieldStats
-		assert.Error(t, decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":[{"value":"nope"}]}`)))
+		err := decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":[{"value":"nope"}]}`))
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	})
 
-	t.Run("malformed centroid array propagates the decode error", func(t *testing.T) {
+	t.Run("malformed centroid array is a data integrity error", func(t *testing.T) {
 		var decoded FieldStats
-		assert.Error(t, decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":{"not":"an array"}}`)))
+		err := decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101,"centroids":{"not":"an array"}}`))
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	})
 }
 
