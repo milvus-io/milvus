@@ -197,8 +197,38 @@ const (
 	// JSONStatsPath storage path const for json stats
 	JSONStatsPath = "json_stats"
 
+	// SnapshotRootPath storage path const for snapshot metadata and manifests.
+	// Layout: {rootPath}/snapshots/{collection_id}/{metadata|manifests}/...
+	SnapshotRootPath = "snapshots"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
+
+// InternalStorageRootSegments lists every top-level directory that Milvus
+// creates directly under the storage root path (ChunkManager.RootPath()).
+//
+// It is the single registry of Milvus's own object-storage layout. Import path
+// validation in datacoord refuses ordinary imports that point into any of
+// these, so a directory missing from this list is a directory that bulk import
+// can read. When adding a new storage path constant above, add it here too --
+// TestInternalStorageRootSegmentsIsExhaustive fails otherwise.
+//
+// Constants that are NOT top-level directories (leaf file names, sub-paths)
+// must be listed in that test's nonTopLevelSegments instead.
+var InternalStorageRootSegments = []string{
+	SegmentInsertLogPath,
+	SegmentDeltaLogPath,
+	SegmentStatslogPath,
+	SegmentIndexV0Path,
+	SegmentIndexV1Path,
+	SegmentBm25LogPath,
+	PartitionStatsPath,
+	AnalyzeStatsPath,
+	TextIndexPath,
+	JSONIndexPath,
+	JSONStatsPath,
+	SnapshotRootPath,
+}
 
 const (
 	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
