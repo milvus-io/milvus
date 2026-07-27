@@ -200,19 +200,33 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 		if !evt.HasUpdated {
 			return
 		}
+		// InitLoonReaderConfig range-checks both values before applying
+		// either, so an out-of-range update leaves the running settings
+		// untouched rather than resizing the (non-destroyable) reader pool
+		// and only then failing on the window.
 		if err := InitLoonReaderConfig(pt); err != nil {
-			mlog.Warn(context.TODO(), "failed to reconfigure loon reader params",
-				mlog.String("source", source), mlog.Err(err))
+			mlog.Warn(context.TODO(),
+				"failed to reconfigure loon reader params, previous settings stay in effect",
+				mlog.String("source", source),
+				mlog.Int64("readerThreadPoolSize", pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()),
+				mlog.Int64("indexBuildReadWindowBytes", pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()),
+				mlog.Err(err))
 			return
 		}
 		// Report the effective pool size, not the requested one: non-zero
 		// values resize the pool either way, but 0 cannot destroy it, so
-		// rolling back to 0 leaves the existing pool serving reads.
-		// Readers also latch parallelism when they open, so a change only
-		// affects tasks started afterwards.
+		// rolling back to 0 leaves the existing pool serving reads. Note a
+		// reader latches the parallelism it saw at open only as an on/off
+		// gate; a reader opened with parallelism > 1 follows the pool's
+		// current size on every later round, so resizes also affect
+		// already-open readers.
+		// GetParallelism() reports 1 when the pool does not exist, so
+		// requested == 0 with effective == 1 is the pool being absent (or
+		// sized 1) - not a failure to destroy it. Only warn when a real
+		// pool survives a disable request.
 		requested := pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
 		effective := int64(EffectiveLoonReaderThreadPoolSize())
-		if requested != effective {
+		if requested == 0 && effective > 1 {
 			mlog.Warn(context.TODO(),
 				"loon reader thread pool size not fully applied; the pool cannot be destroyed at runtime, restart to disable it",
 				mlog.String("source", source),
