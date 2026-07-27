@@ -24,6 +24,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "monitor/Monitor.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -124,4 +125,62 @@ TEST(CApiTest, GetCollectionNameTest) {
     ASSERT_EQ(strcmp(name, "default-collection"), 0);
     DeleteCollection(collection);
     free((void*)(name));
+}
+
+TEST(CApiTest, CleanupCoreCollectionMetricsTest) {
+    constexpr const char* kTargetDB = "metric_cleanup_db";
+    constexpr const char* kTargetCollection = "metric_cleanup_collection";
+    constexpr const char* kOtherDB = "metric_cleanup_other_db";
+    constexpr const char* kOtherCollection = "metric_cleanup_other_collection";
+
+    auto seed = [](const std::string& db, const std::string& collection) {
+        milvus::monitor::internal_core_skipindex_chunks_scanned(db, collection)
+            .Increment(10);
+        milvus::monitor::internal_core_skipindex_chunks_pruned(db, collection)
+            .Increment(4);
+        milvus::monitor::internal_core_skipindex_prune_ratio_expr(db,
+                                                                  collection)
+            .Observe(0.4);
+        for (const auto* op : {"query", "search"}) {
+            milvus::monitor::internal_core_query_scanned_bytes_total(
+                db, collection, op)
+                .Observe(1024);
+            milvus::monitor::internal_core_query_scanned_bytes_cold(
+                db, collection, op)
+                .Observe(512);
+        }
+    };
+
+    seed(kTargetDB, kTargetCollection);
+    seed(kOtherDB, kOtherCollection);
+
+    CleanupCoreCollectionMetrics(kTargetDB, kTargetCollection);
+    // Re-adding the removed series must start from zero, while unrelated label
+    // sets retain their values.
+    EXPECT_DOUBLE_EQ(milvus::monitor::internal_core_skipindex_chunks_scanned(
+                         kTargetDB, kTargetCollection)
+                         .Value(),
+                     0.0);
+    EXPECT_DOUBLE_EQ(milvus::monitor::internal_core_skipindex_chunks_scanned(
+                         kOtherDB, kOtherCollection)
+                         .Value(),
+                     10.0);
+    EXPECT_DOUBLE_EQ(milvus::monitor::internal_core_skipindex_chunks_pruned(
+                         kTargetDB, kTargetCollection)
+                         .Value(),
+                     0.0);
+    EXPECT_DOUBLE_EQ(milvus::monitor::internal_core_skipindex_chunks_pruned(
+                         kOtherDB, kOtherCollection)
+                         .Value(),
+                     4.0);
+
+    // Cleaning an already-recreated label set is idempotent, and the same
+    // labels remain reusable from a fresh zero value.
+    CleanupCoreCollectionMetrics(kTargetDB, kTargetCollection);
+    auto& recreated = milvus::monitor::internal_core_skipindex_chunks_scanned(
+        kTargetDB, kTargetCollection);
+    EXPECT_DOUBLE_EQ(recreated.Value(), 0.0);
+
+    CleanupCoreCollectionMetrics(kTargetDB, kTargetCollection);
+    CleanupCoreCollectionMetrics(kOtherDB, kOtherCollection);
 }

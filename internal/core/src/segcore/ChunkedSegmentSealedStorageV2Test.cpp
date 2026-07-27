@@ -78,6 +78,7 @@
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/Types.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -1564,6 +1565,18 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
                 std::shared_ptr<arrow::Array> array;
                 EXPECT_TRUE(builder.Finish(&array).ok());
                 arrays.push_back(array);
+            } else if (arrow_schema->fields()[i]->type()->id() ==
+                       arrow::Type::INT32) {
+                std::vector<int32_t> values(rows_per_batch);
+                std::iota(values.begin(),
+                          values.end(),
+                          static_cast<int32_t>(start));  // monotonic
+                arrow::Int32Builder builder;
+                EXPECT_TRUE(
+                    builder.AppendValues(values.data(), rows_per_batch).ok());
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
             } else {
                 // Monotonic 8-digit prefix + fixed padding: bloats the row
                 // group (many row groups -> many cells) AND gives the VARCHAR
@@ -1598,7 +1611,8 @@ std::shared_ptr<Schema>
 MakeSkipMeasureSchema(FieldId& val_fid,
                       FieldId& pk_fid,
                       FieldId* payload_fid = nullptr,
-                      FieldId* nullable_fid = nullptr) {
+                      FieldId* nullable_fid = nullptr,
+                      FieldId* int32_fid = nullptr) {
     auto schema = std::make_shared<Schema>();
     val_fid = schema->AddDebugField("val", DataType::INT64, false);
     pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
@@ -1609,6 +1623,9 @@ MakeSkipMeasureSchema(FieldId& val_fid,
     // Only added when asked, so the tests above keep their exact column layout.
     if (nullable_fid != nullptr) {
         *nullable_fid = schema->AddDebugField("nval", DataType::INT64, true);
+    }
+    if (int32_fid != nullptr) {
+        *int32_fid = schema->AddDebugField("ival32", DataType::INT32, false);
     }
     schema->AddField(FieldName("ts"),
                      TimestampFieldID,
@@ -2006,6 +2023,17 @@ UnaryRangePlan(FieldId fid, proto::plan::OpType op, int64_t threshold) {
     return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 }
 
+std::shared_ptr<milvus::plan::PlanNode>
+BinaryRangePlan(FieldId fid, DataType data_type, int64_t lower, int64_t upper) {
+    proto::plan::GenericValue lower_value;
+    lower_value.set_int64_val(lower);
+    proto::plan::GenericValue upper_value;
+    upper_value.set_int64_val(upper);
+    auto expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(fid, data_type), lower_value, upper_value, true, true);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+}
+
 // The same measurement over offset input -- the path iterative filter runs
 // (IterativeFilterNode installs an offset vector on the EvalCtx), which reaches
 // ProcessDataByOffsets instead of the sequential ProcessDataChunks. test::
@@ -2016,7 +2044,8 @@ RunByOffsetsWithStorageUsage(
     const std::shared_ptr<milvus::plan::PlanNode>& plannode,
     const milvus::segcore::SegmentInternalInterface* segment,
     int64_t active_count,
-    milvus::exec::OffsetVector& offsets) {
+    milvus::exec::OffsetVector& offsets,
+    int repeats = 1) {
     auto filter_node =
         std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(plannode);
     AssertInfo(filter_node != nullptr, "expected a FilterBitsNode");
@@ -2031,21 +2060,93 @@ RunByOffsetsWithStorageUsage(
         std::make_unique<milvus::exec::ExecContext>(query_context.get());
     auto exprs =
         std::make_unique<milvus::exec::ExprSet>(filters, exec_context.get());
-    std::vector<VectorPtr> results;
-    milvus::exec::EvalCtx eval_ctx(exec_context.get(), &offsets);
-    exprs->Eval(0, 1, true, eval_ctx, results);
+    int64_t count = 0;
+    for (int i = 0; i < repeats; ++i) {
+        std::vector<VectorPtr> results;
+        milvus::exec::EvalCtx eval_ctx(exec_context.get(), &offsets);
+        exprs->Eval(0, 1, true, eval_ctx, results);
 
-    auto col_vec = milvus::test::GetColumnVectorForTest(results[0]);
-    // Unlike ExecuteQueryExpr, whose bitmap marks the rows filtered out, an
-    // ExprSet evaluated directly returns the match set (this is how
-    // ExprArithOpTest reads gen_filter_res), so it is counted as-is.
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
-    return ScanTraffic{static_cast<int64_t>(view.count()),
+        auto col_vec = milvus::test::GetColumnVectorForTest(results[0]);
+        // Unlike ExecuteQueryExpr, whose bitmap marks the rows filtered out,
+        // an ExprSet evaluated directly returns the match set (this is how
+        // ExprArithOpTest reads gen_filter_res), so it is counted as-is.
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        count += static_cast<int64_t>(view.count());
+    }
+    // exprs is destroyed after the return value is formed and before the
+    // caller resumes; ~SegmentExpr publishes the cross-batch unique-chunk
+    // effect at that point.
+    return ScanTraffic{count,
                        op_context.storage_usage.scanned_total_bytes.load(),
                        op_context.storage_usage.scanned_cold_bytes.load()};
 }
 
 }  // namespace
+
+// Driver prefetch must ask the skip index with the field's physical type.
+// Binary-range literals are represented as int64_t in the plan, but INT32
+// footer metrics hold int32_t; passing the promoted literal type makes every
+// variant check fail and causes prefetch to touch all cells before the scan
+// gets a chance to prune them.
+TEST(SkipIndexPr51441, Int32BinaryRangeDriverPrefetchSkipsPrunedCells) {
+    DriverPrefetchGuard driver_prefetch_guard(true);
+    StorageUsageTrackingGuard tracking_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, int32_fid;
+    auto schema =
+        MakeSkipMeasureSchema(val_fid, pk_fid, nullptr, nullptr, &int32_fid);
+    const std::string root = "skip_pr51441_int32_binary_driver_prefetch_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    const int64_t cells = segment->num_chunk_data(int32_fid);
+    ASSERT_GT(cells, 1) << "need disjoint INT32 cell ranges to prune";
+
+    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    const double scanned_before = scanned.Value();
+    const double pruned_before = pruned.Value();
+
+    const int64_t lower = N - 1000;
+    auto partial = RunWithStorageUsage(
+        BinaryRangePlan(int32_fid, DataType::INT32, lower, N - 1),
+        segment.get(),
+        N);
+
+    const double scanned_delta = scanned.Value() - scanned_before;
+    const double pruned_delta = pruned.Value() - pruned_before;
+    EXPECT_EQ(partial.count, N - lower);
+    EXPECT_DOUBLE_EQ(scanned_delta, static_cast<double>(cells));
+    EXPECT_GT(pruned_delta, 0.0);
+    EXPECT_LT(pruned_delta, scanned_delta);
+
+    auto full = RunWithStorageUsage(
+        BinaryRangePlan(int32_fid, DataType::INT32, 0, N - 1),
+        segment.get(),
+        N);
+    auto all_pruned = RunWithStorageUsage(
+        BinaryRangePlan(int32_fid, DataType::INT32, N, N + 1000),
+        segment.get(),
+        N);
+
+    EXPECT_EQ(full.count, N);
+    EXPECT_EQ(all_pruned.count, 0);
+    ASSERT_GT(full.total_bytes, 0);
+    EXPECT_LT(partial.total_bytes, full.total_bytes / 2)
+        << "driver prefetch touched INT32 cells that the skip index pruned ("
+        << partial.total_bytes << " vs " << full.total_bytes << ")";
+    EXPECT_EQ(all_pruned.total_bytes, 0)
+        << "driver prefetch touched an INT32 column even though every cell "
+           "was pruned";
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
 
 // Sealed VARCHAR IN must prune on the path the query actually takes. The
 // existing StorageV2VarcharInPruneAndResultsCorrect asserts pruning by calling
@@ -2212,12 +2313,35 @@ TEST(SkipIndexPr51441, PrunedCellsAreNotTouchedByOffsetInput) {
         offsets.push_back(static_cast<int32_t>(i));
     }
 
+    std::unordered_set<int64_t> offset_chunks;
+    for (auto offset : offsets) {
+        offset_chunks.insert(
+            segment->get_chunk_by_offset(val_fid, offset).first);
+    }
+    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    const double scanned_before_pruned = scanned.Value();
+    const double pruned_before_pruned = pruned.Value();
+
     // val > N matches nothing, so every cell the offsets land in is prunable.
     auto all_pruned = RunByOffsetsWithStorageUsage(
         UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, N),
         segment.get(),
         N,
-        offsets);
+        offsets,
+        2);
+    EXPECT_DOUBLE_EQ(scanned.Value() - scanned_before_pruned,
+                     static_cast<double>(offset_chunks.size()))
+        << "offset metrics must count each judged chunk once, not each row or "
+           "non-consecutive run";
+    EXPECT_DOUBLE_EQ(pruned.Value() - pruned_before_pruned,
+                     static_cast<double>(offset_chunks.size()))
+        << "every chunk reached by these offsets is prunable";
+
+    const double scanned_before_full = scanned.Value();
+    const double pruned_before_full = pruned.Value();
     // val > -1 matches everything: the cost of reaching those same offsets
     // without pruning.
     auto full = RunByOffsetsWithStorageUsage(
@@ -2225,6 +2349,9 @@ TEST(SkipIndexPr51441, PrunedCellsAreNotTouchedByOffsetInput) {
         segment.get(),
         N,
         offsets);
+    EXPECT_DOUBLE_EQ(scanned.Value() - scanned_before_full,
+                     static_cast<double>(offset_chunks.size()));
+    EXPECT_DOUBLE_EQ(pruned.Value() - pruned_before_full, 0.0);
 
     EXPECT_EQ(all_pruned.count, 0);
     EXPECT_EQ(full.count, static_cast<int64_t>(offsets.size()));
@@ -2309,11 +2436,11 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
             << "the flag was on before the load, so the segment's slots track";
 
         const auto before_pruned = observed();
-        (void)segment->Retrieve(nullptr,
-                                all_pruned_plan.get(),
-                                MAX_TIMESTAMP,
-                                kNoOutputLimit,
-                                false);
+        auto pruned_result = segment->Retrieve(nullptr,
+                                               all_pruned_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               kNoOutputLimit,
+                                               false);
         const auto after_pruned = observed();
         EXPECT_EQ(after_pruned.first, before_pruned.first + 1)
             << "a fully pruned query published nothing: the operation was "
@@ -2321,13 +2448,21 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
                "samples disappear from the histogram";
 
         const auto before_full = observed();
-        (void)segment->Retrieve(
+        auto full_result = segment->Retrieve(
             nullptr, full_plan.get(), MAX_TIMESTAMP, kNoOutputLimit, false);
         const auto after_full = observed();
         ASSERT_EQ(after_full.first, before_full.first + 1);
 
         const double pruned_bytes = after_pruned.second - before_pruned.second;
         const double full_bytes = after_full.second - before_full.second;
+        EXPECT_DOUBLE_EQ(
+            pruned_bytes,
+            static_cast<double>(pruned_result->scanned_total_bytes()))
+            << "query metric was observed before the final target-field IO "
+               "was merged into RetrieveResults";
+        EXPECT_DOUBLE_EQ(
+            full_bytes, static_cast<double>(full_result->scanned_total_bytes()))
+            << "query metric must equal the final cost returned to Proxy";
         ASSERT_GT(full_bytes, 0.0) << "storage usage tracking did not "
                                       "accumulate for the unpruned retrieve";
         // Measured at 0 against ~170 MB for the same segment: a retrieve whose
@@ -2344,6 +2479,26 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
             << "the pruned retrieve reported " << pruned_bytes
             << " bytes against " << full_bytes
             << " for the same segment: pruning is not reaching the metric";
+
+        auto observed_search = [] {
+            auto metric =
+                milvus::monitor::internal_core_query_scanned_bytes_total(
+                    kSkipMeasureDb, kSkipMeasureCollection, "search")
+                    .Collect();
+            return std::make_pair(metric.histogram.sample_count,
+                                  metric.histogram.sample_sum);
+        };
+        milvus::SearchResult finalized_search;
+        finalized_search.segment_ = segment.get();
+        finalized_search.search_storage_cost_ = {123, 456};
+        const auto before_search = observed_search();
+        ReportSearchResultStorageMetrics(&finalized_search);
+        ReportSearchResultStorageMetrics(&finalized_search);
+        const auto after_search = observed_search();
+        EXPECT_EQ(after_search.first, before_search.first + 1)
+            << "explicit finalization must observe each SearchResult once";
+        EXPECT_DOUBLE_EQ(after_search.second - before_search.second, 456.0)
+            << "search metric must use the final accumulated StorageCost";
     }
 
     {

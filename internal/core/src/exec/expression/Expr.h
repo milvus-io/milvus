@@ -24,6 +24,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 
 #include "common/Array.h"
 #include "common/ArrayOffsets.h"
@@ -331,11 +332,9 @@ class SegmentExpr : public Expr {
     //
     // Note this counts CHUNKS, not bytes, so on its own it says how often the
     // skip index fires but not how much data that saved -- cells are not
-    // uniformly sized, and the two series have no label in common to join on.
-    // A byte-level counter (accumulating the pruned cell's cells_storage_bytes
-    // right here) would answer that directly and is a follow-up; it would also
-    // be comparable with cache_cell_access_{hit,miss}_bytes_total, which is
-    // always collected and is what the proxy-side StorageCost derives from.
+    // uniformly sized. Correlate it with scanned bytes on the shared
+    // db_name/collection_name labels; a byte-level pruned counter would answer
+    // the causal question directly and remains a follow-up.
     //
     // The skip index is passed in rather than re-fetched so this stays the one
     // place that decides what counts as "judged". A field with no metrics
@@ -758,6 +757,22 @@ class SegmentExpr : public Expr {
         }
 
         auto skip_index = segment_->GetSkipIndex();
+        // Offset input can revisit the same chunk non-consecutively and across
+        // iterative-filter Eval batches. Cache the decision for the lifetime
+        // of this physical expression; its destructor reports one aggregate
+        // sample, so the ratio depends on unique chunk decisions rather than
+        // candidate density or batch shape.
+        auto should_skip_offset_chunk = [&](int64_t chunk_id) {
+            if (!skip_func) {
+                return false;
+            }
+            auto [it, inserted] =
+                offset_chunk_skip_decisions_.try_emplace(chunk_id, false);
+            if (inserted) {
+                it->second = skip_func(*skip_index, field_id_, chunk_id);
+            }
+            return it->second;
+        };
 
         if constexpr (std::is_same_v<T, VectorArrayView>) {
             for (size_t i = 0; i < input->size(); ++i) {
@@ -773,8 +788,7 @@ class SegmentExpr : public Expr {
                     chunk_id,
                     std::make_pair(chunk_offset, int64_t{1}));
                 const auto& [data_vec, valid_data] = pw.get();
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
+                if (!should_skip_offset_chunk(chunk_id)) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data_vec.data(),
                         valid_data.data(),
@@ -853,9 +867,7 @@ class SegmentExpr : public Expr {
                     // cost the sequential scan stopped paying. A pruned run is
                     // still fetched while its validity remains observable, the
                     // same gate ProcessDataChunksForMultipleChunk uses.
-                    const bool skip =
-                        skip_func &&
-                        skip_func(*skip_index, field_id_, run_chunk_id);
+                    const bool skip = should_skip_offset_chunk(run_chunk_id);
                     if (skip && !(is_nullable_ && !null_rejecting_)) {
                         // Nothing to read: drive the callback on a null batch
                         // per row so cursor-tracking callbacks stay aligned.
@@ -942,8 +954,7 @@ class SegmentExpr : public Expr {
                     // scan stopped doing. Same validity gate as
                     // ProcessDataChunksForMultipleChunk: a skipped chunk is
                     // still fetched while its validity remains observable.
-                    cached_skip = skip_func &&
-                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_skip = should_skip_offset_chunk(chunk_id);
                     if (!cached_skip || (is_nullable_ && !null_rejecting_)) {
                         pw.emplace(segment_->chunk_data<T>(
                             op_ctx_, field_id_, chunk_id));
@@ -1014,8 +1025,7 @@ class SegmentExpr : public Expr {
                     chunk_valid_base = chunk.valid_data();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
                     // chunk instead of once per row.
-                    cached_skip = skip_func &&
-                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_skip = should_skip_offset_chunk(chunk_id);
                     cached_chunk_id = chunk_id;
                 }
                 const T* data = chunk_base + chunk_offset;
@@ -2827,6 +2837,9 @@ class SegmentExpr : public Expr {
     bool execute_all_at_once_{false};
     // used for reducing cache miss latency in tiered storage
     bool prefetched_{false};
+    // Offset/iterative paths can revisit chunks across Eval batches. Keep one
+    // decision per chunk and publish the aggregate once in ~SegmentExpr().
+    std::unordered_map<int64_t, bool> offset_chunk_skip_decisions_;
     // Scalar index is pinned lazily by EnsurePinnedIndex(). Pre-pin
     // existence checks (HasCompatibleScalarIndex) query segment metadata
     // directly, so expressions on short-circuit paths (TextIndex, PkIndex,

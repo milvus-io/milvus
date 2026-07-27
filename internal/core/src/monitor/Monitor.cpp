@@ -205,7 +205,7 @@ DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_core_skipindex_chunks,
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_skipindex_prune_ratio,
                                    "[cpp]fraction of chunks pruned per expr")
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes,
-                                   "[cpp]bytes of cells touched per query")
+                                   "[cpp]bytes touched per segment operation")
 
 // Series are resolved per call rather than bound once at static init, because
 // the collection label is only known at query time. Family::Add is a hashed
@@ -217,8 +217,8 @@ internal_core_skipindex_chunks_scanned(const std::string& db,
                                        const std::string& collection) {
     return internal_core_skipindex_chunks_family.Add(
         {{"skipindex_chunks", "scanned"},
-         {"db", db},
-         {"collection", collection}});
+         {"db_name", db},
+         {"collection_name", collection}});
 }
 
 prometheus::Counter&
@@ -226,15 +226,17 @@ internal_core_skipindex_chunks_pruned(const std::string& db,
                                       const std::string& collection) {
     return internal_core_skipindex_chunks_family.Add(
         {{"skipindex_chunks", "pruned"},
-         {"db", db},
-         {"collection", collection}});
+         {"db_name", db},
+         {"collection_name", collection}});
 }
 
 prometheus::Histogram&
 internal_core_skipindex_prune_ratio_expr(const std::string& db,
                                          const std::string& collection) {
     return internal_core_skipindex_prune_ratio_family.Add(
-        {{"skipindex", "prune_ratio"}, {"db", db}, {"collection", collection}},
+        {{"skipindex", "prune_ratio"},
+         {"db_name", db},
+         {"collection_name", collection}},
         ratioBuckets);
 }
 
@@ -244,8 +246,8 @@ internal_core_query_scanned_bytes_total(const std::string& db,
                                         const std::string& op) {
     return internal_core_query_scanned_bytes_family.Add(
         {{"query_scanned", "total"},
-         {"db", db},
-         {"collection", collection},
+         {"db_name", db},
+         {"collection_name", collection},
          {"op", op}},
         bytesBuckets);
 }
@@ -256,10 +258,53 @@ internal_core_query_scanned_bytes_cold(const std::string& db,
                                        const std::string& op) {
     return internal_core_query_scanned_bytes_family.Add(
         {{"query_scanned", "cold"},
-         {"db", db},
-         {"collection", collection},
+         {"db_name", db},
+         {"collection_name", collection},
          {"op", op}},
         bytesBuckets);
+}
+
+void
+observe_core_query_scanned_bytes(const std::string& db_name,
+                                 const std::string& collection_name,
+                                 const std::string& op,
+                                 int64_t scanned_total_bytes,
+                                 int64_t scanned_cold_bytes) {
+    internal_core_query_scanned_bytes_total(db_name, collection_name, op)
+        .Observe(static_cast<double>(scanned_total_bytes));
+    internal_core_query_scanned_bytes_cold(db_name, collection_name, op)
+        .Observe(static_cast<double>(scanned_cold_bytes));
+}
+
+void
+cleanup_core_collection_metrics(const std::string& db_name,
+                                const std::string& collection_name) {
+    for (const auto* kind : {"scanned", "pruned"}) {
+        auto& metric = internal_core_skipindex_chunks_family.Add(
+            {{"skipindex_chunks", kind},
+             {"db_name", db_name},
+             {"collection_name", collection_name}});
+        internal_core_skipindex_chunks_family.Remove(&metric);
+    }
+
+    auto& prune_ratio = internal_core_skipindex_prune_ratio_family.Add(
+        {{"skipindex", "prune_ratio"},
+         {"db_name", db_name},
+         {"collection_name", collection_name}},
+        ratioBuckets);
+    internal_core_skipindex_prune_ratio_family.Remove(&prune_ratio);
+
+    for (const auto* op : {"query", "search"}) {
+        for (const auto* kind : {"total", "cold"}) {
+            auto& metric = internal_core_query_scanned_bytes_family.Add(
+                {{"query_scanned", kind},
+                 {"db_name", db_name},
+                 {"collection_name", collection_name},
+                 {"op", op}},
+                bytesBuckets);
+            internal_core_query_scanned_bytes_family.Remove(&metric);
+        }
+    }
 }
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,

@@ -577,8 +577,7 @@ queryNode:
       # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
-      # Enable storage usage tracking for Tiered Storage. Accounts the bytes each request touched and how many of those had to be loaded, which is what the per-request cache_hit_ratio and the scanned-bytes metrics are derived from. Takes effect only at startup (not refreshable): every cache slot freezes this setting when it is created, so a runtime flip would leave the node accounting for only some of what a query reads.
-      storageUsageTrackingEnabled: true
+      storageUsageTrackingEnabled: true # Enable storage usage tracking for Tiered Storage. Accounts the bytes each request touched and how many of those had to be loaded, which is what the per-request cache_hit_ratio and the scanned-bytes metrics are derived from. Takes effect only at startup (not refreshable): every cache slot freezes this setting when it is created, so a runtime flip would leave the node accounting for only some of what a query reads.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
     dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info

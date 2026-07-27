@@ -18,6 +18,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
+#include "monitor/Monitor.h"
 #include "monitor/scope_metric.h"
 #include "segcore/Collection.h"
 #include "segcore/collection_c.h"
@@ -91,6 +92,15 @@ DeleteCollection(CCollection collection) {
 
     auto col = static_cast<milvus::segcore::Collection*>(collection);
     delete col;
+}
+
+void
+CleanupCoreCollectionMetrics(const char* db_name, const char* collection_name) {
+    SCOPE_CGO_CALL_METRIC();
+
+    milvus::monitor::cleanup_core_collection_metrics(
+        db_name == nullptr ? "" : db_name,
+        collection_name == nullptr ? "" : collection_name);
 }
 
 const char*

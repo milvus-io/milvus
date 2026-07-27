@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "common/PrometheusClient.h"
 
 namespace milvus::monitor {
@@ -78,14 +80,17 @@ prometheus::Histogram&
 internal_core_skipindex_prune_ratio_expr(const std::string& db,
                                          const std::string& collection);
 
-// per-query storage traffic: total = every cell touched, cold = the cells that
-// actually had to be loaded (i.e. real IO). Reading both is what tells you
-// whether pruning translated into IO saved, or only into skipped CPU.
+// Per-segment-operation storage traffic: total = every cell touched, cold =
+// the cells that actually had to be loaded (i.e. real IO). Reading both is what
+// tells you whether pruning translated into IO saved, or only into skipped CPU.
 //
-// Labelled by collection and by op ("search" or "query"), because the two have
-// different traffic shapes -- a search always reads the vector column while a
-// filtered query may read nothing at all -- and mixing them into one histogram
-// makes neither readable.
+// Labelled by collection and by user-facing op ("search" or "query"), because
+// the two have different traffic shapes -- a search always reads the vector
+// column while a filtered query may read nothing at all -- and mixing them into
+// one histogram makes neither readable. Samples are physical segment
+// operations, not Proxy request samples; aggregate sums are comparable after
+// grouping by db_name/collection_name, but their histogram distributions have
+// different cardinality.
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes);
 
 prometheus::Histogram&
@@ -96,6 +101,22 @@ prometheus::Histogram&
 internal_core_query_scanned_bytes_cold(const std::string& db,
                                        const std::string& collection,
                                        const std::string& op);
+
+// Observe one completed segment operation after every storage-reading phase
+// (including late materialization) has contributed to the final cost.
+void
+observe_core_query_scanned_bytes(const std::string& db_name,
+                                 const std::string& collection_name,
+                                 const std::string& op,
+                                 int64_t scanned_total_bytes,
+                                 int64_t scanned_cold_bytes);
+
+// Dynamic series are scoped to a loaded collection. Remove them when the
+// collection's final reference is released so a query node that loads many
+// different collections does not retain stale label sets forever.
+void
+cleanup_core_collection_metrics(const std::string& db_name,
+                                const std::string& collection_name);
 
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar);

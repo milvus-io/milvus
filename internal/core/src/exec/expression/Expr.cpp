@@ -53,6 +53,18 @@ namespace milvus {
 namespace exec {
 
 SegmentExpr::~SegmentExpr() {
+    if (!offset_chunk_skip_decisions_.empty()) {
+        int64_t chunks_pruned = 0;
+        for (const auto& decision : offset_chunk_skip_decisions_) {
+            chunks_pruned += decision.second ? 1 : 0;
+        }
+        auto skip_index = segment_->GetSkipIndex();
+        RecordSkipIndexEffect(
+            *skip_index,
+            static_cast<int64_t>(offset_chunk_skip_decisions_.size()),
+            chunks_pruned);
+    }
+
     // record accumulated json filter latencies as segment-level metrics.
     // latencies are accumulated in microseconds and converted to milliseconds for Observe.
     // this avoids per-batch metric overhead and provides more meaningful
