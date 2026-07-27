@@ -683,6 +683,41 @@ func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencyWindow(t *testing.
 	require.Equal(t, uint64(10), rs.windowManager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
 }
 
+func TestRecoveryStorageAdvancesOnlyTargetWindowForOrdinaryMessages(t *testing.T) {
+	enableRecoveryIdempotency(t)
+	resource.InitForTest(t)
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
+	rs.SetLogger(resource.Resource().Logger())
+	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
+		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+		{Vchannel: "v2", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+	})
+	v1 := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))
+	v2 := newEmptyVChannelWindow("p1", "v2", testRecoveryCheckpoint(10, 10))
+	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{
+		"v1": v1,
+		"v2": v2,
+	})
+
+	ordinary := message.NewDeleteMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&message.DeleteMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.DeleteRequest{CollectionID: 1}).
+		MustBuildMutable().
+		WithTimeTick(20).
+		WithLastConfirmed(rmq.NewRmqID(19)).
+		IntoImmutableMessage(rmq.NewRmqID(20))
+	require.NoError(t, rs.ObserveMessage(context.Background(), ordinary))
+	require.Equal(t, uint64(20), v1.snapshotCheckpointTimetick)
+	require.Equal(t, uint64(10), v2.snapshotCheckpointTimetick)
+	require.Equal(t, uint64(20), rs.windowManager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+
+	require.NoError(t, rs.ObserveMessage(context.Background(), buildTimeTickMessage(t, 30)))
+	require.Equal(t, uint64(30), v1.snapshotCheckpointTimetick)
+	require.Equal(t, uint64(30), v2.snapshotCheckpointTimetick)
+	require.Equal(t, uint64(30), rs.windowManager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+}
+
 func TestConsumeDirtySnapshotDoesNotConsumeIdempotencyWindows(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
 	window := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))

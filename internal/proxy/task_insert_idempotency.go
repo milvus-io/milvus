@@ -220,8 +220,9 @@ func warnOnPartialIdempotentDuplicate(ctx context.Context, key string, resp type
 	if duplicates == 0 || duplicates == total {
 		return
 	}
-	mlog.Warn(ctx, "idempotent insert was deduplicated on part of its write units only; the fresh ones were appended again",
-		mlog.String("idempotencyKey", key),
+	mlog.RatedWarn(ctx, 1, "idempotent insert was deduplicated on part of its write units only; the fresh ones were appended again",
+		mlog.String("idempotencyKeyHash", message.IdempotencyKeyFingerprint(key)),
+		mlog.Int("idempotencyKeyLength", len(key)),
 		mlog.Int("duplicateWriteUnits", duplicates),
 		mlog.Int("totalWriteUnits", total))
 }

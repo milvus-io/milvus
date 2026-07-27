@@ -137,15 +137,15 @@ func (m *windowManager) removeIdempotencyWindow(vchannel string) {
 }
 
 // ensureActiveIdempotencyWindows advances every existing window and creates a
-// window for each active vchannel. It is used by the recovery bootstrap paths,
-// which materialize the full active set at once; the per-message observe loop
-// uses advanceIdempotencyWindowCheckpoints + ensureIdempotencyWindow instead, so
-// window lifecycle management stays out of the hot path.
+// window for each active vchannel. It is used only by recovery bootstrap paths,
+// which materialize the full active set at once. The per-message observe loop
+// updates only the target vchannel for ordinary messages and all windows for the
+// already-global TimeTick path.
 func (m *windowManager) ensureActiveIdempotencyWindows(vchannels map[string]*vchannelRecoveryInfo, checkpoint *WALCheckpoint) {
 	if m == nil || !m.cfg.idempotencyEnabled {
 		return
 	}
-	m.advanceIdempotencyWindowCheckpointsUnsafe(checkpoint)
+	m.advanceAllIdempotencyWindowCheckpointsUnsafe(checkpoint)
 	for vchannel, info := range vchannels {
 		if !info.IsActive() {
 			continue
@@ -153,20 +153,7 @@ func (m *windowManager) ensureActiveIdempotencyWindows(vchannels map[string]*vch
 		m.getOrCreateIdempotencyWindow(vchannel, checkpoint)
 	}
 }
-
-// advanceIdempotencyWindowCheckpoints advances every existing window's snapshot
-// checkpoint. This is the per-message slice of the old
-// EnsureActiveIdempotencyWindows: window creation has moved to vchannel lifecycle
-// events (ensureIdempotencyWindow), so the observe loop no longer scans the full
-// active vchannel set on every message.
-func (m *windowManager) advanceIdempotencyWindowCheckpoints(checkpoint *WALCheckpoint) {
-	if m == nil || !m.cfg.idempotencyEnabled {
-		return
-	}
-	m.advanceIdempotencyWindowCheckpointsUnsafe(checkpoint)
-}
-
-func (m *windowManager) advanceIdempotencyWindowCheckpointsUnsafe(checkpoint *WALCheckpoint) {
+func (m *windowManager) advanceAllIdempotencyWindowCheckpointsUnsafe(checkpoint *WALCheckpoint) {
 	for _, state := range m.idempotencyWindows() {
 		state.advanceCheckpointTo(checkpoint)
 	}
