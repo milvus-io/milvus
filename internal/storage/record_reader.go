@@ -17,6 +17,8 @@ import (
 )
 
 type RecordReader interface {
+	// Next returns a record borrowed from the reader and valid until the next
+	// Next or Close. Callers retaining it longer must Retain and Release it.
 	Next() (Record, error)
 	Close() error
 }
@@ -402,15 +404,18 @@ func (mr *ManifestReader) Close() error {
 type ChunkedBlobsReader func() ([]*Blob, error)
 
 type CompositeBinlogRecordReader struct {
-	fields map[FieldID]*schemapb.FieldSchema
-	index  map[FieldID]int16
-	brs    []*BinlogReader
-	rrs    []array.RecordReader
+	fields  map[FieldID]*schemapb.FieldSchema
+	index   map[FieldID]int16
+	brs     []*BinlogReader
+	rrs     []array.RecordReader
+	current Record
 }
 
 var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
 
 func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
+	crr.releaseCurrent()
+
 	recs := make([]arrow.Array, len(crr.fields))
 	releaseRecsOnError := true
 	defer func() {
@@ -452,13 +457,16 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		recs[crr.index[f.FieldID]] = arr
 	}
 	releaseRecsOnError = false
-	return &compositeRecord{
+	crr.current = &compositeRecord{
 		index: crr.index,
 		recs:  recs,
-	}, nil
+	}
+	return crr.current, nil
 }
 
 func (crr *CompositeBinlogRecordReader) Close() error {
+	crr.releaseCurrent()
+
 	if crr.brs != nil {
 		for _, er := range crr.brs {
 			if er != nil {
@@ -474,4 +482,11 @@ func (crr *CompositeBinlogRecordReader) Close() error {
 		}
 	}
 	return nil
+}
+
+func (crr *CompositeBinlogRecordReader) releaseCurrent() {
+	if crr.current != nil {
+		crr.current.Release()
+		crr.current = nil
+	}
 }

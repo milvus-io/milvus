@@ -323,7 +323,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		baseRecord := r
 		r, err = materializer.Wrap(baseRecord)
 		if err != nil {
-			baseRecord.Release()
 			mlog.Warn(ctx, "compact wrong, failed to materialize record", mlog.Err(err))
 			return
 		}
@@ -392,7 +391,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 					return mWriter.Write(out)
 				}()
 				if err != nil {
-					releaseWrappedRecord(r, baseRecord)
+					cleanupMaterializedRecord(r)
 					return 0, 0, err
 				}
 			}
@@ -403,11 +402,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				out.Release()
 			}
 			if err != nil {
-				releaseWrappedRecord(r, baseRecord)
+				cleanupMaterializedRecord(r)
 				return 0, 0, err
 			}
 		}
-		releaseWrappedRecord(r, baseRecord)
+		cleanupMaterializedRecord(r)
 	}
 
 	deltalogDeleteEntriesCount := len(delta)
