@@ -672,6 +672,68 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 	s.Nil(removedTask)
 }
 
+// TestCheckGC_ReclaimsTaskConvergedAfterWorkerLoss is the GC end of the
+// worker-loss regression: a confirmed worker loss that lands after the parent
+// job already failed must not leave the task InProgress on the dead node —
+// checkGC skips any task with a node assignment, so task and job would be
+// retained forever. After ResolveTaskOnWorkerLoss converges the task to
+// Failed + NullNodeID, GC must reclaim both.
+func (s *CopySegmentCheckerSuite) TestCheckGC_ReclaimsTaskConvergedAfterWorkerLoss() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+
+	// Failed job whose retention has already expired.
+	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+			CleanupTs:    cleanupTs,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// InProgress task still assigned to the (now dead) node 10. Its target
+	// segment is absent from meta (already cleaned up by the inspector).
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		NodeId:       10,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 10},
+		},
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	// Before the loss is resolved, GC must keep both: the task still has a
+	// node assignment.
+	s.checker.checkGC(job)
+	s.NotNil(s.copyMeta.GetTask(context.TODO(), 1001))
+	s.NotNil(s.copyMeta.GetJob(context.TODO(), s.jobID))
+
+	// The delayed worker-loss response arrives; the parent job is terminal, so
+	// the task converges to Failed + NullNodeID.
+	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1001, "worker lost")
+	s.NoError(err)
+	s.Equal(workerLossFailed, resolution)
+
+	// Now GC reclaims task and job.
+	s.checker.checkGC(job)
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1001))
+	s.Nil(s.copyMeta.GetJob(context.TODO(), s.jobID))
+}
+
 func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
 

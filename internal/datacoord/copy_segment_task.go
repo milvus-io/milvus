@@ -451,35 +451,37 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		// restarted/replaced, or its in-memory task manager lost the task).
 		// Leaving the task InProgress would make the scheduler poll a dead
 		// node until the job-level timeout, since only Pending tasks are
-		// re-dispatched. Reset to Pending with NullNodeID so the scheduler
-		// re-dispatches it to a live node.
-		// Re-dispatch is idempotent: target binlog paths are deterministic
-		// transforms of the source paths (same content on overwrite), and each
-		// dispatch allocates fresh buildIDs, so index files from a partial
-		// earlier attempt are never referenced by meta and are removed by GC.
-		//
-		// The reset is state-guarded (task still InProgress, parent job still
-		// active): this response can arrive long after the query was issued, and
-		// in the meantime another task may have failed the parent job. Reviving
-		// the task to Pending then would let the scheduler issue one more
-		// dispatch for an already-dead job before checkFailedJob converges it
-		// back to Failed.
-		applied, resetErr := t.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), t.GetTaskId(),
-			datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-			UpdateCopyTaskNodeID(NullNodeID))
-		if resetErr != nil {
-			mlog.Warn(context.TODO(), "failed to reset copy segment task to pending after worker loss",
-				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resetErr))...)
+		// re-dispatched. ResolveTaskOnWorkerLoss decides atomically (all checks
+		// and the update under one meta write lock):
+		//   - parent job still active: reset to Pending with NullNodeID so the
+		//     scheduler re-dispatches to a live node. Re-dispatch is idempotent:
+		//     target binlog paths are deterministic transforms of the source
+		//     paths (same content on overwrite), and each dispatch allocates
+		//     fresh buildIDs, so index files from a partial earlier attempt are
+		//     never referenced by meta and are removed by GC.
+		//   - parent job terminal (this response arrived after another task
+		//     already failed the job): converge to Failed with NullNodeID.
+		//     Reviving to Pending would earn the scheduler one extra dispatch
+		//     for a dead job, and leaving it InProgress on the dead node would
+		//     block checkGC forever (GC skips tasks with a node assignment).
+		resolution, resolveErr := t.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), t.GetTaskId(),
+			fmt.Sprintf("copy segment task lost on worker node %d after parent job terminated: %v", nodeID, err))
+		if resolveErr != nil {
+			mlog.Warn(context.TODO(), "failed to resolve copy segment task after worker loss",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resolveErr))...)
 			return
 		}
-		if !applied {
-			mlog.Info(context.TODO(), "skip resetting copy segment task after worker loss: task left InProgress or job no longer active",
+		switch resolution {
+		case workerLossRedispatched:
+			mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",
 				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
-			return
+		case workerLossFailed:
+			mlog.Info(context.TODO(), "converged lost copy segment task to failed: parent job no longer active",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		case workerLossSkipped:
+			mlog.Info(context.TODO(), "skip resolving copy segment task after worker loss: task no longer in progress",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		}
-		mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",
-			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
 
@@ -526,10 +528,24 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 // - Non-critical operation (task already finished)
 func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
 	nodeID := t.GetNodeId()
-	err := cluster.DropCopySegment(nodeID, t.GetTaskId())
-	if err != nil {
+	if nodeID == NullNodeID {
+		return
+	}
+	// ErrNodeNotFound means the node (and the in-memory task with it) is already
+	// gone — the drop's goal is achieved, proceed to clear the assignment.
+	if err := cluster.DropCopySegment(nodeID, t.GetTaskId()); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		mlog.Warn(context.TODO(), "failed to drop copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		return
+	}
+	// The worker-side task is gone; clear the node assignment so checkGC can
+	// reclaim the task after retention — GC skips any task still assigned to a
+	// node, and nothing else clears the assignment of a terminal task. Mirrors
+	// DropImportTask in the import pipeline; state/reason are not touched.
+	if updateErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
+		UpdateCopyTaskNodeID(NullNodeID)); updateErr != nil {
+		mlog.Warn(context.TODO(), "failed to clear copy segment task node assignment after drop",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(updateErr))...)
 		return
 	}
 	mlog.Info(context.TODO(), "drop copy segment task on datanode done",

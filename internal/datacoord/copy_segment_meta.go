@@ -91,7 +91,7 @@ type CopySegmentMeta interface {
 	// Task operations
 	AddTask(ctx context.Context, task CopySegmentTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
-	UpdateTaskInStateIfJobActive(ctx context.Context, taskID int64, expectedState datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error)
+	ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error)
 	GetTask(ctx context.Context, taskID int64) CopySegmentTask
 	GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
@@ -678,56 +678,87 @@ func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if task := m.tasks.get(taskID); task != nil {
-		updatedTask := task.Clone()
-		for _, action := range actions {
-			action(updatedTask)
-		}
-		err := m.catalog.SaveCopySegmentTask(ctx, updatedTask.(*copySegmentTask).task.Load())
-		if err != nil {
-			return err
-		}
-		// update memory task atomically
-		task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
+		return m.updateTaskLocked(ctx, task, actions...)
 	}
 	return nil
 }
 
-// UpdateTaskInStateIfJobActive applies the actions to a task only if the task is
-// currently in expectedState AND its parent job is still active (non-terminal),
-// with both checks and the update under the same write lock.
-//
-// Callers that act on a task snapshot taken before a slow operation (e.g. a
-// worker RPC) must use this instead of UpdateTask when the update would make the
-// task eligible for dispatch again: while the RPC was in flight another task may
-// have failed the parent job, and reviving this task to Pending would let the
-// scheduler issue an extra dispatch for a job that is already dead, before
-// checkFailedJob converges the task back to Failed.
-//
-// Returns (false, nil) when the task is missing, not in expectedState, or its
-// parent job is missing/terminal (the update is skipped), (true, nil) on success.
-func (m *copySegmentMeta) UpdateTaskInStateIfJobActive(ctx context.Context, taskID int64, expectedState datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	task := m.tasks.get(taskID)
-	if task == nil || task.GetState() != expectedState {
-		return false, nil
-	}
-	job, ok := m.jobs[task.GetJobId()]
-	if !ok || isTerminalCopyJobState(job.GetState()) {
-		return false, nil
-	}
-
+// updateTaskLocked clones the task, applies the actions, persists the clone and
+// swaps it into the cache. Callers must hold m.mu.
+func (m *copySegmentMeta) updateTaskLocked(ctx context.Context, task CopySegmentTask, actions ...UpdateCopySegmentTaskAction) error {
 	updatedTask := task.Clone()
 	for _, action := range actions {
 		action(updatedTask)
 	}
 	if err := m.catalog.SaveCopySegmentTask(ctx, updatedTask.(*copySegmentTask).task.Load()); err != nil {
-		return false, err
+		return err
 	}
 	// update memory task atomically
 	task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
-	return true, nil
+	return nil
+}
+
+// workerLossResolution is the outcome of ResolveTaskOnWorkerLoss.
+type workerLossResolution int
+
+const (
+	// workerLossSkipped: the task is missing or no longer InProgress — a
+	// concurrent path (checkFailedJob, a worker result) already transitioned it,
+	// so there is nothing left to resolve.
+	workerLossSkipped workerLossResolution = iota
+	// workerLossRedispatched: the parent job is still active; the task was reset
+	// to Pending with NullNodeID so the scheduler re-dispatches it to a live node.
+	workerLossRedispatched
+	// workerLossFailed: the parent job is terminal or missing; the task was
+	// converged to Failed with NullNodeID. It can never be dispatched again
+	// (only Pending tasks are), and with no node assignment left it no longer
+	// blocks checkGC from reclaiming the task and its job.
+	workerLossFailed
+)
+
+// ResolveTaskOnWorkerLoss atomically decides the fate of a task whose
+// worker-side counterpart is confirmed lost (DataNode restarted/replaced, or
+// its task manager dropped the task). All checks and the resulting update run
+// under one write lock, so the decision cannot go stale:
+//
+//   - task missing or no longer InProgress -> workerLossSkipped (no-op);
+//   - parent job still active -> reset to Pending + NullNodeID for re-dispatch
+//     (workerLossRedispatched);
+//   - parent job terminal or missing -> converge to Failed + NullNodeID with
+//     failReason (workerLossFailed).
+//
+// The last branch matters for GC: a delayed loss response can land after the
+// parent job already failed. Leaving the task InProgress on the dead node would
+// block checkGC forever — it skips any task whose NodeID is still set, and no
+// later path clears an assignment that never reaches a worker again.
+// The task must never be revived to Pending here: the scheduler would issue one
+// more dispatch for an already-dead job before checkFailedJob converges it.
+func (m *copySegmentMeta) ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	task := m.tasks.get(taskID)
+	if task == nil || task.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskInProgress {
+		return workerLossSkipped, nil
+	}
+
+	job, ok := m.jobs[task.GetJobId()]
+	if ok && !isTerminalCopyJobState(job.GetState()) {
+		if err := m.updateTaskLocked(ctx, task,
+			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+			UpdateCopyTaskNodeID(NullNodeID)); err != nil {
+			return workerLossSkipped, err
+		}
+		return workerLossRedispatched, nil
+	}
+
+	if err := m.updateTaskLocked(ctx, task,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskNodeID(NullNodeID),
+		UpdateCopyTaskReason(failReason)); err != nil {
+		return workerLossSkipped, err
+	}
+	return workerLossFailed, nil
 }
 
 // GetTask retrieves a task by ID from in-memory cache.

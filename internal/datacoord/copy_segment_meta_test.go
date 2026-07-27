@@ -1183,7 +1183,7 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_AppliesOnNonTermi
 	s.Equal("timeout", saved.GetReason())
 }
 
-// addJobWithTask is a helper for the UpdateTaskInStateIfJobActive cases.
+// addJobWithTask is a helper for the ResolveTaskOnWorkerLoss cases.
 func (s *CopySegmentMetaSuite) addJobWithTask(jobID, taskID int64,
 	jobState datapb.CopySegmentJobState, taskState datapb.CopySegmentTaskState,
 ) {
@@ -1212,9 +1212,10 @@ func (s *CopySegmentMetaSuite) addJobWithTask(jobID, taskID int64,
 	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
 }
 
-// TestUpdateTaskInStateIfJobActive_AppliesWhenJobActive: the worker-loss reset
-// must go through while the parent job is still Executing.
-func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_AppliesWhenJobActive() {
+// TestResolveTaskOnWorkerLoss_RedispatchesWhenJobActive: while the parent job
+// is still Executing, a lost task must be reset to Pending with NullNodeID so
+// the scheduler re-dispatches it to a live node.
+func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_RedispatchesWhenJobActive() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
@@ -1222,76 +1223,73 @@ func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_AppliesWhenJobAc
 		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
 
-	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1710,
-		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-		UpdateCopyTaskNodeID(NullNodeID))
+	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1710, "worker lost")
 	s.NoError(err)
-	s.True(applied)
+	s.Equal(workerLossRedispatched, resolution)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1710)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, saved.GetState())
 	s.EqualValues(NullNodeID, saved.GetNodeId())
+	s.Empty(saved.GetReason())
 }
 
-// TestUpdateTaskInStateIfJobActive_SkipsWhenJobTerminal is the review-reported
-// case: a delayed worker-loss response must not revive a task whose parent job
-// already failed, which would earn the scheduler one extra dispatch.
-func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_SkipsWhenJobTerminal() {
+// TestResolveTaskOnWorkerLoss_ConvergesToFailedWhenJobTerminal is the
+// review-reported case: a delayed worker-loss response for a task whose parent
+// job already failed must NOT revive it to Pending (one extra dispatch for a
+// dead job), but it also must not stay InProgress on the dead node — that
+// would block checkGC forever, since GC skips tasks with a node assignment and
+// nothing else clears it. The task converges to Failed with NullNodeID.
+func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_ConvergesToFailedWhenJobTerminal() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
-	// Only the AddTask write; the guarded update must not reach the catalog.
-	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(1)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	s.addJobWithTask(711, 1711,
 		datapb.CopySegmentJobState_CopySegmentJobFailed,
 		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
 
-	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1711,
-		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-		UpdateCopyTaskNodeID(NullNodeID))
+	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1711, "worker lost after job failed")
 	s.NoError(err)
-	s.False(applied)
+	s.Equal(workerLossFailed, resolution)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1711)
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, saved.GetState())
-	s.Equal(int64(7), saved.GetNodeId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
+	s.EqualValues(NullNodeID, saved.GetNodeId(), "assignment must be cleared so checkGC can reclaim the task")
+	s.Equal("worker lost after job failed", saved.GetReason())
 }
 
-// TestUpdateTaskInStateIfJobActive_SkipsWhenTaskStateMismatch: a task that has
-// already left InProgress (e.g. checkFailedJob marked it Failed) must not be
-// reset back to Pending by a late worker-loss response.
-func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_SkipsWhenTaskStateMismatch() {
+// TestResolveTaskOnWorkerLoss_SkipsWhenTaskStateMismatch: a task that has
+// already left InProgress (e.g. checkFailedJob marked it Failed) must be left
+// untouched by a late worker-loss response.
+func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_SkipsWhenTaskStateMismatch() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	// Only the AddTask write; the skipped resolution must not reach the catalog.
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(1)
 
 	s.addJobWithTask(712, 1712,
 		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
 
-	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1712,
-		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-		UpdateCopyTaskNodeID(NullNodeID))
+	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1712, "worker lost")
 	s.NoError(err)
-	s.False(applied)
+	s.Equal(workerLossSkipped, resolution)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1712)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
 }
 
-// TestUpdateTaskInStateIfJobActive_MissingTaskOrJob covers the lookup misses.
-func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_MissingTaskOrJob() {
+// TestResolveTaskOnWorkerLoss_MissingTaskOrJob covers the lookup misses: a
+// missing task is skipped; a task whose parent job is absent converges to
+// Failed (it can never progress and must not block GC).
+func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_MissingTaskOrJob() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Task does not exist at all.
-	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 9999,
-		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending))
+	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 9999, "worker lost")
 	s.NoError(err)
-	s.False(applied)
+	s.Equal(workerLossSkipped, resolution)
 
-	// Task exists but its parent job is absent from meta.
+	// Task exists but its parent job is absent from meta: same as a terminal
+	// job — the task is unrecoverable and must converge to Failed.
 	orphan := &copySegmentTask{
 		copyMeta: s.copyMeta,
 		tr:       timerecord.NewTimeRecorder("task"),
@@ -1302,21 +1300,21 @@ func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_MissingTaskOrJob
 		JobId:        713, // no such job
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		NodeId:       7,
 	})
 	s.NoError(s.copyMeta.AddTask(context.TODO(), orphan))
 
-	applied, err = s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1713,
-		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending))
+	resolution, err = s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1713, "worker lost")
 	s.NoError(err)
-	s.False(applied)
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		s.copyMeta.GetTask(context.TODO(), 1713).GetState())
+	s.Equal(workerLossFailed, resolution)
+	saved := s.copyMeta.GetTask(context.TODO(), 1713)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
+	s.EqualValues(NullNodeID, saved.GetNodeId())
 }
 
-// TestUpdateTaskInStateIfJobActive_CatalogErrorLeavesTaskUnchanged ensures a
-// failed persist does not mutate the in-memory task.
-func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_CatalogErrorLeavesTaskUnchanged() {
+// TestResolveTaskOnWorkerLoss_CatalogErrorLeavesTaskUnchanged ensures a failed
+// persist does not mutate the in-memory task, on both resolution branches.
+func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_CatalogErrorLeavesTaskUnchanged() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).
@@ -1326,12 +1324,9 @@ func (s *CopySegmentMetaSuite) TestUpdateTaskInStateIfJobActive_CatalogErrorLeav
 		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
 
-	applied, err := s.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), 1714,
-		datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-		UpdateCopyTaskNodeID(NullNodeID))
+	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1714, "worker lost")
 	s.Error(err)
-	s.False(applied)
+	s.Equal(workerLossSkipped, resolution)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1714)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, saved.GetState())

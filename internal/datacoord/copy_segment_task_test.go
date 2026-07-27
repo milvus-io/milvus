@@ -1573,7 +1573,7 @@ type embeddedAllocator struct{ allocator.Allocator }
 // failed the job. Reviving this task to Pending would let the scheduler issue
 // one more dispatch for an already-dead job before checkFailedJob converges it
 // back to Failed.
-func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossDoesNotResetWhenJobTerminal() {
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossConvergesToFailedWhenJobTerminal() {
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
 		nil,
@@ -1589,12 +1589,152 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossDoesNotResetWhenJ
 
 	task.QueryTaskOnWorker(cluster)
 
-	// The task must stay InProgress on its original node: not revived to
-	// Pending, so the scheduler cannot re-dispatch it. checkFailedJob will
-	// converge it to Failed on the next round.
+	// The task must NOT be revived to Pending (the scheduler would issue one
+	// extra dispatch for a dead job), and it must NOT stay InProgress on the
+	// dead node either: nothing would ever clear that assignment, and checkGC
+	// skips tasks with a node assignment — task and job would leak forever.
+	// It converges to Failed with NullNodeID, terminal and never dispatchable.
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
+	s.NotEmpty(updatedTask.GetReason())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		copyMeta.GetJob(context.Background(), 100).GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossResolveErrorLeavesTask() {
+	// A resolve failure (catalog down) must leave the task untouched; the next
+	// query round retries the whole worker-loss handling.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		nil,
+		merr.WrapErrNodeNotFound(10),
+	)
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+
+	mockResolve := mockey.Mock((*copySegmentMeta).ResolveTaskOnWorkerLoss).
+		Return(workerLossSkipped, errors.New("catalog down")).Build()
+	defer mockResolve.UnPatch()
+
+	task.QueryTaskOnWorker(cluster)
+
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
 	s.EqualValues(10, updatedTask.GetNodeId())
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
-		copyMeta.GetJob(context.Background(), 100).GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossSkippedResolution() {
+	// A concurrent path already transitioned the task; the worker-loss handler
+	// must accept the skip without touching the task.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		nil,
+		merr.WrapErrNodeNotFound(10),
+	)
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+
+	mockResolve := mockey.Mock((*copySegmentMeta).ResolveTaskOnWorkerLoss).
+		Return(workerLossSkipped, nil).Build()
+	defer mockResolve.UnPatch()
+
+	task.QueryTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
+	s.EqualValues(10, updatedTask.GetNodeId())
+}
+
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ClearNodeAssignmentFailureKeepsAssignment() {
+	// If clearing the assignment fails to persist, the NodeID must stay so the
+	// orphan is at least visible; state/reason are never touched by the drop.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	mockUpdate := mockey.Mock((*copySegmentMeta).UpdateTask).
+		Return(errors.New("catalog down")).Build()
+	defer mockUpdate.UnPatch()
+
+	task.DropTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.EqualValues(10, updatedTask.GetNodeId())
+}
+
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ClearsNodeAssignment() {
+	// After a successful worker-side drop the meta NodeID must be cleared,
+	// otherwise checkGC skips the task (and its job) forever.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskCompleted
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	task.DropTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeGoneStillClearsAssignment() {
+	// ErrNodeNotFound means the node (and its in-memory task) is already gone:
+	// the drop's goal is achieved, so the assignment must still be cleared.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
+		Return(merr.WrapErrNodeNotFound(10)).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskFailed
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	task.DropTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
+}
+
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_OtherErrorKeepsAssignment() {
+	// A transport error does not prove the worker-side task is gone: keep the
+	// assignment so the drop can be retried, instead of leaking the worker task.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
+		Return(errors.New("rpc timeout")).Once()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	task.DropTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.EqualValues(10, updatedTask.GetNodeId())
+}
+
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NoAssignmentIsNoop() {
+	// No node assignment -> nothing to drop; the cluster must not be called
+	// (mock has no expectation, an unexpected call fails the test).
+	cluster := session.NewMockCluster(s.T())
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = NullNodeID
+	newCopySegmentTaskTestMeta(s.T(), task)
+
+	task.DropTaskOnWorker(cluster)
 }
