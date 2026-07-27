@@ -209,16 +209,8 @@ class SkipIndex {
             std::is_same<T, milvus::Json>::value ||
             std::is_same<T, bool>::value;
         static constexpr bool value = isAllowedType && !isDisabledType;
-        static constexpr bool arith_value =
-            std::is_integral<T>::value && !std::is_same<T, bool>::value;
         static constexpr bool in_value = isAllowedType;
     };
-
-    template <typename T>
-    using HighPrecisionType =
-        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
-                           int64_t,
-                           T>;
 
  public:
     std::shared_ptr<SkipIndex>
@@ -356,113 +348,6 @@ class SkipIndex {
                                      upper_val,
                                      lower_inclusive,
                                      upper_inclusive);
-    }
-
-    template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(milvus::OpContext* op_ctx,
-                            FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        auto check_and_skip = [&](HighPrecisionType<T> new_value_hp,
-                                  OpType new_op_type) {
-            if constexpr (std::is_integral_v<T>) {
-                if (new_value_hp > std::numeric_limits<T>::max() ||
-                    new_value_hp < std::numeric_limits<T>::min()) {
-                    // Overflow detected. The transformed value cannot be represented by T.
-                    // We cannot make a safe comparison with the chunk's min/max.
-                    return false;
-                }
-            }
-            return CanSkipUnaryRange<T>(op_ctx,
-                                        field_id,
-                                        chunk_id,
-                                        new_op_type,
-                                        static_cast<T>(new_value_hp));
-        };
-        switch (arith_type) {
-            case ArithOpType::Add: {
-                // field + C > V  =>  field > V - C
-                return check_and_skip(value - right_operand, op_type);
-            }
-            case ArithOpType::Sub: {
-                // field - C > V  =>  field > V + C
-                return check_and_skip(value + right_operand, op_type);
-            }
-            case ArithOpType::Mul: {
-                // field * C <op> V cannot be inverted into a range on `field`
-                // by integer division: this overload is only instantiated for
-                // integral T, so `value / right_operand` truncates and the
-                // rewritten predicate is strictly narrower than the original.
-                // e.g. `field * 2 < 3` holds for field == 1 (2 < 3), but
-                // rewrites to `field < 3/2 == 1`, which prunes a chunk of
-                // [1,1] that actually matches -- a silent dropped row.
-                // Inverting this correctly needs per-comparator floor/ceil
-                // rules; until then do not prune (never skipping is safe).
-                return false;
-            }
-            case ArithOpType::Div: {
-                // field / C > V
-                // Same truncation problem as Mul, in the other direction:
-                // integer division maps a RANGE of field values onto one
-                // result, so multiplying the bound back is not the inverse.
-                // e.g. `field / 2 == 1` holds for field in {2,3}, but rewrites
-                // to `field == 2`, which prunes a chunk of [3,3] that actually
-                // matches. Do not prune until the exact rules are implemented.
-                return false;
-            }
-            default:
-                return false;
-        }
-    }
-
-    template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        return CanSkipBinaryArithRange<T>(nullptr,
-                                          field_id,
-                                          chunk_id,
-                                          op_type,
-                                          arith_type,
-                                          value,
-                                          right_operand);
-    }
-
-    template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(milvus::OpContext* op_ctx,
-                            FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        return false;
-    }
-
-    template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        return CanSkipBinaryArithRange<T>(nullptr,
-                                          field_id,
-                                          chunk_id,
-                                          op_type,
-                                          arith_type,
-                                          value,
-                                          right_operand);
     }
 
     template <typename T>

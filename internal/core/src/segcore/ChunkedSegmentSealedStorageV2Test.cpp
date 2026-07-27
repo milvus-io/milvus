@@ -1892,36 +1892,6 @@ TEST(SkipIndexPr51441, StatsSourcePositionalRebuildAndErase) {
         skip.CanSkipUnaryRange<int64_t>(fid, 0, OpType::Equal, int64_t(105)));
 }
 
-// Integer arithmetic predicates cannot be inverted by integer multiplication /
-// division: the rewrite truncates and is strictly narrower than the original,
-// so it would prune chunks that actually match. Each case below is chosen so
-// that the NAIVE rewrite would prune while the real predicate matches -- i.e.
-// they fail if the inversion ever comes back. FakeChunkStatsSource gives
-// chunk 0 == [0,10] and chunk 1 == [100,110].
-TEST(SkipIndexPr51441, IntegerMulDivArithNeverPrunes) {
-    milvus::SkipIndex skip;
-    const FieldId fid(202);
-    skip.LoadSkipFromStatsSource(
-        /*segment_id=*/2, fid, std::make_shared<FakeChunkStatsSource>());
-
-    // field * 2 < 201 is true for field == 100, which chunk 1 contains.
-    // Naive rewrite: field < 201/2 == 100 -- nothing in [100,110] satisfies
-    // that, so the rewrite would prune a chunk holding a match.
-    EXPECT_FALSE(skip.CanSkipBinaryArithRange<int64_t>(
-        fid, 1, OpType::LessThan, ArithOpType::Mul, int64_t(201), int64_t(2)));
-
-    // field / 7 == 14 is true for field in [98,104]; chunk 1 holds 100..104.
-    // Naive rewrite: field == 14*7 == 98 -- outside [100,110], so the rewrite
-    // would prune a chunk holding a match.
-    EXPECT_FALSE(skip.CanSkipBinaryArithRange<int64_t>(
-        fid, 1, OpType::Equal, ArithOpType::Div, int64_t(14), int64_t(7)));
-
-    // Add/Sub are exact on integers and must still prune a non-matching chunk:
-    // field + 1 == 1000 => field == 999, outside [0,10].
-    EXPECT_TRUE(skip.CanSkipBinaryArithRange<int64_t>(
-        fid, 0, OpType::Equal, ArithOpType::Add, int64_t(1000), int64_t(1)));
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // PR #51441: the IO-saving half of the change.
 //
@@ -2034,6 +2004,25 @@ BinaryRangePlan(FieldId fid, DataType data_type, int64_t lower, int64_t upper) {
     return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 }
 
+std::shared_ptr<milvus::plan::PlanNode>
+BinaryArithPlan(FieldId fid,
+                proto::plan::OpType op,
+                proto::plan::ArithOpType arith_op,
+                int64_t value,
+                int64_t right_operand) {
+    proto::plan::GenericValue value_arg;
+    value_arg.set_int64_val(value);
+    proto::plan::GenericValue right_arg;
+    right_arg.set_int64_val(right_operand);
+    auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(fid, DataType::INT64),
+        op,
+        arith_op,
+        value_arg,
+        right_arg);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+}
+
 // The same measurement over offset input -- the path iterative filter runs
 // (IterativeFilterNode installs an offset vector on the EvalCtx), which reaches
 // ProcessDataByOffsets instead of the sequential ProcessDataChunks. test::
@@ -2082,6 +2071,103 @@ RunByOffsetsWithStorageUsage(
 }
 
 }  // namespace
+
+// Arithmetic filters are evaluated exactly as written by the execution
+// kernel, without attempting to invert them into a range over the source
+// field. Besides avoiding integer overflow/truncation mismatches, an empty
+// skip callback means these expressions are not counted as "judged" by the
+// skip-index effectiveness metrics. Cover the default in-scan prefetch, driver
+// prefetch, and offset/iterative paths; Add is the important control because it
+// was the last arithmetic operation that still pruned before this policy.
+TEST(SkipIndexPr51441, ArithmeticPredicatesNeverUseSkipIndex) {
+    StorageUsageTrackingGuard tracking_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_arithmetic_no_skip_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1)
+        << "need multiple cells so the old Add inversion could prune";
+
+    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    auto& ratio = milvus::monitor::internal_core_skipindex_prune_ratio_expr(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    struct MetricSnapshot {
+        double scanned;
+        double pruned;
+        uint64_t ratio_samples;
+    };
+    auto snapshot = [&] {
+        return MetricSnapshot{
+            scanned.Value(),
+            pruned.Value(),
+            ratio.Collect().histogram.sample_count,
+        };
+    };
+    auto expect_unchanged = [](const MetricSnapshot& before,
+                               const MetricSnapshot& after) {
+        EXPECT_DOUBLE_EQ(after.scanned, before.scanned);
+        EXPECT_DOUBLE_EQ(after.pruned, before.pruned);
+        EXPECT_EQ(after.ratio_samples, before.ratio_samples);
+    };
+
+    // val is [0, N). Therefore val + 1 > N matches nothing, while val + 1 > 0
+    // matches every row. With arithmetic pruning disabled both must read the
+    // same full field, regardless of which prefetch path drives execution.
+    auto no_match_plan = BinaryArithPlan(val_fid,
+                                         proto::plan::OpType::GreaterThan,
+                                         proto::plan::ArithOpType::Add,
+                                         N,
+                                         1);
+    auto full_plan = BinaryArithPlan(val_fid,
+                                     proto::plan::OpType::GreaterThan,
+                                     proto::plan::ArithOpType::Add,
+                                     0,
+                                     1);
+    auto run_sequential = [&](bool driver_prefetch) {
+        DriverPrefetchGuard guard(driver_prefetch);
+        const auto before = snapshot();
+        auto no_match =
+            RunWithStorageUsage(no_match_plan, segment.get(), N);
+        const auto after_no_match = snapshot();
+        expect_unchanged(before, after_no_match);
+
+        auto full = RunWithStorageUsage(full_plan, segment.get(), N);
+        const auto after_full = snapshot();
+        expect_unchanged(after_no_match, after_full);
+
+        EXPECT_EQ(no_match.count, 0);
+        EXPECT_EQ(full.count, N);
+        ASSERT_GT(full.total_bytes, 0);
+        EXPECT_EQ(no_match.total_bytes, full.total_bytes)
+            << "arithmetic filter still pruned cells with driver prefetch="
+            << driver_prefetch;
+    };
+    run_sequential(false);
+    run_sequential(true);
+
+    milvus::exec::OffsetVector offsets{0,
+                                       static_cast<int32_t>(N / 2),
+                                       static_cast<int32_t>(N - 1)};
+    const auto before_offsets = snapshot();
+    auto offset_result = RunByOffsetsWithStorageUsage(
+        no_match_plan, segment.get(), N, offsets, 2);
+    const auto after_offsets = snapshot();
+    expect_unchanged(before_offsets, after_offsets);
+    EXPECT_EQ(offset_result.count, 0);
+    EXPECT_GT(offset_result.total_bytes, 0);
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
 
 // Driver prefetch must ask the skip index with the field's physical type.
 // Binary-range literals are represented as int64_t in the plan, but INT32

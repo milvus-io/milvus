@@ -2563,17 +2563,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         }
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, op_type, arith_type, value, right_operand](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipBinaryArithRange<T>(op_ctx,
-                                                         field_id,
-                                                         chunk_id,
-                                                         op_type,
-                                                         arith_type,
-                                                         value,
-                                                         right_operand);
-        };
+    // Arithmetic predicates deliberately do not participate in chunk pruning.
+    // Their execution semantics include integer wraparound/truncation and
+    // operation-specific edge cases, so an inverse range transform is not
+    // generally equivalent to the expression the execution kernel evaluates.
+    // Passing an empty callback also keeps arithmetic out of the skip-index
+    // judged/prune-ratio metrics.
+    std::function<bool(const SkipIndex&, FieldId, int)> skip_index_func;
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -2620,78 +2616,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                processed_size,
                real_batch_size);
     return res_vec;
-}
-
-void
-PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
-    auto datatype = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
-        datatype = expr_->column_.element_type_;
-    }
-
-    switch (datatype) {
-        case DataType::BOOL: {
-            PrefetchRawData<bool>();
-            break;
-        }
-        case DataType::INT8: {
-            PrefetchRawData<int8_t>();
-            break;
-        }
-        case DataType::INT16: {
-            PrefetchRawData<int16_t>();
-            break;
-        }
-        case DataType::INT32: {
-            PrefetchRawData<int32_t>();
-            break;
-        }
-        case DataType::INT64: {
-            PrefetchRawData<int64_t>();
-            break;
-        }
-        case DataType::FLOAT: {
-            PrefetchRawData<float>();
-            break;
-        }
-        case DataType::DOUBLE: {
-            PrefetchRawData<double>();
-            break;
-        }
-        default: {
-            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
-            break;
-        }
-    }
-}
-
-template <typename T>
-void
-PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
-    using H =
-        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
-                           int64_t,
-                           T>;
-    auto skip_index = segment_->GetSkipIndex();
-    auto value = GetValueWithCastNumber<H>(expr_->value_);
-    auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
-
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip =
-            skip_index->CanSkipBinaryArithRange<T>(field_id_,
-                                                   i,
-                                                   expr_->op_type_,
-                                                   expr_->arith_op_type_,
-                                                   value,
-                                                   right_value);
-        if (!skip) {
-            chunks_may_hit.push_back(i);
-        }
-    }
-    RecordSkipIndexEffect(
-        *skip_index, num_data_chunk_, num_data_chunk_ - chunks_may_hit.size());
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 template VectorPtr
