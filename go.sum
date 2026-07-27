@@ -192,6 +192,8 @@ github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6r
 github.com/bgentry/speakeasy v0.1.0/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kBD4zp0CCIs=
 github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727084728-a58408f49811 h1:KrSaN1fk4uvNXWU7Zv067CWqtceh34aqFefwksv6uHA=
 github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727084728-a58408f49811/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727093850-fbdc96f0e201 h1:X2F0G+hf9SBKLLIB6SjBan2aemn7dlrfnmdYBPIgBEA=
+github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727093850-fbdc96f0e201/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/bits-and-blooms/bitset v1.3.1/go.mod h1:gIdJ4wp64HaoK2YrL1Q5/N7Y16edYb8uY+O0FJTyyDA=
 github.com/bits-and-blooms/bitset v1.12.0 h1:U/q1fAF7xXRhFCrhROzIfffYnu+dlS38vCZtmFVPHmA=
 github.com/bits-and-blooms/bitset v1.12.0/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
