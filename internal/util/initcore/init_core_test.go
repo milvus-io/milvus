@@ -17,12 +17,14 @@
 package initcore
 
 import (
+	"strconv"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -147,6 +149,74 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
 	assert.NoError(t, InitArrowReaderConfig(pt))
+}
+
+func TestInitLoonReaderConfigRejectsOutOfRangePoolSize(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+
+	// The default (0) is accepted and leaves the pool uninitialized, which
+	// milvus-storage reports as parallelism 1.
+	assert.NoError(t, InitLoonReaderConfig(pt))
+	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
+
+	// 4294967296 is the case the bound exists for: it truncates to 0 when
+	// narrowed to int32, which the C side accepts as "disabled" and reports
+	// as success, silently dropping the operator's configuration.
+	for _, v := range []string{"-1", "1025", "4294967296", "9223372036854775807"} {
+		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, v))
+		err := InitLoonReaderConfig(pt)
+		assert.Error(t, err, "pool size %s must be rejected", v)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		// A rejected value must not have reached the C side.
+		assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
+	}
+
+	// The upper bound itself is a valid, accepted value. Only validation is
+	// asserted here — actually creating a 1024-thread pool would leak into
+	// every later test in this package, since the pool is a process-wide
+	// singleton that cannot be destroyed.
+	assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key,
+		strconv.Itoa(maxStorageReaderThreadPoolSize)))
+	assert.LessOrEqual(t, pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64(),
+		int64(maxStorageReaderThreadPoolSize))
+}
+
+func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	assert.NotPanics(t, func() { RegisterLoonReaderConfigWatchers(pt, "test") })
+
+	var poolFires, windowFires atomic.Int32
+	poolSentinel := config.NewHandler("sentinel-pool", func(*config.Event) { poolFires.Add(1) })
+	windowSentinel := config.NewHandler("sentinel-window", func(*config.Event) { windowFires.Add(1) })
+	pt.Watch(pt.CommonCfg.StorageReaderThreadPoolSize.Key, poolSentinel)
+	pt.Watch(pt.CommonCfg.IndexBuildReadWindowBytes.Key, windowSentinel)
+	defer pt.Unwatch(pt.CommonCfg.StorageReaderThreadPoolSize.Key, poolSentinel)
+	defer pt.Unwatch(pt.CommonCfg.IndexBuildReadWindowBytes.Key, windowSentinel)
+
+	// Hot-reloading only the window keeps the pool disabled. The handler must
+	// not report the pool as "not fully applied": with no pool the C side
+	// reports parallelism 1, which is the absent-pool reading of 0, not a
+	// failed rollback.
+	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "1048576"))
+	assert.Positive(t, windowFires.Load(),
+		"helper must have registered a handler on IndexBuildReadWindowBytes")
+	assert.EqualValues(t, 0, pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64())
+	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
+
+	// An out-of-range pool size drives the handler's error branch: it must log
+	// and return rather than panic.
+	assert.NotPanics(t, func() {
+		_ = pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "1025")
+	})
+	assert.Positive(t, poolFires.Load(),
+		"helper must have registered a handler on StorageReaderThreadPoolSize")
+	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
 }
 
 func TestUpdateLoadTransientBudgetBytes(t *testing.T) {

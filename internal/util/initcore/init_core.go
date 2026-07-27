@@ -501,13 +501,26 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+// maxStorageReaderThreadPoolSize bounds common.storage.readerThreadPoolSize.
+// The C side applies the value verbatim to folly's IOThreadPoolExecutor with
+// no upper bound of its own, so a typo (160000) would spawn that many
+// threads. The bound also rejects values that would truncate when narrowed
+// to int32 (4294967296 -> 0, which the C side reads as "disabled" and
+// silently accepts).
+const maxStorageReaderThreadPoolSize = 1024
+
 // InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
 // round may span, which bounds how many row groups download in parallel per
 // round). Both default to 0 = pre-existing sequential behavior.
 func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
-	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt32()
+	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
+			maxStorageReaderThreadPoolSize, poolSize)
+	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
 		return err

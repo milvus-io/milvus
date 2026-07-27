@@ -802,9 +802,12 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`is independent of this pool. ` +
 			`Values > 0 resize the pool in both directions at runtime. Setting ` +
 			`0 after the pool exists is a no-op — the pool cannot be destroyed, ` +
-			`so disabling it entirely requires a restart. Readers latch the ` +
-			`parallelism when they open, so any change only affects tasks ` +
-			`started afterwards.`,
+			`so disabling it entirely requires a restart. A reader latches the ` +
+			`parallelism it observed at open only as an on/off gate: opened ` +
+			`with <= 1 it stays sequential for its lifetime, while opened ` +
+			`with > 1 it follows the pool's current size on each subsequent ` +
+			`round — so a runtime resize also affects the later rounds of ` +
+			`already-open readers. Max 1024.`,
 		Export: false,
 	}
 	p.StorageReaderThreadPoolSize.Init(base.mgr)
