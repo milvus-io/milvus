@@ -321,9 +321,14 @@ func (p *delegatorGrowingSourceProvider) rollbackRetained(snapshot map[int64]ret
 	}
 }
 
+// handoffSnapshot records what one enter-handoff call contributed to the fence,
+// so a failed operation can undo exactly its own contribution. It deliberately
+// does not capture the whole prior state: restoring that wholesale would drop
+// entries a concurrent operation added after the snapshot was taken, and would
+// lower handoffOnly without consulting handoffInflight -- while another handoff
+// is still parked in waitFence.
 type handoffSnapshot struct {
-	enabled bool
-	allowed map[int64]struct{}
+	added map[int64]struct{}
 }
 
 // enterHandoffOnly arms the handoff-only fence without registering an in-flight
@@ -349,17 +354,16 @@ func (p *delegatorGrowingSourceProvider) enterHandoffOnlyInflight(segments []syn
 }
 
 func (p *delegatorGrowingSourceProvider) enterHandoffOnlyLocked(segments []syncmgr.GrowingSourceReleaseHandoffSegment) handoffSnapshot {
-	snapshot := handoffSnapshot{
-		enabled: p.handoffOnly,
-		allowed: make(map[int64]struct{}, len(p.handoffAllowed)),
-	}
-	for segmentID := range p.handoffAllowed {
-		snapshot.allowed[segmentID] = struct{}{}
-	}
+	snapshot := handoffSnapshot{added: make(map[int64]struct{}, len(segments))}
 
 	p.handoffOnly = true
 	for _, segment := range segments {
+		if _, ok := p.handoffAllowed[segment.SegmentID]; ok {
+			// Already allowed by a concurrent handoff: not ours to undo.
+			continue
+		}
 		p.handoffAllowed[segment.SegmentID] = struct{}{}
+		snapshot.added[segment.SegmentID] = struct{}{}
 	}
 	return snapshot
 }
@@ -368,8 +372,16 @@ func (p *delegatorGrowingSourceProvider) rollbackHandoffOnly(snapshot handoffSna
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.handoffOnly = snapshot.enabled
-	p.handoffAllowed = snapshot.allowed
+	for segmentID := range snapshot.added {
+		delete(p.handoffAllowed, segmentID)
+	}
+	// Never clear handoffOnly directly. Another handoff may still be parked in
+	// waitFence, or may still hold allowed/retained entries; the drain check is
+	// the single place that decides, and it is the only one that honors
+	// handoffInflight. For the Prepare path this call is a no-op because the
+	// caller's own in-flight count is still held -- its deferred
+	// leaveHandoffOnlyInflight re-checks once the count reaches zero.
+	p.exitHandoffOnlyIfDrainedLocked()
 }
 
 func (p *delegatorGrowingSourceProvider) markReleaseAllowed(fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) {

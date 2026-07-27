@@ -18,9 +18,11 @@ package delegator
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -343,6 +345,74 @@ func TestDelegatorGrowingSourceProviderBeginHandoffRollbackDoesNotPinFence(t *te
 	provider.mu.Unlock()
 	require.Equal(t, 0, inflight)
 	require.False(t, handoffOnly)
+}
+
+// TestDelegatorGrowingSourceProviderRollbackKeepsConcurrentHandoff pins that a
+// failed handoff undoes only its own contribution to the fence. Restoring the
+// whole pre-operation snapshot would lower handoffOnly while a second handoff is
+// still parked in waitFence -- letting an unrelated growing segment acquire a
+// lease mid-handoff -- and would also drop the second handoff's segment from
+// handoffAllowed.
+func TestDelegatorGrowingSourceProviderRollbackKeepsConcurrentHandoff(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+
+	var (
+		aEntered = make(chan struct{})
+		aRelease = make(chan struct{})
+		bEntered = make(chan struct{})
+		bRelease = make(chan struct{})
+		fenceMu  sync.Mutex
+		seen     int
+	)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, func(ctx context.Context, fenceTs uint64) error {
+		fenceMu.Lock()
+		seen++
+		first := seen == 1
+		fenceMu.Unlock()
+		if first {
+			close(aEntered)
+			<-aRelease
+			return errors.New("mock fence failure") // A fails
+		}
+		close(bEntered)
+		<-bRelease
+		return nil
+	})
+
+	aDone := make(chan error, 1)
+	go func() {
+		aDone <- provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 100,
+			[]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1001, TargetOffset: 0}})
+	}()
+	<-aEntered
+
+	bDone := make(chan error, 1)
+	go func() {
+		bDone <- provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 200,
+			[]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 2001, TargetOffset: 0}})
+	}()
+	<-bEntered
+
+	// A fails and rolls back while B is still parked in waitFence.
+	close(aRelease)
+	require.Error(t, <-aDone)
+
+	provider.mu.Lock()
+	stillArmed := provider.handoffOnly
+	_, bStillAllowed := provider.handoffAllowed[2001]
+	_, aRolledBack := provider.handoffAllowed[1001]
+	provider.mu.Unlock()
+
+	require.True(t, stillArmed, "fence must stay armed while B is still in flight")
+	require.True(t, bStillAllowed, "B's segment must survive A's rollback")
+	require.False(t, aRolledBack, "A's own segment must be undone")
+
+	// An unrelated segment must still be rejected while the fence is armed.
+	require.False(t, provider.acquireLease(3003), "unrelated segment must not get a lease mid-handoff")
+
+	close(bRelease)
+	require.NoError(t, <-bDone)
+	provider.Close()
 }
 
 // TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight pins the
