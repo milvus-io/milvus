@@ -95,6 +95,28 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		return err
 	}
 
+	// Binlog import (backup=true) and L0 import read Milvus's own internal
+	// storage layout, so they can be switched off cluster-wide in addition to
+	// the ImportBinlog privilege the proxy requires. Checked before the binlog
+	// listing below so a cluster with the capability disabled never performs
+	// the prefix walk.
+	//
+	// NOTE: deliberately NOT re-checked in createImportJobFromAck, unlike the
+	// L0 gate there. That callback also runs on CDC secondary clusters, where
+	// rejecting an import the primary already accepted would diverge the two
+	// clusters. Enforcement is on the primary, which is the only path a client
+	// can reach. See issue #51883.
+	if (importutilv2.IsBackup(options) || importutilv2.IsL0Import(options)) &&
+		!Params.DataCoordCfg.EnableBinlogImport.GetAsBool() {
+		return merr.WrapErrImportFailed("binlog import is disabled on this cluster " +
+			"(dataCoord.import.enableBinlogImport=false)")
+	}
+
+	// Keep ordinary imports out of Milvus's own storage directories.
+	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
+		return err
+	}
+
 	// Validate binlog import files if it's a backup
 	if importutilv2.IsBackup(options) {
 		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, files, options)
