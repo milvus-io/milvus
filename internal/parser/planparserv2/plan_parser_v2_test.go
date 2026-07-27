@@ -172,6 +172,8 @@ func TestExpr_NullLiteral(t *testing.T) {
 		`Int64Field != NULL`,
 		// range comparison
 		`1 < NULL < 5`,
+		`NULL < Int64Field < 5`,
+		`1 < Int64Field < NULL`,
 		`Int64Field < NULL`,
 		// logical / unary operands
 		`NULL and Int64Field > 0`,
@@ -1584,9 +1586,22 @@ func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
 		})
 	}
 
-	// Bounds with different JSON dynamic types have no parser-level ordering.
-	// Their runtime type semantics are evaluated by segcore.
-	assertValidExpr(t, helper, `1 <= A < "z"`)
+	for _, exprStr := range []string{
+		`1 <= A < "z"`,
+		`"z" > A >= 1`,
+		`false < A < true`,
+		`[1] < A < [2]`,
+	} {
+		_, err := ParseExpr(helper, exprStr, nil)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, exprStr)
+		assert.Contains(t, err.Error(), "bounds are not comparable", exprStr)
+	}
+
+	// Separate comparisons keep their own JSON dynamic-type semantics and must
+	// not be rejected or merged into a mixed-type BinaryRangeExpr.
+	expr, err := ParseExpr(helper, `A >= 1 AND A < "z"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr.GetBinaryExpr())
 }
 
 func TestExpr_castValue(t *testing.T) {

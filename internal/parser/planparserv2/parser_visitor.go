@@ -1639,6 +1639,22 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	}
 }
 
+func newLogicalBinaryExpr(leftExpr, rightExpr *ExprWithType, op planpb.BinaryExpr_BinaryOp) *ExprWithType {
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Left:  leftExpr.expr,
+					Right: rightExpr.expr,
+					Op:    op,
+				},
+			},
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 // VisitLogicalOr apply logical or to two boolean expressions.
 func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{} {
 	left := ctx.Expr(0).Accept(v)
@@ -1672,6 +1688,9 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 			return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 		}
 		if boolLiteral.GetBoolVal() {
+			if otherExpr != nil && canBeExecuted(otherExpr) && otherExpr.expr.GetIsTemplate() {
+				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalOr)
+			}
 			// true or expr → always true
 			return &ExprWithType{
 				expr:     alwaysTrueExpr(),
@@ -1685,10 +1704,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return otherExpr
 	}
 
-	var leftExpr *ExprWithType
-	var rightExpr *ExprWithType
-	leftExpr = getExpr(left)
-	rightExpr = getExpr(right)
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
 	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
 		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in logical and expression")
 	}
@@ -1700,21 +1716,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_BinaryExpr{
-			BinaryExpr: &planpb.BinaryExpr{
-				Left:  leftExpr.expr,
-				Right: rightExpr.expr,
-				Op:    planpb.BinaryExpr_LogicalOr,
-			},
-		},
-		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
-	}
-
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return newLogicalBinaryExpr(leftExpr, rightExpr, planpb.BinaryExpr_LogicalOr)
 }
 
 // VisitLogicalAnd apply logical and to two boolean expressions.
@@ -1750,6 +1752,9 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 		}
 		if !boolLiteral.GetBoolVal() {
+			if otherExpr != nil && canBeExecuted(otherExpr) && otherExpr.expr.GetIsTemplate() {
+				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalAnd)
+			}
 			// false and expr → always false
 			return &ExprWithType{
 				expr:     alwaysFalseExpr(),
@@ -1763,10 +1768,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return otherExpr
 	}
 
-	var leftExpr *ExprWithType
-	var rightExpr *ExprWithType
-	leftExpr = getExpr(left)
-	rightExpr = getExpr(right)
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
 	if isRandomSampleExpr(leftExpr) {
 		return merr.WrapErrQueryPlanMsg("random sample expression can only be the last expression in the logical and expression")
 	}
@@ -1779,42 +1781,35 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 	}
 
-	var expr *planpb.Expr
 	if isRandomSampleExpr(rightExpr) {
 		randomSampleExpr := rightExpr.expr.GetRandomSampleExpr()
 		randomSampleExpr.Predicate = leftExpr.expr
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_RandomSampleExpr{
-				RandomSampleExpr: randomSampleExpr,
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_RandomSampleExpr{
+					RandomSampleExpr: randomSampleExpr,
+				},
+				IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 			},
+			dataType: schemapb.DataType_Bool,
 		}
-	} else if isElementFilterExpr(rightExpr) {
+	}
+	if isElementFilterExpr(rightExpr) {
 		// Similar to RandomSampleExpr, extract doc-level predicate
 		elementFilterExpr := rightExpr.expr.GetElementFilterExpr()
 		elementFilterExpr.Predicate = leftExpr.expr
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_ElementFilterExpr{
-				ElementFilterExpr: elementFilterExpr,
-			},
-			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
-		}
-	} else {
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_BinaryExpr{
-				BinaryExpr: &planpb.BinaryExpr{
-					Left:  leftExpr.expr,
-					Right: rightExpr.expr,
-					Op:    planpb.BinaryExpr_LogicalAnd,
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ElementFilterExpr{
+					ElementFilterExpr: elementFilterExpr,
 				},
+				IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 			},
-			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+			dataType: schemapb.DataType_Bool,
 		}
 	}
 
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return newLogicalBinaryExpr(leftExpr, rightExpr, planpb.BinaryExpr_LogicalAnd)
 }
 
 // visitBitwiseBinaryOp is the shared implementation for VisitBitAnd/VisitBitOr/VisitBitXor.
