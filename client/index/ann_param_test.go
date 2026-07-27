@@ -44,10 +44,16 @@ func TestAnnParams(t *testing.T) {
 	assert.Equal(t, 10, v)
 
 	idxDiskAnn := NewDiskANNIndex(entity.L2)
-	idxDiskAnn.Params()
+	assert.Equal(t, DISKANN, idxDiskAnn.IndexType())
+	diskAnnParams := idxDiskAnn.Params()
+	assert.Equal(t, string(DISKANN), diskAnnParams[IndexTypeKey])
+	assert.Equal(t, string(entity.L2), diskAnnParams[MetricTypeKey])
 
 	idxAisaq := NewAISAQIndex(entity.L2)
-	idxAisaq.Params()
+	assert.Equal(t, AISAQ, idxAisaq.IndexType())
+	aisaqParams := idxAisaq.Params()
+	assert.Equal(t, string(AISAQ), aisaqParams[IndexTypeKey])
+	assert.Equal(t, string(entity.L2), aisaqParams[MetricTypeKey])
 
 	scannAP := NewSCANNAnnParam(32, 50)
 	result = scannAP.Params()
