@@ -43,6 +43,7 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
@@ -734,10 +735,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   "sealed segment does not support get_timestamps()");
     }
 
-    // Load Geometry cache for a field
-    void
-    LoadGeometryCache(FieldId field_id,
-                      const std::shared_ptr<ChunkedColumnInterface>& column);
+    // Build a DETACHED geometry cache for a field. The caller installs it
+    // atomically (SimpleGeometryCacheManager::InstallCache) once the column
+    // it describes is published, so readers never observe a partially built
+    // or partially replaced cache. Returns nullptr only if the caller decides
+    // not to build.
+    std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    BuildGeometryCacheDetached(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column);
 
  private:
     void

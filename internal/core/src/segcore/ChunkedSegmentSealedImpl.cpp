@@ -28,6 +28,7 @@
 #include <map>
 #include <filesystem>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <optional>
 #include <ratio>
@@ -4850,12 +4851,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
     // Clean up geometry cache for all fields in this segment
     auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
-
-    if (ctx_) {
-        GEOS_finish_r(ctx_);
-        ctx_ = nullptr;
-    }
+    cache_manager.RemoveSegmentCaches(segment_instance_uid(), get_segment_id());
 
     if (mmap_descriptor_ != nullptr) {
         auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -7033,11 +7029,25 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     generate_interim_index(field_id, num_rows, column, op_ctx, committer);
 
+    // Build the geometry cache OUTSIDE the publish lock (it decodes the whole
+    // column), then install it atomically together with the column below, so
+    // GIS predicates and bulk_subscript never disagree about which version of
+    // the column they are reading.
+    std::shared_ptr<milvus::exec::SimpleGeometryCache> staged_geometry_cache;
     if (!SystemProperty::Instance().IsSystem(field_id) &&
         data_type == DataType::GEOMETRY &&
         segcore_config_.get_enable_geometry_cache()) {
-        LoadGeometryCache(field_id, column);
+        staged_geometry_cache = BuildGeometryCacheDetached(field_id, column);
     }
+    auto install_staged_geometry_cache = [&]() {
+        if (staged_geometry_cache != nullptr) {
+            milvus::exec::SimpleGeometryCacheManager::Instance().InstallCache(
+                segment_instance_uid(),
+                get_segment_id(),
+                field_id,
+                staged_geometry_cache);
+        }
+    };
 
     auto& field_meta = schema_snapshot->operator[](field_id);
     auto prepare_array_offsets = [&](RuntimeResourceState& target_runtime) {
@@ -7157,6 +7167,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
             std::unique_lock lck(mutex_);
             apply_loaded_column(target_runtime, old_column, staged_state);
+            install_staged_geometry_cache();
         });
         return;
     }
@@ -7173,6 +7184,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
         std::unique_lock lck(mutex_);
         apply_loaded_column(*runtime, old_column, *capture_snapshot());
+        install_staged_geometry_cache();
         return;
     }
 
@@ -7184,6 +7196,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     apply_loaded_column(*next_runtime, old_column, *current);
 
     auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
+    install_staged_geometry_cache();
     lck.unlock();
     if (SystemProperty::Instance().IsSystem(field_id)) {
         PublishRuntimeStateLocked(published_runtime);
@@ -7936,47 +7949,84 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
     });
 }
 
-void
-ChunkedSegmentSealedImpl::LoadGeometryCache(
+std::shared_ptr<milvus::exec::SimpleGeometryCache>
+ChunkedSegmentSealedImpl::BuildGeometryCacheDetached(
     FieldId field_id, const std::shared_ptr<ChunkedColumnInterface>& column) {
     try {
-        // Get geometry cache for this segment+field
-        auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance()
-                .GetOrCreateCache(get_segment_id(), field_id);
+        // Build into a DETACHED cache -- deliberately NOT the live one from
+        // the manager. A load can be a REPLACE on this same object (a
+        // default-filled column later replaced by the real one:
+        // is_replace_field = was_default_filled || files_changed), where the
+        // contents genuinely change, and segment_instance_uid() is unchanged
+        // for an in-place reopen. Writing through the live cache would let
+        // concurrent queries observe a half-replaced mixture -- overwritten
+        // rows evaluated against not-yet-published geometry, untouched rows
+        // read as gaps and judged non-matching -- and a throw partway would
+        // strand that contaminated cache in the manager map forever, since
+        // caches are only ever built at load time. The caller installs this
+        // one atomically once it is complete.
+        auto geometry_cache =
+            std::make_shared<milvus::exec::SimpleGeometryCache>();
 
-        // Iterate through all chunks and collect WKB data
+        // Rows are written at their absolute segment offsets (see
+        // SimpleGeometryCache::AppendDataAt).
         auto num_chunks = column->num_chunks();
+        size_t absolute_offset = 0;
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             // Get all string views from this chunk
             auto pw = column->StringViews(nullptr, chunk_id);
             auto [string_views, valid_data] = pw.get();
 
             // Add each string view to the geometry cache
-            for (size_t i = 0; i < string_views.size(); ++i) {
-                if (valid_data.empty() || valid_data[i]) {
+            for (size_t i = 0; i < string_views.size();
+                 ++i, ++absolute_offset) {
+                // Guard valid_data[i] like FieldIndexing.cpp's accessor does:
+                // nothing here establishes that valid_data spans every view,
+                // so an unchecked index is an out-of-bounds read that would
+                // desynchronize the cache's nullness from the segment. Rows
+                // beyond the span are classified NULL, matching the index
+                // side -- intentional leniency toward a short valid_data
+                // span rather than failing the whole segment load.
+                if (valid_data.empty() ||
+                    (i < valid_data.size() && valid_data[i])) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data.data(), wkb_data.size());
+                    geometry_cache->AppendDataAt(
+                        absolute_offset, wkb_data.data(), wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendDataAt(absolute_offset, nullptr, 0);
                 }
             }
         }
 
         LOG_INFO(
-            "Successfully loaded geometry cache for segment {} field {} "
+            "Successfully built geometry cache for segment {} field {} "
             "with "
             "{} geometries",
             get_segment_id(),
             field_id.get(),
-            geometry_cache.Size());
+            geometry_cache->Size());
+        return geometry_cache;
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM (e.g. the cache's geometries_.resize)
+        // is the same transient resource failure as a GEOS allocation failure
+        // and must stay retriable -- the generic handler below would collapse
+        // it into a non-retriable UnexpectedError.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for segment {} field "
+                  "{}",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
-                  "Failed to load geometry cache for segment {} field {}: {}",
+                  "Failed to build geometry cache for segment {} field {}: {}",
                   get_segment_id(),
                   field_id.get(),
                   e.what());

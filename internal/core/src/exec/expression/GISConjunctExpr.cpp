@@ -299,12 +299,16 @@ PhyGISRefineConjunctExpr::EvalPrepared(
     proto::plan::GISFunctionFilterExpr_GISOp op,
     const PreparedGeometry& prepared,
     const Geometry& query_geom,
-    const Geometry& left) const {
+    const Geometry& left,
+    GEOSContextHandle_t ctx) const {
     // Delegate to the shared helper so the prepared-predicate semantics (the
     // contains/within swap in particular) never drift from the per-predicate
     // path. DWithin is filtered out before grouping, so distance is unused here.
+    // Equals is NOT filtered out, and it is the helper's unprepared fallback --
+    // hence `ctx`, so it never drives GEOS through a cache-owned `left`'s
+    // shared context.
     return EvaluateGISPreparedOp(
-        op, prepared, query_geom, left, /*distance=*/0.0);
+        op, prepared, query_geom, left, /*distance=*/0.0, ctx);
 }
 
 void
@@ -313,8 +317,10 @@ PhyGISRefineConjunctExpr::PrefetchRawData() {
     // bulk_subscript over their offsets -- never a sequential full-column scan,
     // so the base prefetch_chunks over EVERY chunk is mostly wasted. Warm the
     // column only when reads will actually span it.
-    auto* geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-        segment_->get_segment_id(), st_->field_id);
+    auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
+        segment_->segment_instance_uid(),
+        segment_->get_segment_id(),
+        st_->field_id);
     if (geometry_cache != nullptr) {
         // Reads come from the cache; the raw column is never touched.
         return;
@@ -395,8 +401,8 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         auto eval_all = [&](const Geometry& left) -> bool {
             bool bit = st_->is_and;
             for (size_t j = 0; j < st_->preds.size(); ++j) {
-                bool r =
-                    EvalPrepared(st_->preds[j].op, preps[j], qgeoms[j], left);
+                bool r = EvalPrepared(
+                    st_->preds[j].op, preps[j], qgeoms[j], left, qctx);
                 bit = st_->is_and ? (bit && r) : (bit || r);
                 if (st_->is_and != bit) {
                     break;  // short-circuit
@@ -421,8 +427,12 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
         }
 
-        auto* geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-            segment_->get_segment_id(), st_->field_id);
+        // shared_ptr: an in-flight query keeps the cache alive past a
+        // concurrent segment drop (see SimpleGeometryCacheManager).
+        auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
+            segment_->segment_instance_uid(),
+            segment_->get_segment_id(),
+            st_->field_id);
 
         if (geometry_cache) {
             auto cache_lock = geometry_cache->AcquireReadLock();
@@ -452,7 +462,17 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     continue;
                 }
                 const auto& wkb = geometry_array->data(k);
-                Geometry left(local_ctx, wkb.data(), wkb.size());
+                // Tolerant parse, matching the per-predicate path: a non-null
+                // row whose WKB is empty or corrupt is now KEPT by both write
+                // paths and indexed with a placeholder MBR, so it does reach
+                // refinement whenever the query bbox covers the origin. The
+                // throwing Geometry(ctx, wkb) ctor would fail the entire query
+                // on such a row; it can never satisfy the predicate, so
+                // evaluate it to false instead. See PR #50951.
+                Geometry left;
+                if (!left.TryParseFromWkb(local_ctx, wkb.data(), wkb.size())) {
+                    continue;
+                }
                 if (eval_all(left)) {
                     res.set(hit_local[k]);
                 }

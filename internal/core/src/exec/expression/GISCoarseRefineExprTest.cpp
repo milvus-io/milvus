@@ -465,7 +465,7 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionWithGeometryCache) {
     // the cache branch it is meant to lock down.
     auto geo_fid = schema->get_field_id(FieldName("geo"));
     ASSERT_NE(milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                  seg->get_segment_id(), geo_fid),
+                  seg->segment_instance_uid(), seg->get_segment_id(), geo_fid),
               nullptr);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);

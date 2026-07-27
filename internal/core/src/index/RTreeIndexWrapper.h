@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <boost/geometry/index/rtree.hpp>
 #include <geos_c.h>
 #include <cstddef>
@@ -112,6 +113,15 @@ class RTreeIndexWrapper {
     int64_t
     ByteSize() const;
 
+    // Test-only fault injection. The insert hook throws after Boost has
+    // already accepted the value, exercising the worst documented exception
+    // state. Both hooks are one-shot.
+    void
+    SetThrowAfterInsertForTesting(bool enabled);
+
+    void
+    SetThrowOnQueryForTesting(bool enabled);
+
     // Boost rtree does not use index/leaf capacities; keep only fill factor for
     // compatibility (no-op currently)
 
@@ -125,7 +135,10 @@ class RTreeIndexWrapper {
      * @param maxX Output maximum X coordinate
      * @param maxY Output maximum Y coordinate
      */
-    void
+    // Returns false (leaving the outputs unspecified) when GEOS cannot compute
+    // an envelope, e.g. for an empty geometry. Callers must not use the box on
+    // a false return.
+    bool
     get_bounding_box(const GEOSGeometry* geom,
                      GEOSContextHandle_t ctx,
                      double& minX,
@@ -140,7 +153,34 @@ class RTreeIndexWrapper {
     using Value = std::pair<Box, int64_t>;  // (MBR, row_offset)
     using RTree = bgi::rtree<Value, bgi::rstar<16>>;
 
-    RTree rtree_{};
+    // Insert one (box, row_offset) entry with rtree_mutex_ already held.
+    //
+    // NOT idempotent per row_offset, by design: no production path re-drives a
+    // failed batch into the same wrapper. On the insert path a failure
+    // propagates to the delegator, which panics (delegator_data.go:203); on
+    // the growing load path there is no retry loop, and a re-issued
+    // LoadSegments builds a fresh segment and a fresh wrapper. A dedup set
+    // would therefore cost one entry per row forever to guard a case that
+    // cannot occur.
+    //
+    // What IS guaranteed: values_ (the authoritative committed set) and
+    // rtree_ never diverge. Boost documents only the basic guarantee for
+    // insert, so a throw rolls values_ back and flags the tree for a rebuild
+    // from values_ before its next read or write.
+    void
+    insert_value_locked(const Box& box, int64_t row_offset);
+
+    // Boost only guarantees no leaks when insert throws; the tree itself may
+    // be inconsistent and must not be read or mutated. values_ is the
+    // authoritative committed set, so rebuild a fresh tree from it before the
+    // next operation. Caller must hold rtree_mutex_ exclusively.
+    void
+    ensure_rtree_consistent_locked() const;
+
+    std::shared_lock<std::shared_mutex>
+    lock_consistent_rtree_for_read() const;
+
+    mutable RTree rtree_{};
     std::vector<Value> values_;
     std::string index_path_;
     bool is_build_mode_;
@@ -150,6 +190,11 @@ class RTreeIndexWrapper {
 
     // Serialize access to rtree_
     mutable std::shared_mutex rtree_mutex_;
+    mutable bool rtree_needs_rebuild_ = false;
+
+    // Guarded by rtree_mutex_.
+    bool throw_after_insert_for_testing_ = false;
+    std::atomic<bool> throw_on_query_for_testing_{false};
 
     // R-Tree parameters
     uint32_t dimension_ = 2;

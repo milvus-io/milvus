@@ -80,6 +80,16 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            // write_from reads exactly num_rows entries from the source, so a
+            // producer payload shorter than the row count is an out-of-bounds
+            // read. Reject it at the boundary rather than silently treating
+            // the missing tail as NULL further down the ingest path.
+            AssertInfo(data->valid_data_size() == num_rows,
+                       "nullable field {} valid_data size {} must match "
+                       "num_rows {}",
+                       field_meta.get_id().get(),
+                       data->valid_data_size(),
+                       num_rows);
             reserve_to(length_ + num_rows);
             write_from(length_, num_rows, data->valid_data().data());
             length_ += num_rows;

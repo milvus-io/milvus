@@ -44,12 +44,21 @@ namespace exec {
 // (PhyGISFunctionFilterExpr::EvalForIndexSegment) and the optimizer's fusion
 // path (PhyGISRefineConjunctExpr) stay in lockstep instead of drifting as new
 // GISOps are added.
+//
+// `ctx` MUST be the calling thread's GEOS context (GetThreadLocalGEOSContext).
+// The unprepared fallbacks (Equals, DWithin) would otherwise drive GEOS through
+// `left`'s own stored context, and `left` is frequently a cache-owned Geometry
+// whose context is shared by every concurrent query on that segment+field — a
+// GEOS context is not thread-safe, so that is a data race. The prepared
+// predicates are unaffected: they run on `prepared`'s context, which the caller
+// already built on its own thread.
 inline bool
 EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
                       const PreparedGeometry& prepared,
                       const Geometry& query_geom,
                       const Geometry& left,
-                      double distance) {
+                      double distance,
+                      GEOSContextHandle_t ctx) {
     switch (op) {
         case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
             // Symmetric: prepared.intersects(left) == left.intersects(query)
@@ -67,11 +76,13 @@ EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
             // left.within(query) == query.contains(left)
             return prepared.contains(left);
         case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
-            // No prepared version - fall back to regular geometry.
-            return left.equals(query_geom);
+            // No prepared version - fall back to regular geometry, on the
+            // caller's per-thread context (see the note on `ctx` above).
+            return left.equals(query_geom, ctx);
         case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
-            // Distance-based operation - no prepared version.
-            return left.dwithin(query_geom, distance);
+            // Distance-based operation - no prepared version; same per-thread
+            // context requirement as Equals above.
+            return left.dwithin(query_geom, distance, ctx);
         default:
             ThrowInfo(
                 NotImplemented, "unknown GIS op : {}", static_cast<int>(op));
