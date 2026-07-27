@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -782,6 +783,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 	segment := result.GetSegments()[0]
 	s.Contains(segment.GetTextStatsLogs(), int64(101))
 	s.EqualValues(42, segment.GetTextStatsLogs()[101].GetLogSize())
+	files := segment.GetTextStatsLogs()[101].GetFiles()
+	s.Require().NotEmpty(files)
+	for _, file := range files {
+		s.Equal(1, strings.Count(file, "_stats/text_index.101"))
+	}
 	s.Contains(segment.GetManifest(), "with-text-stats")
 }
 
