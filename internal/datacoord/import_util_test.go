@@ -1496,3 +1496,65 @@ func TestErrPKRangeTooSmall_IsDistinguishableAndKeepsItsCode(t *testing.T) {
 	assert.False(t, merr.IsNonRetryableErr(terminal))
 	assert.False(t, merr.IsNonRetryableErr(transient))
 }
+
+func TestValidateImportFilePaths(t *testing.T) {
+	backupOptions := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}
+	l0Options := []*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}}
+
+	tests := []struct {
+		name       string
+		rootPath   string
+		path       string
+		options    []*commonpb.KeyValuePair
+		wantReject bool
+	}{
+		{"plain internal insert_log", "files", "files/insert_log/1/2/3/100/4", nil, true},
+		{"dot dot escape back into insert_log", "files", "files/../files/insert_log/1/2/3/100/4", nil, true},
+		{"leading slash", "files", "/files/insert_log/1/2/3/100/4", nil, true},
+		{"single dot segment", "files", "files/./insert_log/1/2/3/100/4", nil, true},
+		{"delta_log", "files", "files/delta_log/1/2/3/4", nil, true},
+		{"snapshots", "files", "files/snapshots/449/metadata/12.json", nil, true},
+		{"exact directory with no trailing content", "files", "files/insert_log", nil, true},
+		{"empty root path", "", "insert_log/1/2/3/100/4", nil, true},
+
+		// Must NOT be rejected: prefix collision on a non-boundary.
+		{"user directory sharing a prefix", "files", "files/insert_logs_2026/a.json", nil, false},
+		{"ordinary staging path", "files", "staging/a.json", nil, false},
+		{"user file named centroids", "files", "staging/centroids", nil, false},
+
+		// Must NOT be rejected: backup and L0 import legitimately read binlogs.
+		{"backup import into insert_log", "files", "files/insert_log/1/2/3", backupOptions, false},
+		{"l0 import into delta_log", "files", "files/delta_log/1/2/3", l0Options, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(tt.rootPath).Maybe()
+
+			files := []*msgpb.ImportFile{{Paths: []string{tt.path}}}
+			err := ValidateImportFilePaths(cm, files, tt.options)
+
+			if tt.wantReject {
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateImportFilePaths_ChecksEveryPathOfEveryFile(t *testing.T) {
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+
+	// The offending path is neither the first file nor the first path.
+	files := []*msgpb.ImportFile{
+		{Paths: []string{"staging/a.json"}},
+		{Paths: []string{"staging/b.json", "files/stats_log/1/2/3/100/4"}},
+	}
+
+	err := ValidateImportFilePaths(cm, files, nil)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+}
