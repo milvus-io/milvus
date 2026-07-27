@@ -964,6 +964,7 @@ type subTask[T any] struct {
 	req      T
 	targetID int64
 	worker   cluster.Worker
+	err      error
 }
 
 func organizeSubTask[T any](ctx context.Context,
@@ -1001,6 +1002,7 @@ func organizeSubTask[T any](ctx context.Context,
 			req:      req,
 			targetID: workerID,
 			worker:   worker,
+			err:      err,
 		})
 		return nil
 	}
@@ -1045,14 +1047,20 @@ func executeSubTasks[T any, R interface {
 		wg.Go(func() error {
 			var result R
 			var err error
-			if task.targetID == -1 || task.worker == nil {
+			if task.err != nil {
+				err = task.err
+			} else if task.targetID == -1 || task.worker == nil {
 				var segments []int64
 				if req, ok := any(task.req).(interface{ GetSegmentIDs() []int64 }); ok {
 					segments = req.GetSegmentIDs()
 				} else {
 					segments = []int64{}
 				}
-				err = merr.WrapErrServiceInternalMsg("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+				if taskType == "UpdateSchema" {
+					err = merr.WrapErrServiceUnavailableMsg("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+				} else {
+					err = merr.WrapErrServiceInternalMsg("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+				}
 			} else {
 				result, err = execute(ctx, task.req, task.worker)
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -1323,7 +1331,7 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
 		return err
 	}
 	defer sd.lifetime.Done()
