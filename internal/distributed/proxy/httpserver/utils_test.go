@@ -4041,6 +4041,50 @@ func TestAnyToColumnsStructArray(t *testing.T) {
 	assert.Len(t, vecData[1].GetFloatVector().GetData(), 4)
 }
 
+func TestAnyToColumnsStructArrayAsOnlyVectorField(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.Fields = schema.Fields[:1]
+	body := []byte(`{
+		"data": [
+			{
+				"id": 1,
+				"my_struct": [
+					{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}
+				]
+			}
+		]
+	}`)
+
+	rows, _, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+
+	fds, err := anyToColumns(rows, nil, schema, true, false)
+	require.NoError(t, err)
+	require.Len(t, fds, 2)
+	assert.Equal(t, schemapb.DataType_Int64, fds[0].GetType())
+	assert.Equal(t, schemapb.DataType_ArrayOfStruct, fds[1].GetType())
+}
+
+func TestAnyToColumnsRejectsSchemaWithoutVectorOrFunction(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.Fields = schema.Fields[:1]
+	schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
+	body := []byte(`{
+		"data": [
+			{
+				"id": 1,
+				"my_struct": [{"sub_int": 10}]
+			}
+		]
+	}`)
+
+	rows, _, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+
+	_, err = anyToColumns(rows, nil, schema, true, false)
+	require.ErrorContains(t, err, "has no vector field or functions")
+}
+
 func TestBuildQueryRespStructArrayRoundTrip(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	body := []byte(`{
