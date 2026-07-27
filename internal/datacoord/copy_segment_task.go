@@ -524,8 +524,11 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 // - During garbage collection of old tasks
 //
 // Error handling:
-// - Logs warning but does not retry (task will be GC'd eventually)
-// - Non-critical operation (task already finished)
+//   - On an ambiguous error the node assignment is deliberately kept, so this
+//     call does not itself converge. The inspector re-runs it every round for
+//     terminal tasks that still carry an assignment (processTerminal), which is
+//     what eventually lets checkGC reclaim the task and its job.
+//   - Non-critical operation (task already finished)
 func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
 	nodeID := t.GetNodeId()
 	if nodeID == NullNodeID {

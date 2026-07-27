@@ -1712,7 +1712,9 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeGoneStillClearsAssignmen
 
 func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_OtherErrorKeepsAssignment() {
 	// A transport error does not prove the worker-side task is gone: keep the
-	// assignment so the drop can be retried, instead of leaking the worker task.
+	// assignment instead of leaking the worker task. The inspector's
+	// processTerminal re-runs the drop on every round until it converges — see
+	// TestProcessTerminal_RetriesDropUntilAssignmentCleared.
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
 		Return(errors.New("rpc timeout")).Once()

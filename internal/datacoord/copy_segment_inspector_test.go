@@ -20,11 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -43,6 +45,7 @@ type CopySegmentInspectorSuite struct {
 	meta      *meta
 	copyMeta  CopySegmentMeta
 	scheduler *task2.MockGlobalScheduler
+	cluster   *session.MockCluster
 	inspector *copySegmentInspector
 }
 
@@ -81,11 +84,14 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 
 	s.scheduler = task2.NewMockGlobalScheduler(s.T())
 
+	s.cluster = session.NewMockCluster(s.T())
+
 	s.inspector = NewCopySegmentInspector(
 		context.TODO(),
 		s.meta,
 		s.copyMeta,
 		s.scheduler,
+		s.cluster,
 	).(*copySegmentInspector)
 }
 
@@ -124,6 +130,7 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_NoPendingTasks() {
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		NodeId:       NullNodeID,
 	})
 	err = s.copyMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
@@ -283,6 +290,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+		NodeId:       NullNodeID,
 		IdMappings:   idMappings,
 		Reason:       "test failure",
 	})
@@ -331,6 +339,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+		NodeId:       NullNodeID,
 		IdMappings:   idMappings,
 		Reason:       "test failure",
 	})
@@ -341,6 +350,125 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 	s.NotPanics(func() {
 		s.inspector.processFailed(task)
 	})
+}
+
+// addTerminalTaskWithAssignment stores a terminal task that is still assigned to
+// nodeID, i.e. one whose worker-side drop has not converged yet.
+func (s *CopySegmentInspectorSuite) addTerminalTaskWithAssignment(
+	taskID, nodeID int64, state datapb.CopySegmentTaskState,
+) *copySegmentTask {
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       taskID,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        state,
+		NodeId:       nodeID,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+	return task
+}
+
+// TestProcessTerminal_RetriesDropUntilAssignmentCleared is the liveness
+// regression for the review finding: the scheduler calls DropTaskOnWorker
+// exactly once before removing the task from its running set, so an ambiguous
+// drop error would strand the task with its node assignment intact — and
+// checkGC skips any task that still carries one, keeping the task and its
+// parent job in meta past retention forever. The inspector must keep retrying
+// until the assignment is actually cleared.
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesDropUntilAssignmentCleared() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	task := s.addTerminalTaskWithAssignment(1001, 10,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+
+	// Round 1: the drop hits an ambiguous transport error (DataNode rolling
+	// restart). The assignment must be kept — clearing it could orphan a live
+	// worker-side task.
+	s.cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
+		Return(errors.New("rpc timeout")).Once()
+	s.inspector.processTerminal(task)
+	s.EqualValues(10, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
+
+	// Round 2: the node is reachable again, the drop succeeds and the
+	// assignment is cleared, unblocking checkGC.
+	s.cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+	s.inspector.processTerminal(task)
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
+
+	// Round 3: converged — no further RPC. The mock has no expectation left, so
+	// another call would fail the test.
+	s.inspector.processTerminal(task)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		s.copyMeta.GetTask(context.TODO(), 1001).GetState())
+}
+
+// TestProcessTerminal_RetriesPersistFailure: the drop RPC can succeed while the
+// etcd write of NullNodeID fails. That leaves the same stranded state, so it
+// must be retried too.
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesPersistFailure() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).
+		Return(errors.New("etcd down")).Once()
+
+	task := s.addTerminalTaskWithAssignment(1002, 11,
+		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
+
+	s.cluster.EXPECT().DropCopySegment(int64(11), int64(1002)).Return(nil).Once()
+	s.inspector.processTerminal(task)
+	s.EqualValues(11, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
+
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(int64(11), int64(1002)).Return(nil).Once()
+	s.inspector.processTerminal(task)
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
+}
+
+// TestProcessTerminal_NoAssignmentIsNoop: an already-converged task must not
+// issue an RPC on every inspection round.
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_NoAssignmentIsNoop() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	task := s.addTerminalTaskWithAssignment(1003, NullNodeID,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+
+	// No cluster expectation: any DropCopySegment call fails the test.
+	s.inspector.processTerminal(task)
+}
+
+// TestInspect_RetriesDropForTerminalTasks wires the retry into the periodic
+// loop: both Completed and Failed tasks that still carry an assignment must be
+// picked up by inspect(), not just by a direct processTerminal call.
+func (s *CopySegmentInspectorSuite) TestInspect_RetriesDropForTerminalTasks() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.addTerminalTaskWithAssignment(1004, 12,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	s.addTerminalTaskWithAssignment(1005, 13,
+		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
+
+	s.cluster.EXPECT().DropCopySegment(int64(12), int64(1004)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(int64(13), int64(1005)).Return(nil).Once()
+
+	s.inspector.inspect()
+
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1004).GetNodeId())
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1005).GetNodeId())
 }
 
 func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
@@ -417,6 +545,7 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+		NodeId:       NullNodeID,
 		IdMappings:   idMappings,
 	})
 	err = s.copyMeta.AddTask(context.TODO(), task3)

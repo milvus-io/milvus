@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -38,6 +39,8 @@ import (
 // 1. Reload InProgress tasks to scheduler on DataCoord restart (idempotent recovery)
 // 2. Enqueue Pending tasks to the global task scheduler for execution
 // 3. Clean up target segments when tasks fail (drop incomplete segments)
+// 4. Unassign terminal tasks whose worker-side drop did not complete, so GC can
+//    reclaim them (checkGC skips any task that still carries a node assignment)
 //
 // TASK STATE TRANSITIONS:
 // Pending → InProgress (inspector enqueues to scheduler)
@@ -73,6 +76,7 @@ type copySegmentInspector struct {
 	meta      *meta                // Segment metadata (for dropping failed target segments)
 	copyMeta  CopySegmentMeta      // Copy job and task metadata
 	scheduler task.GlobalScheduler // Task scheduler for dispatching to DataNodes
+	cluster   session.Cluster      // DataNode cluster (for retrying the drop of terminal tasks)
 
 	closeOnce sync.Once     // Ensures Close is idempotent
 	closeChan chan struct{} // Channel to signal inspector shutdown
@@ -89,6 +93,7 @@ type copySegmentInspector struct {
 //   - meta: Segment metadata for updating segment states
 //   - copyMeta: Copy job and task metadata store
 //   - scheduler: Global task scheduler for dispatching tasks
+//   - cluster: DataNode cluster used to retry the drop of terminal tasks
 //
 // Returns:
 //
@@ -98,12 +103,14 @@ func NewCopySegmentInspector(
 	meta *meta,
 	copyMeta CopySegmentMeta,
 	scheduler task.GlobalScheduler,
+	cluster session.Cluster,
 ) CopySegmentInspector {
 	return &copySegmentInspector{
 		ctx:       ctx,
 		meta:      meta,
 		copyMeta:  copyMeta,
 		scheduler: scheduler,
+		cluster:   cluster,
 		closeChan: make(chan struct{}),
 	}
 }
@@ -225,8 +232,11 @@ func (s *copySegmentInspector) inspect() {
 			switch task.GetState() {
 			case datapb.CopySegmentTaskState_CopySegmentTaskPending:
 				s.processPending(task)
+			case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
+				s.processTerminal(task)
 			case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 				s.processFailed(task)
+				s.processTerminal(task)
 			}
 		}
 	}
@@ -291,4 +301,32 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID))...)
 		}
 	}
+}
+
+// processTerminal re-attempts the worker-side cleanup of a terminal
+// (Completed/Failed) task that still carries a node assignment.
+//
+// Why this exists:
+// The scheduler calls DropTaskOnWorker exactly once, right before removing the
+// task from its running set (task/global_scheduler.go), so a drop that hits an
+// ambiguous error — an RPC timeout during a DataNode rolling restart, or a
+// failed etcd write of NullNodeID — is never retried by the scheduler. Keeping
+// the assignment on such an error is deliberate (clearing it could orphan a
+// live worker-side task), but without a retry the task is stranded: checkGC
+// skips any task whose NodeID is set and therefore never reclaims the task or
+// its parent job, past the retention period, forever. This is the "wait for
+// inspector to unassign" that checkGC's own guard refers to.
+//
+// Idempotency:
+// DropTaskOnWorker returns immediately when the assignment is already cleared,
+// so re-running it every inspection round costs nothing once cleanup lands. It
+// touches only NodeID — never state or reason — so retrying cannot disturb the
+// terminal outcome the task already reported.
+func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
+	if task.GetNodeId() == NullNodeID {
+		return
+	}
+	mlog.Info(s.ctx, "retrying worker-side drop of terminal copy segment task",
+		WrapCopySegmentTaskLog(task, mlog.FieldNodeID(task.GetNodeId()))...)
+	task.DropTaskOnWorker(s.cluster)
 }
