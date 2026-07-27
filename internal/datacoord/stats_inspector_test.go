@@ -368,14 +368,14 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
 }
 
 // Every trigger loop must give up as soon as the scheduler is backlogged instead
-// of walking the remaining collections. The call count is what proves it: each
-// loop asks once for the first collection it looks at and then returns, so three
-// loops ask exactly three times. Walking on (continue) would ask once per
-// collection instead.
+// of walking the remaining collections. The call count is what proves it: the
+// text and JSON loops each ask once for the first collection they look at and
+// then return, while the BM25 loop returns before asking because BM25 is not
+// docked yet. Walking on (continue) would ask once per collection instead.
 func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
 	scheduler := task.NewMockGlobalScheduler(s.T())
 	scheduler.EXPECT().GetPendingTaskCount().
-		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(3)
+		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(2)
 	s.inspector.scheduler = scheduler
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
 

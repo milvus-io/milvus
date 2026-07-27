@@ -234,6 +234,11 @@ func (si *statsInspector) triggerTextStatsTask() {
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
+		// needDoTextIndex is false for every segment once there is no field to
+		// index, so skip the collection before scanning all of its segments.
+		if len(needTriggerFieldIDs) == 0 {
+			continue
+		}
 		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			if !needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted) {
@@ -285,6 +290,11 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
+		// Same as the text loop: no field to shred means no candidate segment,
+		// which also short-circuits every collection once JSON shredding is off.
+		if len(needTriggerFieldIDs) == 0 {
+			continue
+		}
 		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			if collection.IsExternal() && !canBuildExternalJSONKeyIndex(seg) {
@@ -309,6 +319,11 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 }
 
 func (si *statsInspector) triggerBM25StatsTask() {
+	// BM25 stats tasks are not docked yet, so every collection would be scanned
+	// for nothing. Drop out before touching the segment meta at all.
+	if !si.enableBM25() {
+		return
+	}
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil || collection.IsExternal() {
