@@ -2,17 +2,20 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -20,21 +23,15 @@ func itoa(i int) string { return strconv.Itoa(i) }
 func schemaVec(dim int, extraScalars int) *schemapb.CollectionSchema {
 	fields := []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: itoa(dim)}}},
+		{
+			FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: itoa(dim)}},
+		},
 	}
 	for i := 0; i < extraScalars; i++ {
 		fields = append(fields, &schemapb.FieldSchema{FieldID: int64(200 + i), Name: "s" + itoa(i), DataType: schemapb.DataType_Int64})
 	}
 	return &schemapb.CollectionSchema{Fields: fields}
-}
-
-func Test_numpyRowByteSize(t *testing.T) {
-	// float vector dim=768 => 4*768 = 3072 bytes; + 1 int64 scalar (8) = 3080.
-	// autoID PK is NOT in the file, so it is excluded.
-	got, err := numpyRowByteSize(schemaVec(768, 1))
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3080), got)
 }
 
 func Test_minRowTextBytes(t *testing.T) {
@@ -49,8 +46,10 @@ func schemaBM25AutoID() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "512"}}},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "512"}},
+			},
 			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
 		},
 		Functions: []*schemapb.FunctionSchema{
@@ -60,13 +59,12 @@ func schemaBM25AutoID() *schemapb.CollectionSchema {
 }
 
 func Test_rowByteHelpers_skipFunctionOutput(t *testing.T) {
-	// sparse (102) is a function output -> skipped; only the VarChar text field remains.
-	n, err := numpyRowByteSize(schemaBM25AutoID())
-	assert.NoError(t, err)         // must NOT error on the sparse field
-	assert.Equal(t, int64(512), n) // varchar max_length only
+	// sparse (102) is a function output and the autoID pk (100) is generated, so
+	// only the VarChar text field remains -- and VarChar may be empty, so the floor
+	// falls through to 1 rather than erroring on the sparse field.
 	m, err := minRowTextBytes(schemaBM25AutoID())
 	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, m, int64(1)) // varchar contributes 0, floored to 1
+	assert.Equal(t, int64(1), m)
 }
 
 func Test_computeFileRowUpperBound(t *testing.T) {
@@ -77,19 +75,23 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*100), nil)
 		file := &internalpb.ImportFile{Paths: []string{"a.json"}}
 		// minRowTextBytes(schemaVec(768,0)) == 768; 768*100 / 768 + 1 == 101.
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
+		bound, exact, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(101), bound)
+		assert.False(t, exact, "a byte-derived text bound is an estimate")
 	})
 
-	t.Run("numpy", func(t *testing.T) {
+	t.Run("numpy mocked", func(t *testing.T) {
+		// The row count comes from the .npy header shape, so it is exact and does
+		// not depend on file size or on any schema-derived per-row width.
+		mk := mockey.Mock(numpyNumRows).Return(int64(50), nil).Build()
+		defer mk.UnPatch()
 		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().Size(mock.Anything, "a.npy").Return(int64(3072*50), nil)
 		file := &internalpb.ImportFile{Paths: []string{"a.npy"}}
-		// numpyRowByteSize(schemaVec(768,0)) == 3072; 3072*50 / 3072 + 1 == 51.
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
+		bound, exact, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(51), bound)
+		assert.Equal(t, int64(50), bound)
+		assert.True(t, exact)
 	})
 
 	t.Run("parquet mocked", func(t *testing.T) {
@@ -97,10 +99,10 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		defer mk.UnPatch()
 		cm := mocks.NewChunkManager(t)
 		file := &internalpb.ImportFile{Paths: []string{"a.parquet"}}
-		// Parquet is exact and never clamped: the range must fit the real row count.
-		bound, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
+		bound, exact, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(123), bound)
+		assert.True(t, exact)
 	})
 }
 
@@ -149,4 +151,69 @@ func Test_minRowTextBytes_skipsNullableAndDefault(t *testing.T) {
 	got, err := minRowTextBytes(schema)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), got) // was 4 before the fix (nullable+default counted)
+}
+
+func withExpansionFactor(t *testing.T, factor string) {
+	paramtable.Init()
+	key := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.Key
+	paramtable.Get().Save(key, factor)
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+}
+
+func Test_sizeReservations(t *testing.T) {
+	t.Run("exact gets the expansion factor, estimate does not", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		bounds := []int64{100, 100}
+		require.NoError(t, sizeReservations(bounds, []bool{true, false}))
+		assert.Equal(t, []int64{1000, 100}, bounds)
+	})
+
+	t.Run("over budget: exact surrenders its headroom first", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		// 500M exact * 10 = 5G > MaxUint32, but 500M alone fits and leaves room for
+		// the estimate, so only the headroom is given up.
+		bounds := []int64{500_000_000, 1000}
+		require.NoError(t, sizeReservations(bounds, []bool{true, false}))
+		assert.Equal(t, int64(500_000_000), bounds[0], "headroom dropped, exact count kept")
+		assert.Equal(t, int64(1000), bounds[1], "estimate untouched while budget remains")
+	})
+
+	t.Run("exact alone exceeds the batch limit: fail fast", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		bounds := []int64{math.MaxUint32 + 1}
+		err := sizeReservations(bounds, []bool{true})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "too large to reserve primary keys")
+	})
+
+	t.Run("estimates scale proportionally into the remaining budget", func(t *testing.T) {
+		withExpansionFactor(t, "1")
+		bounds := []int64{3 * math.MaxUint32, math.MaxUint32}
+		require.NoError(t, sizeReservations(bounds, []bool{false, false}))
+		var total int64
+		for _, b := range bounds {
+			total += b
+		}
+		assert.LessOrEqual(t, total, int64(math.MaxUint32))
+		// 3:1 input ratio is preserved after scaling.
+		assert.Equal(t, int64(3), bounds[0]/bounds[1])
+	})
+
+	t.Run("a reservation that would scale to zero is an error, not a clamp", func(t *testing.T) {
+		withExpansionFactor(t, "1")
+		// The tiny file's share of the budget rounds below one id. Handing it an
+		// empty range would make the datanode treat it as "no range" and fall back
+		// to its local allocator, silently diverging across clusters.
+		bounds := []int64{math.MaxUint32, math.MaxUint32, 1}
+		err := sizeReservations(bounds, []bool{false, false, false})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty range")
+	})
+
+	t.Run("within budget is left untouched apart from the factor", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		bounds := []int64{1, 2, 3}
+		require.NoError(t, sizeReservations(bounds, []bool{false, false, false}))
+		assert.Equal(t, []int64{1, 2, 3}, bounds)
+	})
 }
