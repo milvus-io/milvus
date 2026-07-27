@@ -451,13 +451,17 @@ func (sd *shardDelegator) addGrowing(entries ...SegmentEntry) {
 }
 
 func (sd *shardDelegator) checkLoadSchemaVersionReady(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	_, currentVersion := sd.delegatorSchemaSnapshot()
+	return sd.checkLoadSchemaVersionReadyWithVersion(ctx, req, currentVersion)
+}
+
+func (sd *shardDelegator) checkLoadSchemaVersionReadyWithVersion(ctx context.Context, req *querypb.LoadSegmentsRequest, currentVersion uint64) error {
 	requiredSchema := req.GetSchema()
 	if requiredSchema == nil {
 		return nil
 	}
 
 	requiredVersion := uint64(requiredSchema.GetVersion())
-	_, currentVersion := sd.delegatorSchemaSnapshot()
 	if currentVersion == requiredVersion {
 		return nil
 	}
@@ -812,7 +816,11 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 }
 
 func (sd *shardDelegator) addDistributionIfLoadSchemaOK(ctx context.Context, req *querypb.LoadSegmentsRequest, entries ...SegmentEntry) error {
-	if err := sd.checkLoadSchemaVersionReady(ctx, req); err != nil {
+	sd.schemaChangeMutex.RLock()
+	defer sd.schemaChangeMutex.RUnlock()
+
+	_, currentVersion := sd.delegatorSchemaSnapshotLocked()
+	if err := sd.checkLoadSchemaVersionReadyWithVersion(ctx, req, currentVersion); err != nil {
 		return err
 	}
 	// alter distribution

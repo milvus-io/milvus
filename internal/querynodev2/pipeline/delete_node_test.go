@@ -17,7 +17,10 @@
 package pipeline
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -149,7 +152,51 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	suite.Nil(out)
 }
 
-func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotPanic() {
+func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotAdvanceTSafe() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	expectedErr := merr.WrapErrServiceUnavailableMsg("delegator is not ready")
+	var updateSchemaCalled atomic.Bool
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Run(func(context.Context, *schemapb.CollectionSchema, uint64) {
+		updateSchemaCalled.Store(true)
+	}).Return(expectedErr)
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldInterval := deleteNodeUpdateSchemaRetryInterval
+	deleteNodeUpdateSchemaRetryInterval = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaRetryInterval = oldInterval
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		suite.Nil(node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		}))
+	}()
+
+	suite.Eventually(func() bool {
+		return updateSchemaCalled.Load()
+	}, time.Second, time.Millisecond)
+	node.Close()
+	suite.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetriesBeforeTSafe() {
 	manager := &segments.Manager{
 		Collection: segments.NewMockCollectionManager(suite.T()),
 		Segment:    segments.NewMockSegmentManager(suite.T()),
@@ -158,16 +205,21 @@ func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotPanic() {
 	schema := &schemapb.CollectionSchema{Version: 2}
 	expectedErr := merr.WrapErrServiceUnavailableMsg("delegator is not ready")
 	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(nil).Once()
 	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
 
 	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
-	suite.NotPanics(func() {
-		suite.Nil(node.Operate(&deleteNodeMsg{
-			schema:          schema,
-			schemaBarrierTs: 10,
-			timeRange:       TimeRange{timestampMax: 10},
-		}))
+	oldInterval := deleteNodeUpdateSchemaRetryInterval
+	deleteNodeUpdateSchemaRetryInterval = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaRetryInterval = oldInterval
 	})
+
+	suite.Nil(node.Operate(&deleteNodeMsg{
+		schema:          schema,
+		schemaBarrierTs: 10,
+		timeRange:       TimeRange{timestampMax: 10},
+	}))
 }
 
 func TestDeleteNode(t *testing.T) {
