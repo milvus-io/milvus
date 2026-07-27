@@ -23,16 +23,16 @@ func (s *Server) registerQueryViewServers() {
 			if !ok {
 				return nil
 			}
-			var watcherFactory qnview.SegmentLoadInfoWatcherFactory
+			var streamFactory qnview.SegmentLoadInfoStreamFactory
 			mixCoord, err := s.mixCoord.GetWithContext(s.ctx)
 			if err == nil {
-				watcherFactory, _ = mixCoord.(qnview.SegmentLoadInfoWatcherFactory)
+				streamFactory, _ = mixCoord.(qnview.SegmentLoadInfoStreamFactory)
 			}
 			return qnImpl.NewQueryViewSegmentManager(
 				s.ctx,
 				&lazyQueryViewLoadMetadataProvider{mixCoord: s.mixCoord},
 				queryViewTransformLogStreamManager(),
-				watcherFactory,
+				streamFactory,
 			)
 		},
 	}, paramtable.GetNodeID())
