@@ -312,7 +312,7 @@ func minimumWorkerVersion(task Task) (semver.Version, bool) {
 }
 
 func (s *globalTaskScheduler) schedule() {
-	pendingNum := len(s.pendingTasks.TaskIDs())
+	pendingNum := s.pendingTasks.TaskCount()
 	if pendingNum == 0 {
 		return
 	}

@@ -198,11 +198,31 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
+// canSubmitStatsTask reports whether the global scheduler still has room for a
+// new stats task. The pending queue is shared by every task type, so a deep
+// queue means the workers are already saturated and adding more stats tasks
+// only grows the backlog. Discovery re-runs on every TaskCheckInterval tick, so
+// a segment skipped here is picked up again once the queue drains.
+func (si *statsInspector) canSubmitStatsTask() bool {
+	pendingTaskCount := si.scheduler.GetPendingTaskCount()
+	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
+	if pendingTaskCount > pendingTaskLimit {
+		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
+			mlog.Int("pendingTaskCount", pendingTaskCount),
+			mlog.Int("pendingTaskLimit", pendingTaskLimit))
+		return false
+	}
+	return true
+}
+
 func (si *statsInspector) triggerTextStatsTask() {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil {
 			continue
+		}
+		if !si.canSubmitStatsTask() {
+			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
@@ -215,7 +235,13 @@ func (si *statsInspector) triggerTextStatsTask() {
 		}
 		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted)
+			if !needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted) {
+				return false
+			}
+			// A segment whose task is already in meta must not be re-submitted;
+			// filtering it out here keeps the per-tick work proportional to the
+			// segments that still need a task instead of to all of them.
+			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_TextIndexJob)
 		}))
 
 		resources := []*internalpb.FileResourceInfo{}
@@ -230,6 +256,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 		}
 
 		for _, segment := range segments {
+			if !si.canSubmitStatsTask() {
+				return
+			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true, resources); err != nil {
 				mlog.Warn(si.ctx, "create stats task with text index for segment failed, wait for retry",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
@@ -245,6 +274,9 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 		if collection == nil {
 			continue
 		}
+		if !si.canSubmitStatsTask() {
+			return
+		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			h := typeutil.CreateFieldSchemaHelper(field)
@@ -257,9 +289,15 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 			if collection.IsExternal() && !canBuildExternalJSONKeyIndex(seg) {
 				return false
 			}
-			return needDoJSONKeyIndex(seg, needTriggerFieldIDs, allowUnsorted)
+			if !needDoJSONKeyIndex(seg, needTriggerFieldIDs, allowUnsorted) {
+				return false
+			}
+			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob)
 		}))
 		for _, segment := range segments {
+			if !si.canSubmitStatsTask() {
+				return
+			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true, nil); err != nil {
 				mlog.Warn(si.ctx, "create stats task with json key index for segment failed, wait for retry:",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
@@ -275,6 +313,9 @@ func (si *statsInspector) triggerBM25StatsTask() {
 		if collection == nil || collection.IsExternal() {
 			continue
 		}
+		if !si.canSubmitStatsTask() {
+			return
+		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			// TODO: docking bm25 stats task
@@ -283,10 +324,16 @@ func (si *statsInspector) triggerBM25StatsTask() {
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return (seg.GetIsSorted() || seg.GetIsSortedByNamespace()) && needDoBM25(seg, needTriggerFieldIDs)
+			if !(seg.GetIsSorted() || seg.GetIsSortedByNamespace()) || !needDoBM25(seg, needTriggerFieldIDs) {
+				return false
+			}
+			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_BM25Job)
 		}))
 
 		for _, segment := range segments {
+			if !si.canSubmitStatsTask() {
+				return
+			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job, true, nil); err != nil {
 				mlog.Warn(si.ctx, "create stats task with bm25 for segment failed, wait for retry",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
@@ -358,14 +405,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			mlog.String("subJobType", subJobType.String()))
 		return nil
 	}
-	pendingTaskCount := si.scheduler.GetPendingTaskCount()
-	pendingTaskLimit := Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt()
-	if pendingTaskCount > pendingTaskLimit {
-		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
-			mlog.Int("pendingTaskCount", pendingTaskCount),
-			mlog.Int("pendingTaskLimit", pendingTaskLimit),
-			mlog.FieldSegmentID(originSegmentID),
-			mlog.String("subJobType", subJobType.String()))
+	if !si.canSubmitStatsTask() {
 		return nil
 	}
 	taskID, err := si.allocator.AllocID(context.Background())
