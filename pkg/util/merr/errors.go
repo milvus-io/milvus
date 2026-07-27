@@ -241,9 +241,14 @@ var (
 	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
-	ErrSegcore                    = newMilvusError("segcore error", 2000, false)
-	ErrSegcoreUnsupported         = newMilvusError("segcore unsupported error", 2001, false)
-	ErrSegcorePretendFinished     = newMilvusError("segcore pretend finished", 2002, false)
+	ErrSegcore = newMilvusError("segcore error", 2000, false)
+	// The named segcore sentinels carry the SAME numeric value as the C++
+	// ErrorCode they represent (EasyAssert.h), so the wire pass-through in
+	// classifySegcoreError and code-based errors.Is agree. 2001/2002 are NOT
+	// usable here: C++ 2001/2002 are UnexpectedError/NotImplemented, and a
+	// sentinel squatting on those values would false-match them.
+	ErrSegcoreUnsupported         = newMilvusError("segcore unsupported error", 2003, false)
+	ErrSegcorePretendFinished     = newMilvusError("segcore pretend finished", 2033, false)
 	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2037, false) // throw from segcore.
 	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2038, false)   // throw from segcore.
 	ErrSegcoreOutOfRange          = newMilvusError("segcore out of range", 2039, false)          // throw from segcore.
