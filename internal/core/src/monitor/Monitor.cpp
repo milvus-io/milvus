@@ -213,37 +213,52 @@ DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes,
 // operation, orders of magnitude colder than cachinglayer's per cell access
 // helpers that do the same thing.
 prometheus::Counter&
-internal_core_skipindex_chunks_scanned(const std::string& collection) {
+internal_core_skipindex_chunks_scanned(const std::string& db,
+                                       const std::string& collection) {
     return internal_core_skipindex_chunks_family.Add(
-        {{"skipindex_chunks", "scanned"}, {"collection", collection}});
+        {{"skipindex_chunks", "scanned"},
+         {"db", db},
+         {"collection", collection}});
 }
 
 prometheus::Counter&
-internal_core_skipindex_chunks_pruned(const std::string& collection) {
+internal_core_skipindex_chunks_pruned(const std::string& db,
+                                      const std::string& collection) {
     return internal_core_skipindex_chunks_family.Add(
-        {{"skipindex_chunks", "pruned"}, {"collection", collection}});
+        {{"skipindex_chunks", "pruned"},
+         {"db", db},
+         {"collection", collection}});
 }
 
 prometheus::Histogram&
-internal_core_skipindex_prune_ratio_expr(const std::string& collection) {
+internal_core_skipindex_prune_ratio_expr(const std::string& db,
+                                         const std::string& collection) {
     return internal_core_skipindex_prune_ratio_family.Add(
-        {{"skipindex", "prune_ratio"}, {"collection", collection}},
+        {{"skipindex", "prune_ratio"}, {"db", db}, {"collection", collection}},
         ratioBuckets);
 }
 
 prometheus::Histogram&
-internal_core_query_scanned_bytes_total(const std::string& collection,
+internal_core_query_scanned_bytes_total(const std::string& db,
+                                        const std::string& collection,
                                         const std::string& op) {
     return internal_core_query_scanned_bytes_family.Add(
-        {{"query_scanned", "total"}, {"collection", collection}, {"op", op}},
+        {{"query_scanned", "total"},
+         {"db", db},
+         {"collection", collection},
+         {"op", op}},
         bytesBuckets);
 }
 
 prometheus::Histogram&
-internal_core_query_scanned_bytes_cold(const std::string& collection,
+internal_core_query_scanned_bytes_cold(const std::string& db,
+                                       const std::string& collection,
                                        const std::string& op) {
     return internal_core_query_scanned_bytes_family.Add(
-        {{"query_scanned", "cold"}, {"collection", collection}, {"op", op}},
+        {{"query_scanned", "cold"},
+         {"db", db},
+         {"collection", collection},
+         {"op", op}},
         bytesBuckets);
 }
 

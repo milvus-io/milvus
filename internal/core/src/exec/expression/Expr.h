@@ -291,6 +291,7 @@ class SegmentExpr : public Expr {
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
         collection_name_ = schema.collection_name();
+        db_name_ = schema.db_name();
 
         if (schema.get_primary_field_id().has_value() &&
             schema.get_primary_field_id().value() == field_id_ &&
@@ -351,12 +352,13 @@ class SegmentExpr : public Expr {
             return;
         }
         milvus::monitor::internal_core_skipindex_chunks_scanned(
-            collection_name_)
+            db_name_, collection_name_)
             .Increment(static_cast<double>(chunks_judged));
-        milvus::monitor::internal_core_skipindex_chunks_pruned(collection_name_)
+        milvus::monitor::internal_core_skipindex_chunks_pruned(db_name_,
+                                                               collection_name_)
             .Increment(static_cast<double>(chunks_pruned));
         milvus::monitor::internal_core_skipindex_prune_ratio_expr(
-            collection_name_)
+            db_name_, collection_name_)
             .Observe(static_cast<double>(chunks_pruned) /
                      static_cast<double>(chunks_judged));
     }
@@ -2801,9 +2803,11 @@ class SegmentExpr : public Expr {
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
     bool null_rejecting_{false};
     // Copied from the schema at construction so the skip-index metrics can
-    // carry a collection label; a segment only holds the schema, never the
-    // segcore::Collection it was created from.
+    // carry database and collection labels; a segment only holds the schema,
+    // never the segcore::Collection it was created from. The database is part
+    // of the identity: collection names are unique only within one.
     std::string collection_name_;
+    std::string db_name_;
     DataType pk_type_;
     int64_t batch_size_;
 

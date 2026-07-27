@@ -3598,8 +3598,11 @@ type queryNodeConfig struct {
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
-	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
-	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
+	// Not refreshable: every cache slot freezes this at creation, so flipping
+	// it at runtime leaves a node with slots on both sides of the flip and a
+	// query's byte accounting covering only part of what it read. Restart.
+	StorageUsageTrackingEnabled    ParamItem `refreshable:"false"`
+	TieredRejectRemoteVectorOutput ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -4078,8 +4081,9 @@ If set to 0, time based eviction is disabled.`,
 		DefaultValue: "true",
 		Doc: "Enable storage usage tracking for Tiered Storage. Accounts the bytes each request touched " +
 			"and how many of those had to be loaded, which is what the per-request cache_hit_ratio and the " +
-			"scanned-bytes metrics are derived from. Note each cache slot freezes this at creation, so turning " +
-			"it on at runtime only takes effect for segments loaded afterwards.",
+			"scanned-bytes metrics are derived from. " +
+			"Takes effect only at startup (not refreshable): every cache slot freezes this setting when it is " +
+			"created, so a runtime flip would leave the node accounting for only some of what a query reads.",
 		Export: true,
 	}
 	p.StorageUsageTrackingEnabled.Init(base.mgr)

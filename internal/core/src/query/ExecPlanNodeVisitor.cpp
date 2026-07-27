@@ -46,33 +46,30 @@ struct ScannedBytesReporter {
 
     ~ScannedBytesReporter() {
         // Report only what was actually measured. The cachinglayer accumulates
-        // storage_usage only when tiered-storage usage tracking is on, that
-        // setting defaults to OFF, and -- crucially -- each CacheSlot freezes
-        // it at creation while the global value is refreshable and really is
-        // updated at runtime (see updateTieredStorageConfigCallback). So asking
-        // the config "is tracking on now?" answers the wrong question and is
-        // wrong in both directions after a flip: newly enabled, the old slots
-        // still do not accumulate and we would publish phantom zeros; newly
-        // disabled, the old slots still do accumulate and we would drop real
-        // samples.
+        // storage_usage only when tiered-storage usage tracking is on, and each
+        // CacheSlot freezes that setting when it is created -- which is safe to
+        // reason about because the setting is startup-only, so every slot the
+        // segment owns holds the same value.
         //
-        // Ask the segment instead: it mirrors the same snapshot its slots were
-        // built from, so it answers the question the config cannot -- "was this
-        // operation measured?" -- without conflating it with "did this
-        // operation move bytes?". Gating on the observation (total > 0) would
-        // conflate exactly those two, and would drop the most informative
-        // sample there is: a fully pruned query touches no cell at all, so a
-        // measured zero is the strongest evidence the skip index removed IO
-        // rather than just CPU, and it is precisely the case that must not
-        // vanish from the histogram.
+        // Ask the segment, not the bytes. "Was this operation measured?" and
+        // "did this operation move bytes?" are different questions, and gating
+        // on the observation (total > 0) answers the second while pretending to
+        // answer the first. That drops the most informative sample there is: a
+        // fully pruned query touches no cell at all, so a measured zero is the
+        // strongest evidence the skip index removed IO rather than just CPU,
+        // and it is precisely the case that must not vanish from the histogram.
         if (segment == nullptr || !segment->storage_usage_tracked()) {
             return;
         }
-        const auto& collection = segment->get_schema().collection_name();
-        milvus::monitor::internal_core_query_scanned_bytes_total(collection, op)
+        const auto& schema = segment->get_schema();
+        const auto& db = schema.db_name();
+        const auto& collection = schema.collection_name();
+        milvus::monitor::internal_core_query_scanned_bytes_total(
+            db, collection, op)
             .Observe(static_cast<double>(
                 ctx.storage_usage.scanned_total_bytes.load()));
-        milvus::monitor::internal_core_query_scanned_bytes_cold(collection, op)
+        milvus::monitor::internal_core_query_scanned_bytes_cold(
+            db, collection, op)
             .Observe(static_cast<double>(
                 ctx.storage_usage.scanned_cold_bytes.load()));
     }

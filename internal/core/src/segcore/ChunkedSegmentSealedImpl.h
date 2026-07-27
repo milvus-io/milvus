@@ -2257,9 +2257,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
 
-    // Snapshot of tieredStorage.storageUsageTrackingEnabled taken when this
-    // segment was built, i.e. the same value the CacheSlots created for it
-    // freeze. See SegmentInternalInterface::storage_usage_tracked.
+    // tieredStorage.storageUsageTrackingEnabled, read once when this segment
+    // was built. The setting is startup-only, so every cache slot this segment
+    // ever creates -- including through Reopen or a column-group replacement --
+    // freezes the same value, and this is exactly what they all accumulate
+    // under. See SegmentInternalInterface::storage_usage_tracked.
     const bool storage_usage_tracked_;
 
     // Query-time reader calls remain non-thread-safe and must be serialized.

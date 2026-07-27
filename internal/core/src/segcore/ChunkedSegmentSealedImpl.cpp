@@ -2362,24 +2362,25 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
 
 namespace {
 
-// Reopening a file this segment already read once fails for two very different
-// reasons, and the query path has to tell them apart: object storage being
-// briefly unavailable (throttled, timed out, connection dropped) is worth a
-// retry, anything else is not. AssertInfo would raise UnexpectedError (2001),
-// which the Go side treats as permanent -- so a throttled GET on the lazy
-// footer path would fail the query outright instead of being retried or
-// rerouted. Arrow reports transient object-storage conditions as IOError, and
-// on a file that was readable moments ago that is what "cannot read it now"
-// almost always means, so map IOError to the retriable storage fallback and
-// everything else to the permanent one.
+// Failing to open a column group file is a storage failure, so report it as
+// one -- AssertInfo would raise UnexpectedError (2001), a generic bucket that
+// says nothing about where the failure came from.
+//
+// It deliberately stops there rather than deciding whether the failure is
+// retriable. Arrow funnels almost every filesystem condition into IOError: a
+// 404, a missing bucket, a denied request and a throttled one all arrive with
+// the same code, so a rule written here could only guess. Guessing toward
+// StorageTransientError (2045) is the expensive direction -- a permanent 404
+// would be retried and failed over across replicas forever -- and this helper
+// serves the first metadata load as well as the lazy footer reopen, where "the
+// file was readable a moment ago" does not even hold. The classification
+// belongs where the distinction still exists, in the filesystem layer that
+// saw the original error; until milvus-storage surfaces it, permanent is the
+// honest answer and matches how every other FileRowGroupReader::Make caller in
+// the tree behaves.
 [[noreturn]] void
-ThrowFooterReopenError(const std::string& what, const arrow::Status& status) {
-    if (status.IsIOError()) {
-        ThrowInfo(ErrorCode::StorageTransientError,
-                  "{}: {}",
-                  what,
-                  status.ToString());
-    }
+ThrowColumnGroupOpenError(const std::string& what,
+                          const arrow::Status& status) {
     ThrowInfo(ErrorCode::StorageError, "{}: {}", what, status.ToString());
 }
 
@@ -2491,7 +2492,7 @@ class GroupFooterCache {
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
             if (!result.ok()) {
-                ThrowFooterReopenError(
+                ThrowColumnGroupOpenError(
                     fmt::format("[StorageV2] {} failed to reopen {} for skip "
                                 "index statistics",
                                 debug_key_,
@@ -2505,7 +2506,7 @@ class GroupFooterCache {
             metas_[file_idx] = reader->file_metadata();
             auto status = reader->Close();
             if (!status.ok()) {
-                ThrowFooterReopenError(
+                ThrowColumnGroupOpenError(
                     fmt::format("[StorageV2] {} failed to close {}",
                                 debug_key_,
                                 files_[file_idx]),
@@ -2612,7 +2613,7 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
             if (!result.ok()) {
-                ThrowFooterReopenError(
+                ThrowColumnGroupOpenError(
                     fmt::format("[StorageV2] metadata loader {} failed to open "
                                 "file row group reader for {}",
                                 debug_key,
@@ -2628,7 +2629,7 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
             auto row_group_meta = file_metadata->GetRowGroupMetadataVector();
             auto status = reader->Close();
             if (!status.ok()) {
-                ThrowFooterReopenError(
+                ThrowColumnGroupOpenError(
                     fmt::format("[StorageV2] metadata loader {} failed to "
                                 "close file reader for {}",
                                 debug_key,

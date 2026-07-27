@@ -317,6 +317,27 @@ func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
 	}
 }
 
+// queryNode.segcore.tieredStorage.storageUsageTrackingEnabled takes effect only
+// at startup: every cache slot freezes it when created, so a node that flipped
+// it at runtime would hold slots on both sides and account for only part of
+// what a query reads. Removing its config callback stops a change from being
+// pushed directly, but UpdateTieredStorageConfig re-sends the whole tiered
+// config whenever any of the genuinely refreshable settings (warmup policies,
+// loading timeouts) changes -- and a fresh GetAsBool() there would smuggle the
+// new value in on the back of an unrelated edit. Read it once and hand the same
+// answer to every later push.
+var (
+	storageUsageTrackingOnce    sync.Once
+	storageUsageTrackingStartup bool
+)
+
+func readStorageUsageTrackingEnabled(params *paramtable.ComponentParam) bool {
+	storageUsageTrackingOnce.Do(func() {
+		storageUsageTrackingStartup = params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool()
+	})
+	return storageUsageTrackingStartup
+}
+
 func InitTieredStorage(params *paramtable.ComponentParam) error {
 	// init tiered storage
 	scalarFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarField.GetValue())
@@ -383,7 +404,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
-	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	storageUsageTrackingEnabled := C.bool(readStorageUsageTrackingEnabled(params))
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	backgroundEvictionEnabled := C.bool(params.QueryNodeCfg.TieredBackgroundEvictionEnabled.GetAsBool())
@@ -453,7 +474,7 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
-	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	storageUsageTrackingEnabled := C.bool(readStorageUsageTrackingEnabled(params))
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 
 	C.UpdateTieredStorageConfig(
@@ -703,7 +724,6 @@ func SetupCoreConfigChangelCallback() {
 		}
 		paramtable.Get().QueryNodeCfg.TieredLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
-		paramtable.Get().QueryNodeCfg.StorageUsageTrackingEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredRejectRemoteVectorOutput.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)

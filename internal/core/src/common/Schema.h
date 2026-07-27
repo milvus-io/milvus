@@ -342,6 +342,20 @@ class Schema {
         return this->collection_name_;
     }
 
+    // Collection names are only unique within a database, so the name alone
+    // does not identify a tenant: two databases may each hold a "documents"
+    // and their metrics would land on one series. Carried from
+    // CollectionSchema.dbName alongside the name for that reason.
+    void
+    set_db_name(std::string name) {
+        this->db_name_ = std::move(name);
+    }
+
+    const std::string&
+    db_name() const {
+        return this->db_name_;
+    }
+
     std::optional<FieldId>
     get_namespace_field_id() const {
         return this->namespace_field_id_opt_;
@@ -708,6 +722,10 @@ class Schema {
     // CollectionSchema.name of the owning collection; empty when the schema
     // was not parsed from a proto.
     std::string collection_name_;
+
+    // CollectionSchema.dbName of the owning collection; empty when the schema
+    // was not parsed from a proto.
+    std::string db_name_;
 
     // mmap settings
     bool has_mmap_setting_ = false;

@@ -198,21 +198,13 @@ class SegmentInterface {
     get_segment_id() const = 0;
 
     // Whether this segment's cache slots accumulate OpContext::storage_usage.
-    // CacheSlot freezes tieredStorage.storageUsageTrackingEnabled at creation
-    // while the config itself is refreshable, so after a flip the config and
-    // the slots disagree and only the slots are authoritative about what was
-    // measured. A segment snapshots the same setting, which is what lets a
-    // reporter tell "this operation moved no bytes" apart from "this operation
-    // was never measured". Segments that hold their data in memory rather than
-    // in cache slots never accumulate, hence false.
-    //
-    // The snapshot is taken before any of the segment's slots exist, so it is
-    // exact unless the config is flipped while this very segment is loading:
-    // slots created after the flip would then disagree with it and the reported
-    // total would cover only part of the operation. Closing that window means
-    // asking each accessed slot, which the cachinglayer does not expose; the
-    // exposure is one segment's load, and the setting is normally fixed at
-    // process start.
+    // Each CacheSlot freezes tieredStorage.storageUsageTrackingEnabled when it
+    // is created; the setting is startup-only, so every slot in the process
+    // holds the same value and a segment can answer for all of its own -- which
+    // is what lets a reporter tell "this operation moved no bytes" apart from
+    // "this operation was never measured", without having to conflate the two
+    // by looking at whether any bytes were seen. Segments that hold their data
+    // in memory rather than in cache slots never accumulate, hence false.
     virtual bool
     storage_usage_tracked() const {
         return false;

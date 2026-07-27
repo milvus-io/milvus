@@ -1592,6 +1592,7 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
 
 // The collection label every metric these tests read is published under.
 constexpr const char* kSkipMeasureCollection = "skip_measure_collection";
+constexpr const char* kSkipMeasureDb = "skip_measure_db";
 
 std::shared_ptr<Schema>
 MakeSkipMeasureSchema(FieldId& val_fid,
@@ -1619,6 +1620,7 @@ MakeSkipMeasureSchema(FieldId& val_fid,
     // published under; a schema assembled field by field has no name of its
     // own, where one parsed from a CollectionSchema carries the real one.
     schema->set_collection_name(kSkipMeasureCollection);
+    schema->set_db_name(kSkipMeasureDb);
     return schema;
 }
 
@@ -2082,9 +2084,9 @@ TEST(SkipIndexPr51441, VarcharInPrunesOnTheExecutedPath) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 
     auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned(
-        kSkipMeasureCollection);
+        kSkipMeasureDb, kSkipMeasureCollection);
     auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned(
-        kSkipMeasureCollection);
+        kSkipMeasureDb, kSkipMeasureCollection);
     const double scanned_before = scanned.Value();
     const double pruned_before = pruned.Value();
 
@@ -2274,7 +2276,7 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
     // it comes from the schema, which is all a segment keeps of its collection.
     auto observed = [] {
         auto metric = milvus::monitor::internal_core_query_scanned_bytes_total(
-                          kSkipMeasureCollection, "query")
+                          kSkipMeasureDb, kSkipMeasureCollection, "query")
                           .Collect();
         return std::make_pair(metric.histogram.sample_count,
                               metric.histogram.sample_sum);
