@@ -1245,7 +1245,7 @@ func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
 
 	switch realExpr := expr.GetExpr().(type) {
 	case *planpb.Expr_ColumnExpr:
-		return validateMatchColumnInfo(realExpr.ColumnExpr.GetInfo())
+		return false, merr.WrapErrParameterInvalidMsg("raw element columns are not supported inside MATCH predicate")
 	case *planpb.Expr_TermExpr:
 		return validateMatchColumnInfo(realExpr.TermExpr.GetColumnInfo())
 	case *planpb.Expr_UnaryRangeExpr:
@@ -1257,7 +1257,7 @@ func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
 	case *planpb.Expr_CompareExpr:
 		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside MATCH predicate")
 	case *planpb.Expr_JsonContainsExpr:
-		return validateMatchColumnInfo(realExpr.JsonContainsExpr.GetColumnInfo())
+		return false, merr.WrapErrParameterInvalidMsg("array/JSON contains expressions are not supported inside MATCH predicate")
 	case *planpb.Expr_NullExpr:
 		return validateMatchColumnInfo(realExpr.NullExpr.GetColumnInfo())
 	case *planpb.Expr_ExistsExpr:
@@ -1289,15 +1289,7 @@ func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
 		}
 		return leftElementLevel && rightElementLevel, nil
 	case *planpb.Expr_CallExpr:
-		hasElementLevel := false
-		for _, param := range realExpr.CallExpr.GetFunctionParameters() {
-			paramElementLevel, err := validateMatchPredicateElementLevel(param)
-			if err != nil {
-				return false, err
-			}
-			hasElementLevel = hasElementLevel || paramElementLevel
-		}
-		return hasElementLevel, nil
+		return false, merr.WrapErrParameterInvalidMsg("function calls are not supported inside MATCH predicate")
 	case *planpb.Expr_ValueExpr, *planpb.Expr_AlwaysTrueExpr:
 		return false, nil
 	case *planpb.Expr_ElementFilterExpr:

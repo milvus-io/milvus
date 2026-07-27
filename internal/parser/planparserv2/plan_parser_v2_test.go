@@ -3646,6 +3646,15 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_ANY(struct_array, ($[sub_int] == 2) && (true || $[sub_int] == 1))`,
 		`MATCH_ANY(struct_array, $[sub_int] == $[sub_int])`,
 
+		// Raw element columns and function calls are not supported by C++ MATCH execution
+		`MATCH_ANY(struct_array, $[sub_int])`,
+		`MATCH_ANY(struct_array, empty($[sub_str]))`,
+
+		// Contains executors still produce row-level bitmaps
+		`MATCH_ANY(struct_array, array_contains($[sub_int], 1))`,
+		`MATCH_ANY(struct_array, array_contains_any($[sub_int], [1, 2]))`,
+		`MATCH_ANY(struct_array, array_contains_all($[sub_int], [1, 2]))`,
+
 		// $[field] syntax outside match context
 		`$[sub_int] > 1`,
 		`Int64Field > 0 && $[sub_int] > 1`,
