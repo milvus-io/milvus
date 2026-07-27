@@ -155,20 +155,34 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	})
 
 	t.Run("wire_code_projection", func(t *testing.T) {
-		// Pins the client-visible contract: pass-through segcore codes collapse
-		// to ErrSegcore's wire code on Status, with the original C++ code kept
-		// in the Reason text. Anyone changing a sentinel's numeric code, the
-		// Code() extraction, or promoting a table entry to its own sentinel
-		// changes what clients receive — this test forces that to be explicit.
+		// Pins the client-visible contract: the ORIGINAL C++ code passes
+		// through to the wire (2028 stays 2028) instead of collapsing onto
+		// ErrSegcore(2000), while the family sentinel stays matchable via
+		// errors.Is for existing guards. Anyone changing the pass-through
+		// rule or a sentinel's numeric code changes what clients receive —
+		// this test forces that to be explicit.
 		st := Status(SegcoreError(2028, "expr bad"))
-		assert.Equal(t, ErrSegcore.code(), st.GetCode())
-		assert.Contains(t, st.GetReason(), "2028")
+		assert.Equal(t, int32(2028), st.GetCode())
+		assert.ErrorIs(t, SegcoreError(2028, "expr bad"), ErrSegcore)
 
-		// A named sentinel keeps its own distinct wire code.
-		assert.Equal(t, ErrSegcoreUnsupported.code(), Status(SegcoreError(2003, "x")).GetCode())
+		// A code with a named sentinel also wires its C++ value; the named
+		// sentinel identity is preserved for errors.Is.
+		assert.Equal(t, int32(2003), Status(SegcoreError(2003, "x")).GetCode())
+		assert.ErrorIs(t, SegcoreError(2003, "x"), ErrSegcoreUnsupported)
 
-		// An unregistered (future) code collapses safely as well.
+		// An unregistered but in-band (future) code passes through too, still
+		// under the ErrSegcore umbrella.
+		assert.Equal(t, int32(2055), Status(SegcoreError(2055, "x")).GetCode())
+		assert.ErrorIs(t, SegcoreError(2055, "x"), ErrSegcore)
+
+		// A garbage code outside the segcore band collapses to ErrSegcore's
+		// wire code — never leak an arbitrary number to clients.
 		assert.Equal(t, ErrSegcore.code(), Status(SegcoreError(9999, "x")).GetCode())
+
+		// A cross-family mapping keeps its sentinel's wire code (deliberate
+		// remapping, not a collapse).
+		assert.Equal(t, ErrCollectionSchemaVersionNotReady.code(),
+			Status(SegcoreError(2046, "x")).GetCode())
 	})
 
 	t.Run("data_format_broken_identity", func(t *testing.T) {

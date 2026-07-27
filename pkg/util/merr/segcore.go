@@ -223,6 +223,24 @@ func classifySegcoreError(code int32, msg string) error {
 	if cls.retriable {
 		base.retriable = true
 	}
+	// Wire the ORIGINAL C++ code through instead of collapsing every
+	// pass-through code onto ErrSegcore(2000): a client receives the precise
+	// segcore code (2009 stays 2009, 2024 stays 2024). The family sentinel
+	// stays reachable via inner/Unwrap, so existing errors.Is guards (the
+	// ErrSegcore umbrella and the named segcore sentinels) keep matching.
+	// Constraints:
+	//   - only in-band codes (2000-2099) pass through; a garbage code from a
+	//     corrupted CStatus stays on ErrSegcore(2000);
+	//   - cross-family mappings (e.g. 2046 -> ErrCollectionSchemaVersionNotReady,
+	//     wire 110) keep their sentinel's wire code: those are deliberate
+	//     remappings, not collapses.
+	if code >= 2000 && code <= 2099 &&
+		base.errCode >= 2000 && base.errCode <= 2099 && code != base.errCode {
+		relabeled := base
+		relabeled.errCode = code
+		relabeled.inner = base
+		base = relabeled
+	}
 	err := wrapFields(base, value("segcoreCode", code))
 	if msg != "" {
 		err = errors.Wrap(err, msg)
