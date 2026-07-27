@@ -283,7 +283,6 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 		return
 	}
 	r.handleMessage(ctx, msg)
-	r.windowManager.advanceIdempotencyWindowCheckpoints(r.checkpoint)
 	r.windowManager.observeMessage(msg)
 
 	r.updateCheckpoint(ctx, msg)

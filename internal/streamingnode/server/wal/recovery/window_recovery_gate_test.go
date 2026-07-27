@@ -184,8 +184,8 @@ func TestBootstrapDoesNotReapChunksLeftByIncompleteDrop(t *testing.T) {
 }
 
 // Window lifecycle (creation) belongs on vchannel events, not the per-message
-// observe loop: the per-message checkpoint advance must not materialize windows
-// for active vchannels, while a vchannel becoming active does create its window.
+// observe loop: observing a message must not materialize windows for active
+// vchannels, while a vchannel becoming active does create its window.
 func TestIdempotencyWindowLifecycleMovedToVChannelEvents(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	catalog, _ := newTestPChannelWindowCatalog(t)
@@ -201,8 +201,8 @@ func TestIdempotencyWindowLifecycleMovedToVChannelEvents(t *testing.T) {
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	// The per-message checkpoint advance must not create windows for active vchannels.
-	rs.windowManager.advanceIdempotencyWindowCheckpoints(rs.checkpoint)
+	// Message observation must not create windows for active vchannels.
+	rs.windowManager.observeMessage(buildTimeTickMessage(t, 2))
 	require.Empty(t, rs.windowManager.idempotencyWindows())
 
 	// Window creation happens on the vchannel lifecycle event.

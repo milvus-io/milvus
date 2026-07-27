@@ -203,6 +203,17 @@ func (impl *idempotencyInterceptor) removeWindow(vchannel string) {
 	}
 }
 
+func logIdempotencyDuplicateHit(ctx context.Context, vchannel string, key IdempotencyKey) {
+	if !mlog.LevelEnabled(mlog.DebugLevel) {
+		return
+	}
+	rawKey := string(key)
+	mlog.RatedDebug(ctx, 1, "idempotency duplicate hit",
+		mlog.FieldVChannel(vchannel),
+		mlog.String("idempotencyKeyHash", message.IdempotencyKeyFingerprint(rawKey)),
+		mlog.Int("idempotencyKeyLength", len(rawKey)))
+}
+
 func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
 	key, hasIdempotencyKey, err := getIdempotencyKey(msg, impl.config)
 	if err != nil {
@@ -248,14 +259,10 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 		if result.Err != nil {
 			return nil, result.Err
 		}
-		mlog.Debug(ctx, "idempotency duplicate hit",
-			mlog.String("vchannel", msg.VChannel()),
-			mlog.String("idempotency_key", string(key)))
+		logIdempotencyDuplicateHit(ctx, msg.VChannel(), key)
 		return fillDuplicateResult(ctx, result.Entry)
 	case BeginDecisionDuplicate:
-		mlog.Debug(ctx, "idempotency duplicate hit",
-			mlog.String("vchannel", msg.VChannel()),
-			mlog.String("idempotency_key", string(key)))
+		logIdempotencyDuplicateHit(ctx, msg.VChannel(), key)
 		return fillDuplicateResult(ctx, begin.Entry)
 	default:
 		return nil, status.NewInner("unknown idempotency begin decision: %d", begin.Decision)
@@ -322,15 +329,11 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			// txnID falls back to keepalive expiry, as before this interceptor.
 			return nil, result.Err
 		}
-		mlog.Debug(ctx, "idempotency duplicate hit",
-			mlog.String("vchannel", msg.VChannel()),
-			mlog.String("idempotency_key", string(key)))
+		logIdempotencyDuplicateHit(ctx, msg.VChannel(), key)
 		impl.resolveRetriedTxnAfterDuplicate(ctx, msg, append)
 		return fillDuplicateResult(ctx, result.Entry)
 	case BeginDecisionDuplicate:
-		mlog.Debug(ctx, "idempotency duplicate hit",
-			mlog.String("vchannel", msg.VChannel()),
-			mlog.String("idempotency_key", string(key)))
+		logIdempotencyDuplicateHit(ctx, msg.VChannel(), key)
 		defer impl.txnInsertResultBuffers.Remove(msg)
 		impl.resolveRetriedTxnAfterDuplicate(ctx, msg, append)
 		return fillDuplicateResult(ctx, begin.Entry)

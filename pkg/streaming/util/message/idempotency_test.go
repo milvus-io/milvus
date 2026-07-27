@@ -7,7 +7,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestIdempotencyKeyFingerprint(t *testing.T) {
+	fingerprint := IdempotencyKeyFingerprint("tenant-secret-key")
+	require.Len(t, fingerprint, idempotencyKeyFingerprintBytes*2)
+	require.Equal(t, fingerprint, IdempotencyKeyFingerprint("tenant-secret-key"))
+	require.NotEqual(t, fingerprint, IdempotencyKeyFingerprint("another-key"))
+	require.NotContains(t, fingerprint, "tenant-secret-key")
+}
 
 func TestMergeIdempotentInsertResults(t *testing.T) {
 	merged, hadAny, err := MergeIdempotentInsertResults(
@@ -56,6 +65,7 @@ func TestMergeIdempotentInsertResultsRejectsMixedIDTypes(t *testing.T) {
 	)
 	require.Error(t, err)
 	require.False(t, hadAny)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 }
 
 func TestValidateIdempotentInsertResult(t *testing.T) {
@@ -63,23 +73,31 @@ func TestValidateIdempotentInsertResult(t *testing.T) {
 	require.NoError(t, ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{}))
 
 	// row offsets but no ids
-	require.Error(t, ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
+	err := ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{0},
-	}))
+	})
+	require.Error(t, err)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	// ids but no row offsets
-	require.Error(t, ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
+	err = ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
 		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
-	}))
+	})
+	require.Error(t, err)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	// ids present but neither int nor string field populated
-	require.Error(t, ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
+	err = ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{0},
 		Ids:        &schemapb.IDs{},
-	}))
+	})
+	require.Error(t, err)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	// length mismatch
-	require.Error(t, ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
+	err = ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{0, 1},
 		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
-	}))
+	})
+	require.Error(t, err)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 }
 
 func TestInsertHeaderIdempotentInsertResult(t *testing.T) {

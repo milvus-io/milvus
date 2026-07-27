@@ -1,11 +1,23 @@
 package message
 
 import (
-	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+const idempotencyKeyFingerprintBytes = 16
+
+// IdempotencyKeyFingerprint returns a stable, non-plaintext identifier suitable
+// for correlating idempotency-key events in logs. The original key must never be
+// logged: explicit keys are client-controlled and may contain sensitive data.
+func IdempotencyKeyFingerprint(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:idempotencyKeyFingerprintBytes])
+}
 
 func NewIdempotentInsertResult(rowOffsets []uint32, ids *schemapb.IDs) *messagespb.IdempotentInsertResult {
 	return &messagespb.IdempotentInsertResult{
@@ -35,9 +47,11 @@ func SetInsertHeaderIdempotentInsertResult(header *InsertMessageHeader, result *
 	header.IdempotentResult = result
 }
 
-// ValidateIdempotentInsertResult validates an idempotent insert result. It is an
-// attacker-facing trust boundary (the result is carried in a client-influenced
-// message header), so it rejects malformed shapes rather than tolerating them:
+// ValidateIdempotentInsertResult validates an idempotent insert result. The
+// helper is shared by trust-boundary and internal recovery/result-building
+// callers, so malformed shapes originate as system errors here; a caller that
+// knows the value came directly from an untrusted boundary may translate the
+// error there. It rejects malformed shapes rather than tolerating them:
 //   - row offsets present but no ids, or ids present but no row offsets;
 //   - ids set but neither the int nor the string field is populated, or both;
 //   - row offsets length not matching the populated id field length.
@@ -51,7 +65,7 @@ func ValidateIdempotentInsertResult(result *messagespb.IdempotentInsertResult) e
 	ids := result.GetIds()
 	if ids == nil {
 		if rowCount != 0 {
-			return fmt.Errorf("idempotent insert result has %d row offsets but no ids", rowCount)
+			return merr.WrapErrServiceInternalMsg("idempotent insert result has %d row offsets but no ids", rowCount)
 		}
 		return nil
 	}
@@ -59,17 +73,17 @@ func ValidateIdempotentInsertResult(result *messagespb.IdempotentInsertResult) e
 	strIDs := ids.GetStrId()
 	switch {
 	case intIDs != nil && strIDs != nil:
-		return fmt.Errorf("idempotent insert result ids set both int and string fields")
+		return merr.WrapErrServiceInternalMsg("idempotent insert result ids set both int and string fields")
 	case intIDs != nil:
 		if rowCount != len(intIDs.GetData()) {
-			return fmt.Errorf("row offsets length %d mismatches int ids length %d", rowCount, len(intIDs.GetData()))
+			return merr.WrapErrServiceInternalMsg("row offsets length %d mismatches int ids length %d", rowCount, len(intIDs.GetData()))
 		}
 	case strIDs != nil:
 		if rowCount != len(strIDs.GetData()) {
-			return fmt.Errorf("row offsets length %d mismatches string ids length %d", rowCount, len(strIDs.GetData()))
+			return merr.WrapErrServiceInternalMsg("row offsets length %d mismatches string ids length %d", rowCount, len(strIDs.GetData()))
 		}
 	default:
-		return fmt.Errorf("idempotent insert result ids set neither int nor string field")
+		return merr.WrapErrServiceInternalMsg("idempotent insert result ids set neither int nor string field")
 	}
 	return nil
 }
@@ -99,7 +113,7 @@ func MergeIdempotentInsertResults(results ...*messagespb.IdempotentInsertResult)
 		}
 		out.RowOffsets = append(out.RowOffsets, result.GetRowOffsets()...)
 		if !appendIDs(out, ids) {
-			return nil, false, fmt.Errorf("idempotent insert results mix int and string id types")
+			return nil, false, merr.WrapErrServiceInternalMsg("idempotent insert results mix int and string id types")
 		}
 		hadAny = true
 	}
