@@ -328,6 +328,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                      HighPrecisionType& val2,
                      bool& lower_inclusive,
                      bool& upper_inclusive,
+                     int64_t batch_size,
                      OffsetVector* input = nullptr);
 
     template <typename T>
@@ -370,7 +371,6 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     SingleElement lower_arg_;
     SingleElement upper_arg_;
     bool arg_inited_{false};
