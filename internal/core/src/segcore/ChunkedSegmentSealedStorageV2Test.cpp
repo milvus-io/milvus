@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -83,6 +84,7 @@
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
@@ -1588,6 +1590,9 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
     return N;
 }
 
+// The collection label every metric these tests read is published under.
+constexpr const char* kSkipMeasureCollection = "skip_measure_collection";
+
 std::shared_ptr<Schema>
 MakeSkipMeasureSchema(FieldId& val_fid,
                       FieldId& pk_fid,
@@ -1610,6 +1615,10 @@ MakeSkipMeasureSchema(FieldId& val_fid,
                      false,
                      std::nullopt);
     schema->set_primary_field_id(pk_fid);
+    // Named so the metrics below can be read on the collection label they are
+    // published under; a schema assembled field by field has no name of its
+    // own, where one parsed from a CollectionSchema carries the real one.
+    schema->set_collection_name(kSkipMeasureCollection);
     return schema;
 }
 
@@ -2033,8 +2042,10 @@ TEST(SkipIndexPr51441, VarcharInPrunesOnTheExecutedPath) {
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 
-    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned;
-    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned;
+    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned(
+        kSkipMeasureCollection);
+    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned(
+        kSkipMeasureCollection);
     const double scanned_before = scanned.Value();
     const double pruned_before = pruned.Value();
 
@@ -2125,6 +2136,132 @@ TEST(SkipIndexPr51441, PrunedCellsAreNotTouchedByTheScan) {
     // every query here is a cache hit and cold_bytes is 0 across the board.
     // total_bytes is what distinguishes "did not touch the cell" from
     // "touched a resident cell", which is exactly the fix under test.
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// What the byte histogram publishes, and when. Two properties, and they pull
+// in opposite directions -- which is why the reporter asks the segment whether
+// it was measured rather than inferring it from the bytes it saw:
+//   - a measured operation is published even when it moved few or no bytes.
+//     Gating on "did we observe bytes" dropped exactly the well-pruned tail,
+//     the samples the metric exists to show;
+//   - an operation over a segment whose cache slots were built while tracking
+//     was off is not published at all. Those slots never accumulate, so a
+//     report would be an unmeasured zero dressed up as a measurement -- and it
+//     would read as "the skip index removed all the IO".
+TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
+    DriverPrefetchGuard driver_prefetch_guard(false);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_report_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+
+    // Retrieve's limit is a byte budget over the output fields, and the
+    // unpruned probe deliberately matches every row; cap it out of the way so
+    // the test measures traffic rather than tripping the output limit.
+    constexpr int64_t kNoOutputLimit = std::numeric_limits<int64_t>::max();
+
+    // The series the retrieve path publishes under. Reading it by label is
+    // itself the check that the collection name survives into the metric --
+    // it comes from the schema, which is all a segment keeps of its collection.
+    auto observed = [] {
+        auto metric = milvus::monitor::internal_core_query_scanned_bytes_total(
+                          kSkipMeasureCollection, "query")
+                          .Collect();
+        return std::make_pair(metric.histogram.sample_count,
+                              metric.histogram.sample_sum);
+    };
+
+    auto retrieve_plan = [&](int64_t threshold) {
+        auto plan = std::make_unique<query::RetrievePlan>(schema);
+        proto::plan::GenericValue value;
+        value.set_int64_val(threshold);
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(val_fid, milvus::DataType::INT64),
+            proto::plan::OpType::GreaterThan,
+            value);
+        plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+        plan->plan_node_->plannodes_ =
+            milvus::test::CreateRetrievePlanByExpr(expr);
+        plan->field_ids_ = std::vector<FieldId>{pk_fid};
+        return plan;
+    };
+
+    // val > N matches nothing, so every cell is prunable; val > -1 matches
+    // everything and is the cost of not pruning.
+    auto all_pruned_plan = retrieve_plan(N);
+    auto full_plan = retrieve_plan(-1);
+
+    {
+        StorageUsageTrackingGuard tracking_guard(true);
+        auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+        ASSERT_TRUE(segment->storage_usage_tracked())
+            << "the flag was on before the load, so the segment's slots track";
+
+        const auto before_pruned = observed();
+        (void)segment->Retrieve(nullptr,
+                                all_pruned_plan.get(),
+                                MAX_TIMESTAMP,
+                                kNoOutputLimit,
+                                false);
+        const auto after_pruned = observed();
+        EXPECT_EQ(after_pruned.first, before_pruned.first + 1)
+            << "a fully pruned query published nothing: the operation was "
+               "measured, and dropping it is exactly how the best-pruned "
+               "samples disappear from the histogram";
+
+        const auto before_full = observed();
+        (void)segment->Retrieve(
+            nullptr, full_plan.get(), MAX_TIMESTAMP, kNoOutputLimit, false);
+        const auto after_full = observed();
+        ASSERT_EQ(after_full.first, before_full.first + 1);
+
+        const double pruned_bytes = after_pruned.second - before_pruned.second;
+        const double full_bytes = after_full.second - before_full.second;
+        ASSERT_GT(full_bytes, 0.0) << "storage usage tracking did not "
+                                      "accumulate for the unpruned retrieve";
+        // Measured at 0 against ~170 MB for the same segment: a retrieve whose
+        // filter prunes every cell touches nothing at all, MVCC included. That
+        // exact zero is what the old gate suppressed, so it is asserted rather
+        // than merely allowed -- if a future change makes such a retrieve pin
+        // something, this metric stops being able to show a clean prune and
+        // the assertion above (a sample was published) is what still has to
+        // hold.
+        EXPECT_EQ(pruned_bytes, 0.0)
+            << "a retrieve that prunes every cell reported " << pruned_bytes
+            << " bytes";
+        EXPECT_LT(pruned_bytes, full_bytes / 2)
+            << "the pruned retrieve reported " << pruned_bytes
+            << " bytes against " << full_bytes
+            << " for the same segment: pruning is not reaching the metric";
+    }
+
+    {
+        // Same segment data, but the slots are created with tracking off, so
+        // nothing accumulates and nothing may be published.
+        StorageUsageTrackingGuard tracking_guard(false);
+        auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+        ASSERT_FALSE(segment->storage_usage_tracked());
+
+        const auto before = observed();
+        (void)segment->Retrieve(nullptr,
+                                all_pruned_plan.get(),
+                                MAX_TIMESTAMP,
+                                kNoOutputLimit,
+                                false);
+        EXPECT_EQ(observed().first, before.first)
+            << "published a sample for a segment that never measured "
+               "anything -- an unmeasured zero reads as 'the skip index "
+               "removed all the IO'";
+    }
 
     SetDefaultEnableParquetStatsSkipIndex(false);
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();

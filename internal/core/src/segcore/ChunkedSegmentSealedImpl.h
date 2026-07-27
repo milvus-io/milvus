@@ -189,6 +189,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return id_;
     }
 
+    bool
+    storage_usage_tracked() const override {
+        return storage_usage_tracked_;
+    }
+
     std::shared_ptr<SegmentReadLease>
     AcquireReadLease(const folly::CancellationToken& cancel_token) const {
         return operation_gate_.AcquireRead(cancel_token, id_);
@@ -2251,6 +2256,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
+
+    // Snapshot of tieredStorage.storageUsageTrackingEnabled taken when this
+    // segment was built, i.e. the same value the CacheSlots created for it
+    // freeze. See SegmentInternalInterface::storage_usage_tracked.
+    const bool storage_usage_tracked_;
 
     // Query-time reader calls remain non-thread-safe and must be serialized.
     // The reader object itself now lives in RuntimeResourceState snapshots so

@@ -51,6 +51,7 @@
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
+#include "cachinglayer/TieredStorageConfig.h"
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
 #include "common/ArrayOffsets.h"
@@ -4823,6 +4824,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       id_(segment_id),
       col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
+      storage_usage_tracked_(
+          milvus::cachinglayer::TieredStorageConfig::GetInstance()
+              .storage_usage_tracking_enabled()),
       deleted_record_(
           nullptr,
           [this](const std::vector<PkType>& pks,

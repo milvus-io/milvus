@@ -56,19 +56,39 @@ DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file);
 
 // search metrics
 // skip index effectiveness: how many chunks the skip index was consulted for
-// vs how many it pruned, plus the per-expression prune ratio distribution.
+// vs how many it pruned, plus the prune ratio distribution.
+//
+// Both carry a collection label so a shared query node can be read per tenant:
+// a node-wide prune rate averages a collection whose filter field is clustered
+// together with one whose is not, and says nothing about either. The name comes
+// from Schema::collection_name() and is empty for schemas not parsed from a
+// proto (test-only), which lands in a "" series rather than being dropped.
 DECLARE_PROMETHEUS_COUNTER_FAMILY(internal_core_skipindex_chunks);
-DECLARE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_scanned);
-DECLARE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_pruned);
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_skipindex_prune_ratio);
-DECLARE_PROMETHEUS_HISTOGRAM(internal_core_skipindex_prune_ratio_expr);
+
+prometheus::Counter&
+internal_core_skipindex_chunks_scanned(const std::string& collection);
+prometheus::Counter&
+internal_core_skipindex_chunks_pruned(const std::string& collection);
+prometheus::Histogram&
+internal_core_skipindex_prune_ratio_expr(const std::string& collection);
 
 // per-query storage traffic: total = every cell touched, cold = the cells that
 // actually had to be loaded (i.e. real IO). Reading both is what tells you
 // whether pruning translated into IO saved, or only into skipped CPU.
+//
+// Labelled by collection and by op ("search" or "query"), because the two have
+// different traffic shapes -- a search always reads the vector column while a
+// filtered query may read nothing at all -- and mixing them into one histogram
+// makes neither readable.
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes);
-DECLARE_PROMETHEUS_HISTOGRAM(internal_core_query_scanned_bytes_total);
-DECLARE_PROMETHEUS_HISTOGRAM(internal_core_query_scanned_bytes_cold);
+
+prometheus::Histogram&
+internal_core_query_scanned_bytes_total(const std::string& collection,
+                                        const std::string& op);
+prometheus::Histogram&
+internal_core_query_scanned_bytes_cold(const std::string& collection,
+                                       const std::string& op);
 
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar);

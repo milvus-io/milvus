@@ -41,6 +41,9 @@ namespace {
 // flag flip is how you tell whether skip-index pruning removed IO or only CPU.
 struct ScannedBytesReporter {
     const milvus::OpContext& ctx;
+    const segcore::SegmentInternalInterface* segment;
+    const char* op;
+
     ~ScannedBytesReporter() {
         // Report only what was actually measured. The cachinglayer accumulates
         // storage_usage only when tiered-storage usage tracking is on, that
@@ -51,20 +54,27 @@ struct ScannedBytesReporter {
         // wrong in both directions after a flip: newly enabled, the old slots
         // still do not accumulate and we would publish phantom zeros; newly
         // disabled, the old slots still do accumulate and we would drop real
-        // samples. Gate on the observation itself instead -- non-zero means
-        // some slot really did track this operation, whatever the config says.
-        // Trade-off: an operation that genuinely touched no cell is not
-        // reported. That is degenerate (a query still pins timestamps/pk), and
-        // losing it is far safer than publishing zeros that read as "the skip
-        // index removed all IO".
-        const auto total = ctx.storage_usage.scanned_total_bytes.load();
-        if (total <= 0) {
+        // samples.
+        //
+        // Ask the segment instead: it mirrors the same snapshot its slots were
+        // built from, so it answers the question the config cannot -- "was this
+        // operation measured?" -- without conflating it with "did this
+        // operation move bytes?". Gating on the observation (total > 0) would
+        // conflate exactly those two, and would drop the most informative
+        // sample there is: a fully pruned query touches no cell at all, so a
+        // measured zero is the strongest evidence the skip index removed IO
+        // rather than just CPU, and it is precisely the case that must not
+        // vanish from the histogram.
+        if (segment == nullptr || !segment->storage_usage_tracked()) {
             return;
         }
-        milvus::monitor::internal_core_query_scanned_bytes_total.Observe(
-            static_cast<double>(total));
-        milvus::monitor::internal_core_query_scanned_bytes_cold.Observe(
-            static_cast<double>(ctx.storage_usage.scanned_cold_bytes.load()));
+        const auto& collection = segment->get_schema().collection_name();
+        milvus::monitor::internal_core_query_scanned_bytes_total(collection, op)
+            .Observe(static_cast<double>(
+                ctx.storage_usage.scanned_total_bytes.load()));
+        milvus::monitor::internal_core_query_scanned_bytes_cold(collection, op)
+            .Observe(static_cast<double>(
+                ctx.storage_usage.scanned_cold_bytes.load()));
     }
 };
 }  // namespace
@@ -332,7 +342,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
-    ScannedBytesReporter scanned_reporter{op_context};
+    ScannedBytesReporter scanned_reporter{op_context, segment, "query"};
     query_context->set_op_context(&op_context);
 
     // Do task execution
@@ -487,7 +497,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
             }
 
             auto op_context = milvus::OpContext(cancel_token_);
-            ScannedBytesReporter scanned_reporter{op_context};
+            ScannedBytesReporter scanned_reporter{
+                op_context, segment, "search"};
             op_context.trace_span = trace_span_;
             query_context->set_op_context(&op_context);
 
@@ -548,7 +559,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
-    ScannedBytesReporter scanned_reporter{op_context};
+    ScannedBytesReporter scanned_reporter{op_context, segment, "search"};
     op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
 

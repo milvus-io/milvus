@@ -290,6 +290,7 @@ class SegmentExpr : public Expr {
         auto& field_meta = schema[field_id_];
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
+        collection_name_ = schema.collection_name();
 
         if (schema.get_primary_field_id().has_value() &&
             schema.get_primary_field_id().value() == field_id_ &&
@@ -339,13 +340,15 @@ class SegmentExpr : public Expr {
         if (chunks_judged <= 0) {
             return;
         }
-        milvus::monitor::internal_core_skipindex_chunks_scanned.Increment(
-            static_cast<double>(chunks_judged));
-        milvus::monitor::internal_core_skipindex_chunks_pruned.Increment(
-            static_cast<double>(chunks_pruned));
-        milvus::monitor::internal_core_skipindex_prune_ratio_expr.Observe(
-            static_cast<double>(chunks_pruned) /
-            static_cast<double>(chunks_judged));
+        milvus::monitor::internal_core_skipindex_chunks_scanned(
+            collection_name_)
+            .Increment(static_cast<double>(chunks_judged));
+        milvus::monitor::internal_core_skipindex_chunks_pruned(collection_name_)
+            .Increment(static_cast<double>(chunks_pruned));
+        milvus::monitor::internal_core_skipindex_prune_ratio_expr(
+            collection_name_)
+            .Observe(static_cast<double>(chunks_pruned) /
+                     static_cast<double>(chunks_judged));
     }
 
     // A null-rejecting consumer (top-level filter, or AND/OR above -- see
@@ -2749,6 +2752,10 @@ class SegmentExpr : public Expr {
     // this expr's output, so result validity (valid_res) is never observed and
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
     bool null_rejecting_{false};
+    // Copied from the schema at construction so the skip-index metrics can
+    // carry a collection label; a segment only holds the schema, never the
+    // segcore::Collection it was created from.
+    std::string collection_name_;
     DataType pk_type_;
     int64_t batch_size_;
 

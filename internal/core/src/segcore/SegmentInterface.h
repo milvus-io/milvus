@@ -197,6 +197,19 @@ class SegmentInterface {
     virtual int64_t
     get_segment_id() const = 0;
 
+    // Whether this segment's cache slots accumulate OpContext::storage_usage.
+    // CacheSlot freezes tieredStorage.storageUsageTrackingEnabled at creation
+    // while the config itself is refreshable, so after a flip the config and
+    // the slots disagree and only the slots are authoritative about what was
+    // measured. A segment mirrors the same snapshot its slots were built from,
+    // which is what lets a reporter tell "this operation moved no bytes" apart
+    // from "this operation was never measured". Segments that hold their data
+    // in memory rather than in cache slots never accumulate, hence false.
+    virtual bool
+    storage_usage_tracked() const {
+        return false;
+    }
+
     virtual SegmentType
     type() const = 0;
 

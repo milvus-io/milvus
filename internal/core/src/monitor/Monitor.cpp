@@ -200,43 +200,52 @@ std::map<std::string, std::string> optimizeExprLatencyLabels{
 std::map<std::string, std::string> filterRatioLabels{
     {"type", "expr_filter_ratio"}};
 
-std::map<std::string, std::string> skipIndexScannedMap = {
-    {"skipindex_chunks", "scanned"}};
-std::map<std::string, std::string> skipIndexPrunedMap = {
-    {"skipindex_chunks", "pruned"}};
-std::map<std::string, std::string> skipIndexRatioMap = {
-    {"skipindex", "prune_ratio"}};
-std::map<std::string, std::string> queryScannedTotalMap = {
-    {"query_scanned", "total"}};
-std::map<std::string, std::string> queryScannedColdMap = {
-    {"query_scanned", "cold"}};
-
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_core_skipindex_chunks,
                                  "[cpp]chunks considered/pruned by skip index")
-DEFINE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_scanned,
-                          internal_core_skipindex_chunks,
-                          skipIndexScannedMap)
-DEFINE_PROMETHEUS_COUNTER(internal_core_skipindex_chunks_pruned,
-                          internal_core_skipindex_chunks,
-                          skipIndexPrunedMap)
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_skipindex_prune_ratio,
                                    "[cpp]fraction of chunks pruned per expr")
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_skipindex_prune_ratio_expr,
-    internal_core_skipindex_prune_ratio,
-    skipIndexRatioMap,
-    ratioBuckets)
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes,
                                    "[cpp]bytes of cells touched per query")
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_query_scanned_bytes_total,
-    internal_core_query_scanned_bytes,
-    queryScannedTotalMap,
-    bytesBuckets)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_query_scanned_bytes_cold,
-                                         internal_core_query_scanned_bytes,
-                                         queryScannedColdMap,
-                                         bytesBuckets)
+
+// Series are resolved per call rather than bound once at static init, because
+// the collection label is only known at query time. Family::Add is a hashed
+// lookup under a lock; these call sites are per expression evaluation and per
+// operation, orders of magnitude colder than cachinglayer's per cell access
+// helpers that do the same thing.
+prometheus::Counter&
+internal_core_skipindex_chunks_scanned(const std::string& collection) {
+    return internal_core_skipindex_chunks_family.Add(
+        {{"skipindex_chunks", "scanned"}, {"collection", collection}});
+}
+
+prometheus::Counter&
+internal_core_skipindex_chunks_pruned(const std::string& collection) {
+    return internal_core_skipindex_chunks_family.Add(
+        {{"skipindex_chunks", "pruned"}, {"collection", collection}});
+}
+
+prometheus::Histogram&
+internal_core_skipindex_prune_ratio_expr(const std::string& collection) {
+    return internal_core_skipindex_prune_ratio_family.Add(
+        {{"skipindex", "prune_ratio"}, {"collection", collection}},
+        ratioBuckets);
+}
+
+prometheus::Histogram&
+internal_core_query_scanned_bytes_total(const std::string& collection,
+                                        const std::string& op) {
+    return internal_core_query_scanned_bytes_family.Add(
+        {{"query_scanned", "total"}, {"collection", collection}, {"op", op}},
+        bytesBuckets);
+}
+
+prometheus::Histogram&
+internal_core_query_scanned_bytes_cold(const std::string& collection,
+                                       const std::string& op) {
+    return internal_core_query_scanned_bytes_family.Add(
+        {{"query_scanned", "cold"}, {"collection", collection}, {"op", op}},
+        bytesBuckets);
+}
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
