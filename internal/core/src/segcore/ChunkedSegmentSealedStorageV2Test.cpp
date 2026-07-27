@@ -42,15 +42,19 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/TieredStorageConfig.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/LoadInfo.h"
+#include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
+#include "monitor/Monitor.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -1467,6 +1471,12 @@ namespace {
 // min/max discriminate, plus fixed padding so each value is 2048 bytes (bloats
 // row groups). Monotonic in the same order as `val`, so row i has val == i and
 // payload == SkipMeasurePayloadAt(i).
+// Row i of the nullable `nval` column is NULL when i % kNullEvery == 0. No row
+// group is entirely null, so every one keeps usable min/max (an all-null row
+// group would degrade to NoneFieldChunkMetrics and never prune, which would
+// defeat the point of the nullable tests below).
+constexpr int64_t kNullEvery = 10;
+
 std::string
 SkipMeasurePayloadAt(int64_t i) {
     // Fixed-width zero padding keeps lexicographic order == numeric order, so
@@ -1481,11 +1491,14 @@ SkipMeasurePayloadAt(int64_t i) {
 // val(INT64 monotonic 0..N-1) + payload(bloated VARCHAR -> many row groups)
 // + ts share one column group; pk sits alone. Writes two parquet files under
 // `root`; returns the row count. `writer_mem` tunes row groups per file.
+// `nullable_col` is the arrow column index that should be written with NULLs
+// (-1 = none, which reproduces the original four-column layout byte for byte).
 int64_t
 WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
                           FieldId pk_fid,
                           const std::string& root,
-                          int64_t writer_mem) {
+                          int64_t writer_mem,
+                          int nullable_col = -1) {
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     (void)fs->DeleteDir(root);
     EXPECT_TRUE(fs->CreateDir(root + "/0").ok());
@@ -1493,12 +1506,21 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
     std::vector<std::string> paths = {
         root + "/0/10000.parquet",
         root + "/" + std::to_string(pk_fid.get()) + "/10001.parquet"};
-    std::vector<std::vector<int>> column_groups = {{0, 2, 3}, {1}};
+    // Everything but pk (arrow index 1) shares column group 0; pk sits alone.
+    // Derived rather than hardcoded so an added column lands in group 0.
+    auto packed_schema = schema->ConvertToArrowSchema();
+    std::vector<int> group_zero;
+    for (int i = 0; i < packed_schema->num_fields(); ++i) {
+        if (i != 1) {
+            group_zero.push_back(i);
+        }
+    }
+    std::vector<std::vector<int>> column_groups = {group_zero, {1}};
     auto storage_config = milvus_storage::StorageConfig();
     auto result = milvus_storage::PackedRecordBatchWriter::Make(
         fs,
         paths,
-        schema->ConvertToArrowSchema(),
+        packed_schema,
         storage_config,
         column_groups,
         writer_mem,
@@ -1514,7 +1536,24 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
         const int64_t start = batch * rows_per_batch;
         std::vector<std::shared_ptr<arrow::Array>> arrays;
         for (int i = 0; i < arrow_schema->fields().size(); ++i) {
-            if (arrow_schema->fields()[i]->type()->id() == arrow::Type::INT64) {
+            if (i == nullable_col) {
+                // Nullable twin of `val`: identical monotonic values, so the
+                // same thresholds prune the same cells, but every
+                // kNullEvery-th row is NULL.
+                arrow::Int64Builder builder;
+                for (int64_t r = 0; r < rows_per_batch; ++r) {
+                    const int64_t v = start + r;
+                    if (v % kNullEvery == 0) {
+                        EXPECT_TRUE(builder.AppendNull().ok());
+                    } else {
+                        EXPECT_TRUE(builder.Append(v).ok());
+                    }
+                }
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else if (arrow_schema->fields()[i]->type()->id() ==
+                       arrow::Type::INT64) {
                 std::vector<int64_t> values(rows_per_batch);
                 std::iota(values.begin(), values.end(), start);  // monotonic
                 arrow::Int64Builder builder;
@@ -1552,13 +1591,18 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
 std::shared_ptr<Schema>
 MakeSkipMeasureSchema(FieldId& val_fid,
                       FieldId& pk_fid,
-                      FieldId* payload_fid = nullptr) {
+                      FieldId* payload_fid = nullptr,
+                      FieldId* nullable_fid = nullptr) {
     auto schema = std::make_shared<Schema>();
     val_fid = schema->AddDebugField("val", DataType::INT64, false);
     pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
     auto pl_fid = schema->AddDebugField("payload", DataType::VARCHAR, false);
     if (payload_fid != nullptr) {
         *payload_fid = pl_fid;
+    }
+    // Only added when asked, so the tests above keep their exact column layout.
+    if (nullable_fid != nullptr) {
+        *nullable_fid = schema->AddDebugField("nval", DataType::INT64, true);
     }
     schema->AddField(FieldName("ts"),
                      TimestampFieldID,
@@ -1848,4 +1892,314 @@ TEST(SkipIndexPr51441, IntegerMulDivArithNeverPrunes) {
     // field + 1 == 1000 => field == 999, outside [0,10].
     EXPECT_TRUE(skip.CanSkipBinaryArithRange<int64_t>(
         fid, 0, OpType::Equal, ArithOpType::Add, int64_t(1000), int64_t(1)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PR #51441: the IO-saving half of the change.
+//
+// These three fixes are invisible to a result-count assertion. Each one only
+// changes how much data the scan touches; the pre-fix code returned exactly
+// the same rows, just after paying for the IO the skip index was supposed to
+// have saved. A test that only checks counts therefore passes either way --
+// which is why they are verified here through the observability this PR adds
+// (the skip-index counters, and OpContext::storage_usage) instead.
+//
+//  - VarcharInPrunesOnTheExecutedPath  -> TermExpr.cpp: the scan's skip list
+//    was built with GetElementValues<std::string_view> from owned std::string
+//    containers and came back empty, so sealed VARCHAR IN never pruned.
+//  - PrunedCellsAreNotTouchedByTheScan -> Expr.h: the skip branch pinned every
+//    pruned chunk anyway, just to read valid_data.
+//  - Both of the above also cover Expr.h's fallback prefetch, which now
+//    filters by the same skip_func -- with driver prefetch off (the product
+//    default) it is the only prefetch that runs.
+// ─────────────────────────────────────────────────────────────────────────
+namespace {
+
+// common.enableDriverPrefetch defaults to false (configs/milvus.yaml), but the
+// core constant DEFAULT_ENABLE_DRIVER_PREFETCH is true, so all_tests would
+// otherwise take the skip-aware driver prefetch and never exercise the
+// fallback prefetch inside ProcessDataChunksForMultipleChunk -- the only
+// prefetch a default deployment runs, and the one that had to learn skip_func.
+class DriverPrefetchGuard {
+ public:
+    explicit DriverPrefetchGuard(bool enabled)
+        : old_(milvus::ENABLE_DRIVER_PREFETCH.load()) {
+        milvus::SetDefaultDriverPrefetchEnable(enabled);
+    }
+
+    ~DriverPrefetchGuard() {
+        milvus::SetDefaultDriverPrefetchEnable(old_);
+    }
+
+ private:
+    const bool old_;
+};
+
+// Each CacheSlot freezes storage_usage_tracking_enabled at construction, so
+// this has to be held across the segment *load*, not just across the query --
+// enabling it afterwards would measure a stream of zeros.
+class StorageUsageTrackingGuard {
+ public:
+    explicit StorageUsageTrackingGuard(bool enabled)
+        : old_(milvus::cachinglayer::TieredStorageConfig::GetInstance()
+                   .storage_usage_tracking_enabled()) {
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .SetStorageUsageTrackingEnabled(enabled);
+    }
+
+    ~StorageUsageTrackingGuard() {
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .SetStorageUsageTrackingEnabled(old_);
+    }
+
+ private:
+    const bool old_;
+};
+
+struct ScanTraffic {
+    int64_t count;
+    int64_t total_bytes;  // every cell the scan pinned (hit or miss)
+    int64_t cold_bytes;   // the subset that had to be loaded, i.e. real IO
+};
+
+// query::ExecuteQueryExpr never installs an OpContext, so the cachinglayer has
+// nowhere to accumulate storage_usage. Run the same plan with one attached and
+// hand back both the answer and the traffic it cost.
+ScanTraffic
+RunWithStorageUsage(const std::shared_ptr<milvus::plan::PlanNode>& plannode,
+                    const milvus::segcore::SegmentInternalInterface* segment,
+                    int64_t active_count) {
+    auto plan_fragment = milvus::plan::PlanFragment(plannode);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    milvus::OpContext op_context;
+    query_context->set_op_context(&op_context);
+
+    auto row = milvus::query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment,
+                                                               query_context);
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType selected(view);
+    selected.flip();
+    return ScanTraffic{static_cast<int64_t>(selected.count()),
+                       op_context.storage_usage.scanned_total_bytes.load(),
+                       op_context.storage_usage.scanned_cold_bytes.load()};
+}
+
+std::shared_ptr<milvus::plan::PlanNode>
+UnaryRangePlan(FieldId fid, proto::plan::OpType op, int64_t threshold) {
+    proto::plan::GenericValue value;
+    value.set_int64_val(threshold);
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(fid, milvus::DataType::INT64), op, value);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+}
+
+}  // namespace
+
+// Sealed VARCHAR IN must prune on the path the query actually takes. The
+// existing StorageV2VarcharInPruneAndResultsCorrect asserts pruning by calling
+// SkipIndex::CanSkipInQuery directly, which was never the broken part -- the
+// break was in PhyTermFilterExpr, and results were correct either way. Read
+// the skip-index counters around a real execution instead: they are only
+// incremented from inside the executed scan/prefetch.
+TEST(SkipIndexPr51441, VarcharInPrunesOnTheExecutedPath) {
+    DriverPrefetchGuard driver_prefetch_guard(false);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, payload_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
+    const std::string root = "skip_pr51441_varchar_in_metrics_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    // Both wanted payloads live in the last batch, so every cell whose max
+    // sorts below them is prunable.
+    const std::vector<std::string> wanted = {SkipMeasurePayloadAt(N - 5000),
+                                             SkipMeasurePayloadAt(N - 3000)};
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(payload_fid), 1)
+        << "need multiple cells for the scan to have anything to prune";
+
+    std::vector<proto::plan::GenericValue> vals;
+    for (const auto& w : wanted) {
+        proto::plan::GenericValue v;
+        v.set_string_val(w);
+        vals.push_back(v);
+    }
+    auto expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(payload_fid, milvus::DataType::VARCHAR), vals);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned;
+    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned;
+    const double scanned_before = scanned.Value();
+    const double pruned_before = pruned.Value();
+
+    auto bits = query::ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(static_cast<int64_t>(bits.count()),
+              static_cast<int64_t>(wanted.size()))
+        << "pruning must not drop matching rows";
+
+    const double scanned_delta = scanned.Value() - scanned_before;
+    const double pruned_delta = pruned.Value() - pruned_before;
+    EXPECT_GT(scanned_delta, 0.0)
+        << "the executed VARCHAR IN never consulted the skip index at all";
+    EXPECT_GT(pruned_delta, 0.0)
+        << "the executed VARCHAR IN consulted the skip index but pruned "
+           "nothing -- the scan's skip list is empty again";
+    EXPECT_LT(pruned_delta, scanned_delta)
+        << "a cell holds the matching rows and must never be pruned";
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// A pruned cell must be neither prefetched nor scan-fetched. Measured as
+// OpContext::storage_usage on one segment under two predicates: one that the
+// skip index can prune three quarters of, and one it can prune nothing of.
+// Same segment and same cell layout, so the only variable is pruning -- and
+// before the fix the skip branch pinned every pruned chunk anyway to read
+// valid_data, which made the two indistinguishable.
+TEST(SkipIndexPr51441, PrunedCellsAreNotTouchedByTheScan) {
+    DriverPrefetchGuard driver_prefetch_guard(false);
+    StorageUsageTrackingGuard tracking_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_traffic_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+    const int64_t threshold = N - 10000;  // only the top quarter matches
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1)
+        << "need multiple cells to measure per-cell traffic";
+
+    // val > threshold: every cell below the threshold is prunable.
+    auto pruning = RunWithStorageUsage(
+        UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, threshold),
+        segment.get(),
+        N);
+    // val > -1: matches everything, so the skip index prunes nothing and this
+    // is the cost of touching the whole column.
+    auto full = RunWithStorageUsage(
+        UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, -1),
+        segment.get(),
+        N);
+    // val > N: matches nothing, so EVERY cell is prunable and a scan that
+    // touches nothing is the unambiguous signal. This is the assertion that
+    // actually pins the fix down: measured at 0 bytes with the gate in place
+    // and 87 MB without it, for a query that cannot return a single row.
+    auto all_pruned = RunWithStorageUsage(
+        UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, N),
+        segment.get(),
+        N);
+
+    EXPECT_EQ(pruning.count, N - 1 - threshold);
+    EXPECT_EQ(full.count, N);
+    EXPECT_EQ(all_pruned.count, 0);
+    ASSERT_GT(full.total_bytes, 0)
+        << "storage usage tracking did not accumulate -- the flag must be on "
+           "before the segment is loaded, not just before the query";
+
+    EXPECT_EQ(all_pruned.total_bytes, 0)
+        << "a query that matches nothing still materialized "
+        << all_pruned.total_bytes
+        << " bytes: every cell was pruned, yet the scan pinned them anyway "
+           "(only to read valid_data), so the skip index saved CPU but no IO";
+
+    // Partial pruning has to scale too. Ratios rather than a bare '<': the
+    // full scan pins each cell about twice (prefetch plus per-batch scan)
+    // while the skip branch pins once, so 'fewer bytes' alone is satisfied
+    // even when every pruned cell is still being fetched.
+    EXPECT_LT(pruning.total_bytes, full.total_bytes / 2)
+        << "pruning three quarters of the column barely reduced the traffic ("
+        << pruning.total_bytes << " vs " << full.total_bytes << ")";
+
+    // Deliberately not asserted on cold_bytes: cells are warmed at load, so
+    // every query here is a cache hit and cold_bytes is 0 across the board.
+    // total_bytes is what distinguishes "did not touch the cell" from
+    // "touched a resident cell", which is exactly the fix under test.
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// The other half of the same gate: eliding the validity fetch on a skipped
+// chunk is only sound when nobody observes the result's validity. Both
+// directions are checked on a nullable column whose lower cells are prunable:
+//   - `nval > T` at top level is null-rejecting, so the fetch IS elided;
+//   - `NOT (nval > T)` observes validity (MarkNullRejecting stops at NOT), so
+//     the fetch must be kept, or NULL rows get flipped to true.
+// Counts are derived from the data, so either mistake shows up as a wrong
+// count rather than as a silent extra read.
+TEST(SkipIndexPr51441, NullableSkippedChunkKeepsThreeValuedLogic) {
+    DriverPrefetchGuard driver_prefetch_guard(false);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, payload_fid, nval_fid;
+    auto schema =
+        MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid, &nval_fid);
+    const std::string root = "skip_pr51441_nullable_v2";
+    // nval is arrow column 3: val(0), pk(1), payload(2), nval(3), ts(4).
+    const int64_t N = WriteSkipMeasureV2Parquet(
+        schema, pk_fid, root, 16 * 1024 * 1024, /*nullable_col=*/3);
+    const int64_t threshold = N - 10000;
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(nval_fid), 1)
+        << "need multiple cells so some are skipped";
+
+    int64_t expect_gt = 0;   // nval > T, NULL excluded
+    int64_t expect_not = 0;  // NOT (nval > T), NULL still excluded
+    for (int64_t i = 0; i < N; ++i) {
+        if (i % kNullEvery == 0) {
+            continue;  // NULL: `nval > T` is NULL, and so is its negation
+        }
+        if (i > threshold) {
+            ++expect_gt;
+        } else {
+            ++expect_not;
+        }
+    }
+    ASSERT_GT(expect_not, 0);
+
+    // Null-rejecting: the skipped cells contribute nothing, and the elided
+    // validity fetch must not change the answer.
+    auto gt_plan =
+        UnaryRangePlan(nval_fid, proto::plan::OpType::GreaterThan, threshold);
+    auto gt_bits =
+        query::ExecuteQueryExpr(gt_plan, segment.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(static_cast<int64_t>(gt_bits.count()), expect_gt)
+        << "nullable scan under a null-rejecting consumer returned the wrong "
+           "rows";
+
+    // Validity IS observed here: a skipped cell that skipped its validity
+    // fetch would flip its NULL rows to true and overshoot by exactly the
+    // number of NULLs in the skipped cells.
+    proto::plan::GenericValue value;
+    value.set_int64_val(threshold);
+    auto inner = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(nval_fid, milvus::DataType::INT64),
+        proto::plan::OpType::GreaterThan,
+        value);
+    auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, inner);
+    auto not_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, not_expr);
+    auto not_bits =
+        query::ExecuteQueryExpr(not_plan, segment.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(static_cast<int64_t>(not_bits.count()), expect_not)
+        << "NOT over a skipped nullable cell leaked NULL rows -- the validity "
+           "fetch must not be elided when validity is observed";
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
 }

@@ -326,6 +326,14 @@ class SegmentExpr : public Expr {
     // what distinguishes "every query prunes a little" from "a few queries
     // prune a lot". Read together with internal_core_query_scanned_bytes_cold:
     // pruning that does not lower cold bytes saved CPU but no IO.
+    //
+    // Note this counts CHUNKS, not bytes, so on its own it says how often the
+    // skip index fires but not how much data that saved -- cells are not
+    // uniformly sized, and the two series have no label in common to join on.
+    // A byte-level counter (accumulating the pruned cell's cells_storage_bytes
+    // right here) would answer that directly and is a follow-up; it would also
+    // be comparable with cache_cell_access_{hit,miss}_bytes_total, which is
+    // always collected and is what the proxy-side StorageCost derives from.
     void
     RecordSkipIndexEffect(int64_t chunks_judged, int64_t chunks_pruned) const {
         if (chunks_judged <= 0) {
