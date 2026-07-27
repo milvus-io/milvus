@@ -367,6 +367,54 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
 	s.Empty(submitted)
 }
 
+// The sub-jobs share one admission budget, so the trigger that runs first wins
+// it. Consecutive rounds must not give the same sub-job first claim.
+func (s *statsInspectorSuite) TestTriggerStatsTasksAlternatesSubJobOrder() {
+	s.putExternalSegment(220, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/220", 1))
+
+	order := make([]indexpb.StatsSubJob, 0)
+	mockSubmit := mockey.Mock((*statsInspector).SubmitStatsTask).To(
+		func(_ *statsInspector, _, _ int64, subJobType indexpb.StatsSubJob, _ bool, _ []*internalpb.FileResourceInfo) error {
+			order = append(order, subJobType)
+			return nil
+		}).Build()
+	defer mockSubmit.UnPatch()
+
+	// Both sub-jobs have candidates, so the first entry is the one that would
+	// have claimed the budget had it been exhausted.
+	s.inspector.triggerStatsTasks(0)
+	s.Require().NotEmpty(order)
+	s.Equal(indexpb.StatsSubJob_TextIndexJob, order[0])
+	s.Contains(order, indexpb.StatsSubJob_JsonKeyIndexJob)
+
+	order = order[:0]
+	s.inspector.triggerStatsTasks(1)
+	s.Require().NotEmpty(order)
+	s.Equal(indexpb.StatsSubJob_JsonKeyIndexJob, order[0])
+	s.Contains(order, indexpb.StatsSubJob_TextIndexJob)
+}
+
+// jsonShreddingTriggerCount is deprecated, but 0 used to disable JSON key index
+// submission outright and must keep doing so instead of silently turning
+// shredding back on after an upgrade.
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZero() {
+	segmentID := UniqueID(230)
+	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/230", 1))
+
+	// Sanity check: the segment is a candidate while the deprecated key is unset.
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.NoError(s.mt.statsTaskMeta.DropStatsTask(s.ctx,
+		s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob).GetTaskID()))
+
+	Params.Save(Params.DataCoordCfg.JSONStatsTriggerCount.Key, "0")
+	defer Params.Reset(Params.DataCoordCfg.JSONStatsTriggerCount.Key)
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
 // Every trigger loop must give up as soon as the scheduler is backlogged instead
 // of walking the remaining collections. The call count is what proves it: the
 // text and JSON loops each ask once for the first collection they look at and

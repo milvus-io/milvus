@@ -87,10 +87,42 @@ func newStatsInspector(ctx context.Context,
 }
 
 func (si *statsInspector) Start() {
+	si.warnDeprecatedThrottleConfigs()
 	si.reloadFromMeta()
 	si.loopWg.Add(2)
 	go si.triggerStatsTaskLoop()
 	go si.cleanupStatsTasksLoop()
+}
+
+// warnDeprecatedThrottleConfigs tells operators whose config still carries the
+// old JSON throttle that it no longer has any effect, instead of letting the
+// setting disappear silently on upgrade.
+func (si *statsInspector) warnDeprecatedThrottleConfigs() {
+	for _, item := range []*paramtable.ParamItem{
+		&Params.DataCoordCfg.JSONStatsTriggerCount,
+		&Params.DataCoordCfg.JSONStatsTriggerInterval,
+	} {
+		if item.GetValue() == item.DefaultValue {
+			continue
+		}
+		mlog.Warn(si.ctx, "deprecated config is set and no longer throttles stats tasks, use dataCoord.statsTaskPendingLimit instead",
+			mlog.String("key", item.Key),
+			mlog.String("value", item.GetValue()))
+	}
+	if jsonShreddingDisabledByDeprecatedConfig() {
+		mlog.Warn(si.ctx, "dataCoord.jsonShreddingTriggerCount is 0, keeping JSON key index submission disabled for compatibility",
+			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
+	}
+}
+
+// jsonShreddingDisabledByDeprecatedConfig reports whether the deprecated
+// jsonShreddingTriggerCount is still being used as a kill switch. The removed
+// limiter broke out of the loop once the submitted count reached the configured
+// value, so 0 disabled JSON key-index submission on the very first segment.
+// Silently re-enabling shredding for an operator who had set 0 would undo a
+// deliberate decision, so that one value keeps its meaning.
+func jsonShreddingDisabledByDeprecatedConfig() bool {
+	return Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() == 0
 }
 
 func (si *statsInspector) Stop() {
@@ -129,17 +161,33 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 
+	round := 0
 	for {
 		select {
 		case <-si.ctx.Done():
 			mlog.Warn(si.ctx, "DataCoord context done, exit checkStatsTaskLoop...")
 			return
 		case <-ticker.C:
-			si.triggerTextStatsTask()
-			si.triggerBM25StatsTask()
-			si.triggerJSONKeyIndexStatsTask()
+			si.triggerStatsTasks(round)
+			round++
 		}
 	}
+}
+
+// triggerStatsTasks runs one discovery round. The sub-jobs share a single
+// admission budget and each trigger returns as soon as it is refused, so
+// whichever runs first claims the capacity. Alternate text and JSON per round,
+// otherwise a long text-index backlog starves JSON shredding for as long as it
+// takes to drain - days on a large collection.
+func (si *statsInspector) triggerStatsTasks(round int) {
+	if round%2 == 0 {
+		si.triggerTextStatsTask()
+		si.triggerJSONKeyIndexStatsTask()
+	} else {
+		si.triggerJSONKeyIndexStatsTask()
+		si.triggerTextStatsTask()
+	}
+	si.triggerBM25StatsTask()
 }
 
 func (si *statsInspector) enableBM25() bool {
@@ -275,6 +323,11 @@ func (si *statsInspector) triggerTextStatsTask() {
 }
 
 func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
+	if jsonShreddingDisabledByDeprecatedConfig() {
+		mlog.RatedWarn(si.ctx, rate.Limit(0.1), "skip JSON key index stats task, dataCoord.jsonShreddingTriggerCount is set to 0",
+			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
+		return
+	}
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil {
