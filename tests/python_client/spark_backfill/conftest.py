@@ -25,6 +25,7 @@ from spark_backfill.k8s_resources import (
     build_support_config_map,
 )
 from spark_backfill.k8s_runner import KubernetesSparkRunner, SparkRuntimeConfig
+from spark_backfill.toolbox_runner import ToolboxRuntimeConfig, ToolboxSparkRunner
 
 
 @pytest.fixture(scope="session")
@@ -50,6 +51,12 @@ def spark_backfill_settings(request):
         job_timeout=request.config.getoption("--spark-job-timeout"),
         keep_failed_job=request.config.getoption("--spark-keep-failed-job"),
         evidence_root=request.config.getoption("--spark-evidence-root"),
+        runner_mode=request.config.getoption("--spark-runner-mode"),
+        toolbox_pod=request.config.getoption("--spark-toolbox-pod"),
+        toolbox_label=request.config.getoption("--spark-toolbox-label"),
+        toolbox_container=request.config.getoption("--spark-toolbox-container"),
+        toolbox_wrapper=request.config.getoption("--spark-toolbox-wrapper"),
+        toolbox_workspace=request.config.getoption("--spark-toolbox-workspace"),
     )
     settings.evidence_root.mkdir(parents=True, exist_ok=True)
     return settings
@@ -83,8 +90,23 @@ def spark_k8s_apis(spark_backfill_settings):
 def spark_support_resources(spark_backfill_settings, spark_storage_credentials, spark_k8s_apis):
     _, core_api, authorization_api = spark_k8s_apis
     namespace = spark_backfill_settings.spark_k8s_namespace
+    if spark_backfill_settings.runner_mode == "toolbox":
+        assert_rbac_permissions(
+            authorization_api,
+            namespace,
+            create_secret=False,
+            runner_mode="toolbox",
+        )
+        yield None, None
+        return
+
     create_secret = not bool(spark_backfill_settings.storage_secret_name)
-    assert_rbac_permissions(authorization_api, namespace, create_secret=create_secret)
+    assert_rbac_permissions(
+        authorization_api,
+        namespace,
+        create_secret=create_secret,
+        runner_mode="job",
+    )
 
     suffix = uuid.uuid4().hex[:8]
     config_map_name = f"spark-backfill-support-{suffix}"
@@ -126,6 +148,27 @@ def spark_support_resources(spark_backfill_settings, spark_storage_credentials, 
 @pytest.fixture(scope="session")
 def spark_job_runner(spark_backfill_settings, spark_k8s_apis, spark_support_resources):
     batch_api, core_api, _ = spark_k8s_apis
+    if spark_backfill_settings.runner_mode == "toolbox":
+        package_dir = Path(__file__).parent
+        support_files = {
+            filename: (package_dir / filename).read_text(encoding="utf-8")
+            for filename in ("contracts.py", "read_probe.py")
+        }
+        return ToolboxSparkRunner(
+            core_api,
+            ToolboxRuntimeConfig(
+                namespace=spark_backfill_settings.spark_k8s_namespace,
+                pod_name=spark_backfill_settings.toolbox_pod,
+                pod_label=spark_backfill_settings.toolbox_label,
+                container=spark_backfill_settings.toolbox_container,
+                wrapper_path=spark_backfill_settings.toolbox_wrapper,
+                workspace_path=spark_backfill_settings.toolbox_workspace,
+                timeout_seconds=spark_backfill_settings.job_timeout,
+                evidence_root=spark_backfill_settings.evidence_root,
+            ),
+            support_files=support_files,
+        )
+
     config_map_name, secret_name = spark_support_resources
     return KubernetesSparkRunner(
         batch_api,
@@ -150,7 +193,7 @@ def spark_minio_client(spark_backfill_settings, spark_storage_credentials):
     access_key, secret_key = spark_storage_credentials
     if not access_key:
         pytest.fail(
-            "Static S3 credentials are required by the local MinIO client for the initial Backfill Nightly suite"
+            "Static S3 credentials are required by the local MinIO client for the Spark Backfill suite"
         )
     return Minio(
         spark_backfill_settings.local_minio_endpoint,

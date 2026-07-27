@@ -1,4 +1,4 @@
-"""Configuration normalization for the Nightly-only Spark Backfill suite."""
+"""Configuration normalization for the Spark Backfill pytest runners."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ class SparkBackfillConfigurationError(ValueError):
 
 @dataclass(frozen=True)
 class SparkBackfillSettings:
+    runner_mode: str
     local_milvus_uri: str
     spark_milvus_uri: str
     milvus_token: str
@@ -34,6 +35,11 @@ class SparkBackfillSettings:
     job_timeout: int
     keep_failed_job: bool
     evidence_root: Path
+    toolbox_pod: str
+    toolbox_label: str
+    toolbox_container: str
+    toolbox_wrapper: str
+    toolbox_workspace: str
 
     @classmethod
     def from_values(
@@ -59,6 +65,12 @@ class SparkBackfillSettings:
         job_timeout,
         keep_failed_job,
         evidence_root,
+        runner_mode="job",
+        toolbox_pod="",
+        toolbox_label="app=spark-milvus-toolbox",
+        toolbox_container="spark-toolbox",
+        toolbox_wrapper="/usr/local/bin/spark-submit-milvus",
+        toolbox_workspace="/workspace/spark-backfill-pytest",
     ) -> SparkBackfillSettings:
         local_milvus_uri = str(uri).strip() or f"http://{host}:{port}"
         management_endpoint = str(management_endpoint).strip().rstrip("/")
@@ -66,19 +78,31 @@ class SparkBackfillSettings:
         connector_sha256 = str(connector_sha256).strip()
         namespace = str(spark_k8s_namespace).strip() or str(milvus_namespace).strip()
         timeout = int(job_timeout)
+        runner_mode = str(runner_mode).strip().lower() or "job"
+        toolbox_pod = str(toolbox_pod).strip()
+        toolbox_label = str(toolbox_label).strip()
+        toolbox_container = str(toolbox_container).strip()
+        toolbox_wrapper = str(toolbox_wrapper).strip()
+        toolbox_workspace = str(toolbox_workspace).strip().rstrip("/")
 
         if not management_endpoint.startswith(("http://", "https://")):
             raise SparkBackfillConfigurationError("management endpoint must be an absolute HTTP(S) URL")
-        if not connector_url.startswith("https://"):
-            raise SparkBackfillConfigurationError("Connector bundle URL must use HTTPS")
-        if not _SHA256_RE.fullmatch(connector_sha256):
-            raise SparkBackfillConfigurationError("Connector bundle SHA256 must contain 64 hexadecimal characters")
+        if runner_mode not in {"job", "toolbox"}:
+            raise SparkBackfillConfigurationError("Spark runner mode must be 'job' or 'toolbox'")
+        if runner_mode == "job":
+            if not connector_url.startswith("https://"):
+                raise SparkBackfillConfigurationError("Connector bundle URL must use HTTPS")
+            if not _SHA256_RE.fullmatch(connector_sha256):
+                raise SparkBackfillConfigurationError("Connector bundle SHA256 must contain 64 hexadecimal characters")
+        elif not toolbox_pod and not toolbox_label:
+            raise SparkBackfillConfigurationError("Toolbox Pod name or label is required")
         if not namespace:
             raise SparkBackfillConfigurationError("Spark Kubernetes namespace is required")
         if timeout <= 0:
             raise SparkBackfillConfigurationError("Spark Job timeout must be positive")
 
         return cls(
+            runner_mode=runner_mode,
             local_milvus_uri=local_milvus_uri,
             spark_milvus_uri=str(spark_milvus_uri).strip() or local_milvus_uri,
             milvus_token=str(token),
@@ -96,6 +120,11 @@ class SparkBackfillSettings:
             job_timeout=timeout,
             keep_failed_job=bool(keep_failed_job),
             evidence_root=Path(evidence_root).expanduser().resolve(),
+            toolbox_pod=toolbox_pod,
+            toolbox_label=toolbox_label,
+            toolbox_container=toolbox_container,
+            toolbox_wrapper=toolbox_wrapper,
+            toolbox_workspace=toolbox_workspace,
         )
 
 
