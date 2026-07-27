@@ -234,6 +234,87 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
 
 		err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:   10,
+			SegmentID:     2004,
+			SchemaVersion: 14,
+		})
+		s.NoError(err)
+	})
+
+	s.Run("infer_storage_version_uses_segment_start_schema_not_latest", func() {
+		latestTextSchema := &schemapb.CollectionSchema{
+			Name: "wb_text_collection_latest",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				}},
+				{FieldID: 102, DataType: schemapb.DataType_Text, Name: "text"},
+			},
+		}
+		startSchema := &schemapb.CollectionSchema{
+			Name: "wb_collection_at_segment_start",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				}},
+			},
+		}
+		mc := metacache.NewMockMetaCache(s.T())
+		mc.EXPECT().GetSchema(uint64(0)).Return(latestTextSchema).Once()
+		mc.EXPECT().Collection().Return(s.collID).Maybe()
+
+		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
+		s.Require().NoError(err)
+
+		mc.EXPECT().GetSegmentByID(int64(2006)).Return(nil, false).Once()
+		mc.EXPECT().GetSchema(uint64(12345)).Return(startSchema).Once()
+		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV2 &&
+				info.GetManifestPath() == "" &&
+				info.GetSchemaVersion() == 16
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			PartitionID:   10,
+			SegmentID:     2006,
+			StartPos:      &msgpb.MsgPosition{Timestamp: 12345},
+			SchemaVersion: 16,
+		})
+		s.NoError(err)
+	})
+
+	s.Run("text_schema_uses_v3_manifest_when_ffi_enabled", func() {
+		param.Save(param.CommonCfg.UseLoonFFI.Key, "true")
+		defer param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
+
+		textSchema := &schemapb.CollectionSchema{
+			Name: "wb_text_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				}},
+				{FieldID: 102, DataType: schemapb.DataType_Text, Name: "text"},
+			},
+		}
+		mc := metacache.NewMockMetaCache(s.T())
+		mc.EXPECT().GetSchema(mock.Anything).Return(textSchema).Maybe()
+		mc.EXPECT().Collection().Return(s.collID).Maybe()
+
+		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
+		s.Require().NoError(err)
+		s.False(wb.AllowGrowingSourceFlush())
+
+		mc.EXPECT().GetSegmentByID(int64(2004)).Return(nil, false).Once()
+		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV3 &&
+				info.GetManifestPath() != "" &&
+				info.GetSchemaVersion() == 14
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
 			PartitionID:    10,
 			SegmentID:      2004,
 			SchemaVersion:  14,
@@ -862,8 +943,55 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 func (s *WriteBufferSuite) TestGrowingSourceLayoutMismatch() {
 	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
 	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
+	s.True(isGrowingSourceLayoutMismatch(errors.New("current split field 101 missing from sync schema for segment 1001")))
 	s.False(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: mock transient error")))
 	s.False(isGrowingSourceLayoutMismatch(nil))
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceSyncTaskUsesProgressSchemaTimestampWithoutBatches() {
+	latestSchema := s.collSchema
+	startSchema := &schemapb.CollectionSchema{
+		Name: "historical_schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+			{FieldID: 101, DataType: schemapb.DataType_Int64, Name: "dropped_later"},
+			{FieldID: 102, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			}},
+		},
+	}
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().GetSchema(uint64(0)).Return(latestSchema).Once()
+	mc.EXPECT().Collection().Return(s.collID).Maybe()
+	wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{
+		growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			s.EqualValues(1001, segmentID)
+			s.EqualValues(10, targetOffset)
+			return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
+		},
+	})
+	s.Require().NoError(err)
+
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1001,
+		PartitionID:    10,
+		NumOfRows:      10,
+		State:          commonpb.SegmentState_Flushing,
+		StorageVersion: storage.StorageV3,
+		StartPosition:  &msgpb.MsgPosition{Timestamp: 11111},
+	}, pkoracle.NewBloomFilterSet(), nil)
+	progress := &growingSourceProgress{
+		segmentID:       1001,
+		targetOffset:    10,
+		schemaTimestamp: 12345,
+	}
+
+	mc.EXPECT().GetSchema(uint64(12345)).Return(startSchema).Once()
+	task, err := wb.getGrowingSourceSyncTask(context.Background(), segment, progress)
+	s.Require().NoError(err)
+	growingTask, ok := task.(*syncmgr.GrowingSourceSyncTask)
+	s.Require().True(ok)
+	s.EqualValues(0, growingTask.BatchRows())
 }
 
 func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFailure() {

@@ -405,6 +405,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
                    bool small_int_raw_type = false) const override;
 
     std::unique_ptr<DataArray>
+    bulk_subscript_with_field_meta(milvus::OpContext* op_ctx,
+                                   const FieldMeta& field_meta,
+                                   const int64_t* seg_offsets,
+                                   int64_t count) const;
+
+    std::unique_ptr<DataArray>
     bulk_subscript(milvus::OpContext* op_ctx,
                    FieldId field_id,
                    const int64_t* seg_offsets,

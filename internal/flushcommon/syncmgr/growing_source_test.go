@@ -55,10 +55,6 @@ type fakeCommitGrowingFlushSource struct {
 	checkConfig func(*GrowingFlushConfig)
 }
 
-func (s *fakeCommitGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
-	return []int64{0, 1, 100, 101, 102}, nil
-}
-
 func (s *fakeCommitGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
 	if s.primaryErr != nil {
 		return nil, s.primaryErr
@@ -706,6 +702,7 @@ func TestBuildGrowingSourceInsertBinlogsRequiresColumnGroupMemorySize(t *testing
 	}
 	result := &GrowingFlushResult{
 		NumRows:                1,
+		FlushedFieldIDs:        []int64{100},
 		ColumnGroupMemorySizes: map[int64]int64{},
 	}
 
@@ -775,10 +772,6 @@ func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.
 
 type fakeBM25GrowingFlushSource struct {
 	stats map[int64]*storage.BM25Stats
-}
-
-func (s *fakeBM25GrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
-	return []int64{0, 1, 100, 101, 102}, nil
 }
 
 func (s *fakeBM25GrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
@@ -874,89 +867,158 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 	require.EqualValues(t, 2, restored.NumToken())
 }
 
-type fakeMaterializedGrowingFlushSource struct {
-	materialized []int64
-}
-
-func (s *fakeMaterializedGrowingFlushSource) CurrentOffset() int64 { return 0 }
-
-func (s *fakeMaterializedGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
-	return nil, nil
-}
-
-func (s *fakeMaterializedGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
-	return s.materialized, nil
-}
-
-func (s *fakeMaterializedGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
-	return nil, nil
-}
-
-func (s *fakeMaterializedGrowingFlushSource) Release() {}
-
-func TestTrimColumnGroupsToMaterialized(t *testing.T) {
+func TestGrowingSourceSyncTaskPreservesCommittedCurrentSplitLayout(t *testing.T) {
+	segmentID := int64(1)
 	schema := &schemapb.CollectionSchema{
+		Name: "drop_field",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "fn_sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{FieldID: 101, Name: "dropped", DataType: schemapb.DataType_Int64},
 		},
 	}
-	groups := []storagecommon.ColumnGroup{
-		{GroupID: 0, Fields: []int64{0, 1, 100, 101, 102}, Columns: []int{0, 1, 2, 3, 4}},
-		{GroupID: 1, Fields: []int64{102}, Columns: []int{4}},
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/root/insert_log/3/2/1", 7),
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 10, ChildFields: []int64{100, 101}, Format: "parquet"},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	mc := metacache.NewMockMetaCache(t)
+	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(segment)
+	}).Return()
+
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	source := &fakeCommitGrowingFlushSource{
+		checkConfig: func(config *GrowingFlushConfig) {
+			require.Equal(t, []int64{100, 101}, config.AllowedFieldIDs)
+			require.Len(t, config.ColumnGroups, 1)
+			require.Equal(t, []int64{100, 101}, config.ColumnGroups[0].Fields)
+		},
 	}
 
-	// A non-materialized column (function output here) is dropped; a group
-	// left empty vanishes; the parallel Columns array is trimmed in lockstep
-	// so the writer pattern never names the dropped column.
-	task := NewGrowingSourceSyncTask().WithSchema(schema).
-		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{0, 1, 100, 101}})
-	trimmed, err := task.trimColumnGroupsToMaterialized(context.Background(), groups)
-	require.NoError(t, err)
-	require.Len(t, trimmed, 1)
-	require.Equal(t, []int64{0, 1, 100, 101}, trimmed[0].Fields)
-	require.Equal(t, []int{0, 1, 2, 3}, trimmed[0].Columns)
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithChannelName("ch").
+		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
+		WithBatchRows(10).
+		WithTargetOffset(10).
+		WithMetaCache(mc).
+		WithSchema(schema).
+		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
+		WithSource(source)
 
-	// A materialized function output is kept.
-	task = NewGrowingSourceSyncTask().WithSchema(schema).
-		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{0, 1, 100, 101, 102}})
-	trimmed, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
-	require.NoError(t, err)
-	require.Len(t, trimmed, 2)
-
-	// A non-materialized dropped ordinary field is trimmed the same way;
-	// system fields stay even though they live outside the insert record.
-	task = NewGrowingSourceSyncTask().WithSchema(schema).
-		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{100}})
-	trimmed, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
-	require.NoError(t, err)
-	require.Len(t, trimmed, 1)
-	require.Equal(t, []int64{0, 1, 100}, trimmed[0].Fields)
-	require.Equal(t, []int{0, 1, 2}, trimmed[0].Columns)
-
-	// An empty materialized report has no legal meaning: error out instead
-	// of writing a layout that may disagree with the data.
-	task = NewGrowingSourceSyncTask().WithSchema(schema).
-		WithSource(&fakeMaterializedGrowingFlushSource{})
-	_, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
-	require.Error(t, err)
-
-	// On a committed-flush ack retry the source is gone: the layout is
-	// trimmed to the committed binlogs, the persisted truth. The binlog map
-	// is keyed by column group id; flushed fields live in ChildFields.
-	task = NewGrowingSourceSyncTask().WithSchema(schema).
-		WithCommittedFlush("manifest", nil, map[int64]*datapb.FieldBinlog{
-			0: {ChildFields: []int64{0, 1, 100, 101}},
-		})
-	trimmed, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
-	require.NoError(t, err)
-	require.Len(t, trimmed, 1)
-	require.Equal(t, []int64{0, 1, 100, 101}, trimmed[0].Fields)
-	require.Equal(t, []int{0, 1, 2, 3}, trimmed[0].Columns)
+	require.NoError(t, task.Run(context.Background()))
+	require.Len(t, segment.GetCurrentSplit(), 1)
+	require.Equal(t, []int64{100, 101}, segment.GetCurrentSplit()[0].Fields)
 }
 
-func TestBuildGrowingSourceInsertBinlogsTrimsToFlushedFields(t *testing.T) {
+func TestResolveColumnGroupsErrorsWhenCurrentSplitFieldMissingFromSchema(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "drop_field",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/root/insert_log/3/2/1", 7),
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 10, ChildFields: []int64{100, 101}, Format: "parquet"},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	_, err := resolveColumnGroups(segment, schema, 1, nil)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
+	require.ErrorContains(t, err, "current split field 101 missing")
+}
+
+func TestGrowingSourceSyncTaskZeroRowFlushPreservesHistoricalSplit(t *testing.T) {
+	segmentID := int64(1)
+	latestSchema := &schemapb.CollectionSchema{
+		Name: "drop_field_latest",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		NumOfRows:      10,
+		State:          commonpb.SegmentState_Flushing,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/root/insert_log/3/2/1", 7),
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 10, ChildFields: []int64{100, 101}, Format: "parquet"},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	mc := metacache.NewMockMetaCache(t)
+	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(segment)
+	}).Return()
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithChannelName("ch").
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
+		WithBatchRows(0).
+		WithTargetOffset(10).
+		WithMetaCache(mc).
+		WithSchema(latestSchema).
+		WithFlush()
+
+	require.NoError(t, task.Run(context.Background()))
+	require.Equal(t, commonpb.SegmentState_Flushed, segment.State())
+	require.Len(t, segment.GetCurrentSplit(), 1)
+	require.Equal(t, []int64{100, 101}, segment.GetCurrentSplit()[0].Fields)
+}
+
+func TestGrowingSourceSyncTaskRejectsZeroRowSyncWithBatchRows(t *testing.T) {
+	segmentID := int64(1)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		NumOfRows:      10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/root/insert_log/3/2/1", 7),
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	mc := metacache.NewMockMetaCache(t)
+	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithChannelName("ch").
+		WithBatchRows(1).
+		WithTargetOffset(10).
+		WithMetaCache(mc)
+
+	err := task.Run(context.Background())
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
+	require.ErrorContains(t, err, "zero-row sync has non-zero batch rows")
+}
+
+func TestBuildGrowingSourceInsertBinlogsRejectsFlushedFieldMismatch(t *testing.T) {
 	groups := []storagecommon.ColumnGroup{
 		{GroupID: 0, Fields: []int64{0, 1, 100, 102}},
 		{GroupID: 5, Fields: []int64{102}},
@@ -967,10 +1029,11 @@ func TestBuildGrowingSourceInsertBinlogsTrimsToFlushedFields(t *testing.T) {
 		ColumnGroupMemorySizes: map[int64]int64{0: 10, 5: 0},
 		FieldNullCounts:        map[int64]int64{0: 0, 1: 0, 100: 0},
 	}
-	binlogs, err := buildGrowingSourceInsertBinlogs(groups, result, []int64{7, 8})
-	require.NoError(t, err)
-	require.Len(t, binlogs, 1)
-	require.Equal(t, []int64{0, 1, 100}, binlogs[0].GetChildFields())
+	_, err := buildGrowingSourceInsertBinlogs(groups, result, []int64{7, 8})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
+	require.ErrorContains(t, err, "flushed fields do not match planned layout")
+	require.ErrorContains(t, err, "missing=[102]")
 }
 
 func TestGrowingSourceFlushedSize(t *testing.T) {

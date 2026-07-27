@@ -445,10 +445,10 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
     cleanup();
 }
 
-// A regular field carried by a staler flush schema but absent from the
-// segment's own schema was dropped before the segment was created: the
-// flush must skip it instead of erroring or asserting.
-TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
+// A regular field carried by a staler flush schema but excluded by the
+// flush layout must be filtered by allowed_field_ids before materialization
+// checks. This models Go-side currentSplit/columnGroups protection.
+TEST_F(StorageTest, FlushGrowingSegmentAllowedFieldsFilterAbsentField) {
     std::string test_dir =
         "/tmp/flush_skip_dropped_field_" +
         std::to_string(
@@ -515,6 +515,10 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
     config.retry_limit = 3;
     config.schema_blob = schema_blob.data();
     config.schema_length = static_cast<int64_t>(schema_blob.size());
+    int64_t allowed_fields[] = {0, 1, 100};
+    config.allowed_field_ids = allowed_fields;
+    config.num_allowed_fields =
+        sizeof(allowed_fields) / sizeof(allowed_fields[0]);
 
     CFlushResult result{};
     auto status =
@@ -609,6 +613,131 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
     for (size_t i = 0; i < result.num_flushed_fields; ++i) {
         EXPECT_NE(result.flushed_field_ids[i], 101);
     }
+
+    FreeFlushResult(&result);
+    cleanup();
+}
+
+// Regression for #51344: an all-null nullable ORDINARY column (schema-legal,
+// valid_data all-false, vector chunk empty) must be flushed as an all-null
+// column, NOT skipped/errored as "real data loss". Its layout must match the
+// write-buffer SyncTask (which always emits the column), otherwise Loon rejects
+// the later append with a column-group-count mismatch and pins the checkpoint.
+// This is the dual of FlushGrowingSegmentSkipsEmptyFunctionOutputColumn: an
+// empty function-output column stays out, an empty nullable ordinary column
+// stays in.
+TEST_F(StorageTest, FlushGrowingSegmentFlushesAllNullNullableColumn) {
+    std::string test_dir =
+        "/tmp/flush_allnull_nullable_" +
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_dir);
+    auto cleanup = [&]() {
+        if (std::filesystem::exists(test_dir)) {
+            std::filesystem::remove_all(test_dir);
+        }
+    };
+
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_name("flush_allnull_nullable");
+    auto* row_id_field = schema_proto.add_fields();
+    row_id_field->set_fieldid(0);
+    row_id_field->set_name("RowID");
+    row_id_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto* ts_field = schema_proto.add_fields();
+    ts_field->set_fieldid(1);
+    ts_field->set_name("Timestamp");
+    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+    // Ordinary nullable vector field in the segment's own schema: the ctor
+    // allocates its column, and the consume path bulk-fills it all-null
+    // (valid_data all-false, vector chunk empty) because inserts never carry it.
+    auto* vec_field = schema_proto.add_fields();
+    vec_field->set_fieldid(101);
+    vec_field->set_name("nullable_vec");
+    vec_field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    vec_field->set_nullable(true);
+    auto* dim_param = vec_field->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value("4");
+
+    auto segment_schema = Schema::ParseFrom(schema_proto);
+    auto segment = CreateGrowingSegment(segment_schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+
+    // Insert carries no data for the nullable vector; the consume path
+    // bulk-fills field 101 all-null (allocated, valid_data all-false, empty).
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            pks.data(), nullptr, N, (*segment_schema)[FieldId(100)])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    std::string schema_blob = schema_proto.SerializeAsString();
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir + "/collection/partition/segment_an";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.schema_blob = schema_blob.data();
+    config.schema_length = static_cast<int64_t>(schema_blob.size());
+    // Exercise the column-group accounting loop (where the production
+    // column-group-count mismatch surfaces): one group over all fields,
+    // including the all-null nullable field 101.
+    int64_t column_group_ids[] = {0};
+    int64_t column_group_field_ids[] = {0, 1, 100, 101};
+    size_t column_group_field_counts[] = {4};
+    config.column_group_ids = column_group_ids;
+    config.column_group_field_ids = column_group_field_ids;
+    config.column_group_field_counts = column_group_field_counts;
+    config.num_column_groups = 1;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    // Must NOT error as "real data loss".
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+    // The all-null nullable column MUST be in the flushed layout (regression:
+    // previously dropped by the entry->empty() materialize predicate).
+    bool found_101 = false;
+    for (size_t i = 0; i < result.num_flushed_fields; ++i) {
+        if (result.flushed_field_ids[i] == 101) {
+            found_101 = true;
+        }
+    }
+    EXPECT_TRUE(found_101)
+        << "all-null nullable field 101 must be flushed as an all-null column";
+    // Column-group accounting ran (this loop is where the production mismatch
+    // surfaces).
+    EXPECT_EQ(result.num_column_groups, 1u);
+    // Field 101 is a genuine all-null column (every row null), not garbage:
+    // its per-field null count must equal the row count.
+    bool checked_101_null = false;
+    for (size_t i = 0; i < result.num_field_stats; ++i) {
+        if (result.field_ids[i] == 101) {
+            EXPECT_EQ(result.field_null_counts[i], N)
+                << "field 101 must be flushed all-null (null count == N)";
+            checked_101_null = true;
+        }
+    }
+    EXPECT_TRUE(checked_101_null)
+        << "field 101 null-count summary must be present";
 
     FreeFlushResult(&result);
     cleanup();
@@ -1069,4 +1198,186 @@ TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
     EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
     EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
     EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
+}
+
+// The monotonic materialized() marker (see VectorBase::materialized) must be set
+// on the first set_data_raw and survive clear(), else a chunk emptied by
+// interim-index removal or an in-flight first insert would drop a still-present
+// column from the flush layout (issue #51344).
+TEST_F(StorageTest, ConcurrentVectorMaterializedMarkerIsMonotonic) {
+    milvus::proto::schema::CollectionSchema proto;
+    auto* pk = proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    auto* f1 = proto.add_fields();
+    f1->set_fieldid(101);
+    f1->set_name("f1");
+    f1->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto schema = Schema::ParseFrom(proto);
+
+    constexpr int64_t size_per_chunk = 32;
+    InsertRecordGrowing ir(*schema, size_per_chunk);
+    auto* col = ir.get_data_base(FieldId(101));
+
+    // Fresh column (allocated by the ctor, never written): not materialized.
+    EXPECT_FALSE(ir.materialized(FieldId(101)));
+    EXPECT_TRUE(col->empty());
+
+    constexpr int N = 2;
+    std::vector<int64_t> vals = {1, 2};
+    auto arr =
+        CreateDataArrayFrom(vals.data(), nullptr, N, (*schema)[FieldId(101)]);
+    col->set_data_raw(0, N, arr.get(), (*schema)[FieldId(101)]);
+    EXPECT_TRUE(ir.materialized(FieldId(101)));  // set on first set_data_raw
+    EXPECT_FALSE(col->empty());
+
+    // interim-index raw-vector removal empties the chunk...
+    col->clear();
+    EXPECT_TRUE(col->empty());
+    // ...but the column is still materialized (monotonic).
+    EXPECT_TRUE(ir.materialized(FieldId(101)));
+}
+
+// Covers the materialized(field_id) accessor: allocated-but-unwritten fields
+// are excluded, while fields written before runtime schema changes remain
+// materialized in the insert record.
+TEST_F(StorageTest, InsertRecordMaterializedTracksWrittenFields) {
+    auto make_proto = []() {
+        milvus::proto::schema::CollectionSchema p;
+        auto add = [&](int64_t id, const char* name, bool pk) {
+            auto* f = p.add_fields();
+            f->set_fieldid(id);
+            f->set_name(name);
+            f->set_data_type(milvus::proto::schema::DataType::Int64);
+            f->set_is_primary_key(pk);
+        };
+        add(100, "pk", true);
+        add(101, "f1", false);
+        add(102, "f2", false);
+        return p;
+    };
+    auto schema = Schema::ParseFrom(make_proto());
+    constexpr int64_t size_per_chunk = 32;
+    InsertRecordGrowing ir(*schema, size_per_chunk);
+
+    // ctor allocates every column but marks none.
+    EXPECT_FALSE(ir.materialized(FieldId(101)));
+
+    // Materialize pk(100) and f1(101); leave f2(102) allocated-but-unwritten.
+    constexpr int N = 2;
+    std::vector<int64_t> v100 = {1, 2};
+    std::vector<int64_t> v101 = {3, 4};
+    auto a100 =
+        CreateDataArrayFrom(v100.data(), nullptr, N, (*schema)[FieldId(100)]);
+    auto a101 =
+        CreateDataArrayFrom(v101.data(), nullptr, N, (*schema)[FieldId(101)]);
+    ir.get_data_base(FieldId(100))
+        ->set_data_raw(0, N, a100.get(), (*schema)[FieldId(100)]);
+    ir.get_data_base(FieldId(101))
+        ->set_data_raw(0, N, a101.get(), (*schema)[FieldId(101)]);
+
+    EXPECT_TRUE(ir.materialized(FieldId(100)));
+    EXPECT_TRUE(ir.materialized(FieldId(101)));
+    EXPECT_FALSE(ir.materialized(FieldId(102)));   // allocated, never written
+    EXPECT_FALSE(ir.materialized(FieldId(9999)));  // absent from data_
+}
+
+TEST_F(StorageTest, FlushUsesTaskSchemaForDroppedFieldAfterReopen) {
+    std::string test_dir =
+        "/tmp/flush_dropped_materialized_field_" +
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_dir);
+    auto cleanup = [&]() {
+        if (std::filesystem::exists(test_dir)) {
+            std::filesystem::remove_all(test_dir);
+        }
+    };
+
+    milvus::proto::schema::CollectionSchema full_proto;
+    full_proto.set_name("drop_field_flush");
+    full_proto.set_schema_version(1);
+    auto add_int64 = [&](int64_t id, const char* name, bool pk) {
+        auto* f = full_proto.add_fields();
+        f->set_fieldid(id);
+        f->set_name(name);
+        f->set_data_type(milvus::proto::schema::DataType::Int64);
+        f->set_is_primary_key(pk);
+    };
+    add_int64(0, "RowID", false);
+    add_int64(1, "Timestamp", false);
+    add_int64(100, "pk", true);
+    add_int64(101, "dropped", false);
+
+    auto full_schema = Schema::ParseFrom(full_proto);
+    auto segment = CreateGrowingSegment(full_schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    std::vector<int64_t> dropped_values = {200, 201, 202};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            pks.data(), nullptr, N, (*full_schema)[FieldId(100)])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            dropped_values.data(), nullptr, N, (*full_schema)[FieldId(101)])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    auto reduced_proto = full_proto;
+    reduced_proto.set_schema_version(2);
+    reduced_proto.clear_fields();
+    for (const auto& field : full_proto.fields()) {
+        if (field.fieldid() != 101) {
+            *reduced_proto.add_fields() = field;
+        }
+    }
+    auto reduced_schema = Schema::ParseFrom(reduced_proto);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    ASSERT_TRUE(growing->get_schema().has_field(FieldId(101)));
+    growing->Reopen(reduced_schema);
+    ASSERT_FALSE(growing->get_schema().has_field(FieldId(101)));
+
+    std::string schema_blob = full_proto.SerializeAsString();
+    CFlushConfig config{};
+    std::string segment_path = test_dir + "/collection/partition/segment";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.schema_blob = schema_blob.data();
+    config.schema_length = static_cast<int64_t>(schema_blob.size());
+    int64_t column_group_ids[] = {0};
+    int64_t column_group_field_ids[] = {100, 101};
+    size_t column_group_field_counts[] = {2};
+    config.column_group_ids = column_group_ids;
+    config.column_group_field_ids = column_group_field_ids;
+    config.column_group_field_counts = column_group_field_counts;
+    config.num_column_groups = 1;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    bool flushed_101 = false;
+    for (size_t i = 0; i < result.num_flushed_fields; ++i) {
+        if (result.flushed_field_ids[i] == 101) {
+            flushed_101 = true;
+        }
+    }
+    EXPECT_TRUE(flushed_101)
+        << "flush schema/currentSplit should keep the dropped physical column";
+    FreeFlushResult(&result);
+    cleanup();
 }

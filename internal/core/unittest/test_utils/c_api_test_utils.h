@@ -18,6 +18,7 @@
 
 #include <boost/format.hpp>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <unordered_set>
 
@@ -73,6 +74,15 @@ AppendFieldInfoForTest(CLoadIndexInfo c_load_index_info,
         status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
+    }
+}
+
+inline void
+FreeStatus(CStatus* status) {
+    if (status != nullptr && status->error_msg != nullptr &&
+        status->error_msg[0] != '\0') {
+        free(const_cast<char*>(status->error_msg));
+        status->error_msg = nullptr;
     }
 }
 

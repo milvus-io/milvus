@@ -1442,40 +1442,6 @@ func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
 	return stats
 }
 
-// MaterializedFieldIDs returns the field ids with materialized columns in the
-// growing segment's insert record. The flush layout must be trimmed to this
-// set; a non-materialized column is legally absent (a dropped field or a
-// function output backfilled by bump-schema compaction).
-func (s *LocalSegment) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
-	if s.Type() != SegmentTypeGrowing {
-		return nil, merr.WrapErrServiceInternalMsg("unexpected segmentType for MaterializedFieldIDs, segmentType = %s", s.segmentType.String())
-	}
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	var cIDs *C.int64_t
-	var cCount C.int64_t
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.GetGrowingSegmentMaterializedFieldIDs(s.ptr, &cIDs, &cCount)
-		return nil, nil
-	}).Await()
-	if err := HandleCStatus(ctx, &status, "GetGrowingSegmentMaterializedFieldIDs"); err != nil {
-		return nil, err
-	}
-	if cIDs == nil || cCount == 0 {
-		return nil, nil
-	}
-	defer C.free(unsafe.Pointer(cIDs))
-	ids := make([]int64, 0, int(cCount))
-	for _, id := range unsafe.Slice(cIDs, int(cCount)) {
-		ids = append(ids, int64(id))
-	}
-	return ids, nil
-}
-
 func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
 	if s.Type() != SegmentTypeGrowing {
 		return nil, merr.WrapErrServiceInternalMsg("unexpected segmentType for PrimaryKeys, segmentType = %s", s.segmentType.String())

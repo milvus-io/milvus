@@ -114,6 +114,7 @@ type growingSourceProgress struct {
 	segmentID           int64
 	targetOffset        int64
 	syncingOffset       int64
+	schemaTimestamp     uint64
 	syncing             bool
 	pendingFlush        bool
 	pendingCommitted    *growingSourcePendingCommittedFlush
@@ -201,7 +202,8 @@ func isGrowingSourceLayoutMismatch(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "Column count mismatch") ||
-		strings.Contains(msg, "Column group size mismatch")
+		strings.Contains(msg, "Column group size mismatch") ||
+		strings.Contains(msg, "missing from sync schema")
 }
 
 func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
@@ -820,11 +822,18 @@ func (wb *writeBufferBase) recordGrowingSourceProgress(inData *InsertData, start
 	}
 	progress, ok := wb.growingSourceProgress[inData.segmentID]
 	if !ok {
+		schemaTimestamp := uint64(0)
+		if startPos != nil {
+			schemaTimestamp = startPos.GetTimestamp()
+		}
 		progress = &growingSourceProgress{
-			segmentID:    inData.segmentID,
-			targetOffset: targetOffset - inData.rowNum,
+			segmentID:       inData.segmentID,
+			targetOffset:    targetOffset - inData.rowNum,
+			schemaTimestamp: schemaTimestamp,
 		}
 		wb.growingSourceProgress[inData.segmentID] = progress
+	} else if progress.schemaTimestamp == 0 && startPos != nil {
+		progress.schemaTimestamp = startPos.GetTimestamp()
 	}
 	progress.targetOffset += inData.rowNum
 	progress.batches = append(progress.batches, growingSourceProgressBatch{
@@ -1383,7 +1392,11 @@ func (wb *writeBufferBase) resolveNewGrowingSegmentStorageVersion(info CreateGro
 		}
 		inferred := storage.StorageV2
 		reason := "default non-streaming storage version"
-		if typeutil.HasTextField(wb.metaCache.GetSchema(0)) {
+		schemaTimestamp := uint64(0)
+		if info.StartPos != nil {
+			schemaTimestamp = info.StartPos.GetTimestamp()
+		}
+		if typeutil.HasTextField(wb.metaCache.GetSchema(schemaTimestamp)) {
 			inferred = storage.StorageV3
 			reason = "TEXT field requires StorageV3"
 		} else if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
@@ -1519,10 +1532,13 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 	if checkpoint == nil {
 		checkpoint = wb.checkpoint
 	}
-	schemaTimestamp := uint64(0)
+	schemaTimestamp := progress.schemaTimestamp
 	if startPos != nil {
 		schemaTimestamp = startPos.GetTimestamp()
+	} else if schemaTimestamp == 0 && segmentInfo.StartPosition() != nil {
+		schemaTimestamp = segmentInfo.StartPosition().GetTimestamp()
 	}
+	schema := wb.metaCache.GetSchema(schemaTimestamp)
 	var source syncmgr.GrowingFlushSource
 	if pendingCommitted == nil {
 		var state syncmgr.GrowingSourceState
@@ -1562,7 +1578,7 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithLevel(segmentInfo.Level()).
 			WithMetaCache(wb.metaCache).
 			WithMetaWriter(wb.metaWriter).
-			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
+			WithSchema(schema).
 			WithAllocator(wb.allocator).
 			WithStorageConfig(packed.CreateStorageConfig()).
 			WithFailureCallback(wb.errHandler).
