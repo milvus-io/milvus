@@ -30,12 +30,40 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 header="${MILVUS_COMMON_HEADER:-}"
 
+find_header_in_cache() {
+  # Resolve the header from THIS ref's binary package folder (not the recipe
+  # folder, and never another cached version): list the ref's package ids,
+  # then ask for that package's cache path.
+  local ref="$1" pid pkg_dir
+  pid="$(conan list "$ref:*" 2>/dev/null | grep -oE '\b[a-f0-9]{40}\b' | head -1 || true)"
+  [[ -n "$pid" ]] || return 0
+  pkg_dir="$(conan cache path "$ref:$pid" 2>/dev/null || true)"
+  [[ -n "$pkg_dir" ]] || return 0
+  find "$pkg_dir" -path '*/common/EasyAssert.h' 2>/dev/null | head -1 || true
+}
+
 if [[ -z "$header" ]]; then
   ref="$(grep -oE 'milvus-common/[0-9][^"#]*' "$ROOT/internal/core/conanfile.py" | head -1 || true)"
   if [[ -n "$ref" ]]; then
     base="$(conan cache path "$ref" 2>/dev/null || true)"
     if [[ -n "$base" ]]; then
       header="$(find "$base" -path '*/common/EasyAssert.h' 2>/dev/null | head -1 || true)"
+    fi
+    if [[ -z "$header" || ! -f "$header" ]]; then
+      header="$(find_header_in_cache "$ref")"
+    fi
+    # Cold conan cache (e.g. the CI code-checker job right after a pin bump,
+    # when the conanfile-hash cache key misses): fetch the pinned package from
+    # the configured remotes so the drift gate can still resolve the header.
+    if [[ -z "$header" || ! -f "$header" ]]; then
+      while read -r remote_name; do
+        [[ -n "$remote_name" ]] || continue
+        echo "segcoregen: conan cache miss for $ref, trying remote $remote_name ..." >&2
+        if conan download "$ref" -r "$remote_name" >/dev/null 2>&1; then
+          header="$(find_header_in_cache "$ref")"
+          [[ -n "$header" && -f "$header" ]] && break
+        fi
+      done < <(conan remote list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p')
     fi
   fi
 fi
