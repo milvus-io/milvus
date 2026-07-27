@@ -151,6 +151,56 @@ func (s *KeyLockDispatcherSuite) TestCallbackPropagation() {
 	s.True(callbackCalled.Load())
 }
 
+// TestPanicStillCompletesAndDrains verifies that a task/callback panic cannot
+// bypass dispatcher cleanup. The writebuffer failure handler may panic, but the
+// dispatcher must still complete the future, release capacity, and drain the
+// next task for the same key.
+func (s *KeyLockDispatcherSuite) TestPanicStillCompletesAndDrains() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := newKeyLockDispatcher[int64](1)
+
+	callbackCalled := atomic.NewBool(false)
+	recoveryCallbackCalled := atomic.NewBool(false)
+	panicTask := NewMockTask(s.T())
+	panicTask.EXPECT().Run(ctx).Run(func(_ context.Context) {
+		panic("mock task panic")
+	}).Return(nil)
+
+	nextRan := atomic.NewBool(false)
+	nextTask := NewMockTask(s.T())
+	nextTask.EXPECT().Run(ctx).Run(func(_ context.Context) {
+		nextRan.Store(true)
+	}).Return(nil)
+
+	f1 := d.Submit(ctx, 1, panicTask, func(err error) error {
+		callbackCalled.Store(err != nil)
+		panic("mock callback panic")
+	}, func(err error) error {
+		recoveryCallbackCalled.Store(err != nil)
+		return err
+	})
+	f2 := d.Submit(ctx, 1, nextTask)
+
+	select {
+	case <-f1.Inner():
+	case <-time.After(time.Second):
+		s.FailNow("panicking task future must complete")
+	}
+	s.Error(f1.Err())
+	s.True(callbackCalled.Load(), "callbacks must observe the panic error")
+	s.True(recoveryCallbackCalled.Load(), "later callbacks must run after a callback panic")
+
+	select {
+	case <-f2.Inner():
+	case <-time.After(time.Second):
+		s.FailNow("queued task for the same key must drain after panic cleanup")
+	}
+	s.NoError(f2.Err())
+	s.True(nextRan.Load())
+	s.Eventually(func() bool { return d.Pending() == 0 }, time.Second, 10*time.Millisecond)
+}
+
 // TestMixedKeysConcurrency verifies a realistic scenario: multiple segments
 // syncing concurrently while same-segment syncs remain serial.
 func (s *KeyLockDispatcherSuite) TestMixedKeysConcurrency() {

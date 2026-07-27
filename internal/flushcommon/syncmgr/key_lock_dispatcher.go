@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -170,18 +171,21 @@ func (d *keyLockDispatcher[K]) dispatchLocked(key K, pt *pendingTask) {
 	// By spawning a goroutine, the current worker function can return and
 	// release its slot, allowing the goroutine's Submit to proceed.
 	go func() {
-		f := d.workerPool.Submit(func() (struct{}, error) {
+		f := d.workerPool.Submit(func() (ret struct{}, err error) {
 			nodeID := paramtable.GetStringNodeID()
 			metrics.WALFlusherSyncDispatcherQueueDuration.WithLabelValues(nodeID).Observe(time.Since(pt.enqueueAt).Seconds())
 
 			startTime := time.Now()
-			err := pt.task.Run(pt.ctx)
+			defer func() {
+				metrics.WALFlusherSyncDispatcherExecuteDuration.WithLabelValues(nodeID).Observe(time.Since(startTime).Seconds())
+				onComplete(err)
+			}()
+
+			err = runTaskSafely(pt.ctx, pt.task)
 			for _, cb := range pt.callbacks {
-				err = cb(err)
+				err = runTaskCallbackSafely(cb, err)
 			}
-			metrics.WALFlusherSyncDispatcherExecuteDuration.WithLabelValues(nodeID).Observe(time.Since(startTime).Seconds())
-			onComplete(err)
-			return struct{}{}, err
+			return ret, err
 		})
 
 		// Detect pool rejection (e.g., pool closed during shutdown).
@@ -196,6 +200,28 @@ func (d *keyLockDispatcher[K]) dispatchLocked(key K, pt *pendingTask) {
 		default:
 		}
 	}()
+}
+
+func runTaskSafely(ctx context.Context, task Task) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = merr.WrapErrServiceInternalMsg("sync task panicked: %v", r)
+		}
+	}()
+	return task.Run(ctx)
+}
+
+func runTaskCallbackSafely(callback func(error) error, err error) (result error) {
+	result = err
+	if callback == nil {
+		return result
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			result = merr.WrapErrServiceInternalMsg("sync task callback panicked: %v", r)
+		}
+	}()
+	return callback(err)
 }
 
 // Close drains all remaining queued tasks across all keys, notifying each
