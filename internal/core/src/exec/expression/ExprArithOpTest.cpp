@@ -1090,6 +1090,21 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                  auto val = json.template at<int64_t>(pointer).value();
                  return (~int64_t(val)) < 0;
              }},
+            // The NotEqual branch dispatches shifts through its own case, so
+            // cover it explicitly: ~ is rewritten to (x ^ -1) and lands on the
+            // BitXor case instead.
+            {R"((json["int"] << 1) != 2)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) << 1) != 2;
+             }},
+            {R"((json["int"] >> 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 1) != 0;
+             }},
             // Test cases for BinaryArithOpEvalRangeExpr GT of various data types
             {R"(json["int"] + 1 > 2)",
              [](const milvus::Json& json) {
