@@ -617,16 +617,6 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			return nil, err
 		}
 		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
-			basePath, _, err := packed.UnmarshalManifestPath(resultSegment.GetManifest())
-			if err != nil {
-				return nil, err
-			}
-			for _, stats := range textStatsLogs {
-				prefix := fmt.Sprintf("%s/_stats/text_index.%d", basePath, stats.GetFieldID())
-				for i, f := range stats.GetFiles() {
-					stats.Files[i] = prefix + "/" + f
-				}
-			}
 			newManifest, err := packed.AddStatsToManifest(resultSegment.GetManifest(), t.compactionParams.StorageConfig, packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion()))
 			if err != nil {
 				return nil, err
