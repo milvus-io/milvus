@@ -17,6 +17,8 @@
 package metrics
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -56,87 +58,6 @@ var (
 			Name:      "op_count",
 			Help:      "count of persistent data operation",
 		}, []string{persistentDataOpType, statusLabelName})
-
-	// Filesystem metrics (default filesystem only) - common across all nodes
-	FilesystemReadCount = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_read_count",
-			Help:      "number of filesystem read operations",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemWriteCount = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_write_count",
-			Help:      "number of filesystem write operations",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemReadBytes = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_read_bytes",
-			Help:      "total bytes read from filesystem",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemWriteBytes = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_write_bytes",
-			Help:      "total bytes written to filesystem",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemGetFileInfoCount = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_get_file_info_count",
-			Help:      "number of get file info operations",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemFailedCount = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_failed_count",
-			Help:      "number of failed filesystem operations",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemMultiPartUploadCreated = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_multi_part_upload_created",
-			Help:      "number of multi-part uploads created",
-		}, []string{
-			filesystemKeyLabelName,
-		})
-
-	FilesystemMultiPartUploadFinished = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: "storage",
-			Name:      "filesystem_multi_part_upload_finished",
-			Help:      "number of multi-part uploads finished",
-		}, []string{
-			filesystemKeyLabelName,
-		})
 )
 
 // RegisterStorageMetrics registers storage metrics
@@ -145,29 +66,124 @@ func RegisterStorageMetrics(registry *prometheus.Registry) {
 	registry.MustRegister(PersistentDataRequestLatency)
 	registry.MustRegister(PersistentDataOpCounter)
 
-	// filesystem metrics
-	registry.MustRegister(FilesystemReadCount)
-	registry.MustRegister(FilesystemWriteCount)
-	registry.MustRegister(FilesystemReadBytes)
-	registry.MustRegister(FilesystemWriteBytes)
-	registry.MustRegister(FilesystemGetFileInfoCount)
-	registry.MustRegister(FilesystemFailedCount)
-	registry.MustRegister(FilesystemMultiPartUploadCreated)
-	registry.MustRegister(FilesystemMultiPartUploadFinished)
+	registry.MustRegister(filesystemCollector)
 }
 
-// PublishFilesystemMetrics publishes filesystem metrics (common across all nodes)
-func PublishFilesystemMetrics(fs string, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished int64) {
-	labels := prometheus.Labels{
-		filesystemKeyLabelName: fs,
-	}
+// FilesystemStats is one filesystem's cumulative counters as reported by the
+// storage layer. Every field is monotonic for the lifetime of the process, so
+// they are exported as counters. Counts are of real object-storage requests
+// (S3 GetObject/PutObject and their local-filesystem equivalents), not of
+// higher-level chunk or column reads -- one logical read may coalesce into
+// fewer requests, which is exactly what this is meant to make visible.
+type FilesystemStats struct {
+	Key                     string
+	ReadCount               int64
+	WriteCount              int64
+	ReadBytes               int64
+	WriteBytes              int64
+	GetFileInfoCount        int64
+	FailedCount             int64
+	MultiPartUploadCreated  int64
+	MultiPartUploadFinished int64
+}
 
-	FilesystemReadCount.With(labels).Set(float64(readCount))
-	FilesystemWriteCount.With(labels).Set(float64(writeCount))
-	FilesystemReadBytes.With(labels).Set(float64(readBytes))
-	FilesystemWriteBytes.With(labels).Set(float64(writeBytes))
-	FilesystemGetFileInfoCount.With(labels).Set(float64(getFileInfoCount))
-	FilesystemFailedCount.With(labels).Set(float64(failedCount))
-	FilesystemMultiPartUploadCreated.With(labels).Set(float64(multiPartUploadCreated))
-	FilesystemMultiPartUploadFinished.With(labels).Set(float64(multiPartUploadFinished))
+var (
+	filesystemLabels = []string{filesystemKeyLabelName}
+
+	filesystemReadCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_read_count"),
+		"number of object-storage read requests issued by the storage layer",
+		filesystemLabels, nil)
+	filesystemWriteCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_write_count"),
+		"number of object-storage write requests issued by the storage layer",
+		filesystemLabels, nil)
+	filesystemReadBytesDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_read_bytes"),
+		"total bytes read from the storage layer",
+		filesystemLabels, nil)
+	filesystemWriteBytesDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_write_bytes"),
+		"total bytes written to the storage layer",
+		filesystemLabels, nil)
+	filesystemGetFileInfoCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_get_file_info_count"),
+		"number of get file info operations",
+		filesystemLabels, nil)
+	filesystemFailedCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_failed_count"),
+		"number of failed storage layer operations",
+		filesystemLabels, nil)
+	filesystemMultiPartUploadCreatedDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_multi_part_upload_created"),
+		"number of multi-part uploads created",
+		filesystemLabels, nil)
+	filesystemMultiPartUploadFinishedDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, "storage", "filesystem_multi_part_upload_finished"),
+		"number of multi-part uploads finished",
+		filesystemLabels, nil)
+
+	filesystemCollector = &filesystemMetricsCollector{}
+
+	filesystemStatsMu sync.RWMutex
+	filesystemStatsFn func() []FilesystemStats
+)
+
+// SetFilesystemStatsFn installs the callback the collector uses to read the
+// storage layer's counters. It lives behind a callback because pkg/ is its own
+// module and cannot import the cgo storage package. Safe to call more than
+// once; passing nil disables collection.
+func SetFilesystemStatsFn(fn func() []FilesystemStats) {
+	filesystemStatsMu.Lock()
+	defer filesystemStatsMu.Unlock()
+	filesystemStatsFn = fn
+}
+
+// filesystemMetricsCollector exports the storage layer's counters using the
+// pull model: the values are read at scrape time rather than pushed on some
+// unrelated event. The push version only ran after a LoadSegments RPC, which
+// froze every series at whatever the totals were when the last load finished
+// and left roles that never load segments with no series at all.
+type filesystemMetricsCollector struct{}
+
+func (c *filesystemMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- filesystemReadCountDesc
+	ch <- filesystemWriteCountDesc
+	ch <- filesystemReadBytesDesc
+	ch <- filesystemWriteBytesDesc
+	ch <- filesystemGetFileInfoCountDesc
+	ch <- filesystemFailedCountDesc
+	ch <- filesystemMultiPartUploadCreatedDesc
+	ch <- filesystemMultiPartUploadFinishedDesc
+}
+
+func (c *filesystemMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	for _, s := range collectFilesystemStats() {
+		ch <- prometheus.MustNewConstMetric(filesystemReadCountDesc, prometheus.CounterValue, float64(s.ReadCount), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemWriteCountDesc, prometheus.CounterValue, float64(s.WriteCount), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemReadBytesDesc, prometheus.CounterValue, float64(s.ReadBytes), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemWriteBytesDesc, prometheus.CounterValue, float64(s.WriteBytes), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemGetFileInfoCountDesc, prometheus.CounterValue, float64(s.GetFileInfoCount), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemFailedCountDesc, prometheus.CounterValue, float64(s.FailedCount), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemMultiPartUploadCreatedDesc, prometheus.CounterValue, float64(s.MultiPartUploadCreated), s.Key)
+		ch <- prometheus.MustNewConstMetric(filesystemMultiPartUploadFinishedDesc, prometheus.CounterValue, float64(s.MultiPartUploadFinished), s.Key)
+	}
+}
+
+// collectFilesystemStats calls the installed callback, which crosses cgo into
+// the storage layer. A failure or panic there must degrade to "no series this
+// scrape" rather than take down the whole /metrics endpoint.
+func collectFilesystemStats() (stats []FilesystemStats) {
+	filesystemStatsMu.RLock()
+	fn := filesystemStatsFn
+	filesystemStatsMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			stats = nil
+		}
+	}()
+	return fn()
 }

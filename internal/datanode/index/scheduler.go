@@ -288,11 +288,9 @@ func (sched *TaskScheduler) processTask(t Task) {
 		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()))
 	}
 
-	// Publish filesystem metrics after index task completion
-	if indexTask != nil {
-		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
-			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
-		}
+	// Make this backend visible to the filesystem metrics scrape.
+	if indexTask != nil && indexTask.req != nil {
+		storagev2.RegisterFilesystemConfig(indexTask.req.GetStorageConfig())
 	}
 }
 

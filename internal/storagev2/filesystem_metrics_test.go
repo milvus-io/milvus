@@ -19,6 +19,7 @@ package storagev2
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -202,8 +203,9 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
 }
 
-// TestPublishFilesystemMetricsWithLocalConfig tests PublishFilesystemMetricsWithConfig
-func TestPublishFilesystemMetricsWithLocalConfig(t *testing.T) {
+// A registered backend must show up in the scrape, with the same key the
+// metrics label uses.
+func TestRegisteredFilesystemIsCollected(t *testing.T) {
 	dir := t.TempDir()
 	pt := paramtable.Get()
 	pt.Save(pt.CommonCfg.StorageType.Key, "local")
@@ -221,65 +223,55 @@ func TestPublishFilesystemMetricsWithLocalConfig(t *testing.T) {
 		StorageType: "local",
 		RootPath:    dir,
 	}
-	metrics, err := PublishFilesystemMetricsWithConfig(localConfig)
-	if err != nil {
-		t.Skipf("Skipping CGO test: %v", err)
+	RegisterFilesystemConfig(localConfig)
+
+	stats := CollectFilesystemStats()
+	if len(stats) == 0 {
+		t.Skip("Skipping CGO test: storage layer not available")
 		return
 	}
-
-	require.NotNil(t, metrics, "Metrics should not be nil")
-	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.GetFileInfoCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.FailedCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadCreated, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
+	for _, s := range stats {
+		assert.NotEmpty(t, s.Key)
+		assert.GreaterOrEqual(t, s.ReadCount, int64(0))
+		assert.GreaterOrEqual(t, s.ReadBytes, int64(0))
+		assert.GreaterOrEqual(t, s.WriteCount, int64(0))
+		assert.GreaterOrEqual(t, s.WriteBytes, int64(0))
+	}
 }
 
-// TestPublishFilesystemMetricsWithConfig tests PublishFilesystemMetricsWithConfig function
-func TestPublishFilesystemMetricsWithConfig(t *testing.T) {
-	// Set up local storage for testing
-	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+// Registration is on hot paths (every sync/compaction task), so it must be
+// idempotent rather than growing the set on every call.
+func TestRegisterFilesystemConfigIsIdempotent(t *testing.T) {
+	cfg := &indexpb.StorageConfig{
+		Address:    "localhost:19530",
+		BucketName: "idempotent-bucket",
+	}
+	key := GetFilesystemKeyFromStorageConfig(cfg)
+	require.NotEmpty(t, key)
 
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	// Initialize local arrow filesystem
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
-	// Test with local storage config
-	localConfig := &indexpb.StorageConfig{
-		StorageType: "local",
-		RootPath:    dir,
+	for i := 0; i < 10; i++ {
+		RegisterFilesystemConfig(cfg)
 	}
 
-	metrics, err := PublishFilesystemMetricsWithConfig(localConfig)
-	assert.NoError(t, err)
-
-	// Verify metrics struct is not nil
-	require.NotNil(t, metrics, "Metrics should not be nil")
-
-	// Verify all 8 metrics fields are present
-	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.WriteBytes, int64(0))
-	assert.GreaterOrEqual(t, metrics.GetFileInfoCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.FailedCount, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadCreated, int64(0))
-	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
+	knownFilesystemsMu.RLock()
+	defer knownFilesystemsMu.RUnlock()
+	assert.Len(t, lo.Filter(lo.Keys(knownFilesystems), func(k string, _ int) bool {
+		return k == key
+	}), 1)
 }
 
-// TestPublishDefaultFilesystemMetrics tests PublishDefaultFilesystemMetrics function
-func TestPublishDefaultFilesystemMetrics(t *testing.T) {
+// A nil or keyless config must be ignored, not recorded under an empty key.
+func TestRegisterFilesystemConfigIgnoresUnusable(t *testing.T) {
+	RegisterFilesystemConfig(nil)
+
+	knownFilesystemsMu.RLock()
+	_, ok := knownFilesystems[""]
+	knownFilesystemsMu.RUnlock()
+	assert.False(t, ok)
+}
+
+// The default backend must be collected without explicit registration.
+func TestDefaultFilesystemIsCollected(t *testing.T) {
 	// Set up local storage for testing
 	dir := t.TempDir()
 	pt := paramtable.Get()
@@ -295,10 +287,10 @@ func TestPublishDefaultFilesystemMetrics(t *testing.T) {
 	err := initcore.InitLocalArrowFileSystem(dir)
 	require.NoError(t, err, "Failed to initialize local arrow filesystem")
 
-	// Test PublishDefaultFilesystemMetrics
-	metrics, err := PublishDefaultFilesystemMetrics()
-	assert.NoError(t, err)
-	assert.NotNil(t, metrics, "Metrics should not be nil")
+	// The default backend is registered lazily on first collection, so it must
+	// appear without anyone having called RegisterFilesystemConfig for it.
+	stats := CollectFilesystemStats()
+	assert.NotNil(t, stats)
 }
 
 // TestNilConfig tests error handling for nil config
@@ -306,8 +298,6 @@ func TestNilConfig(t *testing.T) {
 	_, err := GetFilesystemMetricsWithConfig(nil)
 	assert.Error(t, err)
 
-	_, err = PublishFilesystemMetricsWithConfig(nil)
-	assert.Error(t, err)
 }
 
 // TestGetFilesystemKeyFromStorageConfigEdgeCases tests edge cases for key generation

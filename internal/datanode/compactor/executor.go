@@ -158,11 +158,8 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 
 		task.compactor.Complete()
 
-		// Publish filesystem metrics after compaction task completion
-		storageConfig := task.compactor.GetStorageConfig()
-		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
-			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", mlog.Err(err))
-		}
+		// Make this backend visible to the filesystem metrics scrape.
+		storagev2.RegisterFilesystemConfig(task.compactor.GetStorageConfig())
 		return
 	}
 

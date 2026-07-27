@@ -17,101 +17,77 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPublishFilesystemMetrics(t *testing.T) {
-	// Test values
-	fsName := "test-filesystem"
-	readCount := int64(100)
-	writeCount := int64(50)
-	readBytes := int64(1024000)
-	writeBytes := int64(512000)
-	getFileInfoCount := int64(200)
-	failedCount := int64(5)
-	multiPartUploadCreated := int64(10)
-	multiPartUploadFinished := int64(8)
+func TestFilesystemCollectorExportsCounters(t *testing.T) {
+	t.Cleanup(func() { SetFilesystemStatsFn(nil) })
 
-	// Call the function
-	PublishFilesystemMetrics(fsName, readCount, writeCount, readBytes, writeBytes,
-		getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished)
+	SetFilesystemStatsFn(func() []FilesystemStats {
+		return []FilesystemStats{{
+			Key:                     "localhost:9000/bucket-a",
+			ReadCount:               100,
+			WriteCount:              50,
+			ReadBytes:               1000,
+			WriteBytes:              500,
+			GetFileInfoCount:        10,
+			FailedCount:             1,
+			MultiPartUploadCreated:  5,
+			MultiPartUploadFinished: 3,
+		}}
+	})
 
-	// Verify each metric
-	labels := prometheus.Labels{filesystemKeyLabelName: fsName}
+	expected := `
+# HELP milvus_storage_filesystem_read_bytes total bytes read from the storage layer
+# TYPE milvus_storage_filesystem_read_bytes counter
+milvus_storage_filesystem_read_bytes{fs="localhost:9000/bucket-a"} 1000
+`
+	err := testutil.CollectAndCompare(filesystemCollector, strings.NewReader(expected),
+		"milvus_storage_filesystem_read_bytes")
+	assert.NoError(t, err)
 
-	// Check FilesystemReadCount
-	readCountMetric := FilesystemReadCount.With(labels)
-	assert.NotNil(t, readCountMetric)
-
-	// Check FilesystemWriteCount
-	writeCountMetric := FilesystemWriteCount.With(labels)
-	assert.NotNil(t, writeCountMetric)
-
-	// Check FilesystemReadBytes
-	readBytesMetric := FilesystemReadBytes.With(labels)
-	assert.NotNil(t, readBytesMetric)
-
-	// Check FilesystemWriteBytes
-	writeBytesMetric := FilesystemWriteBytes.With(labels)
-	assert.NotNil(t, writeBytesMetric)
-
-	// Check FilesystemGetFileInfoCount
-	getFileInfoMetric := FilesystemGetFileInfoCount.With(labels)
-	assert.NotNil(t, getFileInfoMetric)
-
-	// Check FilesystemFailedCount
-	failedMetric := FilesystemFailedCount.With(labels)
-	assert.NotNil(t, failedMetric)
-
-	// Check FilesystemMultiPartUploadCreated
-	multiPartCreatedMetric := FilesystemMultiPartUploadCreated.With(labels)
-	assert.NotNil(t, multiPartCreatedMetric)
-
-	// Check FilesystemMultiPartUploadFinished
-	multiPartFinishedMetric := FilesystemMultiPartUploadFinished.With(labels)
-	assert.NotNil(t, multiPartFinishedMetric)
+	// The values are cumulative process counters, so they must be exported as
+	// counters -- exporting them as gauges is what made rate() unusable before.
+	assert.Equal(t, 8, testutil.CollectAndCount(filesystemCollector))
 }
 
-func TestPublishFilesystemMetricsMultipleFilesystems(t *testing.T) {
-	// Test with multiple filesystem names to ensure labels work correctly
-	fs1 := "minio"
-	fs2 := "s3"
+func TestFilesystemCollectorMultipleFilesystems(t *testing.T) {
+	t.Cleanup(func() { SetFilesystemStatsFn(nil) })
 
-	// Publish metrics for first filesystem
-	PublishFilesystemMetrics(fs1, 100, 50, 1000, 500, 10, 1, 5, 3)
+	SetFilesystemStatsFn(func() []FilesystemStats {
+		return []FilesystemStats{
+			{Key: "fs-1", ReadBytes: 1000},
+			{Key: "fs-2", ReadBytes: 2000},
+		}
+	})
 
-	// Publish metrics for second filesystem
-	PublishFilesystemMetrics(fs2, 200, 100, 2000, 1000, 20, 2, 10, 6)
-
-	// Verify both filesystems have their own metric values
-	labels1 := prometheus.Labels{filesystemKeyLabelName: fs1}
-	labels2 := prometheus.Labels{filesystemKeyLabelName: fs2}
-
-	// Both should be non-nil and independently tracked
-	assert.NotNil(t, FilesystemReadCount.With(labels1))
-	assert.NotNil(t, FilesystemReadCount.With(labels2))
-	assert.NotNil(t, FilesystemWriteCount.With(labels1))
-	assert.NotNil(t, FilesystemWriteCount.With(labels2))
+	assert.Equal(t, 2, testutil.CollectAndCount(filesystemCollector,
+		"milvus_storage_filesystem_read_bytes"))
 }
 
-func TestPublishFilesystemMetricsZeroValues(t *testing.T) {
-	// Test with zero values to ensure no issues with edge cases
-	fsName := "empty-filesystem"
+// Without a provider installed there is nothing to report; the collector must
+// stay silent rather than emit zeros, which would read as "no traffic" instead
+// of "not measured".
+func TestFilesystemCollectorWithoutProvider(t *testing.T) {
+	SetFilesystemStatsFn(nil)
+	assert.Equal(t, 0, testutil.CollectAndCount(filesystemCollector))
+}
 
-	PublishFilesystemMetrics(fsName, 0, 0, 0, 0, 0, 0, 0, 0)
+// The provider crosses cgo into the storage layer. If it blows up, the scrape
+// must degrade to "no series" instead of taking down /metrics for everything
+// else on the endpoint.
+func TestFilesystemCollectorSurvivesProviderPanic(t *testing.T) {
+	t.Cleanup(func() { SetFilesystemStatsFn(nil) })
 
-	labels := prometheus.Labels{filesystemKeyLabelName: fsName}
+	SetFilesystemStatsFn(func() []FilesystemStats {
+		panic("storage layer exploded")
+	})
 
-	// All metrics should still be created with zero values
-	assert.NotNil(t, FilesystemReadCount.With(labels))
-	assert.NotNil(t, FilesystemWriteCount.With(labels))
-	assert.NotNil(t, FilesystemReadBytes.With(labels))
-	assert.NotNil(t, FilesystemWriteBytes.With(labels))
-	assert.NotNil(t, FilesystemGetFileInfoCount.With(labels))
-	assert.NotNil(t, FilesystemFailedCount.With(labels))
-	assert.NotNil(t, FilesystemMultiPartUploadCreated.With(labels))
-	assert.NotNil(t, FilesystemMultiPartUploadFinished.With(labels))
+	assert.NotPanics(t, func() {
+		assert.Equal(t, 0, testutil.CollectAndCount(filesystemCollector))
+	})
 }

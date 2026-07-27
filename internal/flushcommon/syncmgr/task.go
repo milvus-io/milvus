@@ -227,8 +227,9 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	}
 	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
 
-	// Publish filesystem metrics after sync task completion
-	storagev2.PublishFilesystemMetricsWithConfig(t.storageConfig)
+	// Make this backend visible to the filesystem metrics scrape. Registration
+	// is idempotent and does no cgo, so it is fine on the sync path.
+	storagev2.RegisterFilesystemConfig(t.storageConfig)
 
 	return nil
 }

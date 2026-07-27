@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -70,6 +71,9 @@ func init() {
 	metrics.RegisterMetaMetrics(Registry.GoRegistry)
 	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
+	// The storage layer's counters are read at scrape time; pkg/metrics is its
+	// own module and cannot import this cgo package, hence the callback.
+	metrics.SetFilesystemStatsFn(storagev2.CollectFilesystemStats)
 }
 
 // stopRocksmqIfUsed closes the RocksMQ if it is used.

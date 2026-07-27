@@ -29,6 +29,7 @@ import "C"
 import (
 	"context"
 	"strconv"
+	"sync"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -257,62 +258,109 @@ func GetFilesystemKeyFromStorageConfig(storageConfig *indexpb.StorageConfig) str
 	return address + "/" + bucketName
 }
 
-// PublishDefaultFilesystemMetrics retrieves and publishes metrics from the default filesystem.
-func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
+// defaultStorageConfig builds the storage config of the process-wide default
+// filesystem, which is the one every role reads and writes through.
+func defaultStorageConfig() *indexpb.StorageConfig {
 	params := paramtable.Get()
-	var storageConfig *indexpb.StorageConfig
-
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		storageConfig = &indexpb.StorageConfig{
+		return &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
 		}
-	} else {
-		storageConfig = &indexpb.StorageConfig{
-			Address:           params.MinioCfg.Address.GetValue(),
-			AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
-			SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
-			UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
-			SslCACert:         params.MinioCfg.SslCACert.GetValue(),
-			BucketName:        params.MinioCfg.BucketName.GetValue(),
-			RootPath:          params.MinioCfg.RootPath.GetValue(),
-			UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
-			IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
-			StorageType:       params.CommonCfg.StorageType.GetValue(),
-			Region:            params.MinioCfg.Region.GetValue(),
-			UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
-			CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
-			RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-			GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
-			SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
-			UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
-		}
 	}
-	return PublishFilesystemMetricsWithConfig(storageConfig)
+	return &indexpb.StorageConfig{
+		Address:           params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
+		BucketName:        params.MinioCfg.BucketName.GetValue(),
+		RootPath:          params.MinioCfg.RootPath.GetValue(),
+		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
+		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
+		StorageType:       params.CommonCfg.StorageType.GetValue(),
+		Region:            params.MinioCfg.Region.GetValue(),
+		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
+		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
+		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
+		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
+	}
 }
 
-// PublishFilesystemMetricsWithConfig retrieves and publishes filesystem metrics using storage config.
-func PublishFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
-	metricSnapshot, err := GetFilesystemMetricsWithConfig(storageConfig)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to get filesystem metrics with config", mlog.Err(err))
-		return nil, err
-	}
+// Filesystems are created lazily and the storage layer offers no way to
+// enumerate them, so we remember every config we have been told about and read
+// each one at scrape time. Keyed by address+bucket, so the set stays as small
+// as the number of distinct backends.
+var (
+	knownFilesystemsMu sync.RWMutex
+	knownFilesystems   = make(map[string]*indexpb.StorageConfig)
+)
 
-	fsKey := GetFilesystemKeyFromStorageConfig(storageConfig)
-	if fsKey == "" {
-		fsKey = "default"
+// RegisterFilesystemConfig records a storage config so its filesystem is
+// included in the metrics scrape. Callers that write through a non-default
+// backend (sync tasks carry their own config) should call this once the config
+// is known; it is cheap enough for a hot path -- a map lookup, no cgo.
+func RegisterFilesystemConfig(storageConfig *indexpb.StorageConfig) {
+	if storageConfig == nil {
+		return
 	}
-	metrics.PublishFilesystemMetrics(
-		fsKey,
-		metricSnapshot.ReadCount,
-		metricSnapshot.WriteCount,
-		metricSnapshot.ReadBytes,
-		metricSnapshot.WriteBytes,
-		metricSnapshot.GetFileInfoCount,
-		metricSnapshot.FailedCount,
-		metricSnapshot.MultiPartUploadCreated,
-		metricSnapshot.MultiPartUploadFinished,
-	)
-	return metricSnapshot, nil
+	key := GetFilesystemKeyFromStorageConfig(storageConfig)
+	if key == "" {
+		return
+	}
+	knownFilesystemsMu.RLock()
+	_, ok := knownFilesystems[key]
+	knownFilesystemsMu.RUnlock()
+	if ok {
+		return
+	}
+	knownFilesystemsMu.Lock()
+	defer knownFilesystemsMu.Unlock()
+	if _, ok := knownFilesystems[key]; !ok {
+		knownFilesystems[key] = storageConfig
+	}
+}
+
+// CollectFilesystemStats reads the cumulative counters of every filesystem we
+// know about. It is installed as metrics.SetFilesystemStatsFn and therefore
+// runs once per scrape, on the /metrics request path: it must stay cheap (a
+// FilesystemCache lookup plus a few relaxed atomic loads per filesystem) and
+// must never fail loudly. Before the storage layer is initialized the lookup
+// errors out, which is a normal startup state, so it degrades to "no series"
+// at debug level rather than warning on every scrape.
+func CollectFilesystemStats() []metrics.FilesystemStats {
+	// The default backend is always of interest, but paramtable may not be
+	// populated at init time, so it is registered on first scrape instead.
+	RegisterFilesystemConfig(defaultStorageConfig())
+
+	knownFilesystemsMu.RLock()
+	configs := make(map[string]*indexpb.StorageConfig, len(knownFilesystems))
+	for k, v := range knownFilesystems {
+		configs[k] = v
+	}
+	knownFilesystemsMu.RUnlock()
+
+	stats := make([]metrics.FilesystemStats, 0, len(configs))
+	for key, storageConfig := range configs {
+		snapshot, err := GetFilesystemMetricsWithConfig(storageConfig)
+		if err != nil {
+			mlog.Debug(context.TODO(), "filesystem metrics unavailable",
+				mlog.String("filesystem", key), mlog.Err(err))
+			continue
+		}
+		stats = append(stats, metrics.FilesystemStats{
+			Key:                     key,
+			ReadCount:               snapshot.ReadCount,
+			WriteCount:              snapshot.WriteCount,
+			ReadBytes:               snapshot.ReadBytes,
+			WriteBytes:              snapshot.WriteBytes,
+			GetFileInfoCount:        snapshot.GetFileInfoCount,
+			FailedCount:             snapshot.FailedCount,
+			MultiPartUploadCreated:  snapshot.MultiPartUploadCreated,
+			MultiPartUploadFinished: snapshot.MultiPartUploadFinished,
+		})
+	}
+	return stats
 }
