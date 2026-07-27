@@ -3669,7 +3669,7 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 	for i, cursor := range cursors {
 		// if cursor has run out of all results from one result and this result has more matched results
 		// in this case we have tell reduce to stop because better results may be retrieved in the following iteration
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (results[i].GetHasMoreResult()) {
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && results[i].GetHasMoreResult() {
 			drainResult = true
 			continue
 		}
@@ -3713,7 +3713,7 @@ func SelectMinPKWithTimestamp[T interface {
 		timestamps := results[i].GetTimestamps()
 		// if cursor has run out of all results from one result and this result has more matched results
 		// in this case we have tell reduce to stop because better results may be retrieved in the following iteration
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (results[i].GetHasMoreResult()) {
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && results[i].GetHasMoreResult() {
 			drainResult = true
 			continue
 		}

@@ -1396,7 +1396,7 @@ func (data *FloatVectorFieldData) AppendRows(dataRows interface{}, validDataRows
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", dataRows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
@@ -1460,7 +1460,7 @@ func (data *Int8VectorFieldData) AppendRows(dataRows interface{}, validDataRows 
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]int8", dataRows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
@@ -1619,7 +1619,7 @@ func (data *FloatVectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
@@ -1669,7 +1669,7 @@ func (data *Int8VectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]int8", rows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
@@ -2058,6 +2058,7 @@ func (data *DoubleFieldData) GetDataType() schemapb.DataType { return schemapb.D
 func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Timestamptz
 }
+
 func (data *DecimalFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Decimal
 }
