@@ -366,7 +366,7 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 	// Sync job state immediately (fail-fast)
 	job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
 	if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
-		updateErr = t.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), t.GetJobId(),
+		_, updateErr = t.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), t.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(reason))
 		if updateErr != nil {
@@ -785,7 +785,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 						mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 				}
 
-				updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+				_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 					UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 					UpdateCopyJobReason(err.Error()))
 				if updateErr != nil {
@@ -956,7 +956,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 					mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 			}
 
-			updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+			_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 				UpdateCopyJobReason(err.Error()))
 			if updateErr != nil {
@@ -1027,7 +1027,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 		}
 
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+		_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(err.Error()))
 		if updateErr != nil {
@@ -1093,7 +1093,7 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 		}
 
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+		_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(err.Error()))
 		if updateErr != nil {

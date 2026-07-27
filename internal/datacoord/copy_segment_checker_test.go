@@ -317,9 +317,11 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurr
 	// Concurrent failure path moves the cached job to Failed. The cached entry
 	// is replaced with a Failed clone; `staleJob` keeps its Pending state and
 	// plays the stale snapshot below.
-	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("task failed concurrently")))
+		UpdateCopyJobReason("task failed concurrently"))
+	s.NoError(err)
+	s.True(applied)
 
 	s.checker.checkPendingJob(staleJob)
 
@@ -861,9 +863,10 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Completed() {
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Update job to Completed via atomic meta method
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	s.NoError(err)
+	s.True(applied)
 
 	// Verify: Ref count is released
 }
@@ -887,9 +890,10 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Failed() {
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Update job to Failed via atomic meta method
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	s.NoError(err)
+	s.True(applied)
 
 	// Verify: Ref count is released
 }
@@ -913,9 +917,10 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Executing() {
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Update job to Executing (non-terminal state) via atomic meta method
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
 	s.NoError(err)
+	s.True(applied)
 
 	// Verify: Ref count is NOT released
 }
@@ -1127,6 +1132,68 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	// Verify: Ref count is released even on failure
 }
 
+// TestFinishJob_SkipsWhenJobAlreadyTerminal: finishJob acting on a stale
+// snapshot of a job that concurrently failed must not report completion — the
+// guarded transition is skipped and the Failed outcome is preserved.
+func (s *CopySegmentCheckerSuite) TestFinishJob_SkipsWhenJobAlreadyTerminal() {
+	// Only the AddJob write; the skipped Completed transition must not reach
+	// the catalog.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	currentJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+			Reason:       "task failed concurrently",
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), currentJob))
+
+	// finishJob still holds the pre-failure Executing snapshot.
+	staleJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.checker.finishJob(staleJob, 123)
+
+	saved := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, saved.GetState())
+	s.Equal("task failed concurrently", saved.GetReason())
+	s.Zero(saved.GetTotalRows())
+}
+
+// TestTryTimeoutJob_CatalogErrorKeepsState: a failed persist of the timeout
+// transition must leave the job state unchanged (retried next round) and must
+// not report a timeout that did not commit.
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_CatalogErrorKeepsState() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).
+		Return(errors.New("catalog down")).Once()
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			TimeoutTs:    CopyJobTimeoutTs(-time.Minute),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	saved := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, saved.GetState())
+	s.NotEqual("timeout", saved.GetReason())
+}
+
 // TestTryTimeoutJob_DoesNotOverwriteTerminalJob is the regression test for the
 // review nit on tryTimeoutJob: `job` is the snapshot captured before the checker
 // round began. In Start(), checkCopyingJob(job) runs first and may finish the
@@ -1152,9 +1219,11 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_DoesNotOverwriteTerminalJob(
 
 	// A concurrent path (finishJob in the same checker round) completes the job
 	// after the snapshot was taken.
-	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
-		UpdateCopyJobTotalRows(123)))
+		UpdateCopyJobTotalRows(123))
+	s.NoError(err)
+	s.True(applied)
 
 	// tryTimeoutJob still holds the stale Executing snapshot with an elapsed deadline.
 	s.checker.tryTimeoutJob(staleJob)

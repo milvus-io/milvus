@@ -982,16 +982,19 @@ func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 	}
 	copyMeta.jobs[jobID] = job
 
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	assert.NoError(t, err)
+	assert.True(t, applied)
 	assert.Equal(t, 1, unpinCalls, "UnpinSnapshot must be called exactly once on terminal transition")
 	assert.Equal(t, int64(42), unpinPinID, "Unpin must be called with job.PinId")
 
-	// Second terminal call: already terminal → must not Unpin again.
-	err = copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	// Second terminal call: already terminal → must not Unpin again, and the
+	// caller must be able to see that its transition was NOT applied.
+	applied, err = copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	assert.NoError(t, err)
+	assert.False(t, applied, "skipped transition must be distinguishable from an applied one")
 	assert.Equal(t, 1, unpinCalls, "Double terminal transition must not double-unpin")
 }
 
@@ -1030,9 +1033,10 @@ func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	}
 	copyMeta.jobs[jobID] = job
 
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	assert.NoError(t, err)
+	assert.True(t, applied, "transition applies even when no unpin is needed")
 	assert.False(t, unpinCalled, "UnpinSnapshot must not be called for legacy job (PinId=0)")
 }
 
@@ -1071,10 +1075,11 @@ func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 		tr: timerecord.NewTimeRecorder("test"),
 	}
 
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+	applied, err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 
 	assert.NoError(t, err, "unpin error must be swallowed — state transition already persisted")
+	assert.True(t, applied, "the transition itself was applied; only the unpin failed")
 	assert.Equal(t, 1, unpinCalls)
 	// State transition happened despite unpin failure.
 	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, copyMeta.jobs[jobID].GetState())
@@ -1083,9 +1088,10 @@ func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 // TestUpdateJobStateAndReleaseRef_NotFound verifies that updating a non-existent
 // job is a no-op and does not error.
 func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_NotFound() {
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 999,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 999,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	s.NoError(err)
+	s.False(applied)
 }
 
 // TestUpdateJobStateAndReleaseRef_CatalogError verifies that if the catalog save fails,
@@ -1108,9 +1114,10 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_CatalogError() {
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Update fails at catalog layer
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 600,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 600,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	s.Error(err)
+	s.False(applied)
 
 	// Job should still be in Executing state (catalog write failed, in-memory unchanged)
 	savedJob := s.copyMeta.GetJob(context.TODO(), 600)
@@ -1137,10 +1144,11 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_SkipsTerminalJob(
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
 
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 700,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 700,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 		UpdateCopyJobReason("timeout"))
 	s.NoError(err)
+	s.False(applied, "guarded update must report it was skipped")
 
 	saved := s.copyMeta.GetJob(context.TODO(), 700)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, saved.GetState())
@@ -1164,9 +1172,11 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_AppliesOnNonTermi
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
 
-	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 701,
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 701,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("timeout")))
+		UpdateCopyJobReason("timeout"))
+	s.NoError(err)
+	s.True(applied)
 
 	saved := s.copyMeta.GetJob(context.TODO(), 701)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, saved.GetState())

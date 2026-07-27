@@ -82,7 +82,7 @@ type CopySegmentMeta interface {
 	AddJob(ctx context.Context, job CopySegmentJob) error
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
-	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error)
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -506,6 +506,12 @@ func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
 // once the deadline has elapsed, would flip the just-Completed job to Failed.
 // The check and the mutate share m.mu, so the decision cannot go stale.
 //
+// Returns (true, nil) when the transition was applied, and (false, nil) when it
+// was skipped — the job is missing, or the terminal-state guard fired because a
+// concurrent path already committed a terminal outcome. Callers must gate any
+// outcome-specific side effect (timeout warning, completion metrics/logs) on the
+// applied flag: after a skipped update the caller's outcome did NOT happen.
+//
 // Locking strategy: the state-mutate section takes m.mu; the Unpin call (an etcd
 // roundtrip via snapshotMeta.SaveSnapshot) runs AFTER releasing m.mu to avoid
 // blocking all copy-segment job operations on an external write. Double-unpin is
@@ -514,24 +520,24 @@ func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
 // never reaches the Unpin call. Past the guard prevJob is therefore always
 // non-terminal and wasTerminal is always false; the `!wasTerminal` term in
 // shouldUnpin is kept only as a local invariant assertion.
-func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
+func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error) {
 	m.mu.Lock()
 	if current, ok := m.jobs[jobID]; ok && isTerminalCopyJobState(current.GetState()) {
 		currentState := current.GetState()
 		m.mu.Unlock()
 		mlog.Info(ctx, "copy segment job already in terminal state, skip state transition",
 			mlog.FieldJobID(jobID), mlog.String("currentState", currentState.String()))
-		return nil
+		return false, nil
 	}
 	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
 	if err != nil {
 		m.mu.Unlock()
-		return err
+		return false, err
 	}
 	if prevJob == nil {
 		m.mu.Unlock()
 		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found", mlog.FieldJobID(jobID))
-		return nil
+		return false, nil
 	}
 
 	previousState := prevJob.GetState()
@@ -546,7 +552,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 	m.mu.Unlock()
 
 	if !shouldUnpin {
-		return nil
+		return true, nil
 	}
 
 	unpinCollID, unpinName, remaining, unpinErr := m.snapshotMeta.UnpinSnapshot(ctx, pinID)
@@ -561,7 +567,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 			mlog.Int64("sourceCollectionID", sourceCollectionID),
 			mlog.String("snapshot", snapshotName),
 			mlog.Err(unpinErr))
-		return nil
+		return true, nil
 	}
 	if unpinName != "" {
 		setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
@@ -573,7 +579,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 		mlog.String("snapshot", snapshotName),
 		mlog.String("previousState", previousState.String()),
 		mlog.String("newState", newState.String()))
-	return nil
+	return true, nil
 }
 
 // RemoveJob deletes a job from both persistent storage and memory cache.

@@ -318,7 +318,7 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
 		log.Warn(c.ctx, "no id mappings to copy, mark job as completed")
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 			UpdateCopyJobReason("no segments to copy")); err != nil {
 			log.Error(c.ctx, "failed to update empty job state to Completed", mlog.Err(err))
@@ -487,7 +487,7 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		log.Warn(c.ctx, "copy segment job has failed tasks",
 			mlog.Int("failedTasks", failedTasks),
 			mlog.Int("totalTasks", totalTasks))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(fmt.Sprintf("%d/%d tasks failed", failedTasks, totalTasks))); err != nil {
 			log.Error(c.ctx, "failed to update job state to Failed", mlog.Err(err))
@@ -576,7 +576,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		log.Error(c.ctx, "finishJob: failing job due to segment flush failures",
 			mlog.Int("flushFailures", flushFailures),
 			mlog.Int("totalSegments", len(targetSegmentIDs)))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(reason)); err != nil {
 			log.Error(c.ctx, "failed to update job state to Failed after flush failures", mlog.Err(err))
@@ -586,12 +586,19 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 
 	// Step 4: Update job state to Completed
 	completeTs := uint64(time.Now().UnixNano())
-	err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+	applied, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 		UpdateCopyJobCompleteTs(completeTs),
 		UpdateCopyJobTotalRows(totalRows))
 	if err != nil {
 		log.Error(c.ctx, "failed to update job state to Completed", mlog.Err(err))
+		return
+	}
+	if !applied {
+		// A concurrent path already committed a terminal outcome (e.g. the job
+		// failed or timed out while segments were being flushed); this job did
+		// NOT complete, so don't report completion metrics/logs for it.
+		log.Info(c.ctx, "skip completing copy segment job: already in terminal state")
 		return
 	}
 
@@ -679,15 +686,23 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 		return
 	}
 
+	applied, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("timeout"))
+	if err != nil {
+		mlog.Error(c.ctx, "failed to update timed-out job state to Failed",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return
+	}
+	if !applied {
+		// The job reached a terminal state through another path in this same
+		// round (typically checkCopyingJob -> finishJob -> Completed); it did
+		// not time out, so don't warn that it did.
+		return
+	}
 	mlog.Warn(c.ctx, "copy segment job timeout",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.Time("timeoutTime", timeoutTime))
-	if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("timeout")); err != nil {
-		mlog.Error(c.ctx, "failed to update timed-out job state to Failed",
-			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
-	}
 }
 
 // checkGC performs garbage collection for completed/failed jobs.
