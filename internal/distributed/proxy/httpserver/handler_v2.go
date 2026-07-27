@@ -911,6 +911,7 @@ func (h *HandlersV2) addCollectionFunction(ctx context.Context, c *gin.Context, 
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: err.Error(),
 		})
+		return nil, err
 	}
 
 	req.FunctionSchema = fSchema
@@ -937,6 +938,7 @@ func (h *HandlersV2) alterCollectionFunction(ctx context.Context, c *gin.Context
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: err.Error(),
 		})
+		return nil, err
 	}
 
 	req.FunctionSchema = fSchema
