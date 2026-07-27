@@ -2620,7 +2620,6 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 		lifetime:                   lifetime.NewLifetime(lifetime.Working),
 		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager:              workerManager,
-		schemaBarrierTs:            100,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2631,7 +2630,8 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 	err := sd.UpdateSchema(context.Background(), staleSchema, 200)
 	require.NoError(t, err)
 
-	assert.Equal(t, uint64(100), sd.schemaBarrierTs)
+	_, delegatorSchemaVersion := sd.delegatorSchemaSnapshot()
+	assert.Equal(t, uint64(2), delegatorSchemaVersion)
 	assert.Equal(t, uint64(2), sd.collection.SchemaVersion())
 }
 
