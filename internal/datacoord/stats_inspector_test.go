@@ -375,26 +375,45 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 	})
 }
 
-// A segment whose task is already in meta must be filtered out before
-// SubmitStatsTask, so a repeated tick costs no ID allocation and no meta write.
+// A segment whose task is already in meta must be dropped by the segment
+// selector, so a repeated tick never reaches SubmitStatsTask at all. Asserting
+// on side effects (no ID allocated, nothing enqueued) would not prove this:
+// SubmitStatsTask's own duplicate guard produces exactly the same side effects,
+// so the assertion has to be on whether SubmitStatsTask is called.
 func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
-	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount().Return(0)
-	scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
-	s.inspector.scheduler = scheduler
+	submitted := make([]UniqueID, 0)
+	mockSubmit := mockey.Mock((*statsInspector).SubmitStatsTask).To(
+		func(_ *statsInspector, originSegmentID, _ int64, _ indexpb.StatsSubJob, _ bool, _ []*internalpb.FileResourceInfo) error {
+			submitted = append(submitted, originSegmentID)
+			return nil
+		}).Build()
+	defer mockSubmit.UnPatch()
 
+	// Without a task in meta the segment is a candidate.
 	s.inspector.triggerTextStatsTask()
-	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+	s.Equal([]UniqueID{20}, submitted)
 
-	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+	// Once the task is recorded the selector must drop the segment.
+	s.NoError(s.mt.statsTaskMeta.AddStatsTask(&indexpb.StatsTask{
+		CollectionID: 1,
+		TaskID:       1001,
+		SegmentID:    20,
+		SubJobType:   indexpb.StatsSubJob_TextIndexJob,
+	}))
+	submitted = submitted[:0]
 	s.inspector.triggerTextStatsTask()
+	s.Empty(submitted)
 }
 
 // Every trigger loop must give up as soon as the scheduler is backlogged instead
-// of walking the remaining collections and segments.
+// of walking the remaining collections. The call count is what proves it: each
+// loop asks once for the first collection it looks at and then returns, so three
+// loops ask exactly three times. Walking on (continue) would ask once per
+// collection instead.
 func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount().Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1)
+	scheduler.EXPECT().GetPendingTaskCount().
+		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(3)
 	s.inspector.scheduler = scheduler
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
