@@ -46,3 +46,31 @@ func TestExprPrivilegeDefinition(t *testing.T) {
 	assert.True(t, IsPrivilegeNameDefined("Expr"))
 	assert.Equal(t, milvuspb.PrivilegeLevel_Cluster.String(), GetPrivilegeLevel("Expr"))
 }
+
+// TestPrivilegeImportBinlogRegistration pins the three registrations that make
+// PrivilegeImportBinlog usable. Missing any one of them fails differently and
+// none of them fails loudly at runtime:
+//   - ObjectPrivileges[Global]: the privilege cannot be granted at all
+//   - AdminPrivilegeGroup:      the builtin admin role silently lacks it
+//   - ClusterAdminPrivileges:   GetPrivilegeLevel misclassifies it, so the
+//     proxy interceptor authorizes it against the connection's database
+//     instead of cluster-wide
+func TestPrivilegeImportBinlogRegistration(t *testing.T) {
+	name := commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()
+
+	assert.Contains(t, ObjectPrivileges[commonpb.ObjectType_Global.String()],
+		MetaStore2API(name), "must be grantable on the Global object")
+
+	assert.Contains(t, AdminPrivilegeGroup, name,
+		"builtin admin role must carry it")
+
+	assert.Contains(t, ClusterAdminPrivileges, MetaStore2API(name),
+		"must be classified as a cluster-level privilege")
+
+	assert.Equal(t, milvuspb.PrivilegeLevel_Cluster.String(),
+		GetPrivilegeLevel(MetaStore2API(name)),
+		"cluster level is what makes the interceptor authorize it with dbName=AnyWord")
+
+	assert.NotContains(t, CollectionReadWritePrivileges, MetaStore2API(name),
+		"must not ride along with collection-level roles")
+}
