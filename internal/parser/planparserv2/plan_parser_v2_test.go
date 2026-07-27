@@ -1604,6 +1604,43 @@ func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
 	require.NotNil(t, expr.GetBinaryExpr())
 }
 
+// Type-mismatch errors in range, `in`, and comparison expressions must include
+// the rejected field name and its type. Without this, users must manually isolate
+// the failing operand.
+func TestExpr_TypeMismatchNamesFieldAndType(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+
+	cases := []struct {
+		expr     string
+		contains []string
+	}{
+		{`1.5 < Int64Field < 3.5`, []string{"1.5", "Double", "Int64Field", "Int64"}},
+		{`"a" < Int64Field < "z"`, []string{`"a"`, "VarChar", "Int64Field", "Int64"}},
+		{`3.5 > Int64Field > 1.5`, []string{"1.5", "Double", "Int64Field", "Int64"}},
+		{`1 < VarCharField < 5`, []string{"1", "Int64", "VarCharField", "VarChar"}},
+		{`0 < BoolField < 1`, []string{"boolean expr", "BoolField", "Bool"}},
+		{`1 < ArrayField[0] < "z"`, []string{`"z"`, "VarChar", "ArrayField[0]", "Int64"}},
+		{`Int64Field in [1, "two", 3]`, []string{`"two"`, "VarChar", "Int64Field", "Int64"}},
+		{`VarCharField in [1, 2]`, []string{"1", "Int64", "VarCharField", "VarChar"}},
+		{`VarCharField > 5`, []string{"VarCharField", "VarChar", "5", "Int64"}},
+		{`Int64Field == "abc"`, []string{"Int64Field", "Int64", `"abc"`, "VarChar"}},
+		{`VarCharField > Int64Field`, []string{"VarCharField", "VarChar", "Int64Field", "Int64"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.expr, func(t *testing.T) {
+			_, err := ParseExpr(helper, c.expr, nil)
+			require.Error(t, err)
+			for _, want := range c.contains {
+				assert.Contains(t, err.Error(), want)
+			}
+			// The internal protobuf text format must never appear in a user-facing error message.
+			assert.NotContains(t, err.Error(), "string_val:")
+			assert.NotContains(t, err.Error(), "int64_val:")
+		})
+	}
+}
+
 func TestExpr_castValue(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

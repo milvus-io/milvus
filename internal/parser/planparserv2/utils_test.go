@@ -1270,41 +1270,52 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 func Test_castRangeValue(t *testing.T) {
 	t.Run("string value for string type", func(t *testing.T) {
 		value := NewString("test")
-		result, err := castRangeValue(schemapb.DataType_VarChar, value)
+		result, err := castRangeValue("name", schemapb.DataType_VarChar, value)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", result.GetStringVal())
 	})
 
 	t.Run("non-string value for string type fails", func(t *testing.T) {
 		value := NewInt(42)
-		_, err := castRangeValue(schemapb.DataType_VarChar, value)
+		_, err := castRangeValue("name", schemapb.DataType_VarChar, value)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid range operations")
+		// The error must include the bound, its type, the field, and the field type.
+		assert.Contains(t, err.Error(), "42")
+		assert.Contains(t, err.Error(), "Int64")
+		assert.Contains(t, err.Error(), "name")
+		assert.Contains(t, err.Error(), "VarChar")
 	})
 
 	t.Run("bool type is invalid for range", func(t *testing.T) {
 		value := NewBool(true)
-		_, err := castRangeValue(schemapb.DataType_Bool, value)
+		_, err := castRangeValue("flag", schemapb.DataType_Bool, value)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid range operations on boolean expr")
+		assert.Contains(t, err.Error(), "flag")
+		assert.Contains(t, err.Error(), "Bool")
 	})
 
 	t.Run("integer value for integer type", func(t *testing.T) {
 		value := NewInt(42)
-		result, err := castRangeValue(schemapb.DataType_Int64, value)
+		result, err := castRangeValue("age", schemapb.DataType_Int64, value)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(42), result.GetInt64Val())
 	})
 
 	t.Run("non-integer value for integer type fails", func(t *testing.T) {
 		value := NewFloat(3.14)
-		_, err := castRangeValue(schemapb.DataType_Int64, value)
+		_, err := castRangeValue("age", schemapb.DataType_Int64, value)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "3.14")
+		assert.Contains(t, err.Error(), "Double")
+		assert.Contains(t, err.Error(), "age")
+		assert.Contains(t, err.Error(), "Int64")
 	})
 
 	t.Run("float value for float type", func(t *testing.T) {
 		value := NewFloat(3.14)
-		result, err := castRangeValue(schemapb.DataType_Float, value)
+		result, err := castRangeValue("price", schemapb.DataType_Float, value)
 		assert.NoError(t, err)
 		assert.Equal(t, 3.14, result.GetFloatVal())
 	})
@@ -1312,16 +1323,44 @@ func Test_castRangeValue(t *testing.T) {
 	t.Run("integer value promoted to float for float type", func(t *testing.T) {
 		// Integer values should be promoted to float when target type is float
 		value := NewInt(42)
-		result, err := castRangeValue(schemapb.DataType_Double, value)
+		result, err := castRangeValue("price", schemapb.DataType_Double, value)
 		assert.NoError(t, err)
 		assert.Equal(t, float64(42), result.GetFloatVal())
 	})
 
 	t.Run("non-number value for float type fails", func(t *testing.T) {
 		value := NewString("test")
-		_, err := castRangeValue(schemapb.DataType_Float, value)
+		_, err := castRangeValue("price", schemapb.DataType_Float, value)
 		assert.Error(t, err)
+		// The rejected literal must preserve its original formatting and must not expose
+		// protobuf text representation.
+		assert.Contains(t, err.Error(), `"test"`)
+		assert.NotContains(t, err.Error(), "string_val")
+		assert.Contains(t, err.Error(), "price")
+		assert.Contains(t, err.Error(), "Float")
 	})
+}
+
+// Test_formatGenericValue verifies that literals are formatted exactly as the user
+// wrote them, not using the protobuf text format returned by GenericValue.String().
+func Test_formatGenericValue(t *testing.T) {
+	assert.Equal(t, "true", formatGenericValue(NewBool(true)))
+	assert.Equal(t, "42", formatGenericValue(NewInt(42)))
+	assert.Equal(t, "3.14", formatGenericValue(NewFloat(3.14)))
+	assert.Equal(t, `"two"`, formatGenericValue(NewString("two")))
+	assert.Equal(t, `[1, "two"]`, formatGenericValue(&planpb.GenericValue{
+		Val: &planpb.GenericValue_ArrayVal{
+			ArrayVal: &planpb.Array{Array: []*planpb.GenericValue{NewInt(1), NewString("two")}},
+		},
+	}))
+}
+
+func Test_getValueDataType(t *testing.T) {
+	assert.Equal(t, "Bool", getValueDataType(NewBool(true)))
+	assert.Equal(t, "Int64", getValueDataType(NewInt(42)))
+	assert.Equal(t, "Double", getValueDataType(NewFloat(3.14)))
+	assert.Equal(t, "VarChar", getValueDataType(NewString("two")))
+	assert.Equal(t, "None", getValueDataType(&planpb.GenericValue{}))
 }
 
 // Test_hexDigit tests the hexDigit helper function

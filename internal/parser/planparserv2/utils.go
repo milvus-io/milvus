@@ -555,11 +555,47 @@ func getDataType(expr *ExprWithType) string {
 	return expr.dataType.String()
 }
 
-func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
+// formatGenericValue formats a literal the way the user wrote it. GenericValue.String()
+// returns an internal protobuf representation (e.g. `string_val:"two"`), which must
+// never be exposed in a user-facing error message.
+func formatGenericValue(value *planpb.GenericValue) string {
+	switch v := value.GetVal().(type) {
+	case *planpb.GenericValue_BoolVal:
+		return strconv.FormatBool(v.BoolVal)
+	case *planpb.GenericValue_Int64Val:
+		return strconv.FormatInt(v.Int64Val, 10)
+	case *planpb.GenericValue_FloatVal:
+		return strconv.FormatFloat(v.FloatVal, 'g', -1, 64)
+	case *planpb.GenericValue_StringVal:
+		return strconv.Quote(v.StringVal)
+	case *planpb.GenericValue_ArrayVal:
+		elements := v.ArrayVal.GetArray()
+		formatted := make([]string, 0, len(elements))
+		for _, element := range elements {
+			formatted = append(formatted, formatGenericValue(element))
+		}
+		return "[" + strings.Join(formatted, ", ") + "]"
+	default:
+		return value.String()
+	}
+}
+
+// getValueDataType returns the parsed type of a literal so type-mismatch errors
+// can include the types of both operands.
+func getValueDataType(value *planpb.GenericValue) string {
+	if valueExpr := toValueExpr(value); valueExpr != nil {
+		return valueExpr.dataType.String()
+	}
+	return schemapb.DataType_None.String()
+}
+
+// leftText and rightText contain the source text of the operands. They are used
+// only to identify the offending field when the two sides cannot be compared.
+func HandleCompare(op int, left, right *ExprWithType, leftText, rightText string) (*planpb.Expr, error) {
 	if !left.expr.GetIsTemplate() && !right.expr.GetIsTemplate() {
 		if !canBeCompared(left, right) {
-			return nil, merr.WrapErrQueryPlanMsg("comparisons between %s and %s are not supported",
-				getDataType(left), getDataType(right))
+			return nil, merr.WrapErrQueryPlanMsg("comparisons between %s (%s) and %s (%s) are not supported",
+				leftText, getDataType(left), rightText, getDataType(right))
 		}
 	}
 
@@ -751,21 +787,29 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 	return nil
 }
 
-func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+// errRangeBoundMismatch reports a bound whose type does not match the field it
+// is compared against. fieldName is the source text of the column operand.
+func errRangeBoundMismatch(fieldName string, dataType schemapb.DataType, value *planpb.GenericValue) error {
+	return merr.WrapErrQueryPlanMsg("invalid range operations: bound value %s (%s) does not match field %s (%s)",
+		formatGenericValue(value), getValueDataType(value), fieldName, dataType.String())
+}
+
+func castRangeValue(fieldName string, dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(value) {
-			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
+			return nil, errRangeBoundMismatch(fieldName, dataType, value)
 		}
 	case schemapb.DataType_Bool:
-		return nil, merr.WrapErrQueryPlanMsg("invalid range operations on boolean expr")
+		return nil, merr.WrapErrQueryPlanMsg("invalid range operations on boolean expr: field %s (%s)",
+			fieldName, dataType.String())
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
 		if !IsInteger(value) {
-			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
+			return nil, errRangeBoundMismatch(fieldName, dataType, value)
 		}
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		if !IsNumber(value) {
-			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
+			return nil, errRangeBoundMismatch(fieldName, dataType, value)
 		}
 		if IsInteger(value) {
 			return NewFloat(float64(value.GetInt64Val())), nil

@@ -546,7 +546,7 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		return ret
 	}
 
-	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
+	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr, ctx.Expr(0).GetText(), ctx.Expr(1).GetText())
 	if err != nil {
 		return err
 	}
@@ -601,7 +601,7 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 		return err
 	}
 
-	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
+	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr, ctx.Expr(0).GetText(), ctx.Expr(1).GetText())
 	if err != nil {
 		return err
 	}
@@ -1205,7 +1205,8 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		for i, e := range array {
 			castedValue, err := castValue(dataType, e)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
+				return merr.WrapErrParameterInvalidMsg("value %s (%s) in list cannot be casted to field %s (%s)",
+					formatGenericValue(e), getValueDataType(e), ctx.Expr(0).GetText(), dataType.String())
 			}
 			values[i] = castedValue
 		}
@@ -1389,6 +1390,24 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	}, nil
 }
 
+// columnIdentifierText returns the source text for the identifier matched by the rule.
+// ColumnInfo only contains the field ID, so the original field name must be resolved
+// here for user-facing error messages. The lookup order follows getChildColumnInfo.
+func columnIdentifierText(identifier, child, structSubField, structIndexField antlr.TerminalNode) string {
+	switch {
+	case identifier != nil:
+		return identifier.GetText()
+	case structSubField != nil:
+		return structSubField.GetText()
+	case structIndexField != nil:
+		return structIndexField.GetText()
+	case child != nil:
+		return child.GetText()
+	default:
+		return ""
+	}
+}
+
 func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
@@ -1480,6 +1499,12 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
+	fieldText := columnIdentifierText(
+		ctx.Identifier(),
+		ctx.JSONIdentifier(),
+		ctx.StructSubFieldIdentifier(),
+		ctx.StructIndexFieldIdentifier(),
+	)
 	columnInfo, err := v.getChildColumnInfo(
 		ctx.Identifier(),
 		ctx.JSONIdentifier(),
@@ -1521,12 +1546,12 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
 	if !isTemplateExpr(lowerValueExpr) {
-		if lowerValue, err = castRangeValue(fieldDataType, lowerValue); err != nil {
+		if lowerValue, err = castRangeValue(fieldText, fieldDataType, lowerValue); err != nil {
 			return err
 		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
-		if upperValue, err = castRangeValue(fieldDataType, upperValue); err != nil {
+		if upperValue, err = castRangeValue(fieldText, fieldDataType, upperValue); err != nil {
 			return err
 		}
 	}
@@ -1560,6 +1585,12 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
+	fieldText := columnIdentifierText(
+		ctx.Identifier(),
+		ctx.JSONIdentifier(),
+		ctx.StructSubFieldIdentifier(),
+		ctx.StructIndexFieldIdentifier(),
+	)
 	columnInfo, err := v.getChildColumnInfo(
 		ctx.Identifier(),
 		ctx.JSONIdentifier(),
@@ -1602,12 +1633,12 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
 	if !isTemplateExpr(lowerValueExpr) {
-		if lowerValue, err = castRangeValue(fieldDataType, lowerValue); err != nil {
+		if lowerValue, err = castRangeValue(fieldText, fieldDataType, lowerValue); err != nil {
 			return err
 		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
-		if upperValue, err = castRangeValue(fieldDataType, upperValue); err != nil {
+		if upperValue, err = castRangeValue(fieldText, fieldDataType, upperValue); err != nil {
 			return err
 		}
 	}
