@@ -168,16 +168,26 @@ type StatusGetter interface {
 	GetStatus() *commonpb.Status
 }
 
+type AlterStatusGetter interface {
+	GetAlterStatus() *commonpb.Status
+}
+
 func GetStatusFromResponse(resp interface{}) (*commonpb.Status, bool) {
 	status, ok := resp.(*commonpb.Status)
 	if ok {
-		return status, true
+		return status, status != nil
 	}
 	getter, ok := resp.(StatusGetter)
-	if !ok {
-		return nil, false
+	if ok {
+		status := getter.GetStatus()
+		return status, status != nil
 	}
-	return getter.GetStatus(), true
+	alterGetter, ok := resp.(AlterStatusGetter)
+	if ok {
+		status := alterGetter.GetAlterStatus()
+		return status, status != nil
+	}
+	return nil, false
 }
 
 type ConsistencyLevelGetter interface {
@@ -243,13 +253,7 @@ func ParseMetricLabel(resp any, err error) string {
 	// wrappers reconstruct err = merr.Error(status) from that same response,
 	// which previously routed every processed REST failure into the rejected_*
 	// buckets and left the fail_* series blind to the entire REST surface.
-	var st *commonpb.Status
-	switch resp := resp.(type) {
-	case interface{ GetStatus() *commonpb.Status }:
-		st = resp.GetStatus()
-	case *commonpb.Status:
-		st = resp
-	}
+	st, _ := GetStatusFromResponse(resp)
 	if st != nil && !merr.Ok(st) {
 		// Client cancellation is neither party's failure.
 		if st.GetCode() == merr.CanceledCode {
