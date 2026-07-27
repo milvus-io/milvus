@@ -397,12 +397,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) << int64_t(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) >> int64_t(right_operand)) != val);
                         break;
                     }

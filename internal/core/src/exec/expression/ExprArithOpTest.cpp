@@ -1084,6 +1084,18 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                  auto val = json.template at<int64_t>(pointer).value();
                  return (int64_t(val) >> 2) >= 0;
              }},
+            {R"((json["int"] << 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) << 1) != 0;
+             }},
+            {R"((json["int"] >> 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 1) != 0;
+             }},
             {R"(~json["int"] < 0)",
              [](const milvus::Json& json) {
                  auto pointer = milvus::Json::pointer({"int"});
