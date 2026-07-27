@@ -96,6 +96,7 @@ func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
 type BigDataIndexExtraParams struct {
 	PQCodeBudgetGBRatio           float64
 	DiskPQCodeBudgetGBRatio       float64
+	HasDiskPQCodeBudgetGBRatio    bool // true when explicitly configured (vs defaulted)
 	BuildNumThreadsRatio          float64
 	SearchCacheBudgetGBRatio      float64
 	AiSAQSearchCacheBudgetGBRatio float64
@@ -150,6 +151,7 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 			ret.DiskPQCodeBudgetGBRatio = DefaultDiskPQCodeBudgetGBRatio
 		} else {
 			ret.DiskPQCodeBudgetGBRatio = DiskPQCodeBudgetGBRatio
+			ret.HasDiskPQCodeBudgetGBRatio = true
 		}
 		BuildNumThreadsRatio, ok := valueMap1["num_threads"]
 		if !ok {
@@ -237,6 +239,14 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+		// Only set diskPQCodeBudgetGBRatio if explicitly configured in ExtraParams.
+		// A zero value means "no disk PQ" (Knowhere stores uncompressed vectors on SSD),
+		// but we must not write an empty string which would cause ParseFloat("") errors downstream.
+		// For DISKANN, do NOT apply the default 0.25 (that's AISAQ's default); only use
+		// the value when the operator explicitly configured disk_pq_code_budget_gb.
+		if extraParams.HasDiskPQCodeBudgetGBRatio && extraParams.DiskPQCodeBudgetGBRatio != 0 {
+			diskPQCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.DiskPQCodeBudgetGBRatio)
+		}
 	} else {
 		var ok bool
 		diskPQCodeBudgetGBRatio, ok = indexParams[DiskPQCodeBudgetRatioKey]
@@ -259,15 +269,23 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		if !ok {
 			searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 		}
-		buildNumThreadsRatio = params.CommonCfg.BuildNumThreadsRatio.GetValue()
+		buildNumThreadsRatio, ok = indexParams[NumBuildThreadRatioKey]
+		if !ok {
+			buildNumThreadsRatio = params.CommonCfg.BuildNumThreadsRatio.GetValue()
+		}
 	}
 
 	indexParams[MaxDegreeKey] = maxDegree
 	indexParams[SearchListSizeKey] = searchListSize
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
-	indexParams[DiskPQCodeBudgetRatioKey] = diskPQCodeBudgetGBRatio
 	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
 	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	// Only persist DiskPQCodeBudgetRatioKey when explicitly provided.
+	// An empty string would cause ParseFloat("") errors in SetDiskIndexBuildParams;
+	// omitting the key lets Knowhere use its default (disk_pq_dims=0, no disk PQ).
+	if diskPQCodeBudgetGBRatio != "" {
+		indexParams[DiskPQCodeBudgetRatioKey] = diskPQCodeBudgetGBRatio
+	}
 
 	return nil
 }
@@ -280,6 +298,7 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 	var pqCodeBudgetGBRatio string
 	var searchCacheBudgetGBRatio string
 	var diskPQCodeBudgetGBRatio string
+	var buildNumThreadsRatio string
 	var aisVectorsBeamWidth string
 	var inlinePQ string
 	var pqCacheSize string
@@ -305,10 +324,22 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
+		// For AISAQ, disk PQ is expected (default ratio is 0.25).
+		// Only write it when the ratio is non-zero; zero means no disk PQ.
+		if extraParams.DiskPQCodeBudgetGBRatio != 0 {
+			diskPQCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.DiskPQCodeBudgetGBRatio)
+		}
 		pqCacheSize, ok = indexParams[PQCacheSizeKey]
 		if !ok {
 			return merr.WrapErrServiceInternalMsg("index param pq_cache_size not exist")
 		}
+		// Read optional AISAQ-specific params from AutoIndex config if present.
+		aisVectorsBeamWidth = indexParams[VectorsBeamWidthKey]
+		inlinePQ = indexParams[InlinePQKey]
+		pqReadPageCacheSize = indexParams[PQReadPageCacheSizeKey]
+		rearrange = indexParams[RearrangeKey]
+		numEntryPoints = indexParams[NumEntryPointsKey]
 	} else {
 		var ok bool
 		diskPQCodeBudgetGBRatio, ok = indexParams[DiskPQCodeBudgetRatioKey]
@@ -330,6 +361,10 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		searchCacheBudgetGBRatio, ok = indexParams[SearchCacheBudgetRatioKey]
 		if !ok {
 			searchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
+		}
+		buildNumThreadsRatio, ok = indexParams[NumBuildThreadRatioKey]
+		if !ok {
+			buildNumThreadsRatio = params.CommonCfg.BuildNumThreadsRatio.GetValue()
 		}
 		aisVectorsBeamWidth, ok = indexParams[VectorsBeamWidthKey]
 		if !ok {
@@ -366,14 +401,29 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 	indexParams[SearchListSizeKey] = searchListSize
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
 	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
-	indexParams[NumBuildThreadRatioKey] = strconv.Itoa(DefaultBuildNumThreadsRatio)
-	indexParams[DiskPQCodeBudgetRatioKey] = diskPQCodeBudgetGBRatio
-	indexParams[VectorsBeamWidthKey] = aisVectorsBeamWidth
-	indexParams[InlinePQKey] = inlinePQ
+	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
 	indexParams[PQCacheSizeKey] = pqCacheSizeBytes
-	indexParams[PQReadPageCacheSizeKey] = pqReadPageCacheSize
-	indexParams[RearrangeKey] = rearrange
-	indexParams[NumEntryPointsKey] = numEntryPoints
+	// Only persist optional params when they have non-empty values.
+	// Writing empty strings causes ParseFloat/ParseInt("") errors downstream
+	// and prevents Knowhere from applying its built-in defaults.
+	if diskPQCodeBudgetGBRatio != "" {
+		indexParams[DiskPQCodeBudgetRatioKey] = diskPQCodeBudgetGBRatio
+	}
+	if aisVectorsBeamWidth != "" {
+		indexParams[VectorsBeamWidthKey] = aisVectorsBeamWidth
+	}
+	if inlinePQ != "" {
+		indexParams[InlinePQKey] = inlinePQ
+	}
+	if pqReadPageCacheSize != "" {
+		indexParams[PQReadPageCacheSizeKey] = pqReadPageCacheSize
+	}
+	if rearrange != "" {
+		indexParams[RearrangeKey] = rearrange
+	}
+	if numEntryPoints != "" {
+		indexParams[NumEntryPointsKey] = numEntryPoints
+	}
 
 	return nil
 }
@@ -493,7 +543,9 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64,
 	if indexType == "AISAQ" || indexType == "DISKANN" {
 		diskPQCodeBudgetGBRatioStr, ok := indexParams[DiskPQCodeBudgetRatioKey]
 		var diskPQCodeBudgetGBRatio float64
-		if !ok {
+		if !ok || diskPQCodeBudgetGBRatioStr == "" {
+			// Key absent or empty means "no disk PQ" → disk_pq_dims=0
+			// (Knowhere stores uncompressed vectors on SSD).
 			diskPQCodeBudgetGBRatio = 0
 		} else {
 			diskPQCodeBudgetGBRatio, err = strconv.ParseFloat(diskPQCodeBudgetGBRatioStr, 64)
@@ -546,17 +598,23 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	var searchCacheBudgetGBRatio float64
 	var loadNumThreadRatio float64
 	var beamWidthRatio float64
-	var configuredSearchCacheBudgetGBRatio string
 
-	if params.AutoIndexConfig.Enable.GetAsBool() {
+	// Prefer values already persisted in indexParams (written during FillDiskIndexParams /
+	// FillAiSAQIndexParams / UpdateDiskIndexBuildParams). Fall back to global config only
+	// when the key is absent.
+	if v, ok := indexParams[SearchCacheBudgetRatioKey]; ok && v != "" {
+		searchCacheBudgetGBRatio, err = strconv.ParseFloat(v, 64)
+		if err != nil {
+			return err
+		}
+	} else if params.AutoIndexConfig.Enable.GetAsBool() {
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}
 		searchCacheBudgetGBRatio = extraParams.SearchCacheBudgetGBRatio
-		loadNumThreadRatio = extraParams.LoadNumThreadRatio
-		beamWidthRatio = extraParams.BeamWidthRatio
 	} else {
+		var configuredSearchCacheBudgetGBRatio string
 		switch indexType {
 		case "DISKANN":
 			configuredSearchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
@@ -567,10 +625,38 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 		if err != nil {
 			return err
 		}
+	}
+
+	if v, ok := indexParams[NumLoadThreadRatioKey]; ok && v != "" {
+		loadNumThreadRatio, err = strconv.ParseFloat(v, 64)
+		if err != nil {
+			return err
+		}
+	} else if params.AutoIndexConfig.Enable.GetAsBool() {
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		if err != nil {
+			return err
+		}
+		loadNumThreadRatio = extraParams.LoadNumThreadRatio
+	} else {
 		loadNumThreadRatio, err = strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
 		if err != nil {
 			return err
 		}
+	}
+
+	if v, ok := indexParams[BeamWidthRatioKey]; ok && v != "" {
+		beamWidthRatio, err = strconv.ParseFloat(v, 64)
+		if err != nil {
+			return err
+		}
+	} else if params.AutoIndexConfig.Enable.GetAsBool() {
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		if err != nil {
+			return err
+		}
+		beamWidthRatio = extraParams.BeamWidthRatio
+	} else {
 		beamWidthRatio, err = strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
 		if err != nil {
 			return err
