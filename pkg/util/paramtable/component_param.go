@@ -7378,20 +7378,39 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
 
 	p.ImportWriteRetryInitialInterval = ParamItem{
-		Key:          "dataNode.import.writeRetryInitialInterval",
-		Version:      "2.6.9",
-		Doc:          "Initial backoff interval in seconds for import write retry.",
+		Key:     "dataNode.import.writeRetryInitialInterval",
+		Version: "2.6.9",
+		Doc: `Initial backoff interval in seconds for import write retry. Must be a positive integer;
+a non-positive or unparseable value falls back to the default.`,
 		DefaultValue: "1",
 		Export:       true,
+		Formatter: func(v string) string {
+			interval := getAsInt(v)
+			if interval <= 0 {
+				mlog.Warn(context.TODO(), "invalid import write retry initial interval, using default 1s")
+				return "1"
+			}
+			return strconv.Itoa(interval)
+		},
 	}
 	p.ImportWriteRetryInitialInterval.Init(base.mgr)
 
 	p.ImportWriteRetryMaxInterval = ParamItem{
-		Key:          "dataNode.import.writeRetryMaxInterval",
-		Version:      "2.6.9",
-		Doc:          "Maximum backoff interval in seconds for import write retry.",
+		Key:     "dataNode.import.writeRetryMaxInterval",
+		Version: "2.6.9",
+		Doc: `Maximum backoff interval in seconds for import write retry. Must be a positive integer;
+a non-positive or unparseable value falls back to the default. Set it to at least twice
+writeRetryInitialInterval, otherwise the effective cap is raised to twice the initial interval.`,
 		DefaultValue: "60",
 		Export:       true,
+		Formatter: func(v string) string {
+			interval := getAsInt(v)
+			if interval <= 0 {
+				mlog.Warn(context.TODO(), "invalid import write retry max interval, using default 60s")
+				return "60"
+			}
+			return strconv.Itoa(interval)
+		},
 	}
 	p.ImportWriteRetryMaxInterval.Init(base.mgr)
 
