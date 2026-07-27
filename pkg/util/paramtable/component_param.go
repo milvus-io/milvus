@@ -4075,9 +4075,12 @@ If set to 0, time based eviction is disabled.`,
 	p.StorageUsageTrackingEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
 		Version:      "2.6.3",
-		DefaultValue: "false",
-		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
-		Export:       true,
+		DefaultValue: "true",
+		Doc: "Enable storage usage tracking for Tiered Storage. Accounts the bytes each request touched " +
+			"and how many of those had to be loaded, which is what the per-request cache_hit_ratio and the " +
+			"scanned-bytes metrics are derived from. Note each cache slot freezes this at creation, so turning " +
+			"it on at runtime only takes effect for segments loaded afterwards.",
+		Export: true,
 	}
 	p.StorageUsageTrackingEnabled.Init(base.mgr)
 
