@@ -1553,11 +1553,12 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
-	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), collection.Schema()); err != nil {
+	initialSchema := collection.Schema()
+	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), initialSchema); err != nil {
 		return nil, err
 	}
 
-	skipStreamingForExternalTable := typeutil.IsExternalCollection(collection.Schema())
+	skipStreamingForExternalTable := typeutil.IsExternalCollection(initialSchema)
 	catchingUpStreamingData := !skipStreamingForExternalTable
 	if skipStreamingForExternalTable {
 		log.Info(ctx, "skip streaming data catchup for read-only external collection",
@@ -1586,7 +1587,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		vchannelName:      channel,
 		version:           version,
 		collection:        collection,
-		schemaView:        newDelegatorSchemaView(collection.Schema()),
+		schemaView:        newDelegatorSchemaView(initialSchema),
 		collectionManager: manager.Collection,
 		segmentManager:    manager.Segment,
 		workerManager:     workerManager,
@@ -1611,12 +1612,12 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		opt(sd)
 	}
 
-	hasBM25Field := lo.ContainsBy(collection.Schema().GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
+	hasBM25Field := lo.ContainsBy(initialSchema.GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
 		return tf.GetType() == schemapb.FunctionType_BM25
 	})
 
 	if hasBM25Field {
-		idfOracle := NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+		idfOracle := NewIDFOracle(sd.vchannelName, initialSchema.GetFunctions())
 		idfOracle.Start()
 		sd.distribution.SetIDFOracle(idfOracle)
 		sd.publishIDFOracle(idfOracle)

@@ -96,6 +96,7 @@ type baseSegment struct {
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
+	loadSchemaVersion  *atomic.Uint64
 }
 
 func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) (baseSegment, error) {
@@ -114,6 +115,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
+		loadSchemaVersion:  atomic.NewUint64(collection.SchemaVersion()),
 	}
 	return bs, nil
 }
@@ -416,6 +418,21 @@ func (s *baseSegment) NeedUpdatedVersion() int64 {
 
 func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
 	s.needUpdatedVersion.Store(version)
+}
+
+func (s *baseSegment) LoadSchemaVersion() uint64 {
+	if s.loadSchemaVersion == nil {
+		return 0
+	}
+	return s.loadSchemaVersion.Load()
+}
+
+func (s *baseSegment) SetLoadSchemaVersion(version uint64) {
+	if s.loadSchemaVersion == nil {
+		s.loadSchemaVersion = atomic.NewUint64(version)
+		return
+	}
+	s.loadSchemaVersion.Store(version)
 }
 
 type FieldInfo struct {
@@ -1305,6 +1322,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
+	s.SetLoadSchemaVersion(s.collection.SchemaVersion())
 	if s.relatedDataSize != nil {
 		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
 	}

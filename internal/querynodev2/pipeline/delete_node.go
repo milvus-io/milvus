@@ -124,17 +124,38 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 
 func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *deleteNodeMsg) bool {
 	start := time.Now()
+	applyCtx, cancel := context.WithTimeout(ctx, deleteNodeUpdateSchemaMaxRetryDuration)
+	defer cancel()
+
+	panicRetryLimit := func(err error) {
+		wrapped := merr.Wrap(err, "schema update retry limit reached in delete node")
+		mlog.Error(ctx, "schema update retry limit reached in delete node, stop process to replay WAL after restart",
+			mlog.Int64("collectionID", dNode.collectionID),
+			mlog.String("channel", dNode.channel),
+			mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+			mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+			mlog.Duration("retryDuration", time.Since(start)),
+			mlog.Err(wrapped))
+		panic(wrapped)
+	}
+
 	for {
 		if dNode.closed.Load() {
 			return false
 		}
-		err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs)
+		err := dNode.delegator.UpdateSchema(applyCtx, nodeMsg.schema, nodeMsg.schemaBarrierTs)
 		if err == nil {
 			return true
 		}
 
 		if dNode.closed.Load() {
 			return false
+		}
+		if errors.Is(applyCtx.Err(), context.Canceled) {
+			return false
+		}
+		if errors.Is(applyCtx.Err(), context.DeadlineExceeded) {
+			panicRetryLimit(err)
 		}
 		if !isUpdateSchemaRetryable(err) {
 			wrapped := merr.Wrap(err, "non-retryable schema update failure in delete node")
@@ -147,15 +168,7 @@ func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *
 			panic(wrapped)
 		}
 		if time.Since(start) >= deleteNodeUpdateSchemaMaxRetryDuration {
-			wrapped := merr.Wrap(err, "schema update retry limit reached in delete node")
-			mlog.Error(ctx, "schema update retry limit reached in delete node, stop process to replay WAL after restart",
-				mlog.Int64("collectionID", dNode.collectionID),
-				mlog.String("channel", dNode.channel),
-				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
-				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
-				mlog.Duration("retryDuration", time.Since(start)),
-				mlog.Err(wrapped))
-			panic(wrapped)
+			panicRetryLimit(err)
 		}
 
 		mlog.RatedWarn(ctx, rate.Limit(1), "failed to update schema in delete node, retrying before advancing tsafe",
@@ -174,6 +187,12 @@ func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *
 		case <-dNode.closeCh:
 			timer.Stop()
 			return false
+		case <-applyCtx.Done():
+			timer.Stop()
+			if dNode.closed.Load() || errors.Is(applyCtx.Err(), context.Canceled) {
+				return false
+			}
+			panicRetryLimit(applyCtx.Err())
 		}
 		timer.Stop()
 	}

@@ -241,6 +241,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	for _, segment := range segments {
 		configureUseTakeForOutput(segment, collection.Schema())
 	}
+	if err := loader.reopenLoadedSegmentsIfStale(ctx, collection, segmentType, segments...); err != nil {
+		return nil, err
+	}
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
@@ -453,6 +456,56 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	}
 
 	return infos
+}
+
+type loadSchemaVersionedSegment interface {
+	LoadSchemaVersion() uint64
+}
+
+func (loader *segmentLoader) reopenLoadedSegmentsIfStale(ctx context.Context, collection *Collection, segmentType SegmentType, infos ...*querypb.SegmentLoadInfo) error {
+	if segmentType != SegmentTypeSealed {
+		return nil
+	}
+
+	requiredSchemaVersion := collection.SchemaVersion()
+	staleInfos := make([]*querypb.SegmentLoadInfo, 0)
+	for _, info := range infos {
+		segment := loader.manager.Segment.GetWithType(info.GetSegmentID(), segmentType)
+		if segment == nil {
+			continue
+		}
+		if loadedSegmentNeedsReopen(segment, info, requiredSchemaVersion) {
+			staleInfos = append(staleInfos, info)
+		}
+	}
+	if len(staleInfos) == 0 {
+		return nil
+	}
+
+	mlog.Info(ctx, "reopen stale loaded segments before full load",
+		mlog.Int64("collectionID", collection.ID()),
+		mlog.Uint64("requiredSchemaVersion", requiredSchemaVersion),
+		mlog.Int64s("segmentIDs", lo.Map(staleInfos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
+			return info.GetSegmentID()
+		})))
+	return loader.ReopenSegments(ctx, staleInfos)
+}
+
+func loadedSegmentNeedsReopen(segment Segment, incoming *querypb.SegmentLoadInfo, requiredSchemaVersion uint64) bool {
+	current := segment.LoadInfo()
+	if incoming.GetDataVersion() > current.GetDataVersion() {
+		return true
+	}
+	if incoming.GetStorageVersion() > current.GetStorageVersion() {
+		return true
+	}
+	if incoming.GetManifestPath() != "" && incoming.GetManifestPath() != current.GetManifestPath() {
+		return true
+	}
+	if versioned, ok := segment.(loadSchemaVersionedSegment); ok {
+		return versioned.LoadSchemaVersion() < requiredSchemaVersion
+	}
+	return false
 }
 
 func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) {

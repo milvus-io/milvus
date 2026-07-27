@@ -300,6 +300,35 @@ func (suite *DeleteNodeSuite) TestUpdateSchemaRetryLimitPanicsWithoutTSafe() {
 	})
 }
 
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetryLimitCancelsInFlightUpdate() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).
+		RunAndReturn(func(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}).Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldMaxRetryDuration := deleteNodeUpdateSchemaMaxRetryDuration
+	deleteNodeUpdateSchemaMaxRetryDuration = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaMaxRetryDuration = oldMaxRetryDuration
+	})
+
+	suite.Panics(func() {
+		node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		})
+	})
+}
+
 func (suite *DeleteNodeSuite) TestUpdateSchemaPreCloseCancelsInFlightUpdate() {
 	manager := &segments.Manager{
 		Collection: segments.NewMockCollectionManager(suite.T()),

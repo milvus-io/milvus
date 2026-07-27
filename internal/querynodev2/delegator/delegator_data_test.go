@@ -1287,6 +1287,52 @@ func (s *DelegatorDataSuite) TestLoadSegmentsSchemaVersionGate() {
 	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsReleasesOrphanWorkerLoadOnFinalSchemaGateFailure() {
+	oldSchema := typeutil.Clone(s.delegator.collection.Schema())
+	newSchema := typeutil.Clone(oldSchema)
+	newSchema.Version = oldSchema.GetVersion() + 1
+	req := &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       oldSchema,
+		LoadScope:    querypb.LoadScope_Full,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	}
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Run(func(context.Context, *querypb.LoadSegmentsRequest) {
+			s.delegator.schemaChangeMutex.Lock()
+			defer s.delegator.schemaChangeMutex.Unlock()
+			s.delegator.publishDelegatorSchemaLocked(newSchema)
+		}).
+		Return(nil).
+		Once()
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.MatchedBy(func(req *querypb.ReleaseSegmentsRequest) bool {
+		return req.GetNodeID() == int64(1) &&
+			req.GetCollectionID() == s.collectionID &&
+			req.GetScope() == querypb.DataScope_Historical &&
+			req.GetShard() == s.vchannelName &&
+			len(req.GetSegmentIDs()) == 1 &&
+			req.GetSegmentIDs()[0] == int64(100)
+	})).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	err := s.delegator.LoadSegments(context.Background(), req)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+	s.False(s.delegator.distribution.SealedSegmentExistsOnNode(100, 1))
+}
+
 func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaDoesNotUpdateFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
