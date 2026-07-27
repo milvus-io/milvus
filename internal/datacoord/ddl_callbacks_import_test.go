@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -62,6 +63,15 @@ type ImportCallbacksSuite struct {
 
 func TestImportCallbacksSuite(t *testing.T) {
 	suite.Run(t, new(ImportCallbacksSuite))
+}
+
+// newTestMetaWithChunkManager returns a minimal meta carrying a chunk manager,
+// which validateImportRequest needs to resolve the storage root path when it
+// checks caller-supplied import paths against Milvus's internal directories.
+func newTestMetaWithChunkManager(t *testing.T) *meta {
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	return &meta{chunkManager: cm}
 }
 
 // --------------------------------
@@ -95,6 +105,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -129,6 +140,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -174,6 +186,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -222,6 +235,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	files := []*msgpb.ImportFile{
 		{Id: 1, Paths: []string{"/test/file1.json"}},
@@ -265,6 +279,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -294,6 +309,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	err := server.broadcastImport(
@@ -342,6 +358,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	err := server.broadcastImport(
@@ -400,6 +417,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	err := server.broadcastImport(
@@ -463,6 +481,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	err := server.broadcastImport(
@@ -524,6 +543,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	err := server.broadcastImport(
@@ -584,6 +604,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	err := server.broadcastImport(
@@ -1256,4 +1277,34 @@ func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
 
 func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func TestValidateImportRequest_BinlogImportDisabled(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableBinlogImport.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableBinlogImport.Key)
+
+	s := &Server{}
+
+	err := s.validateImportRequest(context.Background(),
+		[]*msgpb.ImportFile{{Paths: []string{"files/insert_log/1/2/3"}}},
+		[]*commonpb.KeyValuePair{{Key: "backup", Value: "true"}})
+
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.Contains(t, err.Error(), "enableBinlogImport")
+}
+
+func TestValidateImportRequest_L0ImportAlsoGatedByTheSwitch(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableBinlogImport.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableBinlogImport.Key)
+
+	s := &Server{}
+
+	err := s.validateImportRequest(context.Background(),
+		[]*msgpb.ImportFile{{Paths: []string{"files/delta_log/1/2/3"}}},
+		[]*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}})
+
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.Contains(t, err.Error(), "enableBinlogImport")
 }
