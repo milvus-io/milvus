@@ -153,6 +153,7 @@ func (m *windowManager) ensureActiveIdempotencyWindows(vchannels map[string]*vch
 		m.getOrCreateIdempotencyWindow(vchannel, checkpoint)
 	}
 }
+
 func (m *windowManager) advanceAllIdempotencyWindowCheckpointsUnsafe(checkpoint *WALCheckpoint) {
 	for _, state := range m.idempotencyWindows() {
 		state.advanceCheckpointTo(checkpoint)
