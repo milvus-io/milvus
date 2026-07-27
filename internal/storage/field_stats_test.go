@@ -691,7 +691,11 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 
 	stats2, err := NewFieldStats(1, schemapb.DataType_FloatVector, 1)
 	assert.NoError(t, err)
-	stats2.UnmarshalJSON(bytes)
+	// The error MUST be asserted: dropping it here is why the centroid decode stayed
+	// broken for so long — sonic reported a failure while still filling the slice, so
+	// the assertions below passed and only loadPartitionStats (which checks the error)
+	// ever saw it.
+	assert.NoError(t, stats2.UnmarshalJSON(bytes))
 	assert.Equal(t, 1, len(stats2.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid}, stats2.Centroids)
 
@@ -705,9 +709,57 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 
 	stats4, err := NewFieldStats(1, schemapb.DataType_FloatVector, 2)
 	assert.NoError(t, err)
-	stats4.UnmarshalJSON(bytes2)
+	assert.NoError(t, stats4.UnmarshalJSON(bytes2))
 	assert.Equal(t, 2, len(stats4.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
+}
+
+// TestVectorFieldStatsDecodeIntoZeroValue covers the path the production code actually
+// takes: a PartitionStatsSnapshot decodes into ZERO-VALUE FieldStats elements inside a
+// slice, with nothing pre-allocated. TestVectorFieldStatsMarshal above missed the bug
+// because it decoded into a FieldStats the test had constructed itself AND discarded
+// the error.
+func TestVectorFieldStatsDecodeIntoZeroValue(t *testing.T) {
+	centroid := NewFloatVectorFieldValue([]float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0})
+	centroid2 := NewFloatVectorFieldValue([]float32{9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0})
+
+	stats, err := NewFieldStats(3, schemapb.DataType_FloatVector, 2)
+	assert.NoError(t, err)
+	stats.SetVectorCentroids(centroid, centroid2)
+
+	t.Run("through a slice of zero-value FieldStats", func(t *testing.T) {
+		blob, err := json.Marshal([]FieldStats{*stats})
+		assert.NoError(t, err)
+
+		var decoded []FieldStats
+		assert.NoError(t, json.Unmarshal(blob, &decoded))
+		assert.Len(t, decoded, 1)
+		assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, decoded[0].Centroids)
+	})
+
+	t.Run("through a PartitionStatsSnapshot", func(t *testing.T) {
+		snapshot := &PartitionStatsSnapshot{
+			SegmentStats: map[UniqueID]SegmentStats{
+				1: *NewSegmentStats([]FieldStats{*stats}, 1990),
+			},
+		}
+		blob, err := SerializePartitionStatsSnapshot(snapshot)
+		assert.NoError(t, err)
+
+		got, err := DeserializePartitionsStatsSnapshot(blob)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2},
+			got.SegmentStats[1].FieldStats[0].Centroids)
+	})
+
+	t.Run("missing centroids key does not panic", func(t *testing.T) {
+		var decoded FieldStats
+		assert.NotPanics(t, func() {
+			err := decoded.UnmarshalJSON([]byte(`{"fieldID":3,"type":101}`))
+			assert.NoError(t, err)
+		})
+		assert.Empty(t, decoded.Centroids)
+	})
 }
 
 func TestFindMaxVersion(t *testing.T) {

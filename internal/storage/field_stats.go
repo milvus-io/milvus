@@ -171,10 +171,10 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			}
 			stats.BF = bf
 		}
-	} else {
-		stats.initCentroids(data, stats.Type)
-		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
-		if err != nil {
+	} else if value, ok := messageMap["centroids"]; ok && value != nil {
+		// Guarded: an unsupported/vector-less type reaches this branch too, and
+		// dereferencing a missing "centroids" key used to panic.
+		if err := stats.unmarshalCentroids(*value, stats.Type); err != nil {
 			return err
 		}
 	}
@@ -182,28 +182,43 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) {
-	type FieldStatsAux struct {
-		FieldID   int64                            `json:"fieldID"`
-		Type      schemapb.DataType                `json:"type"`
-		Max       json.RawMessage                  `json:"max"`
-		Min       json.RawMessage                  `json:"min"`
-		BF        bloomfilter.BloomFilterInterface `json:"bf"`
-		Centroids []json.RawMessage                `json:"centroids"`
+// unmarshalCentroids decodes the centroid array into concrete VectorFieldValue
+// implementations chosen by dataType.
+//
+// It decodes each centroid explicitly instead of pre-allocating concrete values into
+// the interface slice and letting the decoder reuse them. That older trick depended on
+// the decoder's merge-into-existing-value behaviour, which is NOT portable: this
+// package decodes with `internal/json` (bytedance/sonic), and sonic rejects `null` into
+// a non-empty interface where encoding/json silently leaves it nil. A vector FieldStats
+// always serializes `"bf":null`, so the helper's auxiliary struct — which declared a
+// `bloomfilter.BloomFilterInterface` field it never even read — failed on every vector
+// field, swallowed the error, pre-allocated nothing, and left the real decode below to
+// fail with a misleading "cannot unmarshal into VectorFieldValue". Partition stats with
+// centroids then never loaded, and loadPartitionStats only logs that.
+func (stats *FieldStats) unmarshalCentroids(data json.RawMessage, dataType schemapb.DataType) error {
+	var rawCentroids []json.RawMessage
+	if err := json.Unmarshal(data, &rawCentroids); err != nil {
+		return err
 	}
-	// Unmarshal JSON into the auxiliary struct
-	var aux FieldStatsAux
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return
-	}
-	for i := 0; i < len(aux.Centroids); i++ {
+
+	centroids := make([]VectorFieldValue, 0, len(rawCentroids))
+	for _, rawCentroid := range rawCentroids {
 		switch dataType {
 		case schemapb.DataType_FloatVector:
-			stats.Centroids = append(stats.Centroids, &FloatVectorFieldValue{})
+			centroid := &FloatVectorFieldValue{}
+			if err := json.Unmarshal(rawCentroid, centroid); err != nil {
+				return err
+			}
+			centroids = append(centroids, centroid)
 		default:
-			// other vector datatype
+			// Fail loudly rather than dropping the centroids: a silently empty
+			// snapshot degrades segment pruning to a full scan with no signal.
+			return merr.WrapErrServiceInternalMsg("unsupported data type %s for field stats centroids", dataType.String())
 		}
 	}
+
+	stats.Centroids = centroids
+	return nil
 }
 
 func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
