@@ -225,11 +225,12 @@ func TestRegisteredFilesystemIsCollected(t *testing.T) {
 	}
 	RegisterFilesystemConfig(localConfig)
 
+	// Asserted, not skipped: InitLocalArrowFileSystem above already succeeded,
+	// so an empty result here means registration or collection is broken, not
+	// that the environment is unavailable. Skipping would hide exactly the
+	// regression this test exists to catch.
 	stats := CollectFilesystemStats()
-	if len(stats) == 0 {
-		t.Skip("Skipping CGO test: storage layer not available")
-		return
-	}
+	require.NotEmpty(t, stats, "registered backend did not show up in the scrape")
 	for _, s := range stats {
 		assert.NotEmpty(t, s.Key)
 		assert.GreaterOrEqual(t, s.ReadCount, int64(0))

@@ -30,6 +30,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -296,6 +297,12 @@ func defaultStorageConfig() *indexpb.StorageConfig {
 var (
 	knownFilesystemsMu sync.RWMutex
 	knownFilesystems   = make(map[string]*indexpb.StorageConfig)
+
+	// Set once the default backend has actually been registered. Not a
+	// sync.Once: paramtable may not be populated on the first scrape, and a
+	// Once would burn its single shot on that failure and never register at
+	// all.
+	defaultFilesystemRegistered atomic.Bool
 )
 
 // RegisterFilesystemConfig records a storage config so its filesystem is
@@ -333,7 +340,17 @@ func RegisterFilesystemConfig(storageConfig *indexpb.StorageConfig) {
 func CollectFilesystemStats() []metrics.FilesystemStats {
 	// The default backend is always of interest, but paramtable may not be
 	// populated at init time, so it is registered on first scrape instead.
-	RegisterFilesystemConfig(defaultStorageConfig())
+	// Skipped once registered, because building the config reads ~20
+	// paramtable values (each behind a lock) and this runs on the /metrics
+	// response path -- otherwise every scrape would pay for a config it then
+	// throws away.
+	if !defaultFilesystemRegistered.Load() {
+		storageConfig := defaultStorageConfig()
+		if GetFilesystemKeyFromStorageConfig(storageConfig) != "" {
+			RegisterFilesystemConfig(storageConfig)
+			defaultFilesystemRegistered.Store(true)
+		}
+	}
 
 	knownFilesystemsMu.RLock()
 	configs := make(map[string]*indexpb.StorageConfig, len(knownFilesystems))
