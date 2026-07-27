@@ -38,14 +38,15 @@ import (
 // RESPONSIBILITIES:
 // 1. Reload InProgress tasks to scheduler on DataCoord restart (idempotent recovery)
 // 2. Enqueue Pending tasks to the global task scheduler for execution
-// 3. Clean up target segments when tasks fail (drop incomplete segments)
+// 3. Clean up the target segments of a failed JOB — a restore is all-or-nothing,
+//    so this covers every task of that job, not only the one that failed
 // 4. Unassign terminal tasks whose worker-side drop did not complete, so GC can
 //    reclaim them (checkGC skips any task that still carries a node assignment)
 //
 // TASK STATE TRANSITIONS:
 // Pending → InProgress (inspector enqueues to scheduler)
 // InProgress → Completed/Failed (datanode reports execution result)
-// Failed → Dropped (inspector drops target segments)
+// Any state under a Failed job → target segments Dropped (inspector)
 //
 // INSPECTION INTERVAL:
 // Configured by Params.DataCoordCfg.CopySegmentCheckInterval (default: 2 seconds)
@@ -227,12 +228,21 @@ func (s *copySegmentInspector) inspect() {
 	})
 
 	for _, job := range jobs {
+		// Target-segment cleanup is a function of the JOB outcome, not the task
+		// outcome: a restore is all-or-nothing, so once the job has failed every
+		// target segment it produced must go, including those a sibling task
+		// completed successfully before the failure.
+		jobFailed := job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
+
 		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.CopySegmentTaskState_CopySegmentTaskPending:
 				s.processPending(task)
 			case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
+				if jobFailed {
+					s.processFailed(task)
+				}
 				s.processTerminal(task)
 			case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 				s.processFailed(task)
@@ -265,7 +275,7 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 	s.scheduler.Enqueue(task)
 }
 
-// processFailed handles cleanup for failed copy segment tasks.
+// processFailed drops the target segments a copy task produced.
 //
 // Process flow:
 //  1. Iterate through all segment ID mappings in the task
@@ -278,6 +288,14 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 // - Failed tasks may have partially copied data to target segments
 // - Incomplete segments should not be visible to queries
 // - Dropping ensures consistent state and prevents data corruption
+//
+// Called for every task of a Failed job, not only for Failed tasks. A restore
+// is all-or-nothing: when a collection splits across several copy tasks
+// (MaxSegmentsPerCopyTask) and one of them fails, the siblings that already
+// Completed have flipped their target segments to Flushed — i.e. queryable —
+// so a restore reported as failed would otherwise leave partial data visible.
+// It also unblocks GC: checkGC refuses to reclaim a Failed job while any of its
+// tasks still has a target segment in meta.
 //
 // Error handling:
 // - Logs warnings if drop fails but continues processing other segments

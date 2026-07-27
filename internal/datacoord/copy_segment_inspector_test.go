@@ -440,6 +440,120 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_NoAssignmentIsNoop() {
 	s.inspector.processTerminal(task)
 }
 
+// TestInspect_FailedJobDropsCompletedSiblingSegments is the regression for the
+// all-or-nothing restore invariant: a collection larger than
+// MaxSegmentsPerCopyTask splits into several copy tasks, so one task can
+// Complete — flipping its target segments Importing → Flushed, i.e. queryable —
+// before a sibling fails and takes the job down. Cleanup keys off the JOB
+// outcome, so the completed sibling's segments must be dropped too; otherwise a
+// restore reported as failed leaves partial data visible, and checkGC's
+// hasSegments guard retains the tasks and the job forever.
+func (s *CopySegmentInspectorSuite) TestInspect_FailedJobDropsCompletedSiblingSegments() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+
+	// Target segment of the COMPLETED task: already Flushed and queryable.
+	completedSeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 201, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Flushed, NumOfRows: 100, InsertChannel: "ch1",
+	})
+	s.NoError(s.meta.AddSegment(context.TODO(), completedSeg))
+
+	// Target segment of the FAILED task: still Importing.
+	failedSeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 202, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Importing, NumOfRows: 100, InsertChannel: "ch1",
+	})
+	s.NoError(s.meta.AddSegment(context.TODO(), failedSeg))
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+			Reason:       "sibling task failed",
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	addTask := func(taskID, targetSegID int64, state datapb.CopySegmentTaskState) {
+		t := &copySegmentTask{
+			copyMeta: s.copyMeta,
+			tr:       timerecord.NewTimeRecorder("task"),
+			times:    taskcommon.NewTimes(),
+		}
+		t.task.Store(&datapb.CopySegmentTask{
+			TaskId:       taskID,
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        state,
+			NodeId:       NullNodeID,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: targetSegID, PartitionId: 10},
+			},
+		})
+		s.NoError(s.copyMeta.AddTask(context.TODO(), t))
+	}
+	addTask(1006, 201, datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	addTask(1007, 202, datapb.CopySegmentTaskState_CopySegmentTaskFailed)
+
+	s.inspector.inspect()
+
+	// Both target segments must be dropped — the completed sibling's included.
+	s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 201).GetState(),
+		"a failed restore must not leave the completed sibling's data queryable")
+	s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 202).GetState())
+}
+
+// TestInspect_CompletedTaskUnderActiveJobKeepsSegments: the drop keys off the
+// job outcome, so a completed task under a still-Executing job must keep its
+// segments — that is the restore succeeding, not failing.
+func (s *CopySegmentInspectorSuite) TestInspect_CompletedTaskUnderActiveJobKeepsSegments() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	seg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 203, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Flushed, NumOfRows: 100, InsertChannel: "ch1",
+	})
+	s.NoError(s.meta.AddSegment(context.TODO(), seg))
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	t := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	t.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1008,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		NodeId:       NullNodeID,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 203, PartitionId: 10},
+		},
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), t))
+
+	s.inspector.inspect()
+
+	s.Equal(commonpb.SegmentState_Flushed, s.meta.GetSegment(context.TODO(), 203).GetState())
+}
+
 // TestInspect_RetriesDropForTerminalTasks wires the retry into the periodic
 // loop: both Completed and Failed tasks that still carry an assignment must be
 // picked up by inspect(), not just by a direct processTerminal call.

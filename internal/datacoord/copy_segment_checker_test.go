@@ -734,6 +734,83 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_ReclaimsTaskConvergedAfterWorkerLo
 	s.Nil(s.copyMeta.GetJob(context.TODO(), s.jobID))
 }
 
+// TestCheckGC_ReclaimsFailedJobWithCompletedSibling is the GC end of the
+// all-or-nothing restore regression: under a Failed job, checkGC keeps every
+// task — the Completed sibling included — while any of them still has a target
+// segment in meta. Once the inspector has dropped those segments (job-scoped
+// cleanup, not task-scoped), both tasks and the job must be reclaimed.
+func (s *CopySegmentCheckerSuite) TestCheckGC_ReclaimsFailedJobWithCompletedSibling() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+
+	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+			CleanupTs:    cleanupTs,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// The completed sibling's target segment is still in meta, Flushed.
+	seg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 2002, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Flushed, NumOfRows: 100, InsertChannel: "ch1",
+	})
+	s.NoError(s.meta.AddSegment(context.TODO(), seg))
+
+	addTask := func(taskID, targetSegID int64, state datapb.CopySegmentTaskState) {
+		t := &copySegmentTask{
+			copyMeta: s.copyMeta,
+			tr:       timerecord.NewTimeRecorder("task"),
+			times:    taskcommon.NewTimes(),
+		}
+		t.task.Store(&datapb.CopySegmentTask{
+			TaskId:       taskID,
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        state,
+			NodeId:       NullNodeID,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: targetSegID, PartitionId: 10},
+			},
+		})
+		s.NoError(s.copyMeta.AddTask(context.TODO(), t))
+	}
+	// Completed sibling (segment still present) and the failed task whose
+	// segment the inspector already dropped.
+	addTask(1002, 2002, datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	addTask(1003, 2003, datapb.CopySegmentTaskState_CopySegmentTaskFailed)
+
+	// The completed sibling's lingering segment pins that task, and pinning any
+	// task keeps the whole job. (The failed task, whose segment the inspector
+	// already dropped, is reclaimed right away — GC removes tasks individually.)
+	s.checker.checkGC(job)
+	s.NotNil(s.copyMeta.GetTask(context.TODO(), 1002),
+		"the completed sibling must be retained while its segment is still in meta")
+	s.NotNil(s.copyMeta.GetJob(context.TODO(), s.jobID),
+		"the job must be retained as long as any of its tasks is")
+
+	// Job-scoped cleanup drops it (what the inspector now does for a Failed
+	// job's completed tasks) and removes it from meta.
+	s.NoError(s.meta.UpdateSegmentsInfo(context.TODO(),
+		UpdateStatusOperator(2002, commonpb.SegmentState_Dropped)))
+	s.meta.segments.DropSegment(2002)
+
+	s.checker.checkGC(job)
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1002))
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1003))
+	s.Nil(s.copyMeta.GetJob(context.TODO(), s.jobID),
+		"job and both tasks are reclaimed once no target segment is left")
+}
+
 func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
 
