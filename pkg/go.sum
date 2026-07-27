@@ -106,6 +106,8 @@ github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727084728-a58408f49811 
 github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727084728-a58408f49811/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727093850-fbdc96f0e201 h1:X2F0G+hf9SBKLLIB6SjBan2aemn7dlrfnmdYBPIgBEA=
 github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727093850-fbdc96f0e201/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727100406-db0b1db844ac h1:DIV23xlDb8obWVwOKit+e9Ln3Zzl7vjtqOhHyKd2XHQ=
+github.com/bigsheeper/milvus-proto/go-api/v3 v3.0.0-20260727100406-db0b1db844ac/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/bits-and-blooms/bitset v1.12.0 h1:U/q1fAF7xXRhFCrhROzIfffYnu+dlS38vCZtmFVPHmA=
 github.com/bits-and-blooms/bitset v1.12.0/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
