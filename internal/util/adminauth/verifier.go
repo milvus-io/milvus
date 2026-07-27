@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"golang.org/x/crypto/bcrypt"
 
 	internalhttp "github.com/milvus-io/milvus/internal/http"
@@ -33,27 +32,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// verifyTimeout bounds the credential lookup, including lazily dialing the mix
-// coord. The caller is an HTTP request on the metrics port, frequently a human
-// debugging a sick cluster, so an unreachable coord must produce a prompt
-// failure rather than a hung connection.
+// verifyTimeout bounds each credential RPC. The caller is an HTTP request on
+// the metrics port, frequently a human debugging a sick cluster, so an
+// unreachable coord must produce a prompt failure rather than a hung request.
 const verifyTimeout = 5 * time.Second
 
-// NewRootCredentialVerifier returns a credential verifier for nodes that do not
-// own credential metadata — querynode, datanode and streamingnode. It resolves
-// the root user's stored bcrypt hash through the mix coord and compares it
-// locally.
+// RootCredentialVerifier verifies management-plane credentials on nodes that
+// do not own credential metadata. The MixCoord client is created lazily and is
+// bound to the component lifetime, while each credential lookup is bounded by
+// the HTTP request context.
+type RootCredentialVerifier struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	newClient func(ctx context.Context) (types.MixCoordClient, error)
+
+	mu     sync.Mutex
+	client types.MixCoordClient
+	closed bool
+}
+
+// NewRootCredentialVerifier returns a credential verifier for nodes that do
+// not own credential metadata — querynode, datanode and streamingnode. It
+// resolves the root user's stored bcrypt hash through the mix coord and
+// compares it locally.
 //
-// newClient is called at most once per successful dial, the first time a
-// credential actually needs verifying. Dialing lazily rather than at startup
-// keeps this off the boot path of every node: with
+// newClient is called lazily the first time a credential actually needs
+// verifying. Creating the client lazily rather than at startup keeps this off
+// the boot path of every node: with
 // common.security.adminAuthEnabled at its default of false the client is never
-// created at all. A failed dial is not cached, so a coord that is down while a
-// node boots does not permanently disable management access on that node.
+// created at all. A failed constructor call is not cached. Once constructed,
+// the MixCoord client owns reconnect and address-discovery behavior, so it is
+// deliberately created with lifetimeCtx rather than a short-lived HTTP request
+// context. This lets a cached client recover after MixCoord becomes available
+// or moves to a new address.
 //
-// Register the result with http.RegisterFallbackPasswordVerifyFunc. It occupies
-// the fallback slot, so on nodes that do have local credential metadata (proxy,
-// mix coord) the cheaper in-process verifier always wins and no RPC is made.
+// Register the result's Verify method with
+// http.RegisterFallbackPasswordVerifyFunc. It occupies the fallback slot, so
+// on nodes that do have local credential metadata (proxy, mix coord) the
+// cheaper in-process verifier always wins and no RPC is made.
 //
 // Only the root user is accepted. Management endpoints act on process lifecycle
 // and cluster runtime state, so they stay root-only even for otherwise valid
@@ -65,65 +81,96 @@ const verifyTimeout = 5 * time.Second
 // the mix coord being reachable to verify the password. A worker stays
 // profileable while coord is healthy; if coord is down, /debug/pprof on that
 // worker answers 503 rather than serving a profile. Turning the flag off
-// restores unauthenticated access.
-func NewRootCredentialVerifier(newClient func(ctx context.Context) (types.MixCoordClient, error)) internalhttp.FallbackVerifier {
-	var (
-		mu     sync.Mutex
-		client types.MixCoordClient
-	)
+// restores unauthenticated access. Close the verifier when the role exits.
+func NewRootCredentialVerifier(
+	lifetimeCtx context.Context,
+	newClient func(ctx context.Context) (types.MixCoordClient, error),
+) *RootCredentialVerifier {
+	ctx, cancel := context.WithCancel(lifetimeCtx)
+	return &RootCredentialVerifier{
+		ctx:       ctx,
+		cancel:    cancel,
+		newClient: newClient,
+	}
+}
 
-	getClient := func(ctx context.Context) (types.MixCoordClient, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if client != nil {
-			return client, nil
-		}
-		created, err := newClient(ctx)
-		if err != nil {
-			return nil, err
-		}
-		client = created
-		return client, nil
+func (v *RootCredentialVerifier) getClient() (types.MixCoordClient, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.closed {
+		return nil, merr.WrapErrServiceUnavailable("root credential verifier is closed")
+	}
+	if v.client != nil {
+		return v.client, nil
+	}
+	created, err := v.newClient(v.ctx)
+	if err != nil {
+		return nil, err
+	}
+	v.client = created
+	return v.client, nil
+}
+
+// Verify checks a root credential. Request cancellation and verifyTimeout
+// bound only this lookup; they never cancel the cached client's reconnect and
+// service-discovery context.
+func (v *RootCredentialVerifier) Verify(ctx context.Context, username, password string) error {
+	if username != util.UserRoot {
+		return internalhttp.ErrInvalidCredential
 	}
 
-	return func(ctx context.Context, username, password string) error {
-		if username != util.UserRoot {
-			return internalhttp.ErrInvalidCredential
-		}
+	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
+	defer cancel()
 
-		ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
-		defer cancel()
+	// Every failure below except the bcrypt mismatch means "could not
+	// check", not "wrong password", and is returned as a non-authentication
+	// error so the caller renders 503 rather than telling the operator their
+	// correct password is invalid while the coord is down.
+	cli, err := v.getClient()
+	if err != nil {
+		return merr.Wrap(err, "mix coord client unavailable")
+	}
 
-		// Every failure below except the bcrypt mismatch means "could not
-		// check", not "wrong password", and is returned as a plain error so the
-		// caller renders 503 rather than telling the operator their correct
-		// password is invalid while the coord is down.
-		cli, err := getClient(ctx)
-		if err != nil {
-			return errors.Wrap(err, "mix coord client unavailable")
-		}
+	resp, err := cli.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
+		Username: username,
+	})
+	if err != nil {
+		return merr.Wrap(err, "GetCredential failed")
+	}
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return merr.Wrap(err, "GetCredential returned error")
+	}
+	if resp.GetPassword() == "" {
+		// Not a wrong password: the store answered OK but carried no hash,
+		// which is an internal inconsistency. Reporting it as unverifiable
+		// (503) also stops bcrypt from being handed an empty hash.
+		return merr.WrapErrServiceInternal("credential store returned an empty hash for root")
+	}
 
-		resp, err := cli.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
-			Username: username,
-		})
-		if err != nil {
-			return errors.Wrap(err, "GetCredential failed")
-		}
-		if err := merr.Error(resp.GetStatus()); err != nil {
-			return errors.Wrap(err, "GetCredential returned error")
-		}
-		if resp.GetPassword() == "" {
-			// Not a wrong password: the store answered OK but carried no hash,
-			// which is an internal inconsistency. Reporting it as unverifiable
-			// (503) also stops bcrypt from being handed an empty hash.
-			return merr.WrapErrServiceInternal("credential store returned an empty hash for root")
-		}
+	if bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) != nil {
+		// Don't log here; the caller logs the mismatch together with the
+		// request path, which is more useful for triage.
+		return internalhttp.ErrInvalidCredential
+	}
+	return nil
+}
 
-		if bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) != nil {
-			// Don't log here; the caller logs the mismatch together with the
-			// request path, which is more useful for triage.
-			return internalhttp.ErrInvalidCredential
-		}
+// Close releases the cached MixCoord client and prevents new credential
+// checks from creating one during role shutdown.
+func (v *RootCredentialVerifier) Close() error {
+	v.mu.Lock()
+	if v.closed {
+		v.mu.Unlock()
 		return nil
 	}
+	v.closed = true
+	v.cancel()
+	client := v.client
+	v.client = nil
+	v.mu.Unlock()
+
+	if client != nil {
+		return client.Close()
+	}
+	return nil
 }

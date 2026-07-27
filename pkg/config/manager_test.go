@@ -17,9 +17,11 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +30,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestAllConfigFromManager(t *testing.T) {
@@ -123,6 +128,72 @@ func TestBasic(t *testing.T) {
 
 	configs := mgr.FileConfigs()
 	assert.Len(t, configs, 0)
+}
+
+func TestSensitiveConfigRedaction(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigKey("querynode.gracefulStopTimeout")
+	mgr.RegisterConfigPrefix("credential.")
+	mgr.SensitiveUpdate("minio.address")
+	mgr.SensitivePrefixUpdate("credential.")
+	assert.True(t, mgr.IsConfigRegistered("querynode.graceful_stop_timeout"))
+	assert.True(t, mgr.IsConfigRegistered("credential.aksk1.secret_access_key"))
+	assert.False(t, mgr.IsConfigRegistered("OPAQUE_RUNTIME_VALUE"))
+
+	for _, key := range []string{
+		"minio.address",
+		"MINIO_ADDRESS",
+		"credential.aksk1.secret_access_key",
+		"AWS_SECRET_ACCESS_KEY",
+		"service.api_key",
+		"tls.private-key",
+	} {
+		assert.True(t, mgr.IsSensitive(key), key)
+	}
+	assert.False(t, mgr.IsSensitive("querynode.gracefulStopTimeout"))
+
+	values := map[string]string{
+		"credential.aksk1.secret_access_key": "group-secret",
+		"AWS_SESSION_TOKEN":                  "env-secret",
+		"OPAQUE_RUNTIME_VALUE":               "opaque-env-secret",
+		"querynode.gracefulStopTimeout":      "30",
+	}
+	redacted := mgr.RedactedValues(values)
+	assert.Equal(t, redactedValue, redacted["credential.aksk1.secret_access_key"])
+	assert.Equal(t, redactedValue, redacted["AWS_SESSION_TOKEN"])
+	assert.Equal(t, redactedValue, redacted["OPAQUE_RUNTIME_VALUE"])
+	assert.Equal(t, "30", redacted["querynode.gracefulStopTimeout"])
+	assert.Equal(t, "group-secret", values["credential.aksk1.secret_access_key"], "input must not be mutated")
+}
+
+func TestSensitiveConfigEventLogRedaction(t *testing.T) {
+	var logs bytes.Buffer
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "info",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, zapcore.AddSync(&logs))
+	require.NoError(t, err)
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	mlog.ReplaceGlobals(logger, props)
+	defer mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("credential.")
+	mgr.SensitivePrefixUpdate("credential.")
+	mgr.OnEvent(&Event{
+		EventSource: "test",
+		EventType:   CreateType,
+		Key:         "credential.aksk1.secret_access_key",
+		Value:       "must-not-appear-in-logs",
+	})
+
+	assert.NotContains(t, logs.String(), "must-not-appear-in-logs")
+	assert.True(t, strings.Contains(logs.String(), redactedValue), logs.String())
 }
 
 func TestOnEvent(t *testing.T) {

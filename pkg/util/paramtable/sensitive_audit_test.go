@@ -27,10 +27,8 @@ import (
 // sensitive material. Any ParamItem whose key matches one of these MUST set
 // Sensitive: true, OR be explicitly allowlisted in sensitiveAuditAllowlist.
 //
-// This guards against the failure mode of CVE-2026-26190's follow-up report
-// (April 2026): the redaction code used a narrow substring blacklist
-// (password/secret/token/credential) which missed minio.accessKeyID,
-// etcd.endpoints, etc. Marking via this list is a CI-enforced replacement.
+// This complements the runtime's conservative fallback with CI coverage for
+// declared ParamItems that need explicit Sensitive metadata.
 var sensitivePatterns = []string{
 	"password",
 	"secret",
@@ -59,10 +57,24 @@ var sensitiveAuditAllowlist = map[string]string{
 // movement). Entries are case-insensitive (compared after ToLower).
 // This list is the positive complement to sensitivePatterns.
 var knownSensitive = []string{
+	"kafka.saslusername",
 	"minio.address",
 	"minio.bucketname",
+	"pulsar.authparams",
 	"common.security.tlsmode",
 	"common.security.internaltlsenabled",
+	"trace.jaeger.url",
+	"trace.otlp.headers",
+}
+
+var knownSensitiveParamGroupPrefixes = []string{
+	"credential.",
+	"function.analyzer.lindera.download_urls.",
+	"function.models.zilliz.",
+	"function.rerank.model.providers.",
+	"function.textembedding.providers.",
+	"kafka.consumer.",
+	"kafka.producer.",
 }
 
 func TestSensitiveParamItemsMarked(t *testing.T) {
@@ -107,9 +119,50 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 		}
 	}
 
+	for _, want := range knownSensitiveParamGroupPrefixes {
+		found := false
+		walkParamGroups(reflect.ValueOf(params).Elem(), func(group *ParamGroup) {
+			if strings.ToLower(group.KeyPrefix) == want {
+				if !group.Sensitive {
+					violations = append(violations, group.KeyPrefix+
+						" (in knownSensitiveParamGroupPrefixes but Sensitive: false)")
+				}
+				found = true
+			}
+		})
+		if !found {
+			t.Logf("knownSensitiveParamGroupPrefixes references %q which does not exist in ParamTable; remove from list if intentionally deleted", want)
+		}
+	}
+
 	if len(violations) > 0 {
 		t.Errorf("Sensitive audit found %d violation(s):\n  %s",
 			len(violations), strings.Join(violations, "\n  "))
+	}
+}
+
+func TestSensitiveCipherParamItemsMarked(t *testing.T) {
+	base := NewBaseTableFromYamlOnly(hookYamlFile)
+	params := &cipherConfig{}
+	params.init(base)
+
+	for name, item := range map[string]*ParamItem{
+		"default KMS key": &params.DefaultRootKey,
+		"AWS role ARN":    &params.KmsAwsRoleARN,
+		"AWS external ID": &params.KmsAwsExternalID,
+	} {
+		if !item.Sensitive {
+			t.Errorf("%s (%s) must be marked Sensitive", name, item.Key)
+		}
+		if !base.Manager().IsSensitive(item.Key) {
+			t.Errorf("%s (%s) was not registered as Sensitive", name, item.Key)
+		}
+	}
+
+	for _, fallbackKey := range params.DefaultRootKey.FallbackKeys {
+		if !base.Manager().IsSensitive(fallbackKey) {
+			t.Errorf("fallback key %s was not registered as Sensitive", fallbackKey)
+		}
 	}
 }
 
@@ -140,10 +193,33 @@ func walkParamItems(v reflect.Value, fn func(*ParamItem)) {
 				fn(field.Addr().Interface().(*ParamItem))
 			}
 		case "paramtable.ParamGroup":
-			// Skip ParamGroup for now — group-level Sensitive is a follow-up.
 		default:
 			if field.Kind() == reflect.Struct {
 				walkParamItems(field, fn)
+			}
+		}
+	}
+}
+
+func walkParamGroups(v reflect.Value, fn func(*ParamGroup)) {
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		if !field.CanInterface() && field.CanAddr() {
+			field = reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem()
+		}
+
+		switch field.Type().String() {
+		case "paramtable.ParamItem":
+		case "paramtable.ParamGroup":
+			if field.CanAddr() {
+				fn(field.Addr().Interface().(*ParamGroup))
+			}
+		default:
+			if field.Kind() == reflect.Struct {
+				walkParamGroups(field, fn)
 			}
 		}
 	}

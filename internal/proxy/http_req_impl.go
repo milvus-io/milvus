@@ -48,27 +48,16 @@ var (
 	HTTPCollectionName = "collection_name"
 	UnknownData        = "unknown"
 	sensitiveMark      = "*****"
-	sensitiveKeys      = []string{
-		"secretaccesskey",
-		"secret_access_key",
-		"password",
-		"apikey",
-		"credentialjson",
-		"credential_json",
-	}
 )
 
 func hideSensitive(configs map[string]string) {
-	checkFunc := func(key string) bool {
-		for _, sensitive := range sensitiveKeys {
-			if strings.Contains(strings.ToLower(key), sensitive) {
-				return true
-			}
-		}
-		return false
-	}
+	// Keep the WebUI config view on the same fail-closed policy as
+	// /management/config/get. Source maps may include arbitrary environment or
+	// plugin keys, so values are hidden unless the key is a declared,
+	// non-sensitive Milvus configuration.
+	manager := paramtable.GetBaseTable().Manager()
 	for key := range configs {
-		if checkFunc(key) {
+		if !manager.IsConfigRegistered(key) || manager.IsSensitive(key) {
 			configs[key] = sensitiveMark
 		}
 	}

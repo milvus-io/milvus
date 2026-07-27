@@ -328,6 +328,14 @@ func TestHandleGetConfig(t *testing.T) {
 	mgr.SetConfig("test.getconfig.key1", "val1")
 	mgr.SetConfig("test.getconfig.key2", "val2")
 	mgr.SetConfig("test.getconfig.key3", "val3")
+	mgr.SetConfig("credential.aksk1.secret_access_key", "param-group-secret")
+	mgr.SetConfig("kafka.consumer.ssl.key.pem", "inline-private-key")
+	mgr.SetConfig("function.analyzer.lindera.download_urls.ipadic", "https://example.invalid/dict?signature=secret")
+	mgr.SetConfig("pulsar.authParams", "token:broker-secret")
+	mgr.SetConfig("AWS_SECRET_ACCESS_KEY", "environment-secret")
+	for _, key := range []string{"test.getconfig.key1", "test.getconfig.key2", "test.getconfig.key3"} {
+		mgr.RegisterConfigKey(key)
+	}
 
 	type configResult struct {
 		Key    string `json:"key"`
@@ -438,6 +446,37 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.Contains(t, configs[0].Error, "sensitive")
 		assert.Equal(t, "val1", configs[1].Value)
 		assert.Contains(t, configs[2].Error, "sensitive")
+	})
+
+	t.Run("sensitive ParamGroup and unknown environment keys are redacted", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=credential.aksk1.secret_access_key,kafka.consumer.ssl.key.pem,function.analyzer.lindera.download_urls.ipadic,pulsar.authParams,AWS_SECRET_ACCESS_KEY", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 5)
+		for _, config := range configs {
+			assert.Contains(t, config.Error, "sensitive")
+		}
+		assert.NotContains(t, w.Body.String(), "param-group-secret")
+		assert.NotContains(t, w.Body.String(), "inline-private-key")
+		assert.NotContains(t, w.Body.String(), "signature=secret")
+		assert.NotContains(t, w.Body.String(), "broker-secret")
+		assert.NotContains(t, w.Body.String(), "environment-secret")
+	})
+
+	t.Run("unknown environment keys are never exposed", func(t *testing.T) {
+		mgr.SetConfig("OPAQUE_RUNTIME_VALUE", "must-not-be-exposed")
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=OPAQUE_RUNTIME_VALUE", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 1)
+		assert.Contains(t, configs[0].Error, "unregistered")
+		assert.NotContains(t, w.Body.String(), "must-not-be-exposed")
 	})
 
 	t.Run("all empty keys should fail", func(t *testing.T) {

@@ -213,10 +213,11 @@ func registerDefaults() {
 	})
 	Register(&Handler{
 		Path:    EventLogRouterPath,
-		Handler: eventlog.Handler(),
+		Handler: eventlog.HandlerWithLocalOnlyPolicy(AuthByAdminFlag),
 		// /eventlog attaches a listener to the process event stream, which
-		// carries internal operational detail; gate it with the rest of the
-		// management plane.
+		// carries internal operational detail; gate discovery with the rest of
+		// the management plane and keep its unauthenticated gRPC stream on
+		// loopback whenever that gate is active.
 		AuthPolicy: AuthByAdminFlag,
 	})
 	Register(&Handler{
@@ -474,6 +475,22 @@ func Register(h *Handler) {
 
 func ServeHTTP() {
 	registerDefaults()
+	adminAuth := &paramtable.Get().CommonCfg.AdminAuthEnabled
+	adminAuth.RegisterCallback(func(_ context.Context, _, _, newValue string) error {
+		enabled, err := strconv.ParseBool(newValue)
+		if err != nil {
+			return err
+		}
+		if enabled {
+			return eventlog.EnsureLocalOnly()
+		}
+		return nil
+	})
+	if adminAuth.GetAsBool() {
+		if err := eventlog.EnsureLocalOnly(); err != nil {
+			mlog.Warn(context.TODO(), "restrict eventlog listener to loopback failed", mlog.Err(err))
+		}
+	}
 	go func() {
 		bindAddr := getHTTPAddr()
 		mlog.Info(context.TODO(), "management listen", mlog.String("addr", bindAddr))
