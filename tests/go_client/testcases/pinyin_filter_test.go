@@ -47,6 +47,42 @@ var pinyinTargetIDs = []int64{
 	pinyinIndexedSealedCount + pinyinUnindexedSealedCount,
 }
 
+func pinyinAnalyzerParams(keepOriginal bool) map[string]any {
+	return map[string]any{
+		"tokenizer": "jieba",
+		"filter": []any{
+			map[string]any{
+				"type":                       "pinyin",
+				"keep_original":              keepOriginal,
+				"keep_full_pinyin":           false,
+				"keep_joined_full_pinyin":    true,
+				"keep_separate_first_letter": false,
+			},
+		},
+	}
+}
+
+func requirePinyinAnalyzerTokens(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	analyzerParams map[string]any,
+	expected []string,
+) {
+	t.Helper()
+
+	results, err := mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption("中文测试").
+		WithAnalyzerParams(analyzerParams))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	tokens := make([]string, len(results[0].Tokens))
+	for i, token := range results[0].Tokens {
+		tokens[i] = token.Text
+	}
+	require.Equal(t, expected, tokens)
+}
+
 func insertPinyinRows(t *testing.T, ctx CtxT, mc MC, collectionName string, start, count int) {
 	ids := make([]int64, count)
 	texts := make([]string, count)
@@ -135,18 +171,22 @@ func TestPinyinFilterTextMatchAcrossDataPaths(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collectionName := common.GenRandomString("pinyin_filter", 6)
 
-	analyzerParams := map[string]any{
-		"tokenizer": "jieba",
-		"filter": []any{
-			map[string]any{
-				"type":                       "pinyin",
-				"keep_original":              true,
-				"keep_full_pinyin":           false,
-				"keep_joined_full_pinyin":    true,
-				"keep_separate_first_letter": false,
-			},
-		},
-	}
+	analyzerParams := pinyinAnalyzerParams(true)
+	requirePinyinAnalyzerTokens(
+		t,
+		ctx,
+		mc,
+		analyzerParams,
+		[]string{"中文", "zhongwen", "测试", "ceshi"},
+	)
+	requirePinyinAnalyzerTokens(
+		t,
+		ctx,
+		mc,
+		pinyinAnalyzerParams(false),
+		[]string{"zhongwen", "ceshi"},
+	)
+
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1024).

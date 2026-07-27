@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -17,6 +18,21 @@ TARGET_IDS = {
 }
 
 
+def pinyin_analyzer_params(keep_original):
+    return {
+        "tokenizer": "jieba",
+        "filter": [
+            {
+                "type": "pinyin",
+                "keep_original": keep_original,
+                "keep_full_pinyin": False,
+                "keep_joined_full_pinyin": True,
+                "keep_separate_first_letter": False,
+            }
+        ],
+    }
+
+
 def build_rows(start, count):
     rows = []
     for row_id in range(start, start + count):
@@ -32,6 +48,20 @@ def build_rows(start, count):
 
 @pytest.mark.tags(CaseLabel.L0)
 class TestPinyinFilter(TestBase):
+    def _assert_analyzer_tokens(self, analyzer_params, expected_tokens):
+        rsp = self.collection_client.post(
+            f"{self.endpoint}/v2/vectordb/common/run_analyzer",
+            headers=self.collection_client.update_headers(),
+            data={
+                "text": ["中文测试"],
+                "analyzerParams": json.dumps(analyzer_params),
+            },
+        ).json()
+        assert rsp["code"] == 0, rsp
+        results = rsp["data"]["results"]
+        assert len(results) == 1, results
+        assert [token["token"] for token in results[0]["tokens"]] == expected_tokens
+
     def _flush_with_rate_limit_retry(self, collection_name, timeout=30):
         deadline = time.monotonic() + timeout
         rsp = {}
@@ -89,24 +119,22 @@ class TestPinyinFilter(TestBase):
 
     def test_pinyin_filter_text_match_across_data_paths(self):
         """
-        target: verify filtered Pinyin vector search through RESTful v2 across three data paths
-        method: vector-search 3000 indexed, 500 unindexed, and 500 growing rows through RESTful v2
-        expected: joined Pinyin and original Chinese both return the target row from every path
+        target: verify exact Pinyin tokens and filtered vector search through RESTful v2
+        method: run both original modes, then search 3000 indexed, 500 unindexed, and 500 growing rows
+        expected: exact tokens preserve the flag, and both query forms return every target row
         """
         name = gen_collection_name()
         self.name = name
-        analyzer_params = {
-            "tokenizer": "jieba",
-            "filter": [
-                {
-                    "type": "pinyin",
-                    "keep_original": True,
-                    "keep_full_pinyin": False,
-                    "keep_joined_full_pinyin": True,
-                    "keep_separate_first_letter": False,
-                }
-            ],
-        }
+        analyzer_params = pinyin_analyzer_params(keep_original=True)
+        self._assert_analyzer_tokens(
+            analyzer_params,
+            ["中文", "zhongwen", "测试", "ceshi"],
+        )
+        self._assert_analyzer_tokens(
+            pinyin_analyzer_params(keep_original=False),
+            ["zhongwen", "ceshi"],
+        )
+
         create_payload = {
             "collectionName": name,
             "schema": {
