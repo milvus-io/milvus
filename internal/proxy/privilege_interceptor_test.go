@@ -1016,3 +1016,37 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestCheckClusterPrivilege_AuthorizationDisabled(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(),
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "authorization disabled must short-circuit to allow")
+}
+
+func TestCheckClusterPrivilege_RootBypass(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	ctx := GetContext(context.Background(), "root:123456")
+
+	err := CheckClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "root must bypass when rootShouldBindRole is false; "+
+		"this is what keeps milvus-backup working unchanged")
+}
+
+func TestCheckClusterPrivilege_NoAuthInfo(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(),
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.Error(t, err, "a ctx without auth metadata must be refused, not allowed")
+}
