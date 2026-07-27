@@ -22,6 +22,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -784,6 +785,48 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 	}
 	mlog.Info(context.TODO(), "import result info", mlog.FieldJobID(jobID),
 		mlog.Int64("totalRows", totalRows), mlog.Int64("totalSize", totalSize))
+}
+
+// ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
+// point into Milvus's own internal storage layout under the storage root path.
+//
+// RBAC authorizes an import against the target collection name only; the file
+// paths never participate in that decision. Refusing Milvus's own data
+// directories keeps an ordinary import inside caller-supplied staging data.
+//
+// Binlog import (backup=true) and L0 import are exempt: reading insert_log and
+// delta_log is exactly what they do. They are gated instead by the cluster-level
+// ImportBinlog privilege (checked in the proxy) and by
+// dataCoord.import.enableBinlogImport.
+func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	if importutilv2.IsBackup(options) || importutilv2.IsL0Import(options) {
+		return nil
+	}
+
+	rootPath := cm.RootPath()
+	denied := make([]string, 0, len(common.InternalStorageRootSegments))
+	for _, segment := range common.InternalStorageRootSegments {
+		denied = append(denied, path.Clean(path.Join(rootPath, segment)))
+	}
+
+	for _, file := range files {
+		for _, filePath := range file.GetPaths() {
+			// TrimPrefix first: an object key never carries a leading slash, but
+			// some S3-compatible backends normalize it away, which would let
+			// "/files/insert_log/..." through a comparison done before cleaning.
+			cleaned := path.Clean(strings.TrimPrefix(filePath, "/"))
+			for _, deniedPath := range denied {
+				// Boundary match, not a raw prefix match: a raw prefix would also
+				// reject a caller's own "files/insert_logs_2026/a.json".
+				if cleaned == deniedPath || strings.HasPrefix(cleaned, deniedPath+"/") {
+					return merr.WrapErrImportFailedMsg(
+						"import path %s is not allowed: %s is a Milvus internal storage directory",
+						filePath, deniedPath)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateBinlogImportRequest validates the binlog import request.
