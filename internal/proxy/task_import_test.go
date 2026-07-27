@@ -21,7 +21,9 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -29,10 +31,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Note: mockey is not used in this file since we use testify/mock for generated mocks
@@ -458,4 +462,35 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 	s.NoError(err)
 	s.Require().NotNil(capturedCtx)
 	s.Equal("run-1-batch-1", interceptor.IdempotencyKeyFromContext(capturedCtx))
+}
+
+func TestImportTask_PreExecuteRequiresImportBinlogPrivilege(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	// CheckClusterPrivilege resolves roles via privilege.GetPrivilegeCache(), a
+	// process-wide singleton normally populated once at Proxy startup. Seed it
+	// with an empty policy set (following the same pattern as
+	// privilege_interceptor_test.go's InitEmptyGlobalCache) so the "ordinary
+	// user" case below reaches the actual privilege decision instead of
+	// failing earlier with ErrServiceUnavailable because the cache is nil.
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).
+		Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
+	require.NoError(t, privilege.InitPrivilegeCache(context.Background(), mixcoord))
+
+	t.Run("root is allowed", func(t *testing.T) {
+		ctx := GetContext(context.Background(), "root:123456")
+		err := CheckClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+		assert.NoError(t, err)
+	})
+
+	t.Run("ordinary user without the privilege is refused", func(t *testing.T) {
+		ctx := GetContext(context.Background(), "alice:123456")
+		err := CheckClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
 }
