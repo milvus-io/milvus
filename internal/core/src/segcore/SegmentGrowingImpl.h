@@ -503,6 +503,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
                          Timestamp timestamp,
                          Timestamp ttl = 0) const override;
 
+    // The metric this segment searches a field with. Growing segments carry no
+    // loaded index, so this comes from the load info the delegator stamped in.
+    MetricType
+    ResolveMetricType(FieldId field_id) const;
+
     void
     vector_search(SearchInfo& search_info,
                   const void* query_data,

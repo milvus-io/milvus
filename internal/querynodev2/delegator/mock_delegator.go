@@ -1341,17 +1341,17 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run fun
 	return _c
 }
 
-// UpdateSchema provides a mock function with given fields: ctx, sch, schemaBarrierTs
-func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
-	ret := _m.Called(ctx, sch, schemaBarrierTs)
+// UpdateSchema provides a mock function with given fields: ctx, sch
+func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error {
+	ret := _m.Called(ctx, sch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateSchema")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema, uint64) error); ok {
-		r0 = rf(ctx, sch, schemaBarrierTs)
+	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(ctx, sch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1367,14 +1367,13 @@ type MockShardDelegator_UpdateSchema_Call struct {
 // UpdateSchema is a helper method to define mock.On call
 //   - ctx context.Context
 //   - sch *schemapb.CollectionSchema
-//   - schemaBarrierTs uint64
-func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}, schemaBarrierTs interface{}) *MockShardDelegator_UpdateSchema_Call {
-	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch, schemaBarrierTs)}
+func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}) *MockShardDelegator_UpdateSchema_Call {
+	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch)}
 }
 
-func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64)) *MockShardDelegator_UpdateSchema_Call {
+func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema)) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
+		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema))
 	})
 	return _c
 }
@@ -1384,7 +1383,7 @@ func (_c *MockShardDelegator_UpdateSchema_Call) Return(_a0 error) *MockShardDele
 	return _c
 }
 
-func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema, uint64) error) *MockShardDelegator_UpdateSchema_Call {
+func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema) error) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1519,7 +1518,8 @@ func (_c *MockShardDelegator_Version_Call) RunAndReturn(run func() int64) *MockS
 func NewMockShardDelegator(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockShardDelegator {
+},
+) *MockShardDelegator {
 	mock := &MockShardDelegator{}
 	mock.Mock.Test(t)
 

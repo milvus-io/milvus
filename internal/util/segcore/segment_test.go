@@ -40,7 +40,6 @@ func TestGrowingSegment(t *testing.T) {
 	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
 		CollectionID: collectionID,
 		Schema:       schema,
-		IndexMeta:    mock_segcore.GenTestIndexMeta(collectionID, schema),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, collection)

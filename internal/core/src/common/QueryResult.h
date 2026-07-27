@@ -318,6 +318,13 @@ struct SearchResult {
     int64_t unity_topK_{0};
     int64_t total_data_cnt_{0};
     void* segment_{nullptr};
+    // The metric the producing segment actually searched with, resolved from that
+    // segment's own loaded index or its load info. Reduce needs one value across
+    // segments to order and refine, and the plan no longer carries a reliable one:
+    // the proxy leaves it empty whenever the request did not name a metric, which
+    // is the common case. Every segment of a collection indexes a field the same
+    // way, so any non-empty result answers for all of them.
+    MetricType metric_type_;
 
     // Sealed search requests keep publication blocked until the result is
     // deleted. Growing search results leave this empty.

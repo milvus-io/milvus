@@ -3643,6 +3643,29 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
     deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
+// ResolveMetricType answers with what this segment would actually search with: the
+// metric baked into its loaded vector index, or -- before that index exists -- the
+// one its own load info was packed with. Deliberately not the collection-wide index
+// meta: that copy is refreshed out of band and can disagree with what is loaded here.
+MetricType
+ChunkedSegmentSealedImpl::ResolveMetricType(
+    const std::shared_ptr<const RuntimeResourceState>& runtime, FieldId field_id) const {
+    if (auto entry = GetVectorIndexing(runtime, field_id); entry != nullptr) {
+        return entry->metric_type_;
+    }
+    for (const auto& index_info : load_info_.index_infos()) {
+        if (index_info.fieldid() != field_id.get()) {
+            continue;
+        }
+        for (const auto& kv : index_info.index_params()) {
+            if (kv.key() == knowhere::meta::METRIC_TYPE) {
+                return kv.value();
+            }
+        }
+    }
+    return MetricType();
+}
+
 void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
@@ -3654,6 +3677,16 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         SearchResult& output) const {
     std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
+    // Resolve the metric from THIS segment before searching. search_info is a copy
+    // owned by this segment's VectorSearchNode, so writing to it is local. The plan
+    // only carries a metric when the request named one explicitly; otherwise it is
+    // empty and the segment is the authority, since it is the segment's own index
+    // that the search actually runs against.
+    if (search_info.metric_type_.empty()) {
+        search_info.metric_type_ =
+            ResolveMetricType(snapshot->runtime, search_info.field_id_);
+    }
+    output.metric_type_ = search_info.metric_type_;
     AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto field_id = search_info.field_id_;
     auto runtime = snapshot->runtime;

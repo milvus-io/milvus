@@ -44,29 +44,21 @@ CreateSearchPlanByExpr(CCollection c_col,
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
             schema, serialized_expr_plan, size);
-        auto col_index_meta = col->get_index_meta();
-        auto field_id = milvus::query::GetFieldID(res.get());
-        AssertInfo(col_index_meta != nullptr, "index meta not exist");
-
-        if (!col_index_meta->HasField(milvus::FieldId(field_id))) {
-            auto status = CStatus();
-            status.error_code = milvus::FieldNotLoaded;
-            auto field_name =
-                (*schema)[milvus::FieldId(field_id)].get_name().get();
-            std::string err_msg =
-                "field index of the field: " + field_name +
-                " is not loaded, please reload the collection";
-            status.error_msg = strdup(err_msg.c_str());
-            *res_plan = nullptr;
-            return status;
-        }
-
-        auto field_index_meta =
-            col_index_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
-        auto& search_info = res->plan_node_->search_info_;
-        search_info.metric_type_ = field_index_meta.GeMetricType();
-        milvus::query::PopulateBruteForceIndexParams(search_info,
-                                                     field_index_meta);
+        // Plan creation no longer consults a collection-wide index meta.
+        //
+        // It used to reject the whole shard with FieldNotLoaded when the field was
+        // missing from that snapshot, and to source the metric type and brute-force
+        // params from it. But the snapshot is refreshed out of band -- QueryCoord
+        // RPCs each carrying a whole ListIndexes result, with no ordering authority
+        // -- so a late older one could reject a search the segments were perfectly
+        // able to serve. It also never guaranteed what it appeared to: a field
+        // present in it may still be missing from any given segment.
+        //
+        // Whether a segment can answer, and with what metric, is a property of that
+        // segment. Both are now resolved there, from its loaded index or its own
+        // load info, and travel back up on SearchResult for reduce. The metric the
+        // request named, if any, still reaches the plan through PlanProto and takes
+        // precedence.
 
         auto status = CStatus();
         status.error_code = milvus::Success;

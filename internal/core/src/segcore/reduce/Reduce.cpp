@@ -443,8 +443,29 @@ ReduceHelper::RefineDistances() {
     }
     auto& placeholder = placeholder_group_->at(0);
     auto field_id = search_info.field_id_;
-    bool is_cosine = search_info.metric_type_ == knowhere::metric::COSINE;
-    bool is_negated = !PositivelyRelated(search_info.metric_type_);
+    // Take the metric from the segments rather than from the plan: each segment
+    // resolves it from its own loaded index or load info, and the plan's copy is
+    // empty unless the request happened to name a metric explicitly. All segments
+    // of a collection index a field identically, so the first non-empty one is
+    // authoritative for the whole reduce.
+    MetricType metric_type = search_info.metric_type_;
+    if (metric_type.empty()) {
+        for (const auto& search_result : search_results_) {
+            if (search_result != nullptr && !search_result->metric_type_.empty()) {
+                metric_type = search_result->metric_type_;
+                break;
+            }
+        }
+    }
+    // PositivelyRelated matches named metrics, so an empty one silently reads as
+    // negated and would flip the refine ordering. Nothing downstream would notice,
+    // so fail here instead.
+    AssertInfo(!metric_type.empty(),
+               "global refine has no metric type: neither the plan nor any "
+               "searched segment supplied one for field {}",
+               field_id.get());
+    bool is_cosine = metric_type == knowhere::metric::COSINE;
+    bool is_negated = !PositivelyRelated(metric_type);
     auto& field = plan_->schema_->operator[](field_id);
     AssertInfo(field.get_data_type() != DataType::VECTOR_SPARSE_U32_F32,
                "global refine is not supported for sparse vector");

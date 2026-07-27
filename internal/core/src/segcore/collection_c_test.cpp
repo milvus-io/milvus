@@ -107,17 +107,6 @@ TEST(CApiTest, UpdateSchemaTest) {
     free(const_cast<char*>(status.error_msg));
 }
 
-TEST(CApiTest, SetIndexMetaTest) {
-    auto collection = NewCollection(get_default_schema_config().c_str());
-
-    milvus::proto::segcore::CollectionIndexMeta indexMeta;
-    indexMeta.ParseFromString(get_default_index_meta());
-    std::vector<char> buffer(indexMeta.ByteSizeLong());
-    indexMeta.SerializeToArray(buffer.data(), indexMeta.ByteSizeLong());
-    SetIndexMeta(collection, buffer.data(), indexMeta.ByteSizeLong());
-    DeleteCollection(collection);
-}
-
 TEST(CApiTest, GetCollectionNameTest) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     auto name = GetCollectionName(collection);

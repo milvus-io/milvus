@@ -1309,6 +1309,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          Timestamp timestamp,
                          Timestamp collection_ttl) const override;
 
+    // The metric this segment would actually search a field with: from its loaded
+    // vector index, else from its own load info. Empty when neither is available.
+    // Takes the caller's already-captured runtime state so the metric and the
+    // search come from the same published snapshot.
+    MetricType
+    ResolveMetricType(const std::shared_ptr<const RuntimeResourceState>& runtime,
+                      FieldId field_id) const;
+
     void
     vector_search(SearchInfo& search_info,
                   const void* query_data,

@@ -45,8 +45,7 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 
 func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, oldColl *model.Collection, newColl *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
-	schema := newColl.ToCollectionSchemaPB()
-	schema.Version = newColl.SchemaVersion + 1
+	schema := nextSchemaSnapshot(newColl)
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}

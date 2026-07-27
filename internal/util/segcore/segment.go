@@ -51,6 +51,10 @@ type CreateCSegmentRequest struct {
 	SegmentType SegmentType
 	IsSorted    bool
 	LoadInfo    *querypb.SegmentLoadInfo
+	// MaxIndexRowCount is the expected row capacity of a segment of this
+	// collection. It only scales the interim-index build threshold; segcore
+	// cannot derive it because it comes from DataCoord config.
+	MaxIndexRowCount int64
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -72,6 +76,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var status C.CStatus
 	if req.LoadInfo != nil {
 		segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		segLoadInfo.MaxIndexRowCount = req.MaxIndexRowCount
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err

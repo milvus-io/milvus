@@ -36,9 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -121,34 +119,11 @@ func (s *StreamingForwardSuite) SetupTest() {
 				},
 			},
 		},
-	}, &segcorepb.CollectionIndexMeta{
-		MaxIndexRowCount: 100,
-		IndexMetas: []*segcorepb.FieldIndexMeta{
-			{
-				FieldID:      101,
-				CollectionID: s.collectionID,
-				IndexName:    "binary_index",
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: "128",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: "BIN_IVF_FLAT",
-					},
-					{
-						Key:   common.MetricTypeKey,
-						Value: metric.JACCARD,
-					},
-				},
-			},
-		},
-	}, &querypb.LoadMetaInfo{
-		PartitionIDs: s.partitionIDs,
-	})
+	}, nil,
+
+		&querypb.LoadMetaInfo{
+			PartitionIDs: s.partitionIDs,
+		})
 
 	s.mq = &msgstream.MockMsgStream{}
 	s.rootPath = "delegator_test"
@@ -361,34 +336,11 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 			},
 		},
 	}
-	s.manager.Collection.PutOrRef(s.collectionID, s.schema, &segcorepb.CollectionIndexMeta{
-		MaxIndexRowCount: 100,
-		IndexMetas: []*segcorepb.FieldIndexMeta{
-			{
-				FieldID:      101,
-				CollectionID: s.collectionID,
-				IndexName:    "binary_index",
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: "128",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: "BIN_IVF_FLAT",
-					},
-					{
-						Key:   common.MetricTypeKey,
-						Value: metric.JACCARD,
-					},
-				},
-			},
-		},
-	}, &querypb.LoadMetaInfo{
-		PartitionIDs: s.partitionIDs,
-	})
+	s.manager.Collection.PutOrRef(s.collectionID, s.schema, nil,
+
+		&querypb.LoadMetaInfo{
+			PartitionIDs: s.partitionIDs,
+		})
 
 	s.mq = &msgstream.MockMsgStream{}
 	s.rootPath = "delegator_test"

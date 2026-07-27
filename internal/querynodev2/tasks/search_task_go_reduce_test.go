@@ -185,14 +185,14 @@ func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupO
 	} else {
 		schema = mock_segcore.GenTestCollectionSchema("test-late-mat", schemapb.DataType_Int64, true)
 	}
-	indexMeta := mock_segcore.GenTestIndexMeta(collectionID, schema)
 
 	manager := segments.NewManager()
-	manager.Collection.PutOrRef(collectionID, schema, indexMeta, &querypb.LoadMetaInfo{
+	manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: collectionID,
 		PartitionIDs: []int64{partitionID},
 	})
+
 	collection := manager.Collection.Get(collectionID)
 
 	ts := &testSegments{
@@ -952,13 +952,13 @@ func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
 
 	paramtable.Init()
 	schema := mock_segcore.GenTestCollectionSchema("test-empty-search", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
 	manager := segments.NewManager()
-	manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
+	manager.Collection.PutOrRef(testCollectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: testCollectionID,
 		PartitionIDs: []int64{testPartitionID},
 	})
+
 	collection := manager.Collection.Get(testCollectionID)
 	defer manager.Collection.Unref(collection.ID(), 1)
 
@@ -1181,9 +1181,8 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 	}()
 
 	schema := mock_segcore.GenTestCollectionSchema("test-reduced-plan-topk", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
 	manager := segments.NewManager()
-	require.NoError(t, manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
+	require.NoError(t, manager.Collection.PutOrRef(testCollectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: testCollectionID,
 		PartitionIDs: []int64{testPartitionID},

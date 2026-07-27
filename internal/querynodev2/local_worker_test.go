@@ -99,15 +99,16 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 
 	suite.schema = mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	suite.indexMeta = mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
-	collection, err := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(suite.collectionID, suite.schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+
 	suite.NoError(err)
 	loadMata := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 	}
-	suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), nil, loadMata)
 
 	suite.mockLoader = segments.NewMockLoader(suite.T())
 	suite.node.loader = suite.mockLoader

@@ -69,16 +69,15 @@ func (suite *SegmentSuite) SetupTest() {
 
 	suite.manager = NewManager()
 	schema := mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,
-		schema,
-		indexMeta,
+		schema, nil,
+
 		&querypb.LoadMetaInfo{
 			LoadType:     querypb.LoadType_LoadCollection,
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
-		},
-	)
+		})
+
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 
 	suite.sealed, err = NewSegment(ctx,
@@ -809,19 +808,20 @@ func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
 	assert.NotContains(t, gotAgain, int64(103))
 }
 
-func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
+func TestLocalSegmentReopenUsesSchemaVersion(t *testing.T) {
 	paramtable.Init()
 
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
 	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection.setSchema(schema, 1)
 
+	// A nil schema falls back to the served (schema, schema.Version).
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
-			return request.Schema == schema && request.SchemaVersion == 101
+			return request.Schema == schema && request.SchemaVersion == 1
 		})).
 		Return(nil)
 
@@ -845,7 +845,7 @@ func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
+	assert.NoError(t, segment.Reopen(context.Background(), loadInfo, nil))
 }
 
 func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
@@ -855,7 +855,7 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	schema.Version = 1
 
 	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection.setSchema(schema, 1)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
@@ -890,7 +890,7 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	err := segment.Reopen(context.Background(), newLoadInfo)
+	err := segment.Reopen(context.Background(), newLoadInfo, nil)
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
 }
@@ -907,7 +907,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 	schema.Version = 1
 
 	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection.setSchema(schema, 1)
 
 	getParam := func(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 		for _, kv := range kvs {
@@ -960,7 +960,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo))
+	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo, nil))
 	require.NotNil(t, captured)
 	require.Len(t, captured.GetIndexInfos(), 1)
 

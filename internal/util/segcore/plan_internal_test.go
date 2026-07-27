@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
@@ -47,25 +46,9 @@ func TestNewSearchRequestSkipsPlaceholderCleanupOnMetricMismatch(t *testing.T) {
 			},
 		},
 	}
-	indexMeta := &segcorepb.CollectionIndexMeta{
-		IndexMetas: []*segcorepb.FieldIndexMeta{
-			{
-				CollectionID: 100,
-				FieldID:      101,
-				IndexName:    "fakevec",
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.DimKey, Value: "128"},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: common.MetricTypeKey, Value: "L2"},
-				},
-			},
-		},
-	}
 	collection, err := CreateCCollection(&CreateCCollectionRequest{
 		CollectionID: 100,
 		Schema:       schema,
-		IndexMeta:    indexMeta,
 	})
 	require.NoError(t, err)
 	defer collection.Release()

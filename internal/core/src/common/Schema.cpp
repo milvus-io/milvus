@@ -184,6 +184,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
     // schema->set_auto_id(schema_proto.autoid());
 
+    // schema_version_ is the logical collection schema version (schema.version),
+    // the single monotonic version QueryNode/segcore gate on. Sourcing it here from
+    // the proto makes an initially-created CCollection carry its real schema version
+    // (instead of defaulting to 0), so the version gate in Collection::parse_schema /
+    // reopen / LazyCheckSchema compares like-for-like. Paths that pass an explicit
+    // version (parse_schema, ParseReopenSchema) still set_schema_version() afterwards
+    // with the same schema.version value, so they remain consistent.
+    schema->set_schema_version(schema_proto.version());
+
     // NOTE: only two system
 
     auto process_field = [&schema, &schema_proto](const auto& child) {

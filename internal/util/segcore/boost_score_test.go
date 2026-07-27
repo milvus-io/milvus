@@ -164,7 +164,6 @@ func newBoostScoreTestContext(t *testing.T) (*segcore.CCollection, segcore.CSegm
 	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
 		CollectionID: collectionID,
 		Schema:       schema,
-		IndexMeta:    mock_segcore.GenTestIndexMeta(collectionID, schema),
 	})
 	require.NoError(t, err)
 

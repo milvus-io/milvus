@@ -70,21 +70,6 @@ UpdateLoadFields(CCollection collection,
     }
 }
 
-CStatus
-SetIndexMeta(CCollection collection,
-             const void* proto_blob,
-             const int64_t length) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto col = static_cast<milvus::segcore::Collection*>(collection);
-        col->parseIndexMeta(proto_blob, length);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
 void
 DeleteCollection(CCollection collection) {
     SCOPE_CGO_CALL_METRIC();

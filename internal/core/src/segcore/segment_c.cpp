@@ -68,6 +68,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentIndexMeta.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/TextLobSpillover.h"
 #include "segcore/SegmentSealed.h"
@@ -109,13 +110,19 @@ std::unique_ptr<milvus::segcore::SegmentInterface>
 CreateSegment(milvus::segcore::Collection* col,
               SegmentType seg_type,
               int64_t segment_id,
-              bool is_sorted_by_pk) {
+              bool is_sorted_by_pk,
+              const milvus::proto::segcore::SegmentLoadInfo* load_info) {
+    // A segment's index configuration comes from its OWN load info, not from the
+    // collection. It has to be known here rather than at SetLoadInfo: a growing
+    // segment builds its IndexingRecord in its constructor, and field_indexings_ is
+    // read without a lock afterwards, so it is immutable once published.
+    auto index_meta = milvus::segcore::BuildSegmentIndexMeta(load_info);
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
             auto seg = milvus::segcore::CreateGrowingSegment(
                 col->get_schema(),
-                col->get_index_meta(),
+                index_meta,
                 segment_id,
                 milvus::segcore::SegcoreConfig::default_config());
             segment = std::move(seg);
@@ -125,7 +132,7 @@ CreateSegment(milvus::segcore::Collection* col,
         case Indexing:
             segment = milvus::segcore::CreateSealedSegment(
                 col->get_schema(),
-                col->get_index_meta(),
+                index_meta,
                 segment_id,
                 milvus::segcore::SegcoreConfig::default_config(),
                 is_sorted_by_pk);
@@ -149,8 +156,8 @@ NewSegment(CCollection collection,
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        auto segment =
-            CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
+        auto segment = CreateSegment(
+            col, seg_type, segment_id, is_sorted_by_pk, /*load_info=*/nullptr);
 
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
@@ -177,8 +184,8 @@ NewSegmentWithLoadInfo(CCollection collection,
 
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        auto segment =
-            CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
+        auto segment = CreateSegment(
+            col, seg_type, segment_id, is_sorted_by_pk, &load_info);
         segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();

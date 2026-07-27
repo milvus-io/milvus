@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -88,7 +89,7 @@ type ShardDelegator interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
-	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -137,6 +138,42 @@ func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegator
 	}
 }
 
+// WithIndexInfoList seeds the channel's index configuration from the watch request.
+func WithIndexInfoList(indexInfos []*indexpb.IndexInfo) ShardDelegatorOption {
+	return func(sd *shardDelegator) {
+		sd.setFieldIndexes(indexInfos)
+	}
+}
+
+// setFieldIndexes replaces the channel's index configuration. Only the configuration
+// half of FieldIndexInfo is populated; index files belong to a specific segment and
+// are never collection-wide.
+func (sd *shardDelegator) setFieldIndexes(indexInfos []*indexpb.IndexInfo) {
+	if len(indexInfos) == 0 {
+		return
+	}
+	fieldIndexes := make([]*querypb.FieldIndexInfo, 0, len(indexInfos))
+	for _, info := range indexInfos {
+		fieldIndexes = append(fieldIndexes, &querypb.FieldIndexInfo{
+			FieldID:     info.GetFieldID(),
+			IndexName:   info.GetIndexName(),
+			IndexID:     info.GetIndexID(),
+			IndexParams: info.GetIndexParams(),
+		})
+	}
+	sd.fieldIndexMut.Lock()
+	defer sd.fieldIndexMut.Unlock()
+	sd.fieldIndexes = fieldIndexes
+}
+
+// getFieldIndexes returns the channel's index configuration for stamping into a
+// growing segment's load info.
+func (sd *shardDelegator) getFieldIndexes() []*querypb.FieldIndexInfo {
+	sd.fieldIndexMut.RLock()
+	defer sd.fieldIndexMut.RUnlock()
+	return sd.fieldIndexes
+}
+
 type idfOracleHolder struct {
 	oracle IDFOracle
 }
@@ -181,17 +218,33 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
+	// fieldIndexes is THIS channel's view of the collection's index configuration.
+	// Growing segments created straight from the stream build their SegmentLoadInfo
+	// here in the delegator (see delegator_data.go), so unlike a QueryCoord-packed
+	// load info theirs has no IndexInfos of its own — this is where they get one.
+	// Seeded from the WatchDmChannels request and refreshed by every load that
+	// carries an index list. Only the configuration fields are meaningful: a growing
+	// segment has no index files, just the params (metric type, index type) its
+	// interim index is built from.
+	fieldIndexMut sync.RWMutex
+	fieldIndexes  []*querypb.FieldIndexInfo
+
 	// current forward policy
 	l0ForwardPolicy string
 
-	// schemaBarrierTs fences load results started before the latest schema update.
-	schemaChangeMutex sync.RWMutex
-	schemaBarrierTs   uint64
-	// collectionVersion is the collection schema version applied to this delegator's
-	// channel-local FunctionRunner and IDF runtime.
-	collectionVersion atomic.Uint64
-	// bm25Functions is the BM25 function set applied to the channel-local IDF runtime.
-	bm25Functions bm25FunctionSet
+	// servedSchemaVersion is the delegator's current served schema.Version. It
+	// fences in-flight load results that started before the latest schema update:
+	// a load carrying an older schema.Version is rejected (see
+	// addDistributionIfSchemaVersionOK). schema.Version is the single monotonic
+	// schema version.
+	schemaChangeMutex   sync.RWMutex
+	servedSchemaVersion uint64
+	// servedSchema is the schema THIS delegator has applied. It is per-delegator, not
+	// the shared Collection (which a peer delegator on the same node, or a load's
+	// PutOrRef, may have already advanced), so the BM25 function diff on the next
+	// UpdateSchema compares against this delegator's own previous schema. Guarded by
+	// schemaChangeMutex.
+	servedSchema *schemapb.CollectionSchema
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -1342,9 +1395,13 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 	return sd.catchingUpStreamingData.Load()
 }
 
-func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+	// Accept schema updates while Initializing, not just Working: the pipeline may
+	// consume a schema-change WAL message during the ConsumeMsgStream -> delegator.Start
+	// startup window. Rejecting it there (IsWorking) forced the caller to either drop the
+	// event (permanent stale schema) or panic. Only a Stopped/closing delegator rejects.
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
 		return err
 	}
 	defer sd.lifetime.Done()
@@ -1352,18 +1409,29 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	schemaVersion := uint64(schema.GetVersion())
 	mlog.Info(ctx, "delegator received update schema event",
 		mlog.Uint64("schemaVersion", schemaVersion),
-		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
 	)
 
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
-	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
+	// Gate side effects on THIS delegator's served schema.Version, not the shared
+	// Collection. Two shards of the same collection on one node share the Collection,
+	// so a peer delegator (or a Full/Delta/Watch PutOrRef) may have already advanced
+	// it to this version; gating on the shared Collection would then skip this
+	// delegator's own per-vchannel convergence (function runner / idfOracle). Every
+	// real DDL bumps schema.Version, so <= is stale or a no-op.
+	if schemaVersion <= sd.servedSchemaVersion {
 		mlog.Info(ctx, "delegator skip stale or no-op schema event",
 			mlog.Uint64("schemaVersion", schemaVersion),
-			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
+			mlog.Uint64("servedSchemaVersion", sd.servedSchemaVersion),
 		)
-		return sd.updateDelegatorSchemaLocked(ctx)
+		return nil
+	}
+	oldSet := newBM25FunctionSet(sd.servedSchema)
+	newSet := newBM25FunctionSet(schema)
+	idfOracle := sd.getIDFOracle()
+	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
+		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
 	}
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
@@ -1380,10 +1448,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
-		// same-version schema payloads such as collection properties. Logical
-		// schema freshness is still guarded by schema.version in collectionManager.
-		SchemaBarrierTs: schemaBarrierTs,
+		// Schema freshness is guarded by schema.Version, the single monotonic
+		// schema version, in collectionManager.
 	},
 		sealed,
 		growing,
@@ -1416,18 +1482,45 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	// Apply the local collection update with the same barrier used for remote
-	// workers. collectionManager keeps schema.Version as the logical freshness key.
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
+	// Apply the local collection update. collectionManager gates on schema.Version.
+	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema); err != nil {
 		return err
 	}
 	if err := sd.updateDelegatorSchemaLocked(ctx); err != nil {
 		return err
 	}
 
+	// Publish the manager schema after the delegator schema update. Queries use
+	// the previous function schema until this point.
+	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
+		// Runner construction failures are retried asynchronously by the manager.
+		// A synchronous error here means the internal function metadata is invalid.
+		panic(err)
+	}
+	if idfOracle == nil && len(newSet) > 0 {
+		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
+		// Old growings cannot receive stats for newly added BM25 fields; ProcessInsert registers only new growings.
+		idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
+		idfOracle.Start()
+		sd.distribution.SetIDFOracle(idfOracle)
+		if current := sd.distribution.current.Load(); current != nil {
+			idfOracle.SetNext(current)
+		}
+		sd.publishIDFOracle(idfOracle)
+	} else if idfOracle != nil && !newSet.Equal(oldSet) {
+		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
+			return err
+		}
+	}
+	// Commit this delegator's served schema only after every side effect (worker
+	// UpdateSchema, function runner, idfOracle) succeeded, and advance the stale-load
+	// fence here. On failure the caller panics for WAL replay; leaving the served
+	// version unchanged lets the replay re-apply this event instead of skipping it.
+	sd.servedSchemaVersion = schemaVersion
+	sd.servedSchema = schema
 	mlog.Info(ctx, "delegator finished update schema event",
 		mlog.Uint64("schemaVersion", schemaVersion),
-		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
+		mlog.Uint64("servedSchemaVersion", sd.servedSchemaVersion),
 		mlog.Int("sealedNum", len(sealed)),
 		mlog.Int("growingNum", len(growing)),
 		mlog.Int("bm25FunctionNum", len(newBM25FunctionSet(schema))),
@@ -1547,12 +1640,18 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
-	schema, schemaVersion, schemaBarrierTs := collection.SchemaSnapshot()
-	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), schema); err != nil {
+	// Snapshot the loaded (schema, version) ONCE and reuse it for every construction-time
+	// consumer — function runner Alloc, external-table check, the served-schema cursor,
+	// and the BM25 idfOracle. A peer delegator (same node, shared Collection) can advance
+	// the schema between reads, so re-reading collection.Schema() per consumer could pair
+	// e.g. a V1 runner with a V2 cursor and make the later V2 stream event look like a
+	// no-op — leaving the runner stuck at V1.
+	initSchema, initSchemaVersion := collection.SchemaAndVersion()
+	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), initSchema); err != nil {
 		return nil, err
 	}
 
-	skipStreamingForExternalTable := typeutil.IsExternalCollection(schema)
+	skipStreamingForExternalTable := typeutil.IsExternalCollection(initSchema)
 	catchingUpStreamingData := !skipStreamingForExternalTable
 	if skipStreamingForExternalTable {
 		log.Info(ctx, "skip streaming data catchup for read-only external collection",
@@ -1576,16 +1675,18 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	})
 
 	sd := &shardDelegator{
-		collectionID:      collectionID,
-		replicaID:         replicaID,
-		vchannelName:      channel,
-		version:           version,
-		collection:        collection,
-		collectionManager: manager.Collection,
-		segmentManager:    manager.Segment,
-		workerManager:     workerManager,
-		lifetime:          lifetime.NewLifetime(lifetime.Initializing),
-		distribution:      NewDistribution(channel, queryView),
+		collectionID:        collectionID,
+		replicaID:           replicaID,
+		vchannelName:        channel,
+		version:             version,
+		collection:          collection,
+		servedSchemaVersion: initSchemaVersion,
+		servedSchema:        initSchema,
+		collectionManager:   manager.Collection,
+		segmentManager:      manager.Segment,
+		workerManager:       workerManager,
+		lifetime:            lifetime.NewLifetime(lifetime.Initializing),
+		distribution:        NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{paramtable.GetStringNodeID(), channel}),
 		latestTsafe:                   atomic.NewUint64(startTs),
@@ -1607,8 +1708,12 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 	sd.bm25Functions = newBM25FunctionSet(schema)
 
-	if len(sd.bm25Functions) > 0 {
-		idfOracle := NewIDFOracle(sd.vchannelName, schema.GetFunctions())
+	hasBM25Field := lo.ContainsBy(initSchema.GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
+		return tf.GetType() == schemapb.FunctionType_BM25
+	})
+
+	if hasBM25Field {
+		idfOracle := NewIDFOracle(sd.vchannelName, initSchema.GetFunctions())
 		idfOracle.Start()
 		sd.distribution.SetIDFOracle(idfOracle)
 		sd.publishIDFOracle(idfOracle)

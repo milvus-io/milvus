@@ -4,8 +4,8 @@ package segments
 
 import (
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	segcorepb "github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -164,17 +164,17 @@ func (_c *MockCollectionManager_ListWithName_Call) RunAndReturn(run func() map[i
 	return _c
 }
 
-// PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta
-func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
-	ret := _m.Called(collectionID, schema, meta, loadMeta)
+// PutOrRef provides a mock function with given fields: collectionID, schema, indexInfos, loadMeta
+func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, indexInfos []*indexpb.IndexInfo, loadMeta *querypb.LoadMetaInfo) error {
+	ret := _m.Called(collectionID, schema, indexInfos, loadMeta)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PutOrRef")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error); ok {
-		r0 = rf(collectionID, schema, meta, loadMeta)
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, []*indexpb.IndexInfo, *querypb.LoadMetaInfo) error); ok {
+		r0 = rf(collectionID, schema, indexInfos, loadMeta)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -190,15 +190,15 @@ type MockCollectionManager_PutOrRef_Call struct {
 // PutOrRef is a helper method to define mock.On call
 //   - collectionID int64
 //   - schema *schemapb.CollectionSchema
-//   - meta *segcorepb.CollectionIndexMeta
+//   - indexInfos []*indexpb.IndexInfo
 //   - loadMeta *querypb.LoadMetaInfo
-func (_e *MockCollectionManager_Expecter) PutOrRef(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_PutOrRef_Call {
-	return &MockCollectionManager_PutOrRef_Call{Call: _e.mock.On("PutOrRef", collectionID, schema, meta, loadMeta)}
+func (_e *MockCollectionManager_Expecter) PutOrRef(collectionID interface{}, schema interface{}, indexInfos interface{}, loadMeta interface{}) *MockCollectionManager_PutOrRef_Call {
+	return &MockCollectionManager_PutOrRef_Call{Call: _e.mock.On("PutOrRef", collectionID, schema, indexInfos, loadMeta)}
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_PutOrRef_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, indexInfos []*indexpb.IndexInfo, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo))
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].([]*indexpb.IndexInfo), args[3].(*querypb.LoadMetaInfo))
 	})
 	return _c
 }
@@ -208,7 +208,7 @@ func (_c *MockCollectionManager_PutOrRef_Call) Return(_a0 error) *MockCollection
 	return _c
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, []*indexpb.IndexInfo, *querypb.LoadMetaInfo) error) *MockCollectionManager_PutOrRef_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -307,17 +307,17 @@ func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32)
 	return _c
 }
 
-// UpdateSchema provides a mock function with given fields: collectionID, schema, schemaBarrierTs
-func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
-	ret := _m.Called(collectionID, schema, schemaBarrierTs)
+// UpdateSchema provides a mock function with given fields: collectionID, schema
+func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error {
+	ret := _m.Called(collectionID, schema)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateSchema")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, uint64) error); ok {
-		r0 = rf(collectionID, schema, schemaBarrierTs)
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(collectionID, schema)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -333,14 +333,13 @@ type MockCollectionManager_UpdateSchema_Call struct {
 // UpdateSchema is a helper method to define mock.On call
 //   - collectionID int64
 //   - schema *schemapb.CollectionSchema
-//   - schemaBarrierTs uint64
-func (_e *MockCollectionManager_Expecter) UpdateSchema(collectionID interface{}, schema interface{}, schemaBarrierTs interface{}) *MockCollectionManager_UpdateSchema_Call {
-	return &MockCollectionManager_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", collectionID, schema, schemaBarrierTs)}
+func (_e *MockCollectionManager_Expecter) UpdateSchema(collectionID interface{}, schema interface{}) *MockCollectionManager_UpdateSchema_Call {
+	return &MockCollectionManager_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", collectionID, schema)}
 }
 
-func (_c *MockCollectionManager_UpdateSchema_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64)) *MockCollectionManager_UpdateSchema_Call {
+func (_c *MockCollectionManager_UpdateSchema_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema)) *MockCollectionManager_UpdateSchema_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema))
 	})
 	return _c
 }
@@ -350,7 +349,7 @@ func (_c *MockCollectionManager_UpdateSchema_Call) Return(_a0 error) *MockCollec
 	return _c
 }
 
-func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, uint64) error) *MockCollectionManager_UpdateSchema_Call {
+func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema) error) *MockCollectionManager_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -360,7 +359,8 @@ func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, 
 func NewMockCollectionManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockCollectionManager {
+},
+) *MockCollectionManager {
 	mock := &MockCollectionManager{}
 	mock.Mock.Test(t)
 

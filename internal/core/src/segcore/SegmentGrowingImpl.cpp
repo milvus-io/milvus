@@ -1588,6 +1588,21 @@ SegmentGrowingImpl::search_batch_pks(
     }
 }
 
+MetricType
+SegmentGrowingImpl::ResolveMetricType(FieldId field_id) const {
+    for (const auto& index_info : load_info_.index_infos()) {
+        if (index_info.fieldid() != field_id.get()) {
+            continue;
+        }
+        for (const auto& kv : index_info.index_params()) {
+            if (kv.key() == knowhere::meta::METRIC_TYPE) {
+                return kv.value();
+            }
+        }
+    }
+    return MetricType();
+}
+
 void
 SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,
@@ -1597,6 +1612,15 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const BitsetView& bitset,
                                   milvus::OpContext* op_context,
                                   SearchResult& output) const {
+    // Same contract as the sealed path: the plan only carries a metric when the
+    // request named one, so otherwise this segment supplies it. A growing segment
+    // has no loaded vector index, so its own load info is the only source -- the
+    // delegator stamps the channel's index configuration in when it creates the
+    // segment from the stream.
+    if (search_info.metric_type_.empty()) {
+        search_info.metric_type_ = ResolveMetricType(search_info.field_id_);
+    }
+    output.metric_type_ = search_info.metric_type_;
     query::SearchOnGrowing(*this,
                            search_info,
                            query_data,
