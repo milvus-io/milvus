@@ -44,10 +44,9 @@ func TestExternalTableJSONShreddingE2E(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	restoreConfig := alterMilvusConfigForExternalJSONShredding(t, map[string]string{
-		"common.enabledJSONShredding":         "true",
-		"common.usingJSONShreddingForQuery":   "true",
-		"dataCoord.jsonShreddingMaxColumns":   "2",
-		"dataCoord.jsonShreddingTriggerCount": "10",
+		"common.enabledJSONShredding":       "true",
+		"common.usingJSONShreddingForQuery": "true",
+		"dataCoord.jsonShreddingMaxColumns": "2",
 	})
 	t.Cleanup(restoreConfig)
 
