@@ -197,7 +197,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			QueryViewVersion: lease.Version,
 		})
 	}
-	optimizer := queryresource.NewGlobalOptimizer(runtime)
+	optimizer := queryresource.NewGlobalOptimizer(runtime, lease.Version.DataVersion)
 	plan := &viewpb.QueryPlan{
 		Version: lease.Version.IntoProto(),
 		ShardId: shardID.IntoProto(),
@@ -210,16 +210,19 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		}
 		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
 		fillSearchRequestPartitionIDs(searchReq, req.GetPartitionIds())
-		if err := optimizer.OptimizeSearch(ctx, searchReq); err != nil {
+		optimization, err := optimizer.OptimizeSearch(ctx, searchReq)
+		if err != nil {
 			return nil, err
 		}
 		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
-		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
-			ignoreGrowing: searchReq.GetIgnoreGrowing(),
-			partitionIDs:  searchReq.GetPartitionIDs(),
-			runtime:       runtime,
-			mvcc:          mvcc,
-		})
+		if !optimization.Skip {
+			plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+				ignoreGrowing: searchReq.GetIgnoreGrowing(),
+				partitionIDs:  searchReq.GetPartitionIDs(),
+				runtime:       runtime,
+				mvcc:          mvcc,
+			})
+		}
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		if request.LegacyRetrieveRequest == nil {
 			return nil, viewerror.NewUnknownError("query plan request misses legacy retrieve request")

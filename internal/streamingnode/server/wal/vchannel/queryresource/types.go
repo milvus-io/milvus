@@ -18,6 +18,13 @@ type QueryRuntimeModule interface {
 	Close()
 }
 
+// QueryRuntimeVersionedModule owns resources that must be prepared for the
+// exact DataVersion of each QueryView before that view can become ready.
+type QueryRuntimeVersionedModule interface {
+	PrepareDataVersion(context.Context, qviews.DataVersion) error
+	ReleaseDataVersion(qviews.DataVersion)
+}
+
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
 type QueryRuntimeModuleBuilder interface {
 	NewRuntime() (QueryRuntimeModule, error)

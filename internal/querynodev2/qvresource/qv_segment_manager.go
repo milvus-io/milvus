@@ -24,21 +24,22 @@ func NewQueryViewPhysicalSegmentLoader(manager *segments.Manager, loader segment
 	})
 }
 
-func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, loader segments.Loader, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, watcherFactories ...qnview.SegmentLoadInfoWatcherFactory) qnview.SegmentManager {
+func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, loader segments.Loader, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, streamFactories ...qnview.SegmentLoadInfoStreamFactory) qnview.SegmentManager {
 	if manager == nil || loader == nil || meta == nil || streams == nil {
 		return nil
 	}
 	physicalLoader := NewQueryViewPhysicalSegmentLoader(manager, loader)
 	nodeScheduler := nodescheduler.Get()
-	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithNodeScheduler(
+	var segmentLoadInfoStream qnview.SegmentLoadInfoStream
+	if len(streamFactories) > 0 && streamFactories[0] != nil {
+		segmentLoadInfoStream = streamFactories[0].NewSegmentLoadInfoStream(ctx)
+	}
+	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(
 		nodeScheduler,
 		physicalLoader,
+		segmentLoadInfoStream,
 		newQueryViewSegmentResourceEstimator(loader),
 	)
-	if len(watcherFactories) > 0 && watcherFactories[0] != nil {
-		watcher := watcherFactories[0].NewSegmentLoadInfoWatcher(ctx, physicalManager.ApplyLoadInfoSnapshot)
-		physicalManager.SetSegmentLoadInfoWatcher(watcher)
-	}
 	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, manager.Collection)
 	return qnview.NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physicalManager, qvtransformlogbuffer.New(streams), collectionRuntime)
 }

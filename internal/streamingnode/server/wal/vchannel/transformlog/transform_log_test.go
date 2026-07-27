@@ -68,6 +68,17 @@ func TestObserveMessageOwnsAppendFlushAndMaterializeScheduling(t *testing.T) {
 	assert.IsType(t, &transformMaterializeTask{}, scheduler.tasks[1])
 }
 
+func TestEmptyBarrierAdvancesInMemoryFrontierWithoutDirtySnapshot(t *testing.T) {
+	transformLog := New(Config{VChannel: "v1"})
+	transformLog.SwitchIntoMetaAndData()
+
+	result := transformLog.ObserveMessage(context.Background(), newTransformLogTestManualFlushMessage(t, 20))
+	require.NotNil(t, result.Data)
+	assert.Equal(t, uint64(20), result.Data.TimeTick())
+	assert.Zero(t, transformLog.SnapshotMeta().GetCheckpointTimeTick())
+	assert.Nil(t, transformLog.ConsumeDirtyAndGetSnapshot())
+}
+
 func TestReadStopsAtEndTimeTick(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
 	manager := NewStreamManager("p1")
@@ -347,7 +358,7 @@ func TestMaterializeSkipsBarrierEntries(t *testing.T) {
 	require.NotNil(t, materializer.requests[0].Entries[0].GetDelete())
 }
 
-func TestFlushAdvancesCheckpointToLastDurableEntry(t *testing.T) {
+func TestFlushPersistsLastEntryAndExposesBarrierAfterSnapshotPersisted(t *testing.T) {
 	transformLog := New(Config{
 		VChannel: "v1",
 		Store:    newMemoryStore(),
@@ -355,14 +366,19 @@ func TestFlushAdvancesCheckpointToLastDurableEntry(t *testing.T) {
 
 	appendResult := transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{})
 	require.True(t, appendResult.Appended)
+	require.True(t, transformLog.syncUp(20).Appended)
 
 	result, err := transformLog.flush(context.Background(), flushOption{TargetTimeTick: 20})
 	require.NoError(t, err)
 	assert.True(t, result.Started)
 	assert.Equal(t, uint64(10), result.DurableTimeTick)
+	assert.Equal(t, uint64(10), transformLog.SnapshotMeta().GetCheckpointTimeTick())
+	assert.Zero(t, transformLog.DataBarrierTimeTick())
 
-	snapshot := transformLog.SnapshotMeta()
-	assert.Equal(t, uint64(10), snapshot.GetCheckpointTimeTick())
+	snapshot := transformLog.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, snapshot)
+	transformLog.MarkSnapshotPersisted(snapshot)
+	assert.Equal(t, uint64(20), transformLog.DataBarrierTimeTick())
 	require.Len(t, transformLog.chunks, 1)
 	require.Len(t, transformLog.chunks[0].entries, 1)
 	assert.Equal(t, uint64(10), transformLog.chunks[0].entries[0].GetTimeTick())
@@ -377,6 +393,7 @@ func TestFlushKeepsCheckpointAtLastDurableEntryWhenTargetStillHasPendingEntries(
 
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 11), appendOption{}).Appended)
+	require.True(t, transformLog.syncUp(20).Appended)
 
 	result, err := transformLog.flush(context.Background(), flushOption{TargetTimeTick: 20})
 	require.NoError(t, err)
@@ -384,6 +401,20 @@ func TestFlushKeepsCheckpointAtLastDurableEntryWhenTargetStillHasPendingEntries(
 	assert.Equal(t, uint64(10), result.DurableTimeTick)
 	assert.Equal(t, uint64(20), result.NextTargetTimeTick)
 	assert.Equal(t, uint64(10), transformLog.SnapshotMeta().GetCheckpointTimeTick())
+	firstSnapshot := transformLog.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, firstSnapshot)
+	transformLog.MarkSnapshotPersisted(firstSnapshot)
+	assert.Equal(t, uint64(10), transformLog.DataBarrierTimeTick())
+
+	result, err = transformLog.flush(context.Background(), flushOption{TargetTimeTick: result.NextTargetTimeTick})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(11), result.DurableTimeTick)
+	assert.Zero(t, result.NextTargetTimeTick)
+	assert.Equal(t, uint64(11), transformLog.SnapshotMeta().GetCheckpointTimeTick())
+	secondSnapshot := transformLog.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, secondSnapshot)
+	transformLog.MarkSnapshotPersisted(secondSnapshot)
+	assert.Equal(t, uint64(20), transformLog.DataBarrierTimeTick())
 }
 
 func TestShouldMaterializeUsesUnmaterializedRowsAndBytes(t *testing.T) {

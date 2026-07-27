@@ -31,9 +31,11 @@ func TestGlobalOptimizerBuildsBM25IDF(t *testing.T) {
 	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9})
-	optimizer := NewGlobalOptimizer(runtime)
+	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1})
 
-	require.NoError(t, optimizer.OptimizeSearch(context.Background(), req))
+	result, err := optimizer.OptimizeSearch(context.Background(), req)
+	require.NoError(t, err)
+	require.False(t, result.Skip)
 
 	placeholder := &commonpb.PlaceholderGroup{}
 	require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), placeholder))
@@ -42,6 +44,24 @@ func TestGlobalOptimizerBuildsBM25IDF(t *testing.T) {
 	plan := &planpb.PlanNode{}
 	require.NoError(t, proto.Unmarshal(req.GetSerializedExprPlan(), plan))
 	require.Equal(t, float64(9), plan.GetVectorAnns().GetQueryInfo().GetBm25Avgdl())
+}
+
+func TestGlobalOptimizerSkipsPreparedEmptyBM25Corpus(t *testing.T) {
+	const (
+		collectionID  = int64(200)
+		inputFieldID  = int64(201)
+		outputFieldID = int64(202)
+	)
+	require.NoError(t, function.AllocFunctionRunners(collectionID, "query-optimizer-empty-test", testBM25Schema(inputFieldID, outputFieldID)))
+	defer function.ReleaseFunctionRunners(collectionID, "query-optimizer-empty-test")
+
+	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
+	runtime := NewQueryRuntime(fakeIDFModule{})
+	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1})
+
+	result, err := optimizer.OptimizeSearch(context.Background(), req)
+	require.NoError(t, err)
+	require.True(t, result.Skip)
 }
 
 func testBM25SearchRequest(t *testing.T, collectionID int64, inputFieldID int64, outputFieldID int64) *internalpb.SearchRequest {
@@ -104,6 +124,6 @@ func (m fakeIDFModule) ApplyLiveEvent(context.Context, walview.VChannelResourceE
 }
 func (m fakeIDFModule) Advance(qviews.DataVersion) {}
 func (m fakeIDFModule) Close()                     {}
-func (m fakeIDFModule) BuildIDF(int64, *schemapb.SparseFloatArray) ([][]byte, float64, error) {
+func (m fakeIDFModule) BuildIDF(qviews.DataVersion, int64, *schemapb.SparseFloatArray) ([][]byte, float64, error) {
 	return m.vectors, m.avgdl, nil
 }

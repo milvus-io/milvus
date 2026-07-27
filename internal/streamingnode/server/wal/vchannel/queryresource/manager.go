@@ -85,10 +85,12 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	var advanceRuntime *QueryRuntime
 	var advance qviews.DataVersion
 	var hasAdvance bool
+	var releaseDataVersion bool
 
 	m.mu.Lock()
 	if _, ok := m.refs[req.Key]; ok {
 		delete(m.refs, req.Key)
+		releaseDataVersion = !hasQueryViewDataVersion(m.refs, req.Key.QueryViewVersion.DataVersion)
 		advance, hasAdvance = minQueryViewDataVersion(m.refs)
 		advanceRuntime = m.runtime
 	}
@@ -99,6 +101,9 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 
 	if hasAdvance && advanceRuntime != nil {
 		advanceRuntime.Advance(advance)
+	}
+	if releaseDataVersion && advanceRuntime != nil {
+		advanceRuntime.ReleaseDataVersion(req.Key.QueryViewVersion.DataVersion)
 	}
 	cancelTask(task)
 	closeRuntime(runtime)
@@ -248,7 +253,7 @@ func (m *Manager) finishBuild(task *scheduledBuild) {
 	cancelTask(task)
 	closeRuntime(runtime)
 	for key, onReady := range ready {
-		m.notifyReady(key, onReady)
+		m.submitReady(key, onReady)
 	}
 }
 
@@ -256,28 +261,44 @@ func (m *Manager) submitReady(key qviews.QueryViewKey, onReady func()) {
 	if onReady == nil {
 		return
 	}
-	m.submitCallback(func() {
-		m.notifyReady(key, onReady)
+	m.mu.Lock()
+	if m.scheduler == nil {
+		m.scheduler = nodescheduler.Get()
+	}
+	scheduler := m.scheduler
+	m.mu.Unlock()
+	scheduler.Submit(resourceReadyTask{
+		manager: m,
+		key:     key,
+		onReady: onReady,
 	})
 }
 
-func (m *Manager) notifyReady(key qviews.QueryViewKey, onReady func()) {
-	if onReady == nil {
-		return
-	}
+func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onReady func()) error {
 	m.mu.Lock()
 	_, ok := m.refs[key]
 	runtime := m.runtime
-	advance, hasAdvance := minQueryViewDataVersion(m.refs)
 	ready := ok && runtime != nil && m.task == nil && m.err == nil
 	m.mu.Unlock()
 	if !ready {
-		return
+		return nil
 	}
-	if hasAdvance {
-		runtime.Advance(advance)
+	if err := runtime.PrepareDataVersion(ctx, key.QueryViewVersion.DataVersion); err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			return err
+		}
+		return errors.Mark(err, nodescheduler.ErrDelay)
+	}
+	m.mu.Lock()
+	_, ok = m.refs[key]
+	ready = ok && m.runtime == runtime && m.task == nil && m.err == nil
+	m.mu.Unlock()
+	if !ready {
+		runtime.ReleaseDataVersion(key.QueryViewVersion.DataVersion)
+		return nil
 	}
 	onReady()
+	return nil
 }
 
 func (m *Manager) submitCallback(callback func()) {

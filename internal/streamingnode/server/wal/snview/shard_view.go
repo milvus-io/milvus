@@ -20,8 +20,9 @@ import (
 // contracts require that all callbacks are asynchronous, so this does not
 // cause deadlocks.
 type snShardView struct {
-	mu              sync.Mutex
-	closed          bool
+	mu     sync.Mutex
+	closed bool
+
 	detached        bool
 	ctx             context.Context
 	pchannel        string
@@ -116,6 +117,7 @@ func (s *snShardView) startRecovery() {
 func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.closed || s.detached {
 		return false
 	}
@@ -138,6 +140,7 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 func (s *snShardView) CloseForHandoff() {
 	s.mu.Lock()
 	s.closed = true
+
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
 	for version, entry := range s.views {

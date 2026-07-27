@@ -2,11 +2,13 @@ package queryresource
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
@@ -61,6 +63,209 @@ func TestManagerBuildNotifiesAllCurrentRefsWithoutWaiterGoroutines(t *testing.T)
 			return false
 		}
 	}, time.Second, time.Millisecond)
+}
+
+func TestManagerWaitsForExactDataVersionBeforeReady(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+
+	prepareVersion2 := make(chan struct{})
+	manager := NewManager(Config{
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{
+			prepare: func(ctx context.Context, version qviews.DataVersion) error {
+				if version.StreamingVersion != 2 {
+					return nil
+				}
+				select {
+				case <-prepareVersion2:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			},
+		}},
+	})
+
+	ready1 := make(chan struct{})
+	meta1, key1 := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{Key: key1, Meta: meta1, OnReady: func() { close(ready1) }}, testManagerViewBuilder)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready1:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+
+	ready2 := make(chan struct{})
+	meta2, key2 := testManagerQueryViewMetaAndKey(2)
+	manager.AcquireLocked(snview.AcquireResource{Key: key2, Meta: meta2, OnReady: func() { close(ready2) }}, testManagerViewBuilder)
+	select {
+	case <-ready2:
+		t.Fatal("query view became ready before its data version was prepared")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(prepareVersion2)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready2:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
+func TestManagerRetriesDataVersionPreparationBeforeReady(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+
+	var attempts atomic.Int32
+	manager := NewManager(Config{
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{
+			prepare: func(context.Context, qviews.DataVersion) error {
+				if attempts.Add(1) == 1 {
+					return merr.WrapErrServiceUnavailableMsg("BM25 stats are not ready")
+				}
+				return nil
+			},
+		}},
+	})
+
+	ready := make(chan struct{})
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { close(ready) }}, testManagerViewBuilder)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.GreaterOrEqual(t, attempts.Load(), int32(2))
+}
+
+func TestManagerReleasesDataVersionPreparedAfterViewWasDropped(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	released := make(chan struct{})
+	var prepared atomic.Bool
+	manager := NewManager(Config{
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{
+			prepare: func(ctx context.Context, version qviews.DataVersion) error {
+				if version.StreamingVersion != 2 {
+					return nil
+				}
+				close(started)
+				select {
+				case <-finish:
+					prepared.Store(true)
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			},
+			release: func(version qviews.DataVersion) {
+				if version.StreamingVersion == 2 && prepared.Load() {
+					select {
+					case <-released:
+					default:
+						close(released)
+					}
+				}
+			},
+		}},
+	})
+
+	ready1 := make(chan struct{})
+	meta1, key1 := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{Key: key1, Meta: meta1, OnReady: func() { close(ready1) }}, testManagerViewBuilder)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready1:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+
+	meta2, key2 := testManagerQueryViewMetaAndKey(2)
+	manager.AcquireLocked(snview.AcquireResource{Key: key2, Meta: meta2, OnReady: func() {}}, testManagerViewBuilder)
+	<-started
+	manager.Release(snview.ReleaseResource{Key: key2})
+	close(finish)
+	require.Eventually(t, func() bool {
+		select {
+		case <-released:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
+func TestManagerKeepsDataVersionWhileAnotherQueryViewReferencesIt(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+
+	var releases atomic.Int32
+	manager := NewManager(Config{
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{
+			prepare: func(context.Context, qviews.DataVersion) error { return nil },
+			release: func(qviews.DataVersion) { releases.Add(1) },
+		}},
+	})
+
+	meta1, key1 := testManagerQueryViewMetaAndKey(1)
+	ready1 := make(chan struct{})
+	manager.AcquireLocked(snview.AcquireResource{Key: key1, Meta: meta1, OnReady: func() { close(ready1) }}, testManagerViewBuilder)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready1:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+
+	key2 := key1
+	key2.QueryViewVersion.QueryVersion = 2
+	meta2 := proto.Clone(meta1).(*viewpb.QueryViewMeta)
+	meta2.Version.QueryVersion = 2
+	ready2 := make(chan struct{})
+	manager.AcquireLocked(snview.AcquireResource{Key: key2, Meta: meta2, OnReady: func() { close(ready2) }}, testManagerViewBuilder)
+	require.Eventually(t, func() bool {
+		select {
+		case <-ready2:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+
+	manager.Release(snview.ReleaseResource{Key: key1})
+	require.Equal(t, int32(0), releases.Load())
 }
 
 func TestManagerReleaseQueuesDroppedCallbackInNodeScheduler(t *testing.T) {
@@ -287,6 +492,40 @@ func (*gatedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannel
 func (*gatedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
 func (*gatedQueryRuntimeModule) Close() {}
+
+type versionedQueryRuntimeModuleBuilder struct {
+	prepare func(context.Context, qviews.DataVersion) error
+	release func(qviews.DataVersion)
+}
+
+func (b versionedQueryRuntimeModuleBuilder) NewRuntime() (QueryRuntimeModule, error) {
+	return &versionedQueryRuntimeModule{prepare: b.prepare, release: b.release}, nil
+}
+
+type versionedQueryRuntimeModule struct {
+	prepare func(context.Context, qviews.DataVersion) error
+	release func(qviews.DataVersion)
+}
+
+func (*versionedQueryRuntimeModule) Prepare(context.Context, walview.VChannelWALView) error {
+	return nil
+}
+
+func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) {}
+
+func (*versionedQueryRuntimeModule) Advance(qviews.DataVersion) {}
+
+func (m *versionedQueryRuntimeModule) PrepareDataVersion(ctx context.Context, version qviews.DataVersion) error {
+	return m.prepare(ctx, version)
+}
+
+func (m *versionedQueryRuntimeModule) ReleaseDataVersion(version qviews.DataVersion) {
+	if m.release != nil {
+		m.release(version)
+	}
+}
+
+func (*versionedQueryRuntimeModule) Close() {}
 
 func testManagerQueryViewMetaAndKey(streamingVersion int64) (*viewpb.QueryViewMeta, qviews.QueryViewKey) {
 	version := qviews.QueryViewVersion{

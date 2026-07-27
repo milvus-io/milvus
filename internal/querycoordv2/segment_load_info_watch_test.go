@@ -3,6 +3,7 @@ package querycoordv2
 import (
 	"context"
 	"io"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -11,12 +12,77 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	componenttypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestCalculateQueryViewSegmentLoadInfoRevisionIsStable(t *testing.T) {
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID: 100,
+		SegmentID:    1000,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        102,
+				IndexID:        12,
+				BuildID:        22,
+				IndexParams:    []*commonpb.KeyValuePair{{Key: "metric_type", Value: "IP"}, {Key: "index_type", Value: "HNSW"}},
+				IndexFilePaths: []string{"index/12/2", "index/12/1"},
+			},
+			{
+				FieldID:        101,
+				IndexID:        11,
+				BuildID:        21,
+				IndexParams:    []*commonpb.KeyValuePair{{Key: "metric_type", Value: "COSINE"}, {Key: "index_type", Value: "HNSW"}},
+				IndexFilePaths: []string{"index/11/2", "index/11/1"},
+			},
+		},
+	}
+	indexes := []*indexpb.IndexInfo{
+		{
+			CollectionID:    100,
+			FieldID:         102,
+			IndexID:         12,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}, {Key: "metric_type", Value: "IP"}},
+			IndexParams:     []*commonpb.KeyValuePair{{Key: "M", Value: "16"}, {Key: "efConstruction", Value: "200"}},
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: "mmap.enabled", Value: "false"}, {Key: "index_type", Value: "HNSW"}},
+		},
+		{
+			CollectionID:    100,
+			FieldID:         101,
+			IndexID:         11,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}, {Key: "metric_type", Value: "COSINE"}},
+			IndexParams:     []*commonpb.KeyValuePair{{Key: "M", Value: "8"}, {Key: "efConstruction", Value: "100"}},
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: "mmap.enabled", Value: "true"}, {Key: "index_type", Value: "HNSW"}},
+		},
+	}
+
+	reorderedLoadInfo := proto.Clone(loadInfo).(*querypb.SegmentLoadInfo)
+	slices.Reverse(reorderedLoadInfo.IndexInfos)
+	for _, info := range reorderedLoadInfo.IndexInfos {
+		slices.Reverse(info.IndexParams)
+		slices.Reverse(info.IndexFilePaths)
+	}
+	reorderedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+	slices.Reverse(reorderedIndexes)
+	for _, index := range reorderedIndexes {
+		slices.Reverse(index.TypeParams)
+		slices.Reverse(index.IndexParams)
+		slices.Reverse(index.UserIndexParams)
+	}
+
+	expected := calculateQueryViewSegmentLoadInfoRevision(loadInfo, indexes)
+	actual := calculateQueryViewSegmentLoadInfoRevision(reorderedLoadInfo, reorderedIndexes)
+	assert.Equal(t, expected, actual)
+
+	changedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: reorderedIndexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+	changedIndexes[0].IndexParams[0].Value = "changed"
+	changed := calculateQueryViewSegmentLoadInfoRevision(reorderedLoadInfo, changedIndexes)
+	assert.NotEqual(t, expected, changed)
+}
 
 func TestQueryViewSegmentLoadInfoWatchSession_ClearsSubscriptionsOnStreamClose(t *testing.T) {
 	watcher := newQueryViewSegmentLoadInfoWatcher()

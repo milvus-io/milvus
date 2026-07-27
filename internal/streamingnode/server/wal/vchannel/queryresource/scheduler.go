@@ -6,6 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -96,3 +97,15 @@ func (t resourceCallbackTask) Execute(context.Context) error {
 }
 
 var _ nodescheduler.Task = resourceCallbackTask(nil)
+
+type resourceReadyTask struct {
+	manager *Manager
+	key     qviews.QueryViewKey
+	onReady func()
+}
+
+func (t resourceReadyTask) Execute(ctx context.Context) error {
+	return t.manager.prepareReady(ctx, t.key, t.onReady)
+}
+
+var _ nodescheduler.Task = resourceReadyTask{}

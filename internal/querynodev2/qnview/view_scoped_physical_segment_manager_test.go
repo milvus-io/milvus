@@ -548,8 +548,8 @@ func TestViewScopedPhysicalSegmentManager_ReleaseStopsRetryingSegmentUpdate(t *t
 
 func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease(t *testing.T) {
 	scheduler := &fakeNodeScheduler{}
-	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler, watcher)
+	stream := &fakeSegmentLoadInfoStream{}
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler, stream)
 
 	loadedCh := make(chan []TransformSegment, 1)
 	meta := buildHandlerTestMeta(1)
@@ -572,22 +572,30 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 
 	mgr.Acquire(req)
 	require.Empty(t, scheduler.tasks)
-	require.Len(t, watcher.subscriptions, 1)
-	assert.Equal(t, SegmentLoadInfoSubscription{
-		CollectionID: testCollectionID,
-		SegmentID:    1000,
-	}, watcher.subscriptions[0])
+	require.Len(t, stream.subscriptions, 1)
+	assert.Equal(t, testCollectionID, stream.subscriptions[0].option.CollectionID)
+	assert.Equal(t, int64(1000), stream.subscriptions[0].option.SegmentID)
+	assert.True(t, stream.subscriptions[0].option.Revision.Empty())
+	assert.NotNil(t, stream.subscriptions[0].option.Handler)
 
 	revision := SegmentLoadInfoRevision{Revision: 10}
-	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+	require.NoError(t, stream.Emit(SegmentLoadInfoSnapshot{
 		CollectionID: testCollectionID,
 		SegmentID:    1000,
 		Revision:     revision,
 		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
-	})
+	}))
 
 	require.Len(t, scheduler.tasks, 1)
 	assert.Equal(t, revision, scheduler.tasks[0].Snapshot.Revision)
+	updatedRevision := SegmentLoadInfoRevision{Revision: 11}
+	require.NoError(t, stream.Emit(SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     updatedRevision,
+		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
+	}))
+	assert.Empty(t, scheduler.updates)
 	scheduler.tasks[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
 
 	select {
@@ -597,8 +605,11 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for watched segment load")
 	}
-	require.Len(t, watcher.subscriptions, 2)
-	assert.Equal(t, revision, watcher.subscriptions[1].Revision)
+	require.Len(t, stream.subscriptions, 1)
+	require.Len(t, scheduler.updates, 1)
+	assert.Equal(t, updatedRevision, scheduler.updates[0].Snapshot.Revision)
+	scheduler.updates[0].OnUpdated(updatedRevision)
+	require.Len(t, stream.subscriptions, 1)
 
 	droppedCh := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{
@@ -610,8 +621,42 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for release")
 	}
-	require.Len(t, watcher.unsubscriptions, 1)
-	assert.Equal(t, SegmentLoadInfoSubscription{CollectionID: testCollectionID, SegmentID: 1000}, watcher.unsubscriptions[0])
+	assert.True(t, stream.subscriptions[0].closed)
+}
+
+func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptionLifecycle(t *testing.T) {
+	scheduler := &fakeNodeScheduler{}
+	stream := &fakeSegmentLoadInfoStream{}
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler, stream)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	meta1 := buildHandlerTestMeta(1)
+	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
+	mgr.Acquire(AcquirePhysicalSegments{Key: key1, Meta: meta1, View: view})
+	require.Len(t, stream.subscriptions, 1)
+	oldSubscription := stream.subscriptions[0]
+
+	mgr.Release(ReleaseSegments{Key: key1})
+	assert.True(t, oldSubscription.closed)
+
+	meta2 := buildHandlerTestMeta(2)
+	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
+	mgr.Acquire(AcquirePhysicalSegments{Key: key2, Meta: meta2, View: view})
+	require.Len(t, stream.subscriptions, 2)
+
+	snapshot := SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     SegmentLoadInfoRevision{Revision: 10},
+		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
+	}
+	require.NoError(t, oldSubscription.option.Handler.Handle(snapshot))
+	assert.Empty(t, scheduler.tasks)
+
+	require.NoError(t, stream.Emit(snapshot))
+	require.Len(t, scheduler.tasks, 1)
 }
 
 func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRelease(t *testing.T) {
@@ -736,8 +781,8 @@ func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports
 			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
 		},
 	}
-	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, watcher)
+	stream := &fakeSegmentLoadInfoStream{}
+	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, stream)
 
 	loadedCh := make(chan []TransformSegment, 3)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -745,12 +790,12 @@ func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports
 		OnLoaded:        func(loaded []TransformSegment) { loadedCh <- loaded },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
-	assert.ElementsMatch(t, []SegmentLoadInfoSubscription{
+	assert.ElementsMatch(t, []SegmentLoadInfoSubscriptionOption{
 		{CollectionID: testCollectionID, SegmentID: 1000},
 		{CollectionID: testCollectionID, SegmentID: 1001},
 		{CollectionID: testCollectionID, SegmentID: 2000},
-	}, watcher.subscriptions)
-	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
+	}, subscriptionOptions(stream.subscriptions))
+	applySegmentLoadSnapshots(t, stream, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
 
 	require.Eventually(t, func() bool {
 		return len(loadedCh) == 3
@@ -770,8 +815,8 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
 		},
 	}
-	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, watcher)
+	stream := &fakeSegmentLoadInfoStream{}
+	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, stream)
 
 	loadedCh := make(chan []TransformSegment, 2)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -779,7 +824,7 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 		OnLoaded:        func(loaded []TransformSegment) { loadedCh <- loaded },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
-	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10})
+	applySegmentLoadSnapshots(t, stream, map[int64]int64{1000: 10, 1001: 10})
 
 	require.Eventually(t, func() bool {
 		return len(loadedCh) == 2
@@ -801,13 +846,13 @@ func TestViewScopedPhysicalSegmentManager_ReleaseAfterLastView(t *testing.T) {
 			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
 		},
 	}
-	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, watcher)
+	stream := &fakeSegmentLoadInfoStream{}
+	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, stream)
 
 	ready1 := make(chan []TransformSegment, 3)
 	ready2 := make(chan []TransformSegment, 4)
 	mgr.Acquire(AcquirePhysicalSegments{Key: key1, Meta: meta1, View: view1, OnLoaded: func(loaded []TransformSegment) { ready1 <- loaded }, OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") }})
-	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
+	applySegmentLoadSnapshots(t, stream, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
 	require.Eventually(t, func() bool {
 		return len(ready1) == 3
 	}, time.Second, 10*time.Millisecond)
@@ -834,8 +879,8 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	loader := &fakePhysicalLoader{loaded: &fakeTransformSegment{id: 1000, partitionID: 10}}
-	watcher := &fakeSegmentLoadInfoWatcher{}
-	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, watcher)
+	stream := &fakeSegmentLoadInfoStream{}
+	mgr := newTestViewScopedPhysicalSegmentManagerWithLoader(t, loader, stream)
 
 	loadedCh := make(chan []TransformSegment, 1)
 	unrecoverableCh := make(chan struct{}, 1)
@@ -844,7 +889,7 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 		OnLoaded:        func(loaded []TransformSegment) { loadedCh <- loaded },
 		OnUnrecoverable: func() { unrecoverableCh <- struct{}{} },
 	})
-	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10})
+	applySegmentLoadSnapshots(t, stream, map[int64]int64{1000: 10})
 
 	select {
 	case got := <-loadedCh:
@@ -857,9 +902,10 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 	}
 }
 
-func applySegmentLoadSnapshots(mgr *ViewScopedPhysicalSegmentManager, segments map[int64]int64) {
+func applySegmentLoadSnapshots(t *testing.T, stream *fakeSegmentLoadInfoStream, segments map[int64]int64) {
+	t.Helper()
 	for segmentID, partitionID := range segments {
-		mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+		require.NoError(t, stream.Emit(SegmentLoadInfoSnapshot{
 			CollectionID: testCollectionID,
 			SegmentID:    segmentID,
 			Revision:     SegmentLoadInfoRevision{Revision: uint64(segmentID)},
@@ -868,6 +914,16 @@ func applySegmentLoadSnapshots(mgr *ViewScopedPhysicalSegmentManager, segments m
 				PartitionID:  partitionID,
 				CollectionID: testCollectionID,
 			},
-		})
+		}))
 	}
+}
+
+func subscriptionOptions(subscriptions []*fakeSegmentLoadInfoSubscription) []SegmentLoadInfoSubscriptionOption {
+	options := make([]SegmentLoadInfoSubscriptionOption, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		option := subscription.option
+		option.Handler = nil
+		options = append(options, option)
+	}
+	return options
 }

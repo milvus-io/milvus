@@ -8,9 +8,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )
 
-func (node *QueryNode) NewQueryViewSegmentManager(ctx context.Context, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, watcherFactories ...qnview.SegmentLoadInfoWatcherFactory) qnview.SegmentManager {
+func (node *QueryNode) NewQueryViewSegmentManager(ctx context.Context, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, streamFactories ...qnview.SegmentLoadInfoStreamFactory) qnview.SegmentManager {
 	if node == nil {
 		return nil
 	}
-	return qvresource.NewQueryViewSegmentManager(ctx, node.manager, node.loader, meta, streams, watcherFactories...)
+	return qvresource.NewQueryViewSegmentManager(ctx, node.manager, node.loader, meta, streams, streamFactories...)
 }

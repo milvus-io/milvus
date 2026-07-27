@@ -25,6 +25,15 @@ func minQueryViewDataVersion(refs map[qviews.QueryViewKey]queryViewRef) (qviews.
 	return min, ok
 }
 
+func hasQueryViewDataVersion(refs map[qviews.QueryViewKey]queryViewRef, target qviews.DataVersion) bool {
+	for key := range refs {
+		if key.QueryViewVersion.DataVersion.EQ(target) {
+			return true
+		}
+	}
+	return false
+}
+
 func cancelTask(task *scheduledBuild) {
 	if task != nil {
 		task.Cancel()
