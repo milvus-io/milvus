@@ -56,7 +56,14 @@ class KmeansClustering {
     Run(const milvus::proto::clustering::AnalyzeInfo& config);
 
     // should never be called before run
-    ClusteringResultMeta
+    //
+    // Returns a reference, not a copy, and that is load-bearing: the cgo
+    // boundary (GetAnalyzeResultMeta) hands the caller raw char* pointers into
+    // this struct's std::string members. A by-value return would make those
+    // pointers reference a local copy that is destroyed on return, so Go would
+    // read freed memory. The pointers stay valid for as long as this
+    // KmeansClustering object lives, which the Go side owns until DeleteAnalyze.
+    const ClusteringResultMeta&
     GetClusteringResultMeta() {
         if (!is_runned_) {
             throw SegcoreError(
