@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type blockingNodeSchedulerTask struct {
@@ -161,4 +164,44 @@ func TestOracleRuntimeRejectsStaleAdvanceDiff(t *testing.T) {
 	require.True(t, retry)
 	require.True(t, runtime.currentVersion.EQ(current))
 	require.Contains(t, runtime.currentGrowing, int64(20))
+}
+
+func TestOracleRuntimePreparesAndServesExactDataVersion(t *testing.T) {
+	current := qviews.DataVersion{StreamingVersion: 10}
+	target := qviews.DataVersion{StreamingVersion: 11}
+	fieldID := int64(102)
+	schema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		OutputFieldIds: []int64{fieldID},
+	}}}
+	growingStore := newGrowingStatsStore(schema)
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{7: 2})
+	growingStore.appendStats(20, 10, bm25Stats{fieldID: stats})
+
+	mock := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()
+	defer mock.UnPatch()
+	runtime := &oracleRuntime{
+		provider:       &Provider{sealedCache: newSegmentCache()},
+		collectionID:   1,
+		vchannel:       "v1",
+		schema:         schema,
+		currentVersion: current,
+		currentStats:   newBM25StatsFromSchema(schema),
+		currentSealed:  make(map[int64]sealedContribution),
+		currentGrowing: make(map[int64]growingContribution),
+		growingStore:   growingStore,
+	}
+
+	require.NoError(t, runtime.PrepareDataVersion(context.Background(), target))
+	query := &schemapb.SparseFloatArray{Contents: [][]byte{
+		typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1}),
+	}}
+	_, avgdl, err := runtime.BuildIDF(target, fieldID, query)
+	require.NoError(t, err)
+	require.Equal(t, float64(2), avgdl)
+
+	runtime.ReleaseDataVersion(target)
+	_, _, err = runtime.BuildIDF(target, fieldID, query)
+	require.Error(t, err)
 }

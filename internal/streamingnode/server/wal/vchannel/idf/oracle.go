@@ -242,6 +242,13 @@ type idfDiff struct {
 	acquiredLease []*segmentCacheLease
 }
 
+type preparedOracleVersion struct {
+	version qviews.DataVersion
+	stats   bm25Stats
+	sealed  map[int64]sealedContribution
+	growing map[int64]growingContribution
+}
+
 type oracleRuntime struct {
 	provider *Provider
 
@@ -263,6 +270,7 @@ type oracleRuntime struct {
 	currentStats     bm25Stats
 	currentSealed    map[int64]sealedContribution
 	currentGrowing   map[int64]growingContribution
+	prepared         map[qviews.DataVersion]*preparedOracleVersion
 	growingStore     *growingStatsStore
 	revision         uint64
 
@@ -291,6 +299,7 @@ func newOracleRuntime(
 		currentStats:    newBM25StatsFromSchema(walView.Schema),
 		currentSealed:   make(map[int64]sealedContribution),
 		currentGrowing:  make(map[int64]growingContribution),
+		prepared:        make(map[qviews.DataVersion]*preparedOracleVersion),
 		growingStore:    newGrowingStatsStore(walView.Schema),
 	}
 	sealed, err := provider.acquireSealedContributions(ctx, initialResources)
@@ -359,19 +368,98 @@ func (r *oracleRuntime) collectPersistedGrowingStats(ctx context.Context, segmen
 	return nil
 }
 
-func (r *oracleRuntime) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
+func (r *oracleRuntime) BuildIDF(dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	stats, ok := r.currentStats[fieldID]
+	versionStats, ok := r.statsForVersionLocked(dataVersion)
 	if !ok {
-		return nil, 0, errors.Errorf("bm25 field %d not found in oracle", fieldID)
+		return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 stats for data version %s are not ready", dataVersion.String())
+	}
+	stats, ok := versionStats[fieldID]
+	if !ok {
+		return nil, 0, merr.WrapErrServiceInternalMsg("BM25 field %d not found in oracle for data version %s", fieldID, dataVersion.String())
 	}
 	idfs := make([][]byte, 0, len(tfs.GetContents()))
 	for _, tf := range tfs.GetContents() {
 		idfs = append(idfs, stats.BuildIDF(tf))
 	}
 	return idfs, stats.GetAvgdl(), nil
+}
+
+func (r *oracleRuntime) statsForVersionLocked(dataVersion qviews.DataVersion) (bm25Stats, bool) {
+	if r.currentVersion.EQ(dataVersion) {
+		return r.currentStats, true
+	}
+	prepared := r.prepared[dataVersion]
+	if prepared == nil {
+		return nil, false
+	}
+	return prepared.stats, true
+}
+
+func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.DataVersion) error {
+	r.mu.RLock()
+	if r.closed {
+		r.mu.RUnlock()
+		return context.Canceled
+	}
+	_, ready := r.statsForVersionLocked(target)
+	r.mu.RUnlock()
+	if ready {
+		return nil
+	}
+
+	resources, err := r.provider.getSealedBM25Resources(ctx, r.collectionID, r.vchannel, target, r.partitionIDs, r.loadInfoVersion)
+	if err != nil {
+		return err
+	}
+	sealed, err := r.provider.acquireSealedContributions(ctx, resources)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		r.releaseSealed(sealed)
+		return context.Canceled
+	}
+	if _, ready := r.statsForVersionLocked(target); ready {
+		r.mu.Unlock()
+		r.releaseSealed(sealed)
+		return nil
+	}
+	targetSealed := segmentSetFromSealed(sealed)
+	growing := r.growingStore.snapshotForDataVersion(target, targetSealed)
+	stats := newBM25StatsFromSchema(r.schema)
+	for _, contribution := range sealed {
+		stats.merge(contribution.stats)
+	}
+	for _, contribution := range growing {
+		stats.merge(contribution.stats)
+	}
+	if r.prepared == nil {
+		r.prepared = make(map[qviews.DataVersion]*preparedOracleVersion)
+	}
+	r.prepared[target] = &preparedOracleVersion{
+		version: target,
+		stats:   stats,
+		sealed:  sealed,
+		growing: growing,
+	}
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *oracleRuntime) ReleaseDataVersion(dataVersion qviews.DataVersion) {
+	r.mu.Lock()
+	prepared := r.prepared[dataVersion]
+	delete(r.prepared, dataVersion)
+	r.mu.Unlock()
+	if prepared != nil {
+		r.releaseSealed(prepared.sealed)
+	}
 }
 
 func (r *oracleRuntime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
@@ -411,6 +499,19 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 		if changed {
 			r.revision++
 		}
+		for _, prepared := range r.prepared {
+			if _, ok := prepared.sealed[segmentID]; ok {
+				continue
+			}
+			if _, ok := prepared.growing[segmentID]; ok {
+				continue
+			}
+			prepared.growing[segmentID] = growingContribution{
+				segmentID:   segmentID,
+				partitionID: partitionID,
+				stats:       newBM25StatsFromSchema(r.schema),
+			}
+		}
 		r.mu.Unlock()
 	case message.MessageTypeInsert, message.MessageTypeTxn:
 		return walview.ForEachSegmentInsertMessage(msg, 0, func(insert walview.SegmentInsertMessage) error {
@@ -424,6 +525,13 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 				contribution.stats.merge(stats)
 				r.currentGrowing[segmentID] = contribution
 				r.currentStats.merge(stats)
+			}
+			for _, prepared := range r.prepared {
+				if contribution, ok := prepared.growing[segmentID]; ok {
+					contribution.stats.merge(stats)
+					prepared.growing[segmentID] = contribution
+					prepared.stats.merge(stats)
+				}
 			}
 			r.revision++
 			return nil
@@ -453,6 +561,30 @@ func (r *oracleRuntime) MaybeAdvance(target qviews.DataVersion) {
 		r.mu.Unlock()
 		return
 	}
+	if prepared := r.prepared[target]; prepared != nil {
+		oldSealed := r.currentSealed
+		r.currentVersion = prepared.version
+		r.currentStats = prepared.stats
+		r.currentSealed = prepared.sealed
+		r.currentGrowing = prepared.growing
+		delete(r.prepared, target)
+		obsolete := make([]map[int64]sealedContribution, 0)
+		for version, candidate := range r.prepared {
+			if !version.GT(target) {
+				obsolete = append(obsolete, candidate.sealed)
+				delete(r.prepared, version)
+			}
+		}
+		r.revision++
+		currentGrowing := cloneGrowingContributions(r.currentGrowing)
+		r.mu.Unlock()
+		r.releaseSealed(oldSealed)
+		for _, sealed := range obsolete {
+			r.releaseSealed(sealed)
+		}
+		r.growingStore.cleanup(target, currentGrowing)
+		return
+	}
 	if !r.hasPending || target.GT(r.pending) {
 		r.pending = target
 		r.hasPending = true
@@ -480,10 +612,15 @@ func (r *oracleRuntime) Close() {
 		}
 		r.mu.Lock()
 		sealed := r.currentSealed
+		prepared := r.prepared
 		r.currentSealed = nil
 		r.currentGrowing = nil
+		r.prepared = nil
 		r.mu.Unlock()
 		r.releaseSealed(sealed)
+		for _, version := range prepared {
+			r.releaseSealed(version.sealed)
+		}
 	})
 }
 

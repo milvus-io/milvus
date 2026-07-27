@@ -135,22 +135,32 @@ type SegmentLoadInfoSnapshot struct {
 	IndexInfos   []*indexpb.IndexInfo
 }
 
-type SegmentLoadInfoSubscription struct {
+type SegmentLoadInfoSubscriptionOption struct {
 	CollectionID int64
 	SegmentID    int64
 	Revision     SegmentLoadInfoRevision
+	Handler      SegmentLoadInfoEventHandler
 }
 
-type SegmentLoadInfoWatcher interface {
-	Subscribe(subscription SegmentLoadInfoSubscription)
-	Unsubscribe(collectionID int64, segmentID int64)
+type SegmentLoadInfoEventHandler interface {
+	Handle(snapshot SegmentLoadInfoSnapshot) error
 	Close()
 }
 
-type SegmentLoadInfoSnapshotHandler func(context.Context, SegmentLoadInfoSnapshot)
+type SegmentLoadInfoSubscription interface {
+	CollectionID() int64
+	SegmentID() int64
+	Error() error
+	Close()
+}
 
-type SegmentLoadInfoWatcherFactory interface {
-	NewSegmentLoadInfoWatcher(ctx context.Context, handler SegmentLoadInfoSnapshotHandler) SegmentLoadInfoWatcher
+type SegmentLoadInfoStream interface {
+	Subscribe(option SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription
+	Close()
+}
+
+type SegmentLoadInfoStreamFactory interface {
+	NewSegmentLoadInfoStream(ctx context.Context) SegmentLoadInfoStream
 }
 
 type SegmentUpdateAction uint8

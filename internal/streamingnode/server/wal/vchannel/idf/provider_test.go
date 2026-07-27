@@ -22,5 +22,9 @@ func TestProviderCreatesNoopRuntimeWhenBM25IsNotLoaded(t *testing.T) {
 			DataVersion: qviews.DataVersion{StreamingVersion: 10},
 		},
 	}))
+	versioned := runtime.(interface {
+		PrepareDataVersion(context.Context, qviews.DataVersion) error
+	})
+	require.NoError(t, versioned.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
 	runtime.Close()
 }

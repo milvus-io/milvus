@@ -439,37 +439,50 @@ func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegm
 	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, collections...)
 }
 
-func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler nodescheduler.Scheduler, watchers ...SegmentLoadInfoWatcher) *ViewScopedPhysicalSegmentManager {
+func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler nodescheduler.Scheduler, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {
 	t.Helper()
-	if len(watchers) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(scheduler, &fakePhysicalLoader{}, watchers[0])
+	if len(streams) > 0 {
+		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(scheduler, &fakePhysicalLoader{}, streams[0])
 	}
 	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, &fakePhysicalLoader{})
 }
 
-func newTestViewScopedPhysicalSegmentManagerWithLoader(t *testing.T, loader PhysicalSegmentLoader, watchers ...SegmentLoadInfoWatcher) *ViewScopedPhysicalSegmentManager {
+func newTestViewScopedPhysicalSegmentManagerWithLoader(t *testing.T, loader PhysicalSegmentLoader, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {
 	t.Helper()
 	nodeScheduler := newTestNodeScheduler(t)
-	if len(watchers) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndWatcher(nodeScheduler, loader, watchers[0])
+	if len(streams) > 0 {
+		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(nodeScheduler, loader, streams[0])
 	}
 	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, loader)
 }
 
-type fakeSegmentLoadInfoWatcher struct {
-	subscriptions   []SegmentLoadInfoSubscription
-	unsubscriptions []SegmentLoadInfoSubscription
+type fakeSegmentLoadInfoStream struct {
+	subscriptions []*fakeSegmentLoadInfoSubscription
 }
 
-func (w *fakeSegmentLoadInfoWatcher) Subscribe(subscription SegmentLoadInfoSubscription) {
-	w.subscriptions = append(w.subscriptions, subscription)
+func (s *fakeSegmentLoadInfoStream) Subscribe(option SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription {
+	sub := &fakeSegmentLoadInfoSubscription{option: option}
+	s.subscriptions = append(s.subscriptions, sub)
+	return sub
 }
 
-func (w *fakeSegmentLoadInfoWatcher) Unsubscribe(collectionID int64, segmentID int64) {
-	w.unsubscriptions = append(w.unsubscriptions, SegmentLoadInfoSubscription{
-		CollectionID: collectionID,
-		SegmentID:    segmentID,
-	})
+func (s *fakeSegmentLoadInfoStream) Emit(snapshot SegmentLoadInfoSnapshot) error {
+	for _, sub := range s.subscriptions {
+		if !sub.closed && sub.option.CollectionID == snapshot.CollectionID && sub.option.SegmentID == snapshot.SegmentID {
+			return sub.option.Handler.Handle(snapshot)
+		}
+	}
+	return nil
 }
 
-func (w *fakeSegmentLoadInfoWatcher) Close() {}
+func (*fakeSegmentLoadInfoStream) Close() {}
+
+type fakeSegmentLoadInfoSubscription struct {
+	option SegmentLoadInfoSubscriptionOption
+	closed bool
+}
+
+func (s *fakeSegmentLoadInfoSubscription) CollectionID() int64 { return s.option.CollectionID }
+func (s *fakeSegmentLoadInfoSubscription) SegmentID() int64    { return s.option.SegmentID }
+func (*fakeSegmentLoadInfoSubscription) Error() error          { return nil }
+func (s *fakeSegmentLoadInfoSubscription) Close()              { s.closed = true }

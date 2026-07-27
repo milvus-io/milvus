@@ -57,7 +57,7 @@ QueryNode.NewQueryViewSegmentManager
 | `QueryViewSegmentReadinessManager` | Pins TransformLog and collection runtime, tracks transform-level view/segment refs, registers loaded segments, waits catch-up, and reports segment readiness. |
 | `ViewScopedPhysicalSegmentManager` | Tracks physical segment refs by QueryView, builds executable load/update tasks from watched snapshots, submits them to NodeScheduler, validates late callbacks, and waits for in-flight load callbacks during release. |
 | `SegmentLoadTask` / `SegmentUpdateTask` | Encapsulate index-meta refresh, resource reservation, physical load/update, callback, cancellation, and retry behavior required by NodeScheduler. |
-| `SegmentLoadInfoWatcher` | Maintains segment subscriptions and delivers complete, revisioned load-info snapshots from QueryCoord. |
+| `SegmentLoadInfoStream` | Owns one QueryNode-level QueryCoord watch stream, maintains segment-scoped subscriptions and delivered revisions, and restores every live subscription after stream failure. |
 | `QueryViewLoadMetadataProvider` | Provides collection-level `DescribeCollection` and versioned `GetQueryViewLoadInfo` through MixCoord/QueryCoord. |
 | `QueryViewCollectionRuntimeManager` | Pins local collection runtime using collection schema/load metadata and exposes index meta update for segment load. |
 | `TransformLogBuffer` | Pins the view-level transform range and registers loaded sealed segments for catch-up. |
@@ -83,7 +83,7 @@ Incoming QueryView(Preparing)
                  -> report empty OnReady if this QN has no assigned segments
                  -> ViewScopedPhysicalSegmentManager.Acquire for missing segments
                       -> record physical refs
-                      -> subscribe SegmentLoadInfoWatcher for each referenced segment
+                      -> subscribe the shared SegmentLoadInfoStream for each referenced segment
                       -> if segment is missing:
                            -> wait for a complete SegmentLoadInfoSnapshot
                            -> NodeScheduler.Submit(SegmentLoadTask)
@@ -108,7 +108,7 @@ Important ordering rules:
    segment loading is submitted.
 3. Collection runtime acquisition uses `DescribeCollection` and
    `GetQueryViewLoadInfo`; segment loading consumes complete snapshots delivered
-   by `SegmentLoadInfoWatcher`.
+   by `SegmentLoadInfoStream`.
 4. Physical load completion is not QueryView readiness. A segment becomes
    QueryView-ready only after TransformLog registration and catch-up.
 5. QueryNode may report incremental `Preparing` progress before it reaches
@@ -159,12 +159,29 @@ Collection runtime acquisition resolves the QueryView's load-info version, then
 pins the local collection runtime through `collectionManager.PutOrRef` before
 any segment load task is submitted.
 
-Segment metadata has a separate streaming boundary. `SegmentLoadInfoWatcher`
-subscribes by `(collectionID, segmentID, revision)` and receives complete
-`SegmentLoadInfoSnapshot` values containing packed `SegmentLoadInfo`, index
-definitions, and a revision. The physical manager stores the latest snapshot,
-starts a missing-segment load only after a complete snapshot is available, and
-coalesces newer snapshots while an update task is already running.
+Segment metadata has a separate streaming boundary. QueryNode owns one shared
+`SegmentLoadInfoStream`. Every live physical segment state owns one subscription
+identified by the globally unique `segmentID`. The subscription request still
+carries `collectionID` for the QueryCoord RPC, but it is not part of the local
+subscription key. The subscription contains its handler and its last
+successfully delivered revision; the physical manager never writes that
+revision back into the stream.
+
+QueryCoord sends complete `SegmentLoadInfoSnapshot` values containing packed
+`SegmentLoadInfo`, index definitions, and a revision. The stream dispatches a
+snapshot to the matching subscription handler. After the handler accepts the
+snapshot, the subscription advances its own delivered revision. The handler
+synchronously records the snapshot in the physical manager and triggers the
+corresponding asynchronous load/update task through NodeScheduler. The physical
+manager coalesces newer snapshots while an update task is already running.
+
+If the underlying gRPC stream breaks, `SegmentLoadInfoStream` keeps all live
+subscriptions, reopens the stream, and re-subscribes every segment from its
+internally maintained delivered revision. A transport failure therefore does
+not require the physical manager to recreate subscriptions or replay revision
+updates. After a QueryNode process restart the in-memory revisions are lost, so
+new subscriptions start from revision zero and QueryCoord returns full current
+snapshots.
 
 This boundary keeps task execution self-contained: a load/update task never
 performs a metadata lookup. It operates only on the immutable snapshot captured
@@ -183,9 +200,11 @@ Acquire behavior:
 
 1. record or replace the view ref;
 2. add the QueryView key to each assigned segment's physical ref set;
-3. create load state only for segments that are missing or reset;
-4. submit load tasks only for segments that are not already loading or loaded;
-5. if all requested segments are already physically loaded, call `OnLoaded`
+3. create one segment-scoped subscription when the first QueryView references a
+   new physical segment state;
+4. create load state only for segments that are missing or reset;
+5. submit load tasks only for segments that are not already loading or loaded;
+6. if all requested segments are already physically loaded, call `OnLoaded`
    with those segments.
 
 Load task behavior:
@@ -205,7 +224,13 @@ Update task behavior:
 3. call `PhysicalSegmentLoader.Update`;
 4. return `nodescheduler.ErrDelay` for non-cancellation failures so the same
    task is retried;
-5. report the applied revision after success.
+5. update only the physical segment state's applied revision after success.
+
+The subscription's delivered revision is independent from the physical applied
+revision. It advances when the handler has accepted the complete snapshot,
+because any subsequently submitted load/update failure remains owned by the
+NodeScheduler retry lifecycle. No task completion path sends a subscribe or
+revision update back to `SegmentLoadInfoStream`.
 
 On physical load completion, the physical manager validates that the segment is
 still referenced before keeping it. If no QueryView still references the
@@ -257,11 +282,13 @@ Release order:
 3. It calls `ViewScopedPhysicalSegmentManager.Release` to remove physical refs.
 4. The physical manager cancels still-loading segments only when the released
    view was the last physical ref.
-5. The physical manager waits for the view's in-flight load callbacks.
-6. The transform manager releases the view-level TransformLog guard and
+5. The physical manager closes the segment's SegmentLoadInfo subscription when
+   the final physical ref is removed.
+6. The physical manager waits for the view's in-flight load callbacks.
+7. The transform manager releases the view-level TransformLog guard and
    collection runtime guard.
-7. `OnDropped` drives the local state machine to `Dropped`.
-8. QueryNode reports `Dropped` and removes the local view entry.
+8. `OnDropped` drives the local state machine to `Dropped`.
+9. QueryNode reports `Dropped` and removes the local view entry.
 
 Task cancellation is asynchronous. Load release correctness depends on context
 cancellation, ref validation, and waiting for in-flight callbacks rather than
@@ -279,6 +306,7 @@ removed or the segment is reset, preventing stale `ErrDelay` retries.
 | Collection index meta update fails | The segment load is treated as unrecoverable. |
 | Resource reservation fails | The segment load is treated as unrecoverable. |
 | Physical loader fails | The segment load is treated as unrecoverable. |
+| Segment LoadInfo gRPC stream breaks | The shared stream reconnects and re-subscribes all live segments from their internally maintained delivered revisions. |
 | Transform registration fails | The loaded segment is released, physical state is reset, and waiting views are reported `Unrecoverable`. |
 | Transform catch-up fails | The registration is removed, the loaded segment is released, physical state is reset, and waiting views are reported `Unrecoverable`. |
 | Release races with load completion | Late callback is validated against current refs; unreferenced loaded segment is released and ignored. |
@@ -308,3 +336,7 @@ replacement view.
    segment load-info watch stream for physical tasks.
 10. QueryNode has no `Up` or `Down` local state; it keeps Ready resources until
     `Dropped` is pushed.
+11. A physical segment state owns at most one SegmentLoadInfo subscription; the
+    last view release or segment reset closes that subscription.
+12. SegmentLoadInfo subscription revision advances only after its handler
+    accepts a snapshot and is used only for stream recovery.

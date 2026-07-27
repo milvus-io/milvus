@@ -150,6 +150,43 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
+func (r *QueryRuntime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	if r.state != queryRuntimeReady {
+		r.mu.Unlock()
+		return context.Canceled
+	}
+	modules := append([]QueryRuntimeModule(nil), r.modules...)
+	r.mu.Unlock()
+	for _, module := range modules {
+		versioned, ok := module.(QueryRuntimeVersionedModule)
+		if !ok {
+			continue
+		}
+		if err := versioned.PrepareDataVersion(ctx, dataVersion); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *QueryRuntime) ReleaseDataVersion(dataVersion qviews.DataVersion) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	modules := append([]QueryRuntimeModule(nil), r.modules...)
+	r.mu.Unlock()
+	for _, module := range modules {
+		if versioned, ok := module.(QueryRuntimeVersionedModule); ok {
+			versioned.ReleaseDataVersion(dataVersion)
+		}
+	}
+}
+
 func (r *QueryRuntime) recordedAdvance() (qviews.DataVersion, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

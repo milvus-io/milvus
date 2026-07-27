@@ -12,8 +12,12 @@ import (
 //
 // Implementations include BM25 IDF computation and search parameter tuning.
 type GlobalOptimizer interface {
-	OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) error
+	OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (SearchOptimization, error)
 	OptimizeRetrieve(ctx context.Context, req *internalpb.RetrieveRequest) error
+}
+
+type SearchOptimization struct {
+	Skip bool
 }
 
 // NewNoopGlobalOptimizer returns a GlobalOptimizer that performs no optimization.
@@ -23,8 +27,8 @@ func NewNoopGlobalOptimizer() GlobalOptimizer {
 
 type noopGlobalOptimizer struct{}
 
-func (noopGlobalOptimizer) OptimizeSearch(context.Context, *internalpb.SearchRequest) error {
-	return nil
+func (noopGlobalOptimizer) OptimizeSearch(context.Context, *internalpb.SearchRequest) (SearchOptimization, error) {
+	return SearchOptimization{}, nil
 }
 
 func (noopGlobalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveRequest) error {

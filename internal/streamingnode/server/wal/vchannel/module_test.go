@@ -47,6 +47,19 @@ func TestVChannelRecoveryModuleRecoveryBarrierFlushesOwnedTransformLog(t *testin
 	assert.Equal(t, uint64(0), result.Data.TimeTick())
 }
 
+func TestVChannelRecoveryModuleEmptyRecoveryBarrierDoesNotDirtyTransformLog(t *testing.T) {
+	module := newTestModule(t, "p1", "v1")
+	module.SwitchIntoMetaAndData()
+
+	result := module.ObserveMessage(context.Background(), newTestRecoveryBarrierMessage(t, 30))
+
+	require.NotNil(t, result.Data)
+	assert.Equal(t, uint64(30), result.Data.TimeTick())
+	for _, snapshot := range module.ConsumeDirtySnapshots() {
+		assert.NotEqual(t, moduleapi.ModuleNameTransformLog, snapshot.ModuleName())
+	}
+}
+
 func TestVChannelRecoveryModuleReturnsOwnedDataFrontier(t *testing.T) {
 	ctx := context.Background()
 	module := newTestModule(t, "p1", "v1")

@@ -29,9 +29,11 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //
 // # Response Guarantee
 //
-// Every view pushed via ApplyViews is guaranteed to eventually produce a
-// response (via OnReport callback), provided the StreamingNodeResourceManager
-// fulfills its liveness contracts (see StreamingNodeResourceManager doc).
+// Every view pushed via ApplyViews while the handler is open is guaranteed to
+// eventually produce a response (via OnReport callback), provided the
+// StreamingNodeResourceManager fulfills its liveness contracts (see
+// StreamingNodeResourceManager doc). Views arriving after CloseForHandoff are
+// ignored and re-pushed by Coord after it reconnects to the new WAL owner.
 // The response paths are:
 //
 // View does not exist in handler:
@@ -57,13 +59,14 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
-	mu       sync.Mutex
-	closed   bool
-	ctx      context.Context
-	pchannel string
-	shards   map[qviews.ShardID]*snShardView
-	catalog  metastore.StreamingNodeCataLog
-	resMgr   StreamingNodeResourceManager
+	mu             sync.Mutex
+	closed         bool
+	ctx            context.Context
+	pchannel       string
+	shards         map[qviews.ShardID]*snShardView
+	catalog        metastore.StreamingNodeCataLog
+	resMgr         StreamingNodeResourceManager
+	localOptimizer optimizer.LocalOptimizer
 }
 
 // recoverSNQueryViewHandler reconstructs the handler from persisted views
@@ -150,6 +153,7 @@ func (h *SNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 
 	// Apply each group atomically under the shard lock.
 	for shardID, shardViews := range grouped {
+
 		for {
 			shard := h.getOrCreateShard(shardID)
 			if shard == nil || shard.ApplyViews(shardViews) {

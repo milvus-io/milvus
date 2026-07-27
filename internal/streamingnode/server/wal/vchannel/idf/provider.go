@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -90,6 +91,7 @@ type Runtime struct {
 	provider *Provider
 	future   *FutureProvider
 	oracle   *oracleRuntime
+	disabled bool
 	closed   bool
 }
 
@@ -106,9 +108,12 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 	r.mu.Unlock()
 
 	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.LoadFields)) {
-		r.mu.RLock()
+		r.mu.Lock()
 		closed := r.closed
-		r.mu.RUnlock()
+		if !closed {
+			r.disabled = true
+		}
+		r.mu.Unlock()
 		if closed {
 			return context.Canceled
 		}
@@ -177,12 +182,32 @@ func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
 	return ids
 }
 
-func (r *Runtime) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
+func (r *Runtime) BuildIDF(dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
 	oracle := r.currentOracle()
 	if oracle == nil {
-		return nil, 0, errors.New("IDF oracle is not initialized")
+		return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
 	}
-	return oracle.BuildIDF(fieldID, tfs)
+	return oracle.BuildIDF(dataVersion, fieldID, tfs)
+}
+
+func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
+	r.mu.RLock()
+	disabled := r.disabled
+	r.mu.RUnlock()
+	if disabled {
+		return nil
+	}
+	oracle := r.currentOracle()
+	if oracle == nil {
+		return merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
+	}
+	return oracle.PrepareDataVersion(ctx, dataVersion)
+}
+
+func (r *Runtime) ReleaseDataVersion(dataVersion qviews.DataVersion) {
+	if oracle := r.currentOracle(); oracle != nil {
+		oracle.ReleaseDataVersion(dataVersion)
+	}
 }
 
 func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {

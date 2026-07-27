@@ -1,16 +1,20 @@
 package querycoordv2
 
 import (
+	"cmp"
 	"context"
 	"hash/fnv"
 	"io"
+	"slices"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"google.golang.org/protobuf/proto"
 )
 
 type queryViewSegmentLoadInfoSubscription struct {
@@ -372,12 +376,68 @@ func (w *queryViewSegmentLoadInfoWatcher) notify(collectionID int64, segmentIDs 
 }
 
 func calculateQueryViewSegmentLoadInfoRevision(loadInfo *querypb.SegmentLoadInfo, indexInfos []*indexpb.IndexInfo) *querypb.QueryViewSegmentLoadInfoRevision {
-	return &querypb.QueryViewSegmentLoadInfoRevision{
-		LoadInfoRevision: hashProto(&querypb.QueryViewSegmentLoadInfoSnapshot{
-			LoadInfo:      loadInfo,
-			IndexInfoList: indexInfos,
-		}),
+	snapshot := &querypb.QueryViewSegmentLoadInfoSnapshot{
+		LoadInfo:      loadInfo,
+		IndexInfoList: indexInfos,
 	}
+	canonicalizeQueryViewSegmentLoadInfoSnapshot(snapshot)
+	return &querypb.QueryViewSegmentLoadInfoRevision{
+		LoadInfoRevision: hashProto(snapshot),
+	}
+}
+
+func canonicalizeQueryViewSegmentLoadInfoSnapshot(snapshot *querypb.QueryViewSegmentLoadInfoSnapshot) {
+	for _, index := range snapshot.GetIndexInfoList() {
+		sortKeyValuePairs(index.TypeParams)
+		sortKeyValuePairs(index.IndexParams)
+		sortKeyValuePairs(index.UserIndexParams)
+	}
+	slices.SortFunc(snapshot.IndexInfoList, compareIndexInfo)
+
+	loadInfo := snapshot.GetLoadInfo()
+	if loadInfo == nil {
+		return
+	}
+	for _, index := range loadInfo.GetIndexInfos() {
+		sortKeyValuePairs(index.IndexParams)
+		slices.Sort(index.IndexFilePaths)
+	}
+	slices.SortFunc(loadInfo.IndexInfos, compareFieldIndexInfo)
+}
+
+func sortKeyValuePairs(pairs []*commonpb.KeyValuePair) {
+	slices.SortFunc(pairs, func(left, right *commonpb.KeyValuePair) int {
+		if result := cmp.Compare(left.GetKey(), right.GetKey()); result != 0 {
+			return result
+		}
+		return cmp.Compare(left.GetValue(), right.GetValue())
+	})
+}
+
+func compareIndexInfo(left, right *indexpb.IndexInfo) int {
+	if result := cmp.Compare(left.GetCollectionID(), right.GetCollectionID()); result != 0 {
+		return result
+	}
+	if result := cmp.Compare(left.GetFieldID(), right.GetFieldID()); result != 0 {
+		return result
+	}
+	if result := cmp.Compare(left.GetIndexID(), right.GetIndexID()); result != 0 {
+		return result
+	}
+	return cmp.Compare(left.GetIndexName(), right.GetIndexName())
+}
+
+func compareFieldIndexInfo(left, right *querypb.FieldIndexInfo) int {
+	if result := cmp.Compare(left.GetFieldID(), right.GetFieldID()); result != 0 {
+		return result
+	}
+	if result := cmp.Compare(left.GetIndexID(), right.GetIndexID()); result != 0 {
+		return result
+	}
+	if result := cmp.Compare(left.GetBuildID(), right.GetBuildID()); result != 0 {
+		return result
+	}
+	return cmp.Compare(left.GetIndexName(), right.GetIndexName())
 }
 
 func hashProto(message proto.Message) uint64 {

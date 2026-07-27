@@ -8,7 +8,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type sealedCacheKey string
@@ -129,12 +131,24 @@ func loadSealedSegmentStats(
 	chunkManager storage.ChunkManager,
 	resource *datapb.StreamingNodeBM25Resource,
 ) (bm25Stats, error) {
+	if resource.GetStorageVersion() >= storage.StorageV3 && resource.GetManifestPath() == "" {
+		return nil, merr.WrapErrDataIntegrityMsg("storage v3 BM25 resource for segment %d has no manifest", resource.GetSegmentId())
+	}
+	manifestPath := ""
+	if resource.GetStorageVersion() >= storage.StorageV3 {
+		manifestPath = resource.GetManifestPath()
+	}
+	pathsByField, err := packed.NewStatsResolver(manifestPath, packed.CreateStorageConfig()).
+		WithBM25Logs(resource.GetBm25Binlogs()).
+		BM25StatsPaths()
+	if err != nil {
+		return nil, merr.Wrap(err, "resolve sealed BM25 stats paths")
+	}
 	stats := make(bm25Stats)
-	for _, fieldBinlog := range resource.GetBm25Binlogs() {
-		fieldID := fieldBinlog.GetFieldID()
+	for fieldID, paths := range pathsByField {
 		fieldStats := stats.getOrCreate(fieldID)
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			bytes, err := chunkManager.Read(ctx, binlog.GetLogPath())
+		for _, path := range paths {
+			bytes, err := chunkManager.Read(ctx, path)
 			if err != nil {
 				return nil, err
 			}
