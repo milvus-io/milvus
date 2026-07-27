@@ -142,6 +142,13 @@ PhyRescoresNode::GetOutput() {
                 filter->ToString());
             auto col_vec_size = col_vec->size();
             TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+            // Fold UNKNOWN (NULL) into FALSE (data &= valid) so a null row
+            // never receives a boost, keeping NULL policy identical on the
+            // native and non-native branches (PhyIterativeFilterNode folds
+            // on both of its branches too).
+            TargetBitmapView validview(col_vec->GetValidRawData(),
+                                       col_vec_size);
+            bitsetview.inplace_and(validview, col_vec_size);
             scorer->batch_score(op_context,
                                 segment,
                                 function_mode,
@@ -150,23 +157,9 @@ PhyRescoresNode::GetOutput() {
                                 boost_scores);
         } else {
             // query all segment if expr not native
-            expr_set->Eval(0, 1, true, eval_ctx, results);
-
             // filter result for offsets[i] was bitset[offset[i]]
-            AssertInfo(!results.empty() && results[0] != nullptr,
-                       "PhyRescoresNode: filter expr returned null result, "
-                       "filter: {}",
-                       filter->ToString());
-            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-            AssertInfo(
-                col_vec != nullptr,
-                "PhyRescoresNode: failed to cast result to ColumnVector, "
-                "filter: {}",
-                filter->ToString());
-            TargetBitmap bitset;
-            auto col_vec_size = col_vec->size();
-            TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-            bitset.append(view);
+            TargetBitmap bitset = EvalNonNativeBoostFilterAllBatches(
+                exec_context, expr_set.get(), eval_ctx, filter);
             scorer->batch_score(op_context,
                                 segment,
                                 function_mode,
@@ -217,5 +210,18 @@ PhyRescoresNode::GetOutput() {
     tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
     return input_;
 };
+
+TargetBitmap
+EvalNonNativeBoostFilterAllBatches(ExecContext* exec_context,
+                                   ExprSet* expr_set,
+                                   EvalCtx& eval_ctx,
+                                   const expr::TypedExprPtr& filter) {
+    auto active_count = exec_context->get_query_context()->get_active_count();
+    // The shared helper accumulates every expression batch so the bitset
+    // covers all active rows and folds UNKNOWN (NULL) into FALSE so null
+    // rows never receive a boost, matching PhyIterativeFilterNode.
+    return EvalExprSetOverAllBatches(
+        *expr_set, eval_ctx, active_count, "PhyRescoresNode");
+}
 
 }  // namespace milvus::exec

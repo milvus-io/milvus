@@ -12,6 +12,8 @@
 #pragma once
 
 #include <fmt/core.h>
+
+#include <algorithm>
 #include <memory>
 
 #include "common/FieldDataInterface.h"
@@ -61,11 +63,40 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         return fmt::format("{}", expr_->ToString());
     }
 
+    // The GIS filter slices by its own batch cursor (GetNextBatchSize) and never
+    // reads the offset-input list, so it cannot serve the offset-input
+    // (iterative-filter / rescore) path. Report false so IterativeFilterNode
+    // takes its non-native fallback instead of feeding offsets into Eval.
+    bool
+    SupportOffsetInput() override {
+        return false;
+    }
+
+    // A skipped batch (conjunct short-circuit via SkipFollowingExprs) must
+    // still advance this expression's cursors, otherwise it desynchronizes
+    // from its sibling expressions and later batches evaluate the wrong rows.
+    // The base MoveCursor() covers every case except the growing
+    // interim-index path: MoveCursorForIndex() asserts sealed-only, while
+    // EvalForIndexSegment() on a growing segment advances the global index
+    // position together with the data cursor -- mirror that here.
+    // Unlike the base implementation, MoveCursorForData() is called without a
+    // HasFieldData() guard: this exec path already walks data chunks
+    // unconditionally (EvalForIndexSegment), and with no field data
+    // num_data_chunk_ is 0, making the call a no-op -- the omission is
+    // intentional, not an oversight.
     void
-    MoveCursor() {
-        if (segment_->type() == SegmentType::Sealed) {
-            SegmentExpr::MoveCursor();
+    MoveCursor() override {
+        if (has_offset_input_) {
+            return;
         }
+        if (SegmentExpr::CanUseIndex() &&
+            segment_->type() != SegmentType::Sealed) {
+            current_index_chunk_pos_ +=
+                std::min(active_count_ - current_index_chunk_pos_, batch_size_);
+            MoveCursorForData();
+            return;
+        }
+        SegmentExpr::MoveCursor();
     }
 
  private:
