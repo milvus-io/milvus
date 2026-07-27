@@ -21,7 +21,20 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		if err := FillExpressionValue(e.BinaryExpr.GetLeft(), templateValues); err != nil {
 			return err
 		}
-		return FillExpressionValue(e.BinaryExpr.GetRight(), templateValues)
+		if err := FillExpressionValue(e.BinaryExpr.GetRight(), templateValues); err != nil {
+			return err
+		}
+		switch e.BinaryExpr.GetOp() {
+		case planpb.BinaryExpr_LogicalOr:
+			if hasBoolValue(e.BinaryExpr.GetLeft(), true) || hasBoolValue(e.BinaryExpr.GetRight(), true) {
+				*expr = *alwaysTrueExpr()
+			}
+		case planpb.BinaryExpr_LogicalAnd:
+			if hasBoolValue(e.BinaryExpr.GetLeft(), false) || hasBoolValue(e.BinaryExpr.GetRight(), false) {
+				*expr = *alwaysFalseExpr()
+			}
+		}
+		return nil
 	case *planpb.Expr_UnaryRangeExpr:
 		return FillUnaryRangeExpressionValue(e.UnaryRangeExpr, templateValues)
 	case *planpb.Expr_BinaryRangeExpr:
@@ -60,6 +73,11 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	default:
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	}
+}
+
+func hasBoolValue(expr *planpb.Expr, target bool) bool {
+	value := expr.GetValueExpr().GetValue()
+	return IsBool(value) && value.GetBoolVal() == target
 }
 
 func FillTermExpressionValue(expr *planpb.TermExpr, templateValues map[string]*planpb.GenericValue) error {

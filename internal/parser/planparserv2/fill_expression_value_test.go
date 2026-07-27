@@ -9,6 +9,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1022,15 +1024,71 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		})
 	})
 
-	s.Run("NaN and different dynamic types are deferred to execution", func() {
-		s.assertValidExpr(schemaH, `{min} < A < {max}`, map[string]*schemapb.TemplateValue{
-			"min": generateTemplateValue(schemapb.DataType_Double, math.NaN()),
-			"max": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
-		})
-		s.assertValidExpr(schemaH, `{min} < A < {max}`, map[string]*schemapb.TemplateValue{
+	s.Run("NaN and different dynamic types should fail", func() {
+		bounds := func(min, max *schemapb.TemplateValue) map[string]*schemapb.TemplateValue {
+			return map[string]*schemapb.TemplateValue{"min": min, "max": max}
+		}
+		value := generateTemplateValue
+		mixedBounds := bounds(value(schemapb.DataType_Int64, int64(1)), value(schemapb.DataType_String, "z"))
+		array := func(v int64) *schemapb.TemplateValue {
+			return value(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{v}))
+		}
+		for _, c := range []testcase{
+			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Int64, int64(10)))},
+			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Int64, int64(1)), value(schemapb.DataType_Double, math.NaN()))},
+			{`{min} < A < {max}`, mixedBounds},
+			{`1 < A < {max}`, map[string]*schemapb.TemplateValue{"max": value(schemapb.DataType_String, "z")}},
+			{`{min} < A < "z"`, map[string]*schemapb.TemplateValue{"min": value(schemapb.DataType_Int64, int64(1))}},
+			{`{min} < DoubleField < {max}`, bounds(value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Double, float64(10)))},
+			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Bool, false), value(schemapb.DataType_Bool, true))},
+			{`{min} < A < {max}`, bounds(array(1), array(2))},
+			{`{min} < A < {max} && random_sample(0.1)`, mixedBounds},
+			{`true OR ({min} < A < {max})`, mixedBounds},
+			{`({min} < A < {max}) OR true`, mixedBounds},
+			{`false AND ({min} < A < {max})`, mixedBounds},
+			{`({min} < A < {max}) AND false`, mixedBounds},
+		} {
+			expr, err := ParseExpr(schemaH, c.expr, c.values)
+			s.ErrorIs(err, merr.ErrQueryPlan, c.expr)
+			s.Nil(expr, c.expr)
+		}
+	})
+
+	s.Run("valid template bounds should survive expression wrappers", func() {
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
+		}
+		exprStr := `{min} < A < {max} && random_sample(0.1)`
+		expr, err := ParseExpr(schemaH, exprStr, templateValues)
+		s.Require().NoError(err, exprStr)
+		s.NotNil(expr, exprStr)
+		s.assertNoUnfilledPlaceholder(expr)
+
+		s.assertValidExpr(schemaH, `A > {min} AND A < {max}`, map[string]*schemapb.TemplateValue{
 			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 			"max": generateTemplateValue(schemapb.DataType_String, "z"),
 		})
+	})
+
+	s.Run("template validation preserves constant short circuit when optimization is disabled", func() {
+		old := paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue("false")
+		defer paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue(old)
+
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
+		}
+		for exprStr, want := range map[string]*planpb.Expr{
+			`true OR ({min} < A < {max})`:   alwaysTrueExpr(),
+			`({min} < A < {max}) OR true`:   alwaysTrueExpr(),
+			`false AND ({min} < A < {max})`: alwaysFalseExpr(),
+			`({min} < A < {max}) AND false`: alwaysFalseExpr(),
+		} {
+			expr, err := ParseExpr(schemaH, exprStr, templateValues)
+			s.Require().NoError(err, exprStr)
+			s.Equal(want, expr, exprStr)
+		}
 	})
 }
 
