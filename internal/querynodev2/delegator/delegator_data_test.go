@@ -1870,6 +1870,95 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	s.Require().NoError(err)
 }
 
+// TestReleaseGrowingSourceClearsHandoffOnWorkerReleaseFailure pins that a failed
+// worker release still clears the release-handoff bookkeeping. RemoveDistributions
+// and AddExcludedSegments already ran unconditionally by that point, so leaving
+// handoffAllowed populated would keep handoffOnly armed forever and reject every
+// unrelated growing segment -- the same symptom as issue #51635.
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceClearsHandoffOnWorkerReleaseFailure() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const (
+		segmentID    = int64(1001)
+		partitionID  = int64(500)
+		targetOffset = int64(10)
+	)
+
+	segment := segments.NewMockSegment(s.T())
+	segment.EXPECT().ID().Return(segmentID).Maybe()
+	segment.EXPECT().Version().Return(int64(1)).Maybe()
+	segment.EXPECT().Shard().Return(s.channel).Maybe()
+	segment.EXPECT().Collection().Return(s.collectionID).Maybe()
+	segment.EXPECT().Partition().Return(partitionID).Maybe()
+	segment.EXPECT().Type().Return(segments.SegmentTypeGrowing).Maybe()
+	segment.EXPECT().Level().Return(datapb.SegmentLevel_Legacy).Maybe()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(targetOffset).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
+	segment.EXPECT().Unpin().Maybe()
+
+	s.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, segment)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: partitionID,
+		Version:     1,
+	})
+
+	releaseErr := merr.WrapErrServiceInternal("mock worker release failure")
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(releaseErr).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{
+			SegmentID:    segmentID,
+			TargetOffset: targetOffset,
+		},
+	})
+	s.Require().NoError(err)
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+	}, false)
+	// The release error must still surface to the caller.
+	s.Require().Error(err)
+
+	// ...but the handoff fence must not survive it.
+	sd.growingSourceProvider.mu.Lock()
+	handoffAllowed := len(sd.growingSourceProvider.handoffAllowed)
+	sd.growingSourceProvider.mu.Unlock()
+	s.Require().Zero(handoffAllowed, "handoffAllowed must be cleared even when the worker release fails")
+}
+
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}

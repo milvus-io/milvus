@@ -153,9 +153,9 @@ func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx 
 	if p.isDeactivated() {
 		return p.prepareDeactivatedGrowingSourceReleaseHandoff(fenceTs, segments)
 	}
-	handoffSnapshot := p.enterHandoffOnly(segments)
+	handoffSnapshot := p.enterHandoffOnlyInflight(segments)
 	// Keep the handoff-only fence armed until this in-flight handoff finishes.
-	// enterHandoffOnly releases p.mu before waitFence, so a concurrent
+	// enterHandoffOnlyInflight releases p.mu before waitFence, so a concurrent
 	// ClearReleasePrepared could otherwise drain handoffAllowed and drop the
 	// fence while we are still parked in waitFence.
 	defer p.leaveHandoffOnlyInflight()
@@ -326,10 +326,29 @@ type handoffSnapshot struct {
 	allowed map[int64]struct{}
 }
 
+// enterHandoffOnly arms the handoff-only fence without registering an in-flight
+// handoff. Callers that only park the fence across an external commit/rollback
+// decision (BeginGrowingSourceReleaseHandoff) must use this variant: their
+// rollback closure is not invoked on the committed path, so an in-flight count
+// taken here would never be given back and would pin handoffOnly forever.
 func (p *delegatorGrowingSourceProvider) enterHandoffOnly(segments []syncmgr.GrowingSourceReleaseHandoffSegment) handoffSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.enterHandoffOnlyLocked(segments)
+}
 
+// enterHandoffOnlyInflight arms the handoff-only fence and registers one
+// in-flight handoff atomically. The caller MUST pair it with
+// leaveHandoffOnlyInflight on every return path.
+func (p *delegatorGrowingSourceProvider) enterHandoffOnlyInflight(segments []syncmgr.GrowingSourceReleaseHandoffSegment) handoffSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	snapshot := p.enterHandoffOnlyLocked(segments)
+	p.handoffInflight++
+	return snapshot
+}
+
+func (p *delegatorGrowingSourceProvider) enterHandoffOnlyLocked(segments []syncmgr.GrowingSourceReleaseHandoffSegment) handoffSnapshot {
 	snapshot := handoffSnapshot{
 		enabled: p.handoffOnly,
 		allowed: make(map[int64]struct{}, len(p.handoffAllowed)),
@@ -339,7 +358,6 @@ func (p *delegatorGrowingSourceProvider) enterHandoffOnly(segments []syncmgr.Gro
 	}
 
 	p.handoffOnly = true
-	p.handoffInflight++
 	for _, segment := range segments {
 		p.handoffAllowed[segment.SegmentID] = struct{}{}
 	}

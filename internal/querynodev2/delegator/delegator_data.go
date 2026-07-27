@@ -1282,13 +1282,21 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		sd.growingSegmentLock.Unlock()
 	}
 
-	if releaseErr != nil {
-		return releaseErr
-	}
+	// Clear the release-handoff bookkeeping even when the worker release failed.
+	// RemoveDistributions and AddExcludedSegments above already ran
+	// unconditionally, so the delegator has committed to dropping these segments
+	// either way. ClearReleasePrepared is the growing-source counterpart of that
+	// cleanup and is the only place that removes IDs from handoffAllowed on an
+	// active provider: gating it on releaseErr would pin handoffOnly forever and
+	// keep rejecting every unrelated growing segment. A querycoord retry
+	// re-prepares, since prepareReleaseManualFlush filters on IsReleasePrepared.
 	if len(growing) > 0 && sd.growingSourceProvider != nil {
 		for _, entry := range growing {
 			sd.growingSourceProvider.ClearReleasePrepared(entry.SegmentID)
 		}
+	}
+	if releaseErr != nil {
+		return releaseErr
 	}
 	return nil
 }

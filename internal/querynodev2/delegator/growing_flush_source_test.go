@@ -288,10 +288,67 @@ func TestDelegatorGrowingSourceProviderClearsHandoffOnlyAfterReleasePrepared(t *
 	source.Release()
 }
 
+// TestDelegatorGrowingSourceProviderBeginHandoffDoesNotPinFence replays the only
+// production release-handoff sequence: Begin (whose rollback closure is dropped on
+// the committed path) followed by Prepare and ClearReleasePrepared. Begin must not
+// take an in-flight count it never gives back, otherwise handoffOnly stays armed
+// forever and every unrelated growing segment keeps being rejected.
+func TestDelegatorGrowingSourceProviderBeginHandoffDoesNotPinFence(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	// Begin arms the fence; the returned rollback is dropped (handoff committed).
+	rollback := provider.BeginGrowingSourceReleaseHandoff([]int64{1001})
+	require.NotNil(t, rollback)
+
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: 1001},
+	})
+	require.NoError(t, err)
+
+	provider.ClearReleasePrepared(1001)
+
+	provider.mu.Lock()
+	handoffOnly := provider.handoffOnly
+	inflight := provider.handoffInflight
+	provider.mu.Unlock()
+	require.Equal(t, 0, inflight, "Begin must not leak an in-flight handoff count")
+	require.False(t, handoffOnly, "handoffOnly must lower once the handoff drains")
+
+	// An unrelated growing segment must be servable again.
+	segment := segments.NewMockSegment(t)
+	segmentManager.EXPECT().GetGrowing(int64(1002)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(int64(1)).Once()
+	segment.EXPECT().Unpin().Once()
+
+	source, state := provider.GetGrowingFlushSource(1002, 1, nil)
+	require.Equal(t, syncmgr.GrowingSourceUsable, state)
+	require.NotNil(t, source)
+	source.Release()
+}
+
+// TestDelegatorGrowingSourceProviderBeginHandoffRollbackDoesNotPinFence covers the
+// other Begin outcome: the caller aborts and invokes the rollback closure. That
+// path must leave no in-flight count behind either.
+func TestDelegatorGrowingSourceProviderBeginHandoffRollbackDoesNotPinFence(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	provider.BeginGrowingSourceReleaseHandoff([]int64{1001})()
+
+	provider.mu.Lock()
+	handoffOnly := provider.handoffOnly
+	inflight := provider.handoffInflight
+	provider.mu.Unlock()
+	require.Equal(t, 0, inflight)
+	require.False(t, handoffOnly)
+}
+
 // TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight pins the
 // invariant that a concurrent ClearReleasePrepared must NOT drop the handoff-only
 // fence while a PrepareGrowingSourceReleaseHandoff is still parked in waitFence.
-// enterHandoffOnly releases p.mu before waitFence, so without the in-flight guard
+// enterHandoffOnlyInflight releases p.mu before waitFence, so without the in-flight guard
 // the concurrent clear would drain handoffAllowed and lower the fence early,
 // letting a brand-new segment acquire a lease mid-handoff.
 func TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight(t *testing.T) {
