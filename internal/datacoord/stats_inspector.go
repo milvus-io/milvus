@@ -341,7 +341,10 @@ func (si *statsInspector) triggerBM25StatsTask() {
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			if !(seg.GetIsSorted() || seg.GetIsSortedByNamespace()) || !needDoBM25(seg, needTriggerFieldIDs) {
+			if !seg.GetIsSorted() && !seg.GetIsSortedByNamespace() {
+				return false
+			}
+			if !needDoBM25(seg, needTriggerFieldIDs) {
 				return false
 			}
 			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_BM25Job)
