@@ -362,7 +362,9 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+		leftField := arithField{dataType: leftExpr.dataType, elementType: getArrayElementType(leftExpr), name: ctx.Expr(0).GetText()}
+		rightField := arithField{dataType: rightExpr.dataType, elementType: getArrayElementType(rightExpr), name: ctx.Expr(1).GetText()}
+		if err := canArithmetic(leftField, rightField, reverse); err != nil {
 			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
@@ -452,11 +454,13 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+		leftField := arithField{dataType: leftExpr.dataType, elementType: getArrayElementType(leftExpr), name: ctx.Expr(0).GetText()}
+		rightField := arithField{dataType: rightExpr.dataType, elementType: getArrayElementType(rightExpr), name: ctx.Expr(1).GetText()}
+		if err = canArithmetic(leftField, rightField, reverse); err != nil {
 			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
-		if err = checkValidModArith(arithExprMap[ctx.GetOp().GetTokenType()], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+		if err = checkValidModArith(arithExprMap[ctx.GetOp().GetTokenType()], leftField, rightField); err != nil {
 			return err
 		}
 
@@ -1856,10 +1860,12 @@ func (v *ParserVisitor) visitBitwiseBinaryOp(leftCtx, rightCtx parser.IExprConte
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if err = canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+		leftField := arithField{dataType: leftExpr.dataType, elementType: getArrayElementType(leftExpr), name: leftCtx.GetText()}
+		rightField := arithField{dataType: rightExpr.dataType, elementType: getArrayElementType(rightExpr), name: rightCtx.GetText()}
+		if err = canArithmetic(leftField, rightField, reverse); err != nil {
 			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[tokenType], err.Error())
 		}
-		if err = checkValidModArith(arithExprMap[tokenType], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+		if err = checkValidModArith(arithExprMap[tokenType], leftField, rightField); err != nil {
 			return err
 		}
 		dataType, err = calcDataType(leftExpr, rightExpr, reverse)
