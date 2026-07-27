@@ -183,6 +183,34 @@ func TestInitLoonReaderConfigRejectsOutOfRangePoolSize(t *testing.T) {
 		int64(maxStorageReaderThreadPoolSize))
 }
 
+// TestInitLoonReaderConfigRejectsOutOfRangeWindow pins the ordering guarantee:
+// both values are range-checked before either is applied, so a rejected window
+// cannot leave the reader pool resized behind it. The pool cannot be destroyed
+// at runtime, which is what makes a partial apply unrecoverable through config.
+func TestInitLoonReaderConfigRejectsOutOfRangeWindow(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	// A window inside the bound is accepted.
+	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "536870912"))
+	assert.NoError(t, InitLoonReaderConfig(pt))
+
+	before := EffectiveLoonReaderThreadPoolSize()
+	for _, invalid := range []string{"-1", "8589934592"} {
+		// Pair the bad window with a pool size that would otherwise be
+		// applied; the point is that it must not reach the C side.
+		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "8"))
+		assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, invalid))
+		err := InitLoonReaderConfig(pt)
+		assert.Error(t, err, "window %s must be rejected", invalid)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, before, EffectiveLoonReaderThreadPoolSize(),
+			"the reader pool must not be resized when the window is rejected")
+	}
+}
+
 func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
@@ -216,6 +244,14 @@ func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	})
 	assert.Positive(t, poolFires.Load(),
 		"helper must have registered a handler on StorageReaderThreadPoolSize")
+	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
+
+	// An out-of-range window drives the same error branch from the other key:
+	// InitLoonReaderConfig rejects it up front, so the handler logs and
+	// returns without the pool having been touched.
+	assert.NotPanics(t, func() {
+		_ = pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "8589934592")
+	})
 	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
 }
 

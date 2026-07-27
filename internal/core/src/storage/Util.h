@@ -295,7 +295,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 // Streams the field's data out of a storage-v3 manifest batch by batch,
 // invoking `consumer` on the calling thread in batch order. Batch decoding
 // (external-type normalization + FieldData materialization) runs in
-// parallel on the MIDDLE thread pool and overlaps with the reader's next
+// parallel on the LOW (background) thread pool and overlaps with the next
 // prefetch round. Decoded-but-undelivered batches are bounded by a byte
 // budget, so this caps the decode window only — the reader's own prefetch
 // window, arrow's buffers and the consumer's own retention are additional

@@ -509,11 +509,23 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 // silently accepts).
 const maxStorageReaderThreadPoolSize = 1024
 
+// maxIndexBuildReadWindowBytes mirrors the limit enforced by
+// InitIndexBuildReadWindow in storage_c.cpp (milvus-storage validates
+// reader.record_batch_max_size in [1, 4GB]). It is duplicated here so both
+// values can be checked before either one is applied; the C side stays
+// authoritative for callers that bypass this function.
+const maxIndexBuildReadWindowBytes = 4 << 30
+
 // InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
 // round may span, which bounds how many row groups download in parallel per
 // round). Both default to 0 = pre-existing sequential behavior.
+//
+// Both values are validated before either is applied. Resizing the global
+// reader pool is not revertible through config (it cannot be destroyed at
+// runtime), so applying it and only then rejecting the window would leave a
+// hot-reload half-applied with nothing but a generic failure log to show it.
 func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
 	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
@@ -521,11 +533,16 @@ func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
 			maxStorageReaderThreadPoolSize, poolSize)
 	}
+	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
+	if window < 0 || window > maxIndexBuildReadWindowBytes {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
+			maxIndexBuildReadWindowBytes, window)
+	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
 		return err
 	}
-	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
 	status = C.InitIndexBuildReadWindow(C.int64_t(window))
 	return HandleCStatus(&status, "InitIndexBuildReadWindow failed")
 }

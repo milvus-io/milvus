@@ -1641,7 +1641,7 @@ IterateFieldDataFromManifest(
 
     auto record_batch_reader = reader_result.ValueOrDie();
 
-    // Decode batches on the MIDDLE thread pool while this thread keeps
+    // Decode batches on a background thread pool while this thread keeps
     // draining the record batch reader. ReadNext must stay single-threaded
     // (the reader is not thread-safe), but everything after it — external
     // normalization plus FieldData materialization — is pure per-batch work
@@ -1659,7 +1659,20 @@ IterateFieldDataFromManifest(
     // the decoded-but-undelivered bytes regardless of batch size and thread
     // count; at least two batches are always admitted so decode can still
     // overlap with fetch when a single batch exceeds the budget.
-    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    //
+    // The decode tasks go to the LOW pool, not MIDDLE. Every production
+    // caller of this function is an index build (DiskFileManagerImpl /
+    // MemFileManagerImpl), i.e. background batch work, while MIDDLE is where
+    // ReduceHelper submits search reduce tasks and then blocks on
+    // future.get(). In standalone both share one ThreadPools singleton, so
+    // submitting a whole decode window to MIDDLE would queue CPU-bound
+    // tasks ahead of reduce and hold search latency up for the entire
+    // download phase. LOW carries only background segment loads and, being
+    // CPU_NUM-sized, still saturates the cores for this CPU-bound decode.
+    // Invariant this relies on: the calling thread blocks on decode futures,
+    // so this function must not be called from a LOW-pool thread. Index
+    // build tasks enter segcore from Go, so no caller does today.
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::LOW);
     constexpr int64_t kMaxInflightBytes = 512LL << 20;
     const size_t max_inflight_batches =
         std::max<size_t>(2, pool.GetMaxThreadNum() * 2);
