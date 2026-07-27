@@ -202,4 +202,81 @@ TEST(OffsetMapping, OutOfBoundsReturnsMinusOne) {
     EXPECT_EQ(mapping.GetLogicalOffset(99), -1);
 }
 
+// logical: 0(v) 1(x) 2(v) 3(v) 4(x) 5(v)
+// physical:  0        1    2         3
+TEST(OffsetMapping, GrowingValidCountBelowConvertsLogicalBound) {
+    GrowingOffsetMapping mapping;
+    auto v = ToBoolBytes(MakeValid({1, 0, 1, 1, 0, 1}));
+    mapping.Append(reinterpret_cast<const bool*>(v.data()), 6, 0, 0);
+    ASSERT_EQ(mapping.GetValidCount(), 4);
+    ASSERT_EQ(mapping.GetTotalCount(), 6);
+
+    EXPECT_EQ(mapping.ValidCountBelow(0), 0);
+    EXPECT_EQ(mapping.ValidCountBelow(1), 1);  // {0}
+    EXPECT_EQ(mapping.ValidCountBelow(2), 1);  // logical 1 is null
+    EXPECT_EQ(mapping.ValidCountBelow(3), 2);  // {0,2}
+    EXPECT_EQ(mapping.ValidCountBelow(4), 3);  // {0,2,3}
+    EXPECT_EQ(mapping.ValidCountBelow(5), 3);  // logical 4 is null
+    EXPECT_EQ(mapping.ValidCountBelow(6), 4);  // all
+    // Bounds outside the mapping clamp instead of over-reporting.
+    EXPECT_EQ(mapping.ValidCountBelow(-1), 0);
+    EXPECT_EQ(mapping.ValidCountBelow(100), 4);
+}
+
+// The reason this API exists: a concurrent insert grows the mapping after a
+// query has fixed its visible-row bound. The scan bound must reflect the
+// bound the query was planned with, not the mapping's current size.
+TEST(OffsetMapping, GrowingValidCountBelowIgnoresRowsAppendedAfterBound) {
+    GrowingOffsetMapping mapping;
+    auto first = ToBoolBytes(MakeValid({1, 0, 1, 1}));
+    mapping.Append(reinterpret_cast<const bool*>(first.data()), 4, 0, 0);
+
+    // The query is planned here: 4 logical rows are acknowledged/visible.
+    const int64_t planned_bound = mapping.GetTotalCount();
+    const int64_t planned_physical = mapping.ValidCountBelow(planned_bound);
+    ASSERT_EQ(planned_physical, 3);
+
+    // A concurrent insert publishes more rows into the mapping before the
+    // search kernel picks its scan range.
+    auto second = ToBoolBytes(MakeValid({1, 1, 1, 1}));
+    mapping.Append(reinterpret_cast<const bool*>(second.data()),
+                   4,
+                   mapping.GetTotalCount(),
+                   mapping.GetValidCount());
+    ASSERT_EQ(mapping.GetValidCount(), 7);
+
+    // GetValidCount() would hand the search 7 physical rows, four of which are
+    // not visible to this query; the converted bound stays at 3.
+    EXPECT_EQ(mapping.ValidCountBelow(planned_bound), planned_physical);
+    EXPECT_NE(mapping.GetValidCount(), planned_physical);
+
+    // Every physical offset within the converted bound maps back below the
+    // query's logical bound, which is exactly what Reduce asserts.
+    for (int64_t physical = 0; physical < planned_physical; ++physical) {
+        EXPECT_LT(mapping.GetLogicalOffset(physical), planned_bound);
+    }
+}
+
+TEST(OffsetMapping, SealedValidCountBelowConvertsLogicalBound) {
+    SealedOffsetMapping mapping;
+    auto v = ToBoolBytes(MakeValid({1, 0, 1, 1, 0, 1}));
+    mapping.Build(reinterpret_cast<const bool*>(v.data()), 6);
+    ASSERT_EQ(mapping.GetValidCount(), 4);
+
+    EXPECT_EQ(mapping.ValidCountBelow(0), 0);
+    EXPECT_EQ(mapping.ValidCountBelow(3), 2);
+    EXPECT_EQ(mapping.ValidCountBelow(6), 4);
+    EXPECT_EQ(mapping.ValidCountBelow(100), 4);
+}
+
+// A disabled mapping means logical and physical spaces coincide, so the bound
+// must pass through unchanged rather than collapsing to zero.
+TEST(OffsetMapping, ValidCountBelowIsIdentityWithoutMapping) {
+    OffsetMapping mapping;
+    EXPECT_FALSE(mapping.IsEnabled());
+    EXPECT_EQ(mapping.ValidCountBelow(0), 0);
+    EXPECT_EQ(mapping.ValidCountBelow(42), 42);
+    EXPECT_EQ(mapping.ValidCountBelow(-5), 0);
+}
+
 }  // namespace milvus

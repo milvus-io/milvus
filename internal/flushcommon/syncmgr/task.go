@@ -314,6 +314,12 @@ func (t *SyncTask) writeMeta(ctx context.Context) error {
 	return t.metaWriter.UpdateSync(ctx, t)
 }
 
+// BatchRows is the row count this attempt carries. The write buffer needs it
+// to pair StartSyncing with Abort/FinishSyncing across a re-submission.
+func (t *SyncTask) BatchRows() int64 {
+	return t.batchRows
+}
+
 func (t *SyncTask) SegmentID() int64 {
 	return t.segmentID
 }

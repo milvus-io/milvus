@@ -118,7 +118,7 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 		return nil, syncmgr.GrowingSourceUnavailable
 	}
 	source := &delegatorGrowingFlushSource{segmentID: segmentID, segment: segment, provider: p, targetOffset: targetOffset, retained: retained}
-	if p.currentOffset(segment) < targetOffset {
+	if growingSourceCurrentOffset(segment) < targetOffset {
 		return source, syncmgr.GrowingSourcePending
 	}
 	return source, syncmgr.GrowingSourceUsable
@@ -230,7 +230,7 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 	if err := segment.PinIfNotReleased(); err != nil {
 		return err
 	}
-	currentOffset := p.currentOffset(segment)
+	currentOffset := growingSourceCurrentOffset(segment)
 	if currentOffset < targetOffset {
 		segment.Unpin()
 		return merr.WrapErrServiceInternalMsg("growing-source segment %d is behind target offset, current=%d target=%d", segmentID, currentOffset, targetOffset)
@@ -555,11 +555,33 @@ func (p *delegatorGrowingSourceProvider) unregisterIfInactiveLocked() *syncmgr.G
 	return registration
 }
 
-func (p *delegatorGrowingSourceProvider) currentOffset(segment segments.Segment) int64 {
+// growingSourceCurrentOffset reports how far the growing segment can safely be
+// flushed. It is the single owner of that bound — every admission check and
+// every GrowingFlushSource.CurrentOffset goes through here, so the flush range
+// can never be derived two different ways.
+//
+// This MUST agree with the bound segcore validates the flush range against:
+// FlushGrowingSegmentData rejects end_offset > get_row_count(), where
+// get_row_count() is ack_responder_.GetAck() — the contiguous *acknowledged*
+// prefix, i.e. exactly the rows an MVCC read would see.
+//
+// InsertCount() is a Go-side counter bumped after each Insert returns. With
+// concurrent inserts into one segment the acknowledged prefix lags it: a later
+// batch can finish while an earlier one is still in flight, so InsertCount
+// covers rows the ack has not reached. Admitting a flush on that number gave
+// segcore a range it then refused, and the resulting error was treated as a
+// sync failure rather than "not ready yet".
+//
+// Reading the acked count instead makes an un-acked tail report
+// GrowingSourcePending, so the flush simply waits for the next round and picks
+// up the rows once they are visible. RowNum() is a cgo call whenever an insert
+// has invalidated the cached value; that cost is paid per flush decision, not
+// per row.
+func growingSourceCurrentOffset(segment segments.Segment) int64 {
 	if segment == nil {
 		return 0
 	}
-	return segment.InsertCount()
+	return segment.RowNum()
 }
 
 func (p *delegatorGrowingSourceProvider) observeRetainedMetricsLocked() {
@@ -611,13 +633,7 @@ type delegatorGrowingFlushSource struct {
 }
 
 func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
-	if s.provider != nil {
-		return s.provider.currentOffset(s.segment)
-	}
-	if s.segment == nil {
-		return 0
-	}
-	return s.segment.InsertCount()
+	return growingSourceCurrentOffset(s.segment)
 }
 
 func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {

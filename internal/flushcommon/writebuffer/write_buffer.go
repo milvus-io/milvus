@@ -204,6 +204,50 @@ func isGrowingSourceLayoutMismatch(err error) bool {
 		strings.Contains(msg, "Column group size mismatch")
 }
 
+// growingSourceSyncFatal reports why a growing-source sync failure can never
+// succeed on retry, or "" when the failure is worth retrying.
+//
+// Retry is the default. A growing-source flush re-reads the same offset range
+// from the segcore growing segment, so retrying is cheap and loses nothing;
+// only failures whose cause cannot change between attempts belong here.
+//
+// Storage-layer permanence is deliberately NOT consulted here. Today every
+// loon FFI failure is wrapped as packed.ErrLoonTransient regardless of its
+// real cause, so asking would classify a dead bucket as retryable and a
+// throttle as fatal with equal confidence — worse than not asking. Retrying
+// forever is the safe side of that ignorance: the rows stay pinned in the
+// growing segment and the checkpoint stays put. Once the storage error
+// classification lands, add the permanent branch here.
+func growingSourceSyncFatal(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case isGrowingSourceLayoutMismatch(err):
+		// The flush layout disagrees with what the segment materialized.
+		// Re-reading the same rows reproduces it exactly.
+		return "layout mismatch"
+	case errors.Is(err, merr.ErrDataIntegrity):
+		// The task refused its own inputs: empty manifest, row-count mismatch,
+		// missing insert summary, a non-V3 segment, a target offset behind
+		// already-flushed rows. Every one of these is re-derived from the same
+		// segment state and the same offset range, so a retry reproduces it
+		// exactly -- and retrying forever would pin the channel checkpoint with
+		// nothing but rate-limited warnings to show for it.
+		//
+		// ErrServiceInternal is deliberately NOT here: on this path it means
+		// "the source is not ready yet" (nil source, source behind the target
+		// offset), which the next round genuinely can resolve.
+		return "data integrity violation"
+	case merr.IsNonRetryableErr(err):
+		// Milvus-side terminal error: the request is malformed or the target
+		// is gone. A restart can at least pick up corrected configuration;
+		// retrying in-process cannot.
+		return "non-retryable error"
+	default:
+		return ""
+	}
+}
+
 func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
 	if len(stats) == 0 {
 		return nil
@@ -276,8 +320,16 @@ type writeBufferBase struct {
 	processedTs    uint64
 	flushTimestamp *atomic.Uint64
 
-	errHandler           func(err error)
-	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
+	// errHandler is fatal: it is used for sync tasks whose payload was yielded
+	// out of the buffer and that have no re-submit path, so the only safe
+	// recovery is process restart plus WAL replay from the (unadvanced)
+	// checkpoint.
+	errHandler func(err error)
+	// growingSourceErrHandler is non-fatal: growing-source syncs read from the
+	// segcore growing segment and are re-submitted by
+	// scheduleGrowingSourceRetryLocked, so a failed attempt loses nothing.
+	growingSourceErrHandler func(err error)
+	taskObserverCallback    func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
 	// Channel-level admission flag for trying growing-source flush. Actual segment
 	// source selection remains sticky in metacache.
@@ -292,8 +344,22 @@ type writeBufferBase struct {
 	growingSourceRetryInterval  time.Duration
 	growingSourceRetryScheduled bool
 	growingSourceRetryTimer     *time.Timer
-	flushSourceModeNotifier     FlushSourceModeNotifier
-	closed                      bool
+
+	// Ordinary sync tasks that failed recoverably and are waiting to be
+	// re-submitted. The rows are NOT lost when a sync fails: yieldBuffer moved
+	// them into the task's SyncPack, so the task still owns them and re-running
+	// the same object replays exactly the same batch.
+	//
+	// While an entry is present, getSyncTask returns it instead of yielding a
+	// fresh batch for that segment. That is what keeps ordering intact: the
+	// key-locked dispatcher serializes tasks per segment but does not reorder a
+	// re-submission behind a newer batch, so a newer batch must not be built.
+	pendingSyncRetries        map[int64]*syncmgr.SyncTask
+	pendingSyncRetryBytes     int64
+	pendingSyncRetryScheduled bool
+	pendingSyncRetryTimer     *time.Timer
+	flushSourceModeNotifier   FlushSourceModeNotifier
+	closed                    bool
 
 	// pre build logger
 	logger                   *mlog.Logger
@@ -341,11 +407,13 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		syncPolicies:               option.syncPolicies,
 		flushTimestamp:             flushTs,
 		errHandler:                 option.errorHandler,
+		growingSourceErrHandler:    option.growingSourceErrorHandler,
 		taskObserverCallback:       option.taskObserverCallback,
 		allowGrowingSourceFlush:    allowGrowingSourceFlush,
 		growingSourceResolver:      growingSourceResolver,
 		growingSourceProgress:      make(map[int64]*growingSourceProgress),
 		growingSourceRetryInterval: growingSourceRetryInterval,
+		pendingSyncRetries:         make(map[int64]*syncmgr.SyncTask),
 		flushSourceModeNotifier:    option.flushSourceModeNotifier,
 	}
 
@@ -353,6 +421,19 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		mlog.String("channel", wb.channelName))
 	wb.cpRatedLogger = wb.logger
 	wb.growingSourceRatedLogger = wb.logger
+
+	// A nil handler would silently drop failure reporting for a path that is
+	// expected to fail and retry, so never leave it unset even when the option
+	// struct was built directly (tests, embedded callers). Rate-limited on
+	// purpose: the retry interval is 100ms, so an unrated warn here turns one
+	// stuck segment into a log flood. The per-failure counter and the escalating
+	// summary live in observeGrowingSourceSyncFailureLocked.
+	if wb.growingSourceErrHandler == nil {
+		wb.growingSourceErrHandler = func(err error) {
+			wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1),
+				"growing-source sync failed, will retry", mlog.Err(err))
+		}
+	}
 
 	return wb, nil
 }
@@ -745,6 +826,74 @@ func (wb *writeBufferBase) growingSourceProgressSyncable(segmentID int64, progre
 	return false, true
 }
 
+// ordinarySyncFatal reports why an ordinary sync failure can never succeed on
+// retry, or "" when it is worth re-submitting. Same split as the
+// growing-source path: data-integrity violations are re-derived from the same
+// batch and would pin the checkpoint forever, everything else gets another go.
+func ordinarySyncFatal(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, merr.ErrDataIntegrity):
+		return "data integrity violation"
+	case merr.IsNonRetryableErr(err):
+		return "non-retryable error"
+	default:
+		return ""
+	}
+}
+
+func (wb *writeBufferBase) parkSyncRetryLocked(task *syncmgr.SyncTask) {
+	segmentID := task.SegmentID()
+	if _, exists := wb.pendingSyncRetries[segmentID]; !exists {
+		wb.pendingSyncRetryBytes += task.BatchRows()
+	}
+	wb.pendingSyncRetries[segmentID] = task
+	wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1),
+		"sync task parked for retry",
+		mlog.Int64("segmentID", segmentID),
+		mlog.Int("pending", len(wb.pendingSyncRetries)))
+	wb.scheduleSyncRetryLocked()
+}
+
+func (wb *writeBufferBase) clearSyncRetryLocked(segmentID int64) {
+	if task, ok := wb.pendingSyncRetries[segmentID]; ok {
+		wb.pendingSyncRetryBytes -= task.BatchRows()
+		if wb.pendingSyncRetryBytes < 0 {
+			wb.pendingSyncRetryBytes = 0
+		}
+		delete(wb.pendingSyncRetries, segmentID)
+	}
+}
+
+func (wb *writeBufferBase) scheduleSyncRetryLocked() {
+	if wb.closed || wb.pendingSyncRetryScheduled ||
+		wb.growingSourceRetryInterval < 0 || len(wb.pendingSyncRetries) == 0 {
+		return
+	}
+	wb.pendingSyncRetryScheduled = true
+	wb.pendingSyncRetryTimer = time.AfterFunc(wb.growingSourceRetryInterval,
+		wb.retrySyncTasks)
+}
+
+func (wb *writeBufferBase) retrySyncTasks() {
+	wb.mut.Lock()
+	wb.pendingSyncRetryScheduled = false
+	wb.pendingSyncRetryTimer = nil
+	if wb.closed || len(wb.pendingSyncRetries) == 0 {
+		wb.mut.Unlock()
+		return
+	}
+	segmentIDs := lo.Keys(wb.pendingSyncRetries)
+	wb.scheduleSyncRetryLocked()
+	syncTasks := wb.getSyncTasksLocked(context.Background(), segmentIDs)
+	wb.mut.Unlock()
+
+	if len(syncTasks) > 0 {
+		wb.submitSyncTasks(context.Background(), syncTasks)
+	}
+}
+
 func (wb *writeBufferBase) scheduleGrowingSourceRetryLocked() {
 	if wb.closed || wb.growingSourceRetryScheduled || wb.growingSourceRetryInterval < 0 || len(wb.growingSourceProgress) == 0 {
 		return
@@ -984,12 +1133,25 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 						progress.failSync(err)
 						wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
 						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
-						if isGrowingSourceLayoutMismatch(err) {
+						if fatal := growingSourceSyncFatal(err); fatal != "" {
+							// markNonRetryableFailure permanently parks this
+							// segment: growingSourceProgressSyncable refuses it
+							// forever, so its batches are never trimmed and the
+							// channel checkpoint stays pinned at
+							// firstUncommittedPosition. Left silent that is an
+							// unbounded, alert-less stall — strictly worse than
+							// a crash, because nothing ever reports it. Fail
+							// loudly instead: the rows are still recoverable
+							// from the WAL, and a human has to look at this.
 							progress.markNonRetryableFailure()
-							mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
+							mlog.Error(ctx, "growing-source sync hit a non-retryable failure, escalating",
+								mlog.String("reason", fatal),
 								mlog.Int64("segmentID", growingSourceTask.SegmentID()),
 								mlog.Int64("targetOffset", progress.targetOffset),
 								mlog.String("lastFailure", progress.lastFailure))
+							fatalErr := errors.Wrapf(err, "growing-source sync unrecoverable (%s), segmentID=%d targetOffset=%d",
+								fatal, growingSourceTask.SegmentID(), progress.targetOffset)
+							defer wb.errHandler(fatalErr)
 						} else {
 							wb.scheduleGrowingSourceRetryLocked()
 						}
@@ -1023,6 +1185,30 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 			}
 			if resyncGrowingSourceSegmentID != 0 {
 				wb.syncSegments(context.Background(), []int64{resyncGrowingSourceSegmentID})
+			}
+
+			if ordinaryTask, isOrdinary := syncTask.(*syncmgr.SyncTask); isOrdinary {
+				wb.mut.Lock()
+				if err != nil {
+					if reason := ordinarySyncFatal(err); reason == "" {
+						// Recoverable: hand the batch back to the metacache and
+						// park the task. It keeps its rows, so the retry replays
+						// the same range against an unadvanced checkpoint.
+						wb.metaCache.UpdateSegments(
+							metacache.AbortSyncing(ordinaryTask.BatchRows()),
+							metacache.WithSegmentIDs(ordinaryTask.SegmentID()))
+						wb.parkSyncRetryLocked(ordinaryTask)
+					} else {
+						mlog.Error(ctx, "sync task hit a non-retryable failure, escalating",
+							mlog.String("reason", reason),
+							mlog.FieldSegmentID(syncTask.SegmentID()))
+						defer wb.errHandler(errors.Wrapf(err,
+							"sync unrecoverable (%s), segmentID=%d", reason, syncTask.SegmentID()))
+					}
+				} else {
+					wb.clearSyncRetryLocked(ordinaryTask.SegmentID())
+				}
+				wb.mut.Unlock()
 			}
 
 			if err != nil {
@@ -1425,6 +1611,15 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		mlog.Warn(ctx, "segment info not found in meta cache", mlog.FieldSegmentID(segmentID))
 		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
+	// A recoverable failure left this segment's batch parked. Re-submit that
+	// exact task -- it still owns the rows -- and re-arm the syncing counter so
+	// each attempt remains one StartSyncing paired with one Abort/Finish.
+	// Building a newer batch here would let it overtake the parked one.
+	if task, ok := wb.pendingSyncRetries[segmentID]; ok {
+		wb.metaCache.UpdateSegments(metacache.StartSyncing(task.BatchRows()),
+			metacache.WithSegmentIDs(segmentID))
+		return task, nil
+	}
 	if progress, ok := wb.growingSourceProgress[segmentID]; ok && !wb.hasWriteBufferInsertPayload(segmentID) {
 		return wb.getGrowingSourceSyncTask(ctx, segmentInfo, progress)
 	}
@@ -1565,7 +1760,13 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
 			WithAllocator(wb.allocator).
 			WithStorageConfig(packed.CreateStorageConfig()).
-			WithFailureCallback(wb.errHandler).
+			// Non-fatal on purpose: this task is re-submitted by
+			// scheduleGrowingSourceRetryLocked, and the rows it flushes stay
+			// pinned in the growing segment until CommitGrowingFlush, so a
+			// failed attempt costs nothing but a round trip. Escalation to the
+			// fatal handler happens only where recovery is impossible — see the
+			// non-retryable branch in submitSyncTasks.
+			WithFailureCallback(wb.growingSourceErrHandler).
 			// Same as above: keep the critical write path retrying despite the
 			// retry.Do InputError short-circuit.
 			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),

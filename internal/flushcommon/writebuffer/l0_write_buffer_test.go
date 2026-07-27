@@ -788,6 +788,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -862,6 +867,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -909,11 +919,15 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		}
 		var errorHandlerCalls atomic.Int32
+		var growingHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			errorHandler: func(error) {
 				errorHandlerCalls.Add(1)
+			},
+			growingSourceErrorHandler: func(error) {
+				growingHandlerCalls.Add(1)
 			},
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
@@ -931,6 +945,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 						done <- textTask
 					}()
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -951,7 +970,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
 		firstTask := <-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		// A retryable growing-source failure is reported through the
+		// non-fatal handler and never escalated: the rows stay in the growing
+		// segment and the write buffer re-submits the task.
+		s.EqualValues(1, growingHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1010)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -967,7 +990,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Require().Len(futures, 1)
 		s.NoError(conc.AwaitAll(futures...))
 		secondTask := <-done
-		s.EqualValues(1, errorHandlerCalls.Load())
+		// The retry succeeded, so neither handler fires again.
+		s.EqualValues(1, growingHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		s.EqualValues(10, secondTask.BatchRows())
 		segment, ok = metacache.GetSegmentByID(1010)
 		s.True(ok)
@@ -1005,6 +1030,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1058,12 +1088,16 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
 		var errorHandlerCalls atomic.Int32
+		var growingHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			metaWriter:                 metaWriter,
 			growingSourceRetryInterval: time.Hour,
 			errorHandler: func(error) {
 				errorHandlerCalls.Add(1)
+			},
+			growingSourceErrorHandler: func(error) {
+				growingHandlerCalls.Add(1)
 			},
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
@@ -1079,6 +1113,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1099,6 +1138,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "row count mismatch")
 		<-done
 
+		// A row-count mismatch is a data-integrity violation: the task
+		// re-derives it from the same segment state and the same offset range,
+		// so retrying reproduces it forever while pinning the checkpoint. It
+		// escalates to the fatal handler instead.
+		s.EqualValues(1, growingHandlerCalls.Load())
 		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1011)]
 		s.True(ok)
@@ -1140,6 +1184,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1238,6 +1287,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				secondTaskCh <- textTask
 				return conc.Go(func() (struct{}, error) {
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1420,6 +1474,11 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1479,6 +1538,11 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
 					err := textTask.Run(ctx)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr

@@ -621,9 +621,13 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if commitSource && shouldCommit && (t.IsFlush() || t.IsDrop()) {
 			committer.CommitGrowingFlush(t.targetOffset)
 		}
-		if err != nil {
-			t.HandleError(err)
-		}
+		// HandleError is NOT called here. syncManager.submit prepends a
+		// handler that already invokes it for every task it runs, and this
+		// defer used to fire on the same error: two failureCallback calls and
+		// two DataNodeFlushBufferCount increments per failure. That stayed
+		// invisible while the callback panicked on the first call; once
+		// growing-source failures became recoverable it turned into a doubled
+		// warn every retry interval. The manager owns the call.
 	}()
 
 	segment, ok := t.metacache.GetSegmentByID(t.segmentID)
@@ -637,7 +641,9 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	}
 	expectedRows := t.targetOffset - segment.FlushedRows()
 	if expectedRows < 0 {
-		return merr.WrapErrServiceInternalMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
+		// Deterministic: FlushedRows only grows and targetOffset is fixed for
+		// this task, so a retry re-derives the same negative span.
+		return merr.WrapErrDataIntegrityMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
 			segment.FlushedRows(), t.targetOffset, t.segmentID)
 	}
 	columnGroups, err := t.getColumnGroups(segment)
@@ -829,7 +835,7 @@ func (t *GrowingSourceSyncTask) trimColumnGroupsToMaterialized(ctx context.Conte
 	// InsertRecord ctor, so an empty set has no legal meaning — refuse it
 	// instead of writing a layout that may disagree with the data.
 	if len(materialized) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg(
+		return nil, merr.WrapErrDataIntegrityMsg(
 			"growing flush source reported empty materialized field ids for segment %d", t.segmentID)
 	}
 	materializedSet := typeutil.NewSet(materialized...)

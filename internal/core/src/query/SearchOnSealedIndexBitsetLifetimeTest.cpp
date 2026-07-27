@@ -534,6 +534,79 @@ TEST(SearchOnGrowingBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
 }
 
+// An empty BitsetView means "no filter", not "zero rows". Clamping the
+// visible-row bound to bitset.size() therefore zeroes it, and a nullable
+// vector field -- whose branch resolves the bound through the offset mapping
+// -- comes back with an empty result instead of every visible row.
+TEST(SearchOnGrowingBitsetLifetime, NullableGrowingEmptyBitsetMeansNoFilter) {
+    constexpr int64_t total_count = 512;
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::L2, true);
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field);
+
+    auto dataset = segcore::DataGen(schema,
+                                    total_count,
+                                    /*seed=*/42,
+                                    /*ts_offset=*/0,
+                                    /*repeat_count=*/1,
+                                    /*array_len=*/10,
+                                    /*group_count=*/1,
+                                    /*random_pk=*/false,
+                                    /*random_val=*/true,
+                                    /*random_valid=*/false,
+                                    /*null_percent=*/10);
+    const auto& vector_data = FindFieldData(dataset, vector_field);
+    auto valid_count = CountValidRows(vector_data, total_count);
+    ASSERT_GT(valid_count, 0);
+
+    auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto reserved_offset = segment->PreInsert(total_count);
+    segment->Insert(reserved_offset,
+                    total_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+    auto* growing_segment =
+        dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    const auto& vectors = vector_data.vectors().float_vector().data();
+    ASSERT_GE(vectors.size(), kDim);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = kTopK;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::indexparam::NPROBE, "32"},
+    };
+    // The plan layer froze the visible-row bound; the kernel must carry it
+    // through instead of re-deriving one from the (absent) bitset.
+    search_info.active_count_ = total_count;
+
+    SearchResult search_result;
+    SearchOnGrowing(*growing_segment,
+                    search_info,
+                    vectors.data(),
+                    nullptr,
+                    1,
+                    MAX_TIMESTAMP,
+                    BitsetView{},
+                    nullptr,
+                    search_result);
+
+    auto matched = std::count_if(
+        search_result.seg_offsets_.begin(),
+        search_result.seg_offsets_.end(),
+        [](int64_t offset) { return offset != INVALID_SEG_OFFSET; });
+    EXPECT_GT(matched, 0)
+        << "an empty bitset must not be read as zero visible rows";
+}
+
 TEST(SearchOnSealedColumnBitsetLifetime,
      GroupByIteratorMustNotKeepDanglingTransformedBitset) {
     constexpr int64_t total_count = 512;

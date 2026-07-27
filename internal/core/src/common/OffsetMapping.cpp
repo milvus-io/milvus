@@ -1,6 +1,7 @@
 #include "common/OffsetMapping.h"
 
 #include <algorithm>
+#include <limits>
 #include <mutex>
 #include <shared_mutex>
 #include <utility>
@@ -51,6 +52,12 @@ OffsetMapping::IsValid(int64_t logical_offset) const {
 int64_t
 OffsetMapping::GetValidCount() const {
     return 0;
+}
+
+int64_t
+OffsetMapping::ValidCountBelow(int64_t logical_bound) const {
+    // No mapping: physical space == logical space.
+    return std::max<int64_t>(0, logical_bound);
 }
 
 bool
@@ -203,6 +210,42 @@ SealedOffsetMapping::GetValidCount() const {
     return valid_count_;
 }
 
+int64_t
+SealedOffsetMapping::ValidCountBelow(int64_t logical_bound) const {
+    if (!enabled_) {
+        return std::max<int64_t>(0, logical_bound);
+    }
+    if (logical_bound <= 0) {
+        return 0;
+    }
+    if (logical_bound >= total_count_) {
+        return valid_count_;
+    }
+    // physical -> logical is built in ascending logical order, so it is
+    // strictly increasing and binary-searchable in either representation.
+    if (!use_map_) {
+        auto it = std::lower_bound(p2l_vec_.begin(),
+                                   p2l_vec_.end(),
+                                   static_cast<int32_t>(logical_bound));
+        return static_cast<int64_t>(std::distance(p2l_vec_.begin(), it));
+    }
+    int64_t lo = 0;
+    int64_t hi = valid_count_;
+    while (lo < hi) {
+        const int64_t mid = lo + (hi - lo) / 2;
+        auto it = p2l_map_.find(static_cast<int32_t>(mid));
+        const int64_t logical = (it == p2l_map_.end())
+                                    ? std::numeric_limits<int64_t>::max()
+                                    : static_cast<int64_t>(it->second);
+        if (logical < logical_bound) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
 bool
 SealedOffsetMapping::IsEnabled() const {
     return enabled_;
@@ -306,6 +349,27 @@ GrowingOffsetMapping::Append(const bool* valid_data,
         start_logical = total_count_;
     }
     auto physical_idx = start_physical >= 0 ? start_physical : valid_count_;
+    // Physical offsets MUST be claimed in ascending logical order, which is
+    // what makes p2l monotonic and ValidCountBelow's binary search valid.
+    //
+    // Nothing in this class enforces that -- it holds because inserts into one
+    // growing segment are serial end to end: the QueryNode flow graph drives
+    // delegator ProcessInsert from a single goroutine over a plain loop, and
+    // watchDmChannel finishes loadGrowingSegments before it ever subscribes to
+    // the WAL, so a load can never interleave with an insert either.
+    //
+    // ConcurrentVector reads GetValidCount() and calls Append() under two
+    // separate locks, so the moment inserts into one segment become concurrent
+    // a later logical batch can win that race and take an earlier physical
+    // offset. p2l stops being monotonic, the binary search walks past the rows
+    // it must exclude, and a search silently returns unacknowledged rows -- no
+    // crash, no log. Fail loudly here instead.
+    AssertInfo(physical_idx == valid_count_,
+               "growing offset mapping requires physical offsets to be claimed "
+               "in logical order: got start_physical={}, expected {}. Inserts "
+               "into one growing segment must stay serial.",
+               physical_idx,
+               valid_count_);
     for (int64_t i = 0; i < count; ++i) {
         if (valid_data[i]) {
             const auto logical_offset = start_logical + i;
@@ -410,6 +474,43 @@ GrowingOffsetMapping::TransformBitset(const BitsetView& bitset,
         }
     }
     return BitsetTransformStatus::Transformed;
+}
+
+int64_t
+GrowingOffsetMapping::ValidCountBelow(int64_t logical_bound) const {
+    std::shared_lock lock(mutex_);
+    if (!enabled_) {
+        // No mapping: logical and physical spaces coincide.
+        return std::max<int64_t>(0, logical_bound);
+    }
+    if (logical_bound <= 0) {
+        return 0;
+    }
+    if (logical_bound >= total_count_) {
+        return valid_count_;
+    }
+    // Append walks rows in ascending logical order and assigns physical
+    // offsets with physical_idx++, so physical -> logical is strictly
+    // increasing. Binary search for the first physical row whose logical
+    // offset has already reached the bound; its index is the count of rows
+    // strictly below the bound.
+    int64_t lo = 0;
+    int64_t hi = valid_count_;
+    while (lo < hi) {
+        const int64_t mid = lo + (hi - lo) / 2;
+        auto it = p2l_map_.find(static_cast<int32_t>(mid));
+        // A hole would break monotonicity; treat it as "at or past the bound"
+        // so the result stays a safe under-approximation.
+        const int64_t logical = (it == p2l_map_.end())
+                                    ? std::numeric_limits<int64_t>::max()
+                                    : static_cast<int64_t>(it->second);
+        if (logical < logical_bound) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
 }
 
 void

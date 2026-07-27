@@ -73,7 +73,7 @@ func TestDelegatorGrowingSourceProviderCloseWaitsForSourceRelease(t *testing.T) 
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().Unpin().Once()
 
 	source, state := provider.GetGrowingFlushSource(1001, 10, nil)
@@ -114,7 +114,7 @@ func TestDelegatorGrowingSourceProviderRetainedSource(t *testing.T) {
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
@@ -124,7 +124,7 @@ func TestDelegatorGrowingSourceProviderRetainedSource(t *testing.T) {
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Twice()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Twice()
-	segment.EXPECT().InsertCount().Return(int64(10)).Twice()
+	segment.EXPECT().RowNum().Return(int64(10)).Twice()
 	segment.EXPECT().Unpin().Times(3)
 	segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Once()
 
@@ -147,20 +147,44 @@ func TestDelegatorGrowingSourceProviderRetainedSource(t *testing.T) {
 	require.Nil(t, source)
 }
 
-func TestDelegatorGrowingSourceProviderUsesInsertCountAsOffset(t *testing.T) {
+func TestDelegatorGrowingSourceProviderUsesAckedRowCountAsOffset(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
 	segment := segments.NewMockSegment(t)
 	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(12)).Twice()
+	segment.EXPECT().RowNum().Return(int64(12)).Twice()
 	segment.EXPECT().Unpin().Once()
 
 	source, state := provider.GetGrowingFlushSource(1001, 12, nil)
 	require.Equal(t, syncmgr.GrowingSourceUsable, state)
 	require.NotNil(t, source)
 	require.EqualValues(t, 12, source.CurrentOffset())
+	source.Release()
+}
+
+// An un-acked tail must report Pending, not Usable. Admitting the flush on
+// rows segcore has not acknowledged is what produced the invalid-offset
+// rejection: FlushGrowingSegmentData validates end_offset against
+// get_row_count() == ack_responder_.GetAck(), so a range past the acked
+// prefix comes back as an error that the sync path then mistook for a real
+// sync failure instead of "not ready yet".
+func TestDelegatorGrowingSourceProviderPendingWhenAckLagsTarget(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	// 12 rows inserted, only 10 acknowledged.
+	segment.EXPECT().RowNum().Return(int64(10)).Twice()
+	segment.EXPECT().Unpin().Once()
+
+	source, state := provider.GetGrowingFlushSource(1001, 12, nil)
+	require.Equal(t, syncmgr.GrowingSourcePending, state)
+	require.NotNil(t, source)
+	require.EqualValues(t, 10, source.CurrentOffset())
 	source.Release()
 }
 
@@ -201,7 +225,7 @@ func TestDelegatorGrowingSourceProviderPrepareWaitsFence(t *testing.T) {
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 200, []syncmgr.GrowingSourceReleaseHandoffSegment{
@@ -255,7 +279,7 @@ func TestDelegatorGrowingSourceProviderHandoffOnlyRejectsNewSegmentsBeforeFence(
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	close(releaseFence)
 	require.NoError(t, <-prepareDone)
@@ -275,7 +299,7 @@ func TestDelegatorGrowingSourceProviderDeactivatedOnlyServesRetainedSources(t *t
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 100, []syncmgr.GrowingSourceReleaseHandoffSegment{
@@ -316,7 +340,7 @@ func TestDelegatorGrowingSourceProviderReleasesWhenDetachedBeforeCommit(t *testi
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
@@ -340,11 +364,11 @@ func TestDelegatorGrowingSourceProviderPrepareRollbackOnFailure(t *testing.T) {
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	segmentManager.EXPECT().GetGrowing(int64(1002)).Return(behindSegment).Once()
 	behindSegment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	behindSegment.EXPECT().InsertCount().Return(int64(5)).Once()
+	behindSegment.EXPECT().RowNum().Return(int64(5)).Once()
 	behindSegment.EXPECT().Unpin().Once()
 	segment.EXPECT().Unpin().Once()
 
@@ -386,7 +410,7 @@ func TestDelegatorGrowingSourceProviderPrepareMixedRetainedAndMissing(t *testing
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	segmentManager.EXPECT().GetGrowing(int64(1002)).Return(nil).Once()
 
@@ -413,7 +437,7 @@ func TestDelegatorGrowingSourceProviderRegisterRetainedBehindTarget(t *testing.T
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(5)).Once()
+	segment.EXPECT().RowNum().Return(int64(5)).Once()
 	segment.EXPECT().Unpin().Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
@@ -440,7 +464,7 @@ func TestDelegatorGrowingSourceProviderRetainedMetrics(t *testing.T) {
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(4096)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
@@ -500,7 +524,7 @@ func TestDelegatorGrowingSourceProviderRetainedMetricsDeletedWhenRetainedDrains(
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().RowNum().Return(int64(10)).Once()
 	segment.EXPECT().MemSize().Return(int64(2048)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{

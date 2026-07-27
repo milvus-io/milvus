@@ -208,10 +208,37 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             }
         }
 
+        // The visible-row bound is decided once, in the plan layer, and
+        // travels here through SearchInfo. Re-reading it from the segment (or
+        // asking the offset mapping how big it is now) races with concurrent
+        // inserts: a growing segment publishes rows into column storage and
+        // into the nullable field's offset mapping BEFORE ack_responder_
+        // advances, so a later read admits rows that are neither acknowledged
+        // nor visible at `timestamp`. Those rows then fail Reduce's
+        // `offset < get_row_count()` assertion, or slip into the result when
+        // the ack happens to catch up first.
+        //
+        // Fall back to computing it only for direct callers (unit tests) that
+        // do not go through the plan layer.
+        const int64_t plan_bound = info.active_count_ >= 0
+                                       ? info.active_count_
+                                       : segment.get_active_count(timestamp);
+
+        // An empty BitsetView means "no filter", NOT "zero rows": its size() is
+        // 0 and clamping to it would zero the bound and make the search return
+        // an empty result. Only a populated bitset carries a row count worth
+        // clamping to.
+        const int64_t logical_bound =
+            bitset.empty() ? plan_bound
+                           : std::min(int64_t(bitset.size()), plan_bound);
+
+        // Nullable vector fields store only non-null rows, so the scan runs in
+        // the mapping's physical space. Convert the logical bound instead of
+        // querying the mapping's current size, so both branches enforce the
+        // same MVCC bound.
         auto active_count = has_offset_mapping
-                                ? offset_mapping.GetValidCount()
-                                : std::min(int64_t(bitset.size()),
-                                           segment.get_active_count(timestamp));
+                                ? offset_mapping.ValidCountBelow(logical_bound)
+                                : logical_bound;
 
         // Check for nullable vector field with all null values
         if (active_count == 0) {

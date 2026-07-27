@@ -57,6 +57,28 @@ class OffsetMapping {
     virtual int64_t
     GetValidCount() const;
 
+    // Physical scan bound corresponding to a logical visibility bound: the
+    // number of valid (non-null) rows whose logical offset is < logical_bound.
+    //
+    // Callers that need a scan bound must use this and NOT GetValidCount().
+    // On a growing mapping the two differ under concurrent inserts, and
+    // GetValidCount() would admit rows the query must not see.
+    //
+    // The default (no mapping) is the identity: logical and physical spaces
+    // coincide.
+    // Number of physical rows whose logical offset is below logical_bound --
+    // i.e. the visible prefix once the plan layer's MVCC bound is translated
+    // into the mapping's physical space.
+    //
+    // PRECONDITION: physical offsets are claimed in ascending logical order,
+    // so p2l is monotonic and the visible rows form a physical prefix. That
+    // holds only because inserts into one growing segment are serial (see the
+    // assertion in GrowingOffsetMapping::Append). If that ever changes, a
+    // count is the wrong shape for this answer -- out of order the visible
+    // rows are an arbitrary subset, not a prefix, and this must become a mask.
+    virtual int64_t
+    ValidCountBelow(int64_t logical_bound) const;
+
     // Check if mapping is enabled
     virtual bool
     IsEnabled() const;
@@ -94,6 +116,11 @@ class SealedOffsetMapping final : public OffsetMapping {
 
     int64_t
     GetValidCount() const override;
+
+    // Sealed mappings are immutable once built, so this is a pure coordinate
+    // conversion with no race; it exists so every caller can use one API.
+    int64_t
+    ValidCountBelow(int64_t logical_bound) const override;
 
     bool
     IsEnabled() const override;
@@ -155,6 +182,22 @@ class GrowingOffsetMapping final : public OffsetMapping {
 
     int64_t
     GetValidCount() const override;
+
+    // Number of valid (non-null) rows whose logical offset is below
+    // logical_bound, i.e. the physical scan bound that corresponds to a
+    // logical visibility bound.
+    //
+    // A growing mapping keeps growing under concurrent inserts, so a search
+    // must NEVER use GetValidCount() as its scan bound: that count includes
+    // rows published after the query fixed its visible-row bound, which are
+    // neither acknowledged by ack_responder_ nor visible at the query
+    // timestamp. Convert the plan-layer bound instead of asking the mapping
+    // how big it is right now.
+    //
+    // Append assigns physical offsets in ascending logical order, so p2l is
+    // monotonic and this is a binary search: O(log n) lookups under one lock.
+    int64_t
+    ValidCountBelow(int64_t logical_bound) const override;
 
     bool
     IsEnabled() const override;

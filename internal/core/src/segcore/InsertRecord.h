@@ -1447,6 +1447,9 @@ class InsertRecordSealed {
 
 class InsertRecordGrowing {
  public:
+    using FieldMap = std::unordered_map<FieldId, std::shared_ptr<VectorBase>>;
+    using ValidDataMap = std::unordered_map<FieldId, ThreadSafeValidDataPtr>;
+
     InsertRecordGrowing(
         const Schema& schema,
         const int64_t size_per_chunk,
@@ -1593,9 +1596,10 @@ class InsertRecordGrowing {
         }
         reserved = 0;
         {
-            std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-            data_.clear();
-            valid_data_.clear();
+            std::lock_guard<std::mutex> lck(field_write_mutex_);
+            std::atomic_store(&data_, std::make_shared<const FieldMap>());
+            std::atomic_store(&valid_data_,
+                              std::make_shared<const ValidDataMap>());
         }
         ack_responder_.clear();
     }
@@ -1765,10 +1769,7 @@ class InsertRecordGrowing {
     // get data without knowing the type
     VectorBase*
     get_data_base(FieldId field_id) const {
-        // Guard the field map against concurrent structural modification
-        // (e.g. append_field_meta during schema evolution rehashing data_).
-        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        return get_data_base_unlocked(field_id);
+        return get_data_base_in(*CaptureFields(), field_id);
     }
 
     // get field data in given type, const version
@@ -1793,16 +1794,13 @@ class InsertRecordGrowing {
 
     ThreadSafeValidDataPtr
     get_valid_data(FieldId field_id) const {
-        // Guard the field map against concurrent structural modification
-        // (e.g. append_field_meta during schema evolution rehashing valid_data_).
-        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        return get_valid_data_unlocked(field_id);
+        return get_valid_data_in(*CaptureValidData(), field_id);
     }
 
     bool
     is_data_exist(FieldId field_id) const {
-        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        return data_.find(field_id) != data_.end();
+        auto fields = CaptureFields();
+        return fields->find(field_id) != fields->end();
     }
 
     // Field ids that have materialized columns. The exact set the flush
@@ -1810,10 +1808,10 @@ class InsertRecordGrowing {
     // absent here.
     std::vector<int64_t>
     get_data_field_ids() const {
-        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        auto fields = CaptureFields();
         std::vector<int64_t> ids;
-        ids.reserve(data_.size());
-        for (const auto& [field_id, entry] : data_) {
+        ids.reserve(fields->size());
+        for (const auto& [field_id, entry] : *fields) {
             // An allocated-but-empty column (e.g. a function output the
             // replayed older-era inserts never filled) is not materialized.
             if (!entry || entry->empty()) {
@@ -1826,24 +1824,23 @@ class InsertRecordGrowing {
 
     bool
     is_valid_data_exist(FieldId field_id) const {
-        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        return is_valid_data_exist_unlocked(field_id);
+        auto valid = CaptureValidData();
+        return valid->find(field_id) != valid->end();
     }
 
     SpanBase
     get_span_base(FieldId field_id, int64_t chunk_id) const {
-        // Take the shared lock once for the whole span resolution instead of
-        // re-locking inside each of get_data_base / is_valid_data_exist /
-        // get_valid_data. This both removes the redundant lock churn on this
-        // hot path and gives a consistent snapshot of the field map across the
-        // three lookups.
-        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        auto data = get_data_base_unlocked(field_id);
-        if (is_valid_data_exist_unlocked(field_id)) {
+        // One snapshot pair for the whole span resolution: the three lookups
+        // below must agree with each other, and a snapshot gives that for free
+        // without any lock on this hot path.
+        auto fields = CaptureFields();
+        auto valid = CaptureValidData();
+        auto data = get_data_base_in(*fields, field_id);
+        if (valid->find(field_id) != valid->end()) {
             auto size = data->get_chunk_size(chunk_id);
             auto element_offset = data->get_element_offset(chunk_id);
             return SpanBase(data->get_chunk_data(chunk_id),
-                            get_valid_data_unlocked(field_id)->get_chunk_data(
+                            get_valid_data_in(*valid, field_id)->get_chunk_data(
                                 element_offset),
                             size,
                             data->get_element_size());
@@ -1855,8 +1852,10 @@ class InsertRecordGrowing {
     void
     append_valid_data(FieldId field_id, int64_t size_per_chunk) {
         auto valid_data = std::make_shared<ThreadSafeValidData>(size_per_chunk);
-        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-        valid_data_.emplace(field_id, std::move(valid_data));
+        std::lock_guard<std::mutex> lck(field_write_mutex_);
+        auto next = std::make_shared<ValidDataMap>(*CaptureValidData());
+        next->emplace(field_id, std::move(valid_data));
+        std::atomic_store(&valid_data_, std::shared_ptr<const ValidDataMap>(next));
     }
 
     // append a column of vector type
@@ -1870,14 +1869,16 @@ class InsertRecordGrowing {
         bool use_mapping_storage = is_valid_data_exist(field_id);
         // Resolve valid_data and build the column before taking the write lock
         // so the shared-lock readers above are not nested inside the unique lock.
-        auto column = std::make_unique<ConcurrentVector<VectorType>>(
+        auto column = std::make_shared<ConcurrentVector<VectorType>>(
             dim,
             size_per_chunk,
             mmap_descriptor,
             use_mapping_storage ? get_valid_data(field_id) : nullptr,
             use_mapping_storage);
-        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-        data_.emplace(field_id, std::move(column));
+        std::lock_guard<std::mutex> lck(field_write_mutex_);
+        auto next = std::make_shared<FieldMap>(*CaptureFields());
+        next->emplace(field_id, std::move(column));
+        std::atomic_store(&data_, std::shared_ptr<const FieldMap>(next));
     }
 
     // append a column of scalar or sparse float vector type
@@ -1890,28 +1891,35 @@ class InsertRecordGrowing {
         bool use_mapping_storage = is_valid_data_exist(field_id);
         // Resolve valid_data and build the column before taking the write lock
         // so the shared-lock readers above are not nested inside the unique lock.
-        std::unique_ptr<ConcurrentVector<Type>> column;
+        std::shared_ptr<ConcurrentVector<Type>> column;
         if constexpr (IsSparse<Type>) {
-            column = std::make_unique<ConcurrentVector<Type>>(
+            column = std::make_shared<ConcurrentVector<Type>>(
                 size_per_chunk,
                 mmap_descriptor,
                 use_mapping_storage ? get_valid_data(field_id) : nullptr,
                 use_mapping_storage);
         } else {
-            column = std::make_unique<ConcurrentVector<Type>>(
+            column = std::make_shared<ConcurrentVector<Type>>(
                 size_per_chunk,
                 mmap_descriptor,
                 use_mapping_storage ? get_valid_data(field_id) : nullptr);
         }
-        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-        data_.emplace(field_id, std::move(column));
+        std::lock_guard<std::mutex> lck(field_write_mutex_);
+        auto next = std::make_shared<FieldMap>(*CaptureFields());
+        next->emplace(field_id, std::move(column));
+        std::atomic_store(&data_, std::shared_ptr<const FieldMap>(next));
     }
 
     void
     drop_field_data(FieldId field_id) {
-        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-        data_.erase(field_id);
-        valid_data_.erase(field_id);
+        std::lock_guard<std::mutex> lck(field_write_mutex_);
+        auto fields = std::make_shared<FieldMap>(*CaptureFields());
+        fields->erase(field_id);
+        std::atomic_store(&data_, std::shared_ptr<const FieldMap>(fields));
+        auto valid = std::make_shared<ValidDataMap>(*CaptureValidData());
+        valid->erase(field_id);
+        std::atomic_store(&valid_data_,
+                          std::shared_ptr<const ValidDataMap>(valid));
     }
 
     int64_t
@@ -1935,11 +1943,10 @@ class InsertRecordGrowing {
     AckResponder ack_responder_;
 
  private:
-    // Unlocked field-map lookups. Callers MUST already hold field_map_mutex_
-    // (at least shared). These let multi-lookup hot paths such as
-    // get_span_base resolve under a single lock acquisition.
-    VectorBase*
-    get_data_base_unlocked(FieldId field_id) const {
+    // Snapshot lookups. They take the map by reference so a hot path such as
+    // get_span_base can resolve several fields against ONE snapshot.
+    static VectorBase*
+    get_data_base_in(const FieldMap& data_, FieldId field_id) {
         AssertInfo(data_.find(field_id) != data_.end(),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
@@ -1948,8 +1955,8 @@ class InsertRecordGrowing {
         return data_.at(field_id).get();
     }
 
-    ThreadSafeValidDataPtr
-    get_valid_data_unlocked(FieldId field_id) const {
+    static ThreadSafeValidDataPtr
+    get_valid_data_in(const ValidDataMap& valid_data_, FieldId field_id) {
         AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
                    "Cannot find valid_data with field_id: " +
                        std::to_string(field_id.get()));
@@ -1958,29 +1965,32 @@ class InsertRecordGrowing {
         return valid_data_.at(field_id);
     }
 
-    bool
-    is_valid_data_exist_unlocked(FieldId field_id) const {
-        return valid_data_.find(field_id) != valid_data_.end();
+    // Copy-on-write field maps. Readers capture an immutable snapshot with a
+    // single atomic load -- no lock, so the hottest accessor in the segment
+    // costs nothing and a writer can never be starved behind it. Writers
+    // serialize on field_write_mutex_ (which readers never touch), build the
+    // next map beside the live one, and publish it atomically.
+    //
+    // This is the same shape ChunkedSegmentSealedImpl uses for its derived
+    // resources (CapturePublishedState). It also fixes element lifetime: the
+    // snapshot keeps every column alive for as long as a reader holds it, so
+    // the raw VectorBase* handed out by get_data_base() can no longer dangle
+    // if a field is ever dropped.
+    std::shared_ptr<const FieldMap>
+    CaptureFields() const {
+        return std::atomic_load(&data_);
     }
 
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
-    std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
+    std::shared_ptr<const ValidDataMap>
+    CaptureValidData() const {
+        return std::atomic_load(&valid_data_);
+    }
+
+    std::shared_ptr<const FieldMap> data_{std::make_shared<const FieldMap>()};
+    std::shared_ptr<const ValidDataMap> valid_data_{
+        std::make_shared<const ValidDataMap>()};
+    mutable std::mutex field_write_mutex_;
     mutable std::shared_mutex shared_mutex_{};
-    // Protects the structure of data_ / valid_data_ against concurrent
-    // rehash: structural writes (append_*/drop/clear during schema evolution)
-    // take it unique, lookups (get_data_base/get_valid_data/...) take it shared.
-    // Kept separate from shared_mutex_ so frequent reads do not contend with
-    // pk inserts.
-    //
-    // PRECONDITION: this lock only protects the map structure, NOT element
-    // lifetime. The raw VectorBase* returned by get_data_base() escapes the
-    // shared lock, so callers rely on no concurrent erase()/clear() of the
-    // entry they hold (append-only mutation is safe). Today that holds because
-    // drop_field_data() has no callers and clear() is never called
-    // concurrently with reads; whoever adds drop-field support (e.g. schema
-    // evolution dropping fields) must also fence element lifetime, this lock
-    // alone will not save the escaped pointers.
-    mutable std::shared_mutex field_map_mutex_{};
 };
 
 // Keep the original template API via alias
