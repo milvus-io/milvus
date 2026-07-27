@@ -43,3 +43,13 @@ def test_rbac_permissions_include_secret_mutation_only_for_ephemeral_secret():
     assert not any(resource == "secrets" for _, resource, _ in without_secret)
     assert ("", "secrets", "create") in with_secret
     assert ("", "secrets", "delete") in with_secret
+
+
+def test_toolbox_rbac_permissions_only_require_pod_discovery_and_exec():
+    permissions = required_rbac_permissions(runner_mode="toolbox", create_secret=False)
+
+    assert permissions == [
+        ("", "pods", "get"),
+        ("", "pods", "list"),
+        ("", "pods/exec", "get"),
+    ]

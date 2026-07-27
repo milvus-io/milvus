@@ -86,12 +86,19 @@ def pytest_addoption(parser):
         "--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests"
     )
 
-    spark_backfill = parser.getgroup("spark-backfill-nightly")
+    spark_backfill = parser.getgroup("spark-backfill")
     spark_backfill.addoption(
         "--run-spark-backfill",
         action="store_true",
         default=False,
-        help="collect and run the Nightly-only Spark-Milvus Backfill suite",
+        help="collect and run the Spark-Milvus Backfill suite",
+    )
+    spark_backfill.addoption(
+        "--spark-runner-mode",
+        action="store",
+        choices=("job", "toolbox"),
+        default="job",
+        help="run Spark in one-shot Kubernetes Jobs or an existing Toolbox Pod",
     )
     spark_backfill.addoption("--management-endpoint", action="store", default="")
     spark_backfill.addoption("--spark-k8s-context", action="store", default="")
@@ -106,6 +113,23 @@ def pytest_addoption(parser):
     )
     spark_backfill.addoption("--spark-connector-url", action="store", default="")
     spark_backfill.addoption("--spark-connector-sha256", action="store", default="")
+    spark_backfill.addoption("--spark-toolbox-pod", action="store", default="")
+    spark_backfill.addoption(
+        "--spark-toolbox-label",
+        action="store",
+        default="app=spark-milvus-toolbox",
+    )
+    spark_backfill.addoption("--spark-toolbox-container", action="store", default="spark-toolbox")
+    spark_backfill.addoption(
+        "--spark-toolbox-wrapper",
+        action="store",
+        default="/usr/local/bin/spark-submit-milvus",
+    )
+    spark_backfill.addoption(
+        "--spark-toolbox-workspace",
+        action="store",
+        default="/workspace/spark-backfill-pytest",
+    )
     spark_backfill.addoption("--spark-milvus-uri", action="store", default="")
     spark_backfill.addoption("--spark-minio-endpoint", action="store", default="")
     spark_backfill.addoption("--spark-storage-secret-name", action="store", default="")

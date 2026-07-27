@@ -43,6 +43,110 @@ def test_settings_reuse_existing_pytest_endpoints_by_default(tmp_path):
     assert settings.evidence_root == Path(tmp_path)
 
 
+def test_toolbox_settings_do_not_require_connector_bundle(tmp_path):
+    settings = SparkBackfillSettings.from_values(
+        host="milvus.example",
+        port=19530,
+        uri="",
+        token="root:Milvus",
+        minio_host="minio.example",
+        minio_bucket="bucket",
+        milvus_namespace="default",
+        management_endpoint="http://milvus.example:9091",
+        spark_k8s_context="ctx",
+        spark_k8s_namespace="default",
+        spark_image="",
+        connector_url="",
+        connector_sha256="",
+        spark_milvus_uri="http://milvus.default:19530",
+        spark_minio_endpoint="minio.default:9000",
+        storage_secret_name="",
+        service_account_name="",
+        job_timeout=1800,
+        keep_failed_job=False,
+        evidence_root=str(tmp_path),
+        runner_mode="toolbox",
+        toolbox_pod="",
+        toolbox_label="app=spark-milvus-toolbox",
+        toolbox_container="spark-toolbox",
+        toolbox_wrapper="/usr/local/bin/spark-submit-milvus",
+        toolbox_workspace="/workspace/spark-backfill-pytest",
+    )
+
+    assert settings.runner_mode == "toolbox"
+    assert settings.connector_url == ""
+    assert settings.connector_sha256 == ""
+    assert settings.toolbox_pod == ""
+    assert settings.toolbox_label == "app=spark-milvus-toolbox"
+    assert settings.toolbox_container == "spark-toolbox"
+    assert settings.toolbox_wrapper == "/usr/local/bin/spark-submit-milvus"
+    assert settings.toolbox_workspace == "/workspace/spark-backfill-pytest"
+
+
+def test_toolbox_settings_require_pod_or_label(tmp_path):
+    with pytest.raises(SparkBackfillConfigurationError, match="Toolbox Pod name or label"):
+        SparkBackfillSettings.from_values(
+            host="milvus",
+            port=19530,
+            uri="",
+            token="root:Milvus",
+            minio_host="minio",
+            minio_bucket="bucket",
+            milvus_namespace="default",
+            management_endpoint="http://milvus:9091",
+            spark_k8s_context="",
+            spark_k8s_namespace="default",
+            spark_image="",
+            connector_url="",
+            connector_sha256="",
+            spark_milvus_uri="",
+            spark_minio_endpoint="",
+            storage_secret_name="",
+            service_account_name="",
+            job_timeout=1800,
+            keep_failed_job=False,
+            evidence_root=str(tmp_path),
+            runner_mode="toolbox",
+            toolbox_pod="",
+            toolbox_label="",
+            toolbox_container="spark-toolbox",
+            toolbox_wrapper="/usr/local/bin/spark-submit-milvus",
+            toolbox_workspace="/workspace/spark-backfill-pytest",
+        )
+
+
+def test_settings_reject_unknown_runner_mode(tmp_path):
+    with pytest.raises(SparkBackfillConfigurationError, match="runner mode"):
+        SparkBackfillSettings.from_values(
+            host="milvus",
+            port=19530,
+            uri="",
+            token="root:Milvus",
+            minio_host="minio",
+            minio_bucket="bucket",
+            milvus_namespace="default",
+            management_endpoint="http://milvus:9091",
+            spark_k8s_context="",
+            spark_k8s_namespace="default",
+            spark_image="",
+            connector_url="",
+            connector_sha256="",
+            spark_milvus_uri="",
+            spark_minio_endpoint="",
+            storage_secret_name="",
+            service_account_name="",
+            job_timeout=1800,
+            keep_failed_job=False,
+            evidence_root=str(tmp_path),
+            runner_mode="cluster",
+            toolbox_pod="",
+            toolbox_label="app=spark-milvus-toolbox",
+            toolbox_container="spark-toolbox",
+            toolbox_wrapper="/usr/local/bin/spark-submit-milvus",
+            toolbox_workspace="/workspace/spark-backfill-pytest",
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
