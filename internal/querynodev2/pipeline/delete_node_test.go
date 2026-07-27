@@ -25,6 +25,8 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -222,6 +224,36 @@ func (suite *DeleteNodeSuite) TestUpdateSchemaRetriesBeforeTSafe() {
 	}))
 }
 
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetriesTransientErrorsBeforeTSafe() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).
+		Return(merr.WrapErrChannelNotAvailable(suite.channel, "delegator initializing")).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).
+		Return(merr.WrapErrNodeNotAvailable(10, "worker unhealthy")).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).
+		Return(status.Error(codes.Unavailable, "worker unavailable")).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(nil).Once()
+	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldInterval := deleteNodeUpdateSchemaRetryInterval
+	deleteNodeUpdateSchemaRetryInterval = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaRetryInterval = oldInterval
+	})
+
+	suite.Nil(node.Operate(&deleteNodeMsg{
+		schema:          schema,
+		schemaBarrierTs: 10,
+		timeRange:       TimeRange{timestampMax: 10},
+	}))
+}
+
 func (suite *DeleteNodeSuite) TestUpdateSchemaNonRetryableErrorPanicsWithoutTSafe() {
 	manager := &segments.Manager{
 		Collection: segments.NewMockCollectionManager(suite.T()),
@@ -240,6 +272,77 @@ func (suite *DeleteNodeSuite) TestUpdateSchemaNonRetryableErrorPanicsWithoutTSaf
 			timeRange:       TimeRange{timestampMax: 10},
 		})
 	})
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetryLimitPanicsWithoutTSafe() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	expectedErr := merr.WrapErrChannelNotAvailable(suite.channel, "delegator initializing")
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldMaxRetryDuration := deleteNodeUpdateSchemaMaxRetryDuration
+	deleteNodeUpdateSchemaMaxRetryDuration = 0
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaMaxRetryDuration = oldMaxRetryDuration
+	})
+
+	suite.Panics(func() {
+		node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		})
+	})
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaPreCloseCancelsInFlightUpdate() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	updateStarted := make(chan struct{})
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).
+		RunAndReturn(func(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+			close(updateStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		}).Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		suite.Nil(node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		}))
+	}()
+
+	suite.Eventually(func() bool {
+		select {
+		case <-updateStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	node.PreClose()
+	suite.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
 }
 
 func TestDeleteNode(t *testing.T) {

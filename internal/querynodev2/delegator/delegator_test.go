@@ -1545,6 +1545,19 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	})
 }
 
+func (s *DelegatorSuite) TestUpdateSchemaAllowedWhileInitializing() {
+	s.ResetDelegator()
+	collection := s.manager.Collection.Get(s.collectionID)
+	s.Require().NotNil(collection)
+	schema := collection.Schema()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.delegator.UpdateSchema(ctx, schema, 100)
+	s.NoError(err)
+}
+
 func (s *DelegatorSuite) ResetDelegator() {
 	var err error
 	s.delegator.Close()

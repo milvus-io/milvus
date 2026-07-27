@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -43,11 +46,16 @@ type deleteNode struct {
 	manager   *DataManager
 	delegator delegator.ShardDelegator
 	closed    atomic.Bool
+	ctx       context.Context
+	cancel    context.CancelFunc
 	closeCh   chan struct{}
 	closeOnce sync.Once
 }
 
-var deleteNodeUpdateSchemaRetryInterval = 200 * time.Millisecond
+var (
+	deleteNodeUpdateSchemaRetryInterval    = 200 * time.Millisecond
+	deleteNodeUpdateSchemaMaxRetryDuration = 5 * time.Minute
+)
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
 func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) {
@@ -104,8 +112,7 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		ctx := context.TODO()
-		if !dNode.updateSchemaUntilApplied(ctx, nodeMsg) {
+		if !dNode.updateSchemaUntilApplied(dNode.ctx, nodeMsg) {
 			return nil
 		}
 	}
@@ -116,6 +123,7 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 }
 
 func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *deleteNodeMsg) bool {
+	start := time.Now()
 	for {
 		if dNode.closed.Load() {
 			return false
@@ -128,13 +136,24 @@ func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *
 		if dNode.closed.Load() {
 			return false
 		}
-		if !merr.IsRetryableErr(err) {
+		if !isUpdateSchemaRetryable(err) {
 			wrapped := merr.Wrap(err, "non-retryable schema update failure in delete node")
 			mlog.Error(ctx, "non-retryable schema update failure in delete node, stop process to replay WAL after restart",
 				mlog.Int64("collectionID", dNode.collectionID),
 				mlog.String("channel", dNode.channel),
 				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
 				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+				mlog.Err(wrapped))
+			panic(wrapped)
+		}
+		if time.Since(start) >= deleteNodeUpdateSchemaMaxRetryDuration {
+			wrapped := merr.Wrap(err, "schema update retry limit reached in delete node")
+			mlog.Error(ctx, "schema update retry limit reached in delete node, stop process to replay WAL after restart",
+				mlog.Int64("collectionID", dNode.collectionID),
+				mlog.String("channel", dNode.channel),
+				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+				mlog.Duration("retryDuration", time.Since(start)),
 				mlog.Err(wrapped))
 			panic(wrapped)
 		}
@@ -160,9 +179,30 @@ func (dNode *deleteNode) updateSchemaUntilApplied(ctx context.Context, nodeMsg *
 	}
 }
 
+func isUpdateSchemaRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if merr.IsRetryableErr(err) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, merr.ErrChannelNotAvailable) ||
+		errors.Is(err, merr.ErrNodeNotAvailable) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted:
+		return true
+	default:
+		return false
+	}
+}
+
 func (dNode *deleteNode) PreClose() {
 	dNode.closeOnce.Do(func() {
 		dNode.closed.Store(true)
+		dNode.cancel()
 		close(dNode.closeCh)
 	})
 }
@@ -174,12 +214,15 @@ func newDeleteNode(
 	manager *DataManager, delegator delegator.ShardDelegator,
 	maxQueueLength int32,
 ) *deleteNode {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &deleteNode{
 		BaseNode:     base.NewBaseNode(fmt.Sprintf("DeleteNode-%s", channel), maxQueueLength),
 		collectionID: collectionID,
 		channel:      channel,
 		manager:      manager,
 		delegator:    delegator,
+		ctx:          ctx,
+		cancel:       cancel,
 		closeCh:      make(chan struct{}),
 	}
 }

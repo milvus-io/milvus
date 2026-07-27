@@ -661,12 +661,12 @@ func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
 				},
 			},
 		}, nil
-	})
+	}).Twice()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, nil).Twice()
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 		{
 			ID:            segment,
@@ -674,10 +674,11 @@ func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
 			PartitionID:   partition,
 			InsertChannel: channel.ChannelName,
 		},
-	}, nil)
-	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
+	}, nil).Twice()
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil).Twice()
 	schemaErr := merr.WrapErrCollectionSchemaVersionNotReadyWithVersion("TestLoadSegmentTaskWaitsDelegatorSchema", 0, 1)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(schemaErr), nil).Once()
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
 
 	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
 		VchannelInfo: channel,
@@ -718,6 +719,37 @@ func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
 	suite.Contains(task.GetReason(), "collection schema version not ready")
 	action := task.Actions()[0].(*SegmentAction)
 	suite.False(action.rpcReturned.Load())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+	suite.NoError(task.Err())
+	suite.True(action.rpcReturned.Load())
+
+	view := &meta.LeaderView{
+		ID:           targetNode,
+		CollectionID: suite.collection,
+		Segments: map[int64]*querypb.SegmentDist{
+			segment: {NodeID: targetNode, Version: 0},
+		},
+		Channel: channel.ChannelName,
+	}
+	suite.dist.SegmentDistManager.Update(targetNode, meta.SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            segment,
+		CollectionID:  suite.collection,
+		PartitionID:   partition,
+		InsertChannel: channel.ChannelName,
+	}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View:         view,
+	})
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
 }
 
 func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
