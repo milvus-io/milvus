@@ -600,11 +600,17 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	}
 
 	var signal chan struct{}
-	if d.closed.Load() {
-		signal = getClosedCh()
-	} else if current := d.current.Load(); current != nil {
+	if current := d.current.Load(); current != nil {
 		// Capture current snapshot's cleared channel. The next genSnapshot will
 		// create a new snapshot and expire this one, closing the channel.
+		//
+		// This holds after Close() too: Close() expires the current snapshot, so
+		// its cleared channel closes as soon as the last in-flight reader unpins
+		// it -- keeping the reader barrier this function documents, instead of
+		// short-circuiting to an already-closed channel and letting the caller
+		// release segments out from under a running QueryStream. genSnapshot()
+		// refuses to install a new snapshot once closed, so this channel is
+		// guaranteed to be reached by an Expire.
 		signal = current.cleared
 	} else {
 		signal = make(chan struct{})
@@ -629,6 +635,21 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 // in which, user could use found nodeID=>segmentID list.
 // mutex RLock is required before calling this method.
 func (d *distribution) genSnapshot() chan struct{} {
+	// Once closed, d.current must stay the expired snapshot installed by Close():
+	// RemoveDistributions hands that snapshot's cleared channel to callers as the
+	// reader barrier, and a fresh unexpired snapshot here would leave that channel
+	// forever open (the loop is stopping, so nothing would expire it) and
+	// reintroduce the post-close hang. Reachable from the snapshot loop -- an
+	// iteration that already took a notifier token can be parked on d.mut while
+	// Close() holds it -- and from AddGrowing/SyncTargetVersion/Flush, none of
+	// which are ordered against Close().
+	if d.closed.Load() {
+		if current := d.current.Load(); current != nil {
+			return current.cleared
+		}
+		return getClosedCh()
+	}
+
 	// stores last snapshot
 	// ok to be nil
 	last := d.current.Load()

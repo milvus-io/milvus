@@ -549,6 +549,48 @@ func (s *DistributionSuite) TestCloseClearsPendingRemoveDistributionSignal() {
 	}
 }
 
+// TestRemoveDistributionsAfterCloseKeepsReaderBarrier pins the barrier that
+// RemoveDistributions documents: the returned signal must not close while an
+// in-flight reader still holds the snapshot containing the removed segment, even
+// after Close(). Short-circuiting to an already-closed channel here would let
+// ReleaseSegments drop a segment out from under a running QueryStream, which
+// does not take the delegator lifetime and so is not drained by Close().
+func (s *DistributionSuite) TestRemoveDistributionsAfterCloseKeepsReaderBarrier() {
+	s.dist.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   1,
+		PartitionID: 1,
+	})
+	// update target version, make distribution serviceable
+	s.dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1000,
+		SealedSegmentRowCount: map[int64]int64{1: 100},
+	}, []int64{1})
+
+	// An in-flight reader pins the snapshot that still contains segment 1.
+	_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
+	s.Require().NoError(err)
+
+	s.dist.Close()
+
+	ch := s.dist.RemoveDistributions([]SegmentEntry{{NodeID: 1, SegmentID: 1}}, nil)
+
+	// The reader is still running, so the barrier must hold.
+	select {
+	case <-ch:
+		s.Fail("remove distribution signal closed while a reader still pinned the snapshot")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Once the reader finishes, the barrier lifts.
+	s.dist.Unpin(version)
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		s.Fail("remove distribution signal not closed after the last reader unpinned")
+	}
+}
+
 func (s *DistributionSuite) TestPeek() {
 	type testCase struct {
 		tag      string
