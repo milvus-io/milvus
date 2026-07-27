@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
-	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -166,15 +165,25 @@ func TestSensitiveConfigRedaction(t *testing.T) {
 	assert.Equal(t, "group-secret", values["credential.aksk1.secret_access_key"], "input must not be mutated")
 }
 
+// syncBuffer adapts a bytes.Buffer to the WriteSyncer the logger expects.
+// Declared locally rather than using zapcore.AddSync because depguard forbids
+// importing zap outside pkg/mlog; the interface is structural, so naming the
+// package is unnecessary. Same pattern as mlog's own benchmark test.
+type syncBuffer struct {
+	bytes.Buffer
+}
+
+func (s *syncBuffer) Sync() error { return nil }
+
 func TestSensitiveConfigEventLogRedaction(t *testing.T) {
-	var logs bytes.Buffer
+	var logs syncBuffer
 	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
 		Level:             "info",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, zapcore.AddSync(&logs))
+	}, &logs)
 	require.NoError(t, err)
 
 	oldLogger := mlog.L()
