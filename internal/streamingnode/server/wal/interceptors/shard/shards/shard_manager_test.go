@@ -714,6 +714,69 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 	}).(*shardManagerImpl)
 }
 
+func TestAsyncFlushSegmentDoesNotHoldShardManagerLockWhileWaitingForWAL(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	const (
+		collID = int64(10)
+		partID = int64(20)
+		segID  = int64(3001)
+	)
+	m := newShardManagerWithGrowingSegment(t, collID, partID, segID)
+	readyWAL := m.wal.Get()
+	pendingWAL := syncutil.NewFuture[wal.WAL]()
+	m.wal = pendingWAL
+	for _, pm := range m.partitionManagers {
+		pm.wal = pendingWAL
+	}
+
+	flushDone := make(chan struct{})
+	go func() {
+		m.AsyncFlushSegment(utils.SealSegmentSignal{
+			SegmentBelongs: utils.SegmentBelongs{
+				PChannel:     m.Channel().Name,
+				VChannel:     "v_alter",
+				CollectionID: collID,
+				PartitionID:  partID,
+				SegmentID:    segID,
+			},
+			SealPolicy: policy.PolicyCapacity(),
+		})
+		close(flushDone)
+	}()
+	select {
+	case <-flushDone:
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	schemaReadDone := make(chan struct{})
+	go func() {
+		m.GetAllCollectionSchemaInfos()
+		close(schemaReadDone)
+	}()
+
+	select {
+	case <-schemaReadDone:
+	case <-time.After(200 * time.Millisecond):
+		pendingWAL.Set(readyWAL)
+		<-flushDone
+		<-schemaReadDone
+		m.Close()
+		t.Fatal("schema read blocked on shard manager lock while flush waited for WAL readiness")
+	}
+
+	select {
+	case <-flushDone:
+	case <-time.After(time.Second):
+		pendingWAL.Set(readyWAL)
+		<-flushDone
+		m.Close()
+		t.Fatal("async flush blocked while waiting for WAL readiness")
+	}
+	m.Close()
+}
+
 func TestAlterCollectionSchemaChange(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
