@@ -77,13 +77,28 @@ func TestSegcoreErrorClassification(t *testing.T) {
 
 	t.Run("input_error_classification", func(t *testing.T) {
 		// Caller-input codes -> InputError, non-retriable by construction:
-		// FieldIDInvalid, DataIsEmpty, JsonKeyInvalid, MetricTypeInvalid,
+		// OpTypeInvalid, DataIsEmpty, JsonKeyInvalid, MetricTypeInvalid,
 		// ExprInvalid, MetricTypeNotMatch, DimNotMatch, InvalidParameter.
-		for _, code := range []int32{2020, 2023, 2025, 2026, 2028, 2031, 2032, 2042} {
+		for _, code := range []int32{2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042} {
 			err := SegcoreError(code, "bad query")
 			assert.Equal(t, InputError, GetErrorType(err), "code %d", code)
 			assert.ErrorIs(t, err, ErrSegcore, "code %d", code)
 			// input error must be non-retriable at the boundary
+			assert.False(t, Status(err).GetRetriable(), "code %d", code)
+		}
+	})
+
+	t.Run("mixed_semantics_codes_stay_system", func(t *testing.T) {
+		// DataTypeInvalid(2007) / FieldIDInvalid(2020) / FieldAlreadyExist(2021)
+		// look like input validation but their producers are predominantly or
+		// exclusively internal guards (see classForCode). They must NOT be
+		// InputError: lb_policy aborts the cross-replica sweep on InputError,
+		// so mislabeling an internal failure would stop rerouting to a healthy
+		// replica. Locked here so a future re-classification is a conscious,
+		// producer-audited decision.
+		for _, code := range []int32{2007, 2020, 2021} {
+			err := SegcoreError(code, "internal guard")
+			assert.Equal(t, SystemError, GetErrorType(err), "code %d", code)
 			assert.False(t, Status(err).GetRetriable(), "code %d", code)
 		}
 	})
@@ -195,7 +210,7 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 	// regression classifications below.
 
 	// Regression guard: the codes we classified on purpose keep their property.
-	wantInput := []SegcoreCode{2007, 2020, 2021, 2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
+	wantInput := []SegcoreCode{2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
 	wantRetriable := []SegcoreCode{2012, 2013, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043, 2045, 2046}
 	for _, c := range wantInput {
 		cls, ok := classForCode(c)

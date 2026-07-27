@@ -132,10 +132,28 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 		return segcoreClass{sentinel: KnowhereError}, true
 
 	// Caller-input errors -> InputError (non-retriable by construction).
-	case CodeDataTypeInvalid, CodeFieldIDInvalid, CodeFieldAlreadyExist, CodeOpTypeInvalid,
+	case CodeOpTypeInvalid,
 		CodeDataIsEmpty, CodeJsonKeyInvalid, CodeMetricTypeInvalid, CodeExprInvalid,
 		CodeMetricTypeNotMatch, CodeDimNotMatch, CodeInvalidParameter:
 		return segcoreClass{sentinel: ErrSegcore, inputError: true}, true
+
+	// Mixed-semantics codes that LOOK like input validation but whose producers
+	// are predominantly or exclusively internal guards (producer audit, review
+	// finding on this PR):
+	//   - FieldIDInvalid(2020): all 4 sites are load-order guards / "unsupported
+	//     system field id" (load_field_data_c.cpp, SegmentInterface.cpp) — zero
+	//     user-request sites;
+	//   - FieldAlreadyExist(2021): both sites are internal load-path invariants
+	//     (load_field_data_c.cpp:65, GroupChunk.h);
+	//   - DataTypeInvalid(2007): ~100 sites, overwhelmingly `default:` /
+	//     "logical error" guards; only a handful are genuine request validation.
+	// Marking them InputError would make lb_policy abort the cross-replica
+	// sweep on what is really an internal failure of one replica — an
+	// availability regression. Default them to plain (non-retriable) system
+	// errors; the few genuine request-validation sites can be tagged at the
+	// request boundary (WrapErrAsInputErrorWhen) or split at the C++ source.
+	case CodeDataTypeInvalid, CodeFieldIDInvalid, CodeFieldAlreadyExist:
+		return segcoreClass{sentinel: ErrSegcore}, true
 
 	// Transient system errors -> retriable (a retry / reroute to another replica
 	// can succeed): object storage, local IO, OOM, mmap, field-not-loaded,
