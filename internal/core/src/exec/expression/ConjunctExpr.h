@@ -157,6 +157,13 @@ class PhyConjunctFilterExpr : public Expr {
         return inputs_.size() - 1;
     }
 
+    // Replace the whole inputs list (used by the GIS split-fusion pre-pass that
+    // rewrites same-column geometry predicates into Coarse + Refine nodes).
+    void
+    RebuildInputs(std::vector<std::shared_ptr<Expr>>&& inputs) {
+        inputs_ = std::move(inputs);
+    }
+
     // This conjunction feeds a null-rejecting consumer: one that treats an
     // UNKNOWN (NULL) output row exactly like FALSE. Under AND, an UNKNOWN
     // row can never become TRUE (UNKNOWN AND x is UNKNOWN or FALSE), so a
