@@ -307,7 +307,6 @@ type commonConfig struct {
 	Stv2SystemColumnIncludeClusteringKey ParamItem `refreshable:"true"`
 	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
-	UseLoonFFI                           ParamItem `refreshable:"true"`
 
 	StoragePathPrefix        ParamItem `refreshable:"false"`
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
@@ -1085,14 +1084,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
-
-	p.UseLoonFFI = ParamItem{
-		Key:          "common.storage.useLoonFFI",
-		Version:      "2.6.7",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.UseLoonFFI.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",

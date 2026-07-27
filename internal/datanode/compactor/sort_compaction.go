@@ -61,7 +61,6 @@ type sortCompactionTask struct {
 	storageVersion        int64
 	segmentStorageVersion int64
 	manifest              string
-	useLoonFFI            bool
 
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
@@ -135,7 +134,6 @@ func (t *sortCompactionTask) preCompact() error {
 	t.storageVersion = t.compactionParams.StorageVersion
 	t.segmentStorageVersion = segment.GetStorageVersion()
 	t.manifest = segment.GetManifest()
-	t.useLoonFFI = t.compactionParams.UseLoonFFI
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -143,7 +141,6 @@ func (t *sortCompactionTask) preCompact() error {
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int64("segmentID", t.segmentID),
 		zap.Int64("storageVersion", t.storageVersion),
-		zap.Bool("useLoonFFI", t.useLoonFFI),
 		zap.Any("compactionParams", t.compactionParams),
 	)
 
@@ -181,7 +178,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		}),
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithUseLoonFFI(t.useLoonFFI),
 	)
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer",

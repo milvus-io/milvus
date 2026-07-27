@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"path"
 	"strconv"
 	"time"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
@@ -45,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -64,7 +61,6 @@ func NewSyncTask(ctx context.Context,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
 	storageVersion int64,
-	useLoonFFI bool,
 	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
@@ -76,16 +72,6 @@ func NewSyncTask(ctx context.Context,
 			PartitionID:    partitionID,
 			InsertChannel:  vchannel,
 			StorageVersion: storageVersion,
-		}
-		// init first manifest path
-		if useLoonFFI {
-			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-			if storageConfig.GetStorageType() != "local" {
-				basePath = path.Join(storageConfig.GetBucketName(), basePath)
-			}
-			// -1 for first write
-			segment.ManifestPath = packed.MarshalManifestPath(basePath, -1)
 		}
 		metaCache.AddSegment(segment, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
