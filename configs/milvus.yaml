@@ -1139,22 +1139,32 @@ common:
   security:
     authorizationEnabled: false
     # Whether to require HTTP Basic Auth with root credentials for operator
-    # endpoints. This covers /management/*, /log/level, /eventlog and
-    # /debug/pprof/* on the metrics port (default 9091), plus proxy config views
-    # and telemetry operator routes under /api/v1.
+    # endpoints. This covers /management/*, /log/level, /eventlog and /debug/pprof/*
+    # on the metrics port (default 9091), plus proxy config views and telemetry
+    # operator routes under /api/v1.
     # When false (default, for upgrade compatibility), these endpoints are
-    # unauthenticated. Treat this as an opt-in mitigation, not as a network
-    # security boundary.
-    # /healthz, /livez, /metrics and /management/check/ready stay open either
-    # way, so k8s probes and Prometheus are unaffected.
-    # Recommended: true whenever the metrics port is exposed beyond localhost.
-    # Port 9091 uses plaintext HTTP, so expose it only on a trusted private
-    # network or behind a TLS-terminating proxy, and rotate the default root
-    # password before enabling this option.
+    # unauthenticated. Treat this as an opt-in mitigation, not as a network security
+    # boundary.
+    # When true, requests must provide the milvus root user's credentials via HTTP
+    # Basic Auth. The auth check is independent of common.security.authorizationEnabled,
+    # so deployments may run with the data-plane (gRPC, /api/v1/*) authenticated
+    # while leaving the management plane open, or vice versa.
+    # Liveness endpoints stay open in both cases (/healthz, /livez, /metrics and
+    # /management/check/ready) so that k8s probes and Prometheus keep working.
+    # 
+    # Note for worker nodes: querynode, datanode and streamingnode hold no credential
+    # metadata, so when this is true they verify the password through the mix coord.
+    # If the mix coord is unreachable, their management plane and pprof answer 503
+    # until it recovers.
+    # 
+    # Recommended: true whenever the metrics port is exposed beyond localhost. Port
+    # 9091 uses plaintext HTTP, so expose it only on a trusted private network or
+    # behind a TLS-terminating proxy, and rotate the default root password before
+    # enabling this option.
     adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers:
+    superUsers: 
     # default password for root user. The maximum length is 72 characters.
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
