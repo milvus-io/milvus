@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -309,7 +310,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
-	pendingTaskLimit := Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt()
+	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
 
 	s.Run("allow at limit", func() {
 		scheduler := task.NewMockGlobalScheduler(s.T())
@@ -326,11 +327,77 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 		scheduler := task.NewMockGlobalScheduler(s.T())
 		scheduler.EXPECT().GetPendingTaskCount().Return(pendingTaskLimit + 1).Once()
 		s.inspector.scheduler = scheduler
+		// A strict allocator asserts the admission check runs before task ID allocation.
+		s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
 		err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_TextIndexJob, true, nil)
 		s.NoError(err)
 		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_TextIndexJob))
 	})
+}
+
+// A segment whose task is already in meta must be filtered out before
+// SubmitStatsTask, so a repeated tick costs no ID allocation and no meta write.
+func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().GetPendingTaskCount().Return(0)
+	scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+	s.inspector.scheduler = scheduler
+
+	s.inspector.triggerTextStatsTask()
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+	s.inspector.triggerTextStatsTask()
+}
+
+// Every trigger loop must give up as soon as the scheduler is backlogged instead
+// of walking the remaining collections and segments.
+func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().GetPendingTaskCount().Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1)
+	s.inspector.scheduler = scheduler
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+
+	s.putExternalSegment(210, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/210", 1))
+
+	s.inspector.triggerTextStatsTask()
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.inspector.triggerBM25StatsTask()
+
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(210, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
+// The loop keeps submitting while the pending count is at the limit and stops on
+// the first segment that would exceed it, mid-collection.
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimit() {
+	Params.Save(Params.DataCoordCfg.StatsTaskPendingLimit.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.StatsTaskPendingLimit.Key)
+
+	segmentIDs := []UniqueID{301, 302, 303, 304}
+	for _, segmentID := range segmentIDs {
+		s.putExternalSegment(segmentID, false, storage.StorageV3,
+			packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", segmentID), 1))
+	}
+
+	pending := 0
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().GetPendingTaskCount().RunAndReturn(func() int { return pending })
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(_ task.Task) { pending++ }).Return()
+	s.inspector.scheduler = scheduler
+
+	s.inspector.triggerJSONKeyIndexStatsTask()
+
+	// pending 0 -> allowed, 1 -> allowed (== limit), 2 -> skipped (> limit).
+	submitted := 0
+	for _, segmentID := range segmentIDs {
+		if s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob) != nil {
+			submitted++
+		}
+	}
+	s.Equal(2, submitted)
+	s.Equal(2, pending)
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {

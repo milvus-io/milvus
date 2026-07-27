@@ -253,7 +253,7 @@ func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], t
 }
 
 func (s *globalTaskScheduler) schedule() {
-	pendingNum := len(s.pendingTasks.TaskIDs())
+	pendingNum := s.pendingTasks.TaskCount()
 	if pendingNum == 0 {
 		return
 	}

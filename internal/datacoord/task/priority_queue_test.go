@@ -48,10 +48,12 @@ func TestFIFOQueue_Pop(t *testing.T) {
 
 	poppedTask := queue.Pop()
 	assert.Equal(t, int64(1), poppedTask.GetTaskID())
+	assert.Equal(t, 1, len(queue.TaskIDs()))
 	assert.Equal(t, 1, queue.TaskCount())
 
 	poppedTask = queue.Pop()
 	assert.Equal(t, int64(2), poppedTask.GetTaskID())
+	assert.Equal(t, 0, len(queue.TaskIDs()))
 	assert.Equal(t, 0, queue.TaskCount())
 }
 
