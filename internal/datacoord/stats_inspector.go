@@ -203,13 +203,14 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 // queue means the workers are already saturated and adding more stats tasks
 // only grows the backlog. Discovery re-runs on every TaskCheckInterval tick, so
 // a segment skipped here is picked up again once the queue drains.
-func (si *statsInspector) canSubmitStatsTask() bool {
+func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
 	pendingTaskCount := si.scheduler.GetPendingTaskCount()
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
 	if pendingTaskCount > pendingTaskLimit {
 		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
 			mlog.Int("pendingTaskCount", pendingTaskCount),
-			mlog.Int("pendingTaskLimit", pendingTaskLimit))
+			mlog.Int("pendingTaskLimit", pendingTaskLimit),
+			mlog.String("subJobType", subJobType.String()))
 		return false
 	}
 	return true
@@ -221,7 +222,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 		if collection == nil {
 			continue
 		}
-		if !si.canSubmitStatsTask() {
+		if !si.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob) {
 			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -241,6 +242,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 			// A segment whose task is already in meta must not be re-submitted;
 			// filtering it out here keeps the per-tick work proportional to the
 			// segments that still need a task instead of to all of them.
+			// Note this runs under meta.segMu.RLock, so keep it to a map read.
 			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_TextIndexJob)
 		}))
 
@@ -255,7 +257,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 		}
 
 		for _, segment := range segments {
-			if !si.canSubmitStatsTask() {
+			if !si.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob) {
 				return
 			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true, resources); err != nil {
@@ -273,7 +275,7 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 		if collection == nil {
 			continue
 		}
-		if !si.canSubmitStatsTask() {
+		if !si.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob) {
 			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -294,7 +296,7 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob)
 		}))
 		for _, segment := range segments {
-			if !si.canSubmitStatsTask() {
+			if !si.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob) {
 				return
 			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true, nil); err != nil {
@@ -312,7 +314,7 @@ func (si *statsInspector) triggerBM25StatsTask() {
 		if collection == nil || collection.IsExternal() {
 			continue
 		}
-		if !si.canSubmitStatsTask() {
+		if !si.canSubmitStatsTask(indexpb.StatsSubJob_BM25Job) {
 			return
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -330,7 +332,7 @@ func (si *statsInspector) triggerBM25StatsTask() {
 		}))
 
 		for _, segment := range segments {
-			if !si.canSubmitStatsTask() {
+			if !si.canSubmitStatsTask(indexpb.StatsSubJob_BM25Job) {
 				return
 			}
 			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job, true, nil); err != nil {
@@ -404,7 +406,9 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			mlog.String("subJobType", subJobType.String()))
 		return nil
 	}
-	if !si.canSubmitStatsTask() {
+	// The trigger loops check admission before getting here; this guard covers
+	// callers that reach the StatsInspector interface directly.
+	if !si.canSubmitStatsTask(subJobType) {
 		return nil
 	}
 	taskID, err := si.allocator.AllocID(context.Background())
