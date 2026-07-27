@@ -222,13 +222,23 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 // not really executes the request
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	action := task.Actions()[step].(*SegmentAction)
-	defer action.rpcReturned.Store(true)
+	markRPCReturned := true
+	defer func() {
+		if markRPCReturned {
+			action.rpcReturned.Store(true)
+		}
+	}()
 	ctx := task.Context()
 
 	var err error
 	defer func() {
 		if err != nil {
-			task.Fail(err)
+			if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+				markRPCReturned = false
+				task.SetReason(err.Error())
+			} else {
+				task.Fail(err)
+			}
 		}
 		ex.removeTask(task, step)
 	}()
@@ -278,7 +288,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to load segment", mlog.Err(err))
+		if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			mlog.Info(ctx, "load segment waits for delegator schema version", mlog.Err(err))
+		} else {
+			mlog.Warn(ctx, "failed to load segment", mlog.Err(err))
+		}
 		return err
 	}
 

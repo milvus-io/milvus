@@ -135,6 +135,11 @@ type idfOracleHolder struct {
 	oracle IDFOracle
 }
 
+type delegatorSchemaView struct {
+	schema  *schemapb.CollectionSchema
+	version uint64
+}
+
 // shardDelegator maintains the shard distribution and streaming part of the data.
 type shardDelegator struct {
 	// shard information attributes
@@ -178,9 +183,10 @@ type shardDelegator struct {
 	// current forward policy
 	l0ForwardPolicy string
 
-	// schemaBarrierTs fences load results started before the latest schema update.
+	// schemaView is the delegator's WAL-driven schema snapshot. Load requests
+	// may require a matching version, but must never advance this view.
 	schemaChangeMutex sync.RWMutex
-	schemaBarrierTs   uint64
+	schemaView        delegatorSchemaView
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -203,6 +209,63 @@ type shardDelegator struct {
 	growingSourceProvider     *delegatorGrowingSourceProvider
 
 	leaderViewUpdatedCallback func(channel string)
+}
+
+func newDelegatorSchemaView(schema *schemapb.CollectionSchema) delegatorSchemaView {
+	if schema == nil {
+		return delegatorSchemaView{}
+	}
+	return delegatorSchemaView{
+		schema:  typeutil.Clone(schema),
+		version: uint64(schema.GetVersion()),
+	}
+}
+
+func (sd *shardDelegator) ensureDelegatorSchemaViewLocked() {
+	if sd.schemaView.schema != nil || sd.collection == nil {
+		return
+	}
+	schema, version := sd.collection.SchemaAndVersion()
+	if schema == nil {
+		return
+	}
+	sd.schemaView = delegatorSchemaView{
+		schema:  typeutil.Clone(schema),
+		version: version,
+	}
+}
+
+func (sd *shardDelegator) delegatorSchemaSnapshot() (*schemapb.CollectionSchema, uint64) {
+	sd.schemaChangeMutex.RLock()
+	schema, version := sd.delegatorSchemaSnapshotLocked()
+	sd.schemaChangeMutex.RUnlock()
+	if schema != nil {
+		return schema, version
+	}
+
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+	sd.ensureDelegatorSchemaViewLocked()
+	return sd.delegatorSchemaSnapshotLocked()
+}
+
+func (sd *shardDelegator) delegatorSchemaSnapshotLocked() (*schemapb.CollectionSchema, uint64) {
+	if sd.schemaView.schema == nil {
+		return nil, 0
+	}
+	return typeutil.Clone(sd.schemaView.schema), sd.schemaView.version
+}
+
+func (sd *shardDelegator) shouldUpdateDelegatorSchemaLocked(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	sd.ensureDelegatorSchemaViewLocked()
+	return uint64(schema.GetVersion()) > sd.schemaView.version
+}
+
+func (sd *shardDelegator) publishDelegatorSchemaLocked(schema *schemapb.CollectionSchema) {
+	sd.schemaView = newDelegatorSchemaView(schema)
 }
 
 // getLogger returns the logger with pre-defined shard attributes.
@@ -1274,25 +1337,19 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
-	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
+	if !sd.shouldUpdateDelegatorSchemaLocked(schema) {
 		mlog.Info(ctx, "delegator skip stale or no-op schema event",
 			mlog.Uint64("schemaVersion", schemaVersion),
 			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
 		)
 		return nil
 	}
-	oldSet := newBM25FunctionSet(sd.collection.Schema())
+	oldSchema := sd.schemaView.schema
+	oldSet := newBM25FunctionSet(oldSchema)
 	newSet := newBM25FunctionSet(schema)
 	idfOracle := sd.getIDFOracle()
 	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
 		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
-	}
-
-	// Keep the load barrier monotonic. A higher logical schema version can be
-	// replayed with a smaller barrier than an earlier same-version property
-	// refresh, but that must not reopen older load results.
-	if sd.schemaBarrierTs < schemaBarrierTs {
-		sd.schemaBarrierTs = schemaBarrierTs
 	}
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
@@ -1309,9 +1366,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
-		// same-version schema payloads such as collection properties. Logical
-		// schema freshness is still guarded by schema.version in collectionManager.
+		// Keep sending SchemaBarrierTs to workers and the collection manager for
+		// same-version schema payloads such as collection properties. Delegator
+		// load freshness is gated by schema.Version, not this timestamp.
 		SchemaBarrierTs: schemaBarrierTs,
 	},
 		sealed,
@@ -1364,10 +1421,11 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 			return err
 		}
 	}
+	sd.publishDelegatorSchemaLocked(schema)
 	mlog.Info(ctx, "delegator finished update schema event",
 		mlog.Uint64("schemaVersion", schemaVersion),
 		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
-		mlog.Uint64("loadBarrierTs", sd.schemaBarrierTs),
+		mlog.Uint64("delegatorSchemaVersion", sd.schemaView.version),
 		mlog.Int("sealedNum", len(sealed)),
 		mlog.Int("growingNum", len(growing)),
 		mlog.Int("bm25FunctionNum", len(newSet)),
@@ -1520,6 +1578,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		vchannelName:      channel,
 		version:           version,
 		collection:        collection,
+		schemaView:        newDelegatorSchemaView(collection.Schema()),
 		collectionManager: manager.Collection,
 		segmentManager:    manager.Segment,
 		workerManager:     workerManager,
