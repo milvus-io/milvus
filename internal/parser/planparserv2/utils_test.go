@@ -1228,6 +1228,8 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 		planpb.ArithOpType_BitAnd,
 		planpb.ArithOpType_BitOr,
 		planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl,
+		planpb.ArithOpType_Shr,
 	}
 	for _, op := range bitwiseOps {
 		op := op

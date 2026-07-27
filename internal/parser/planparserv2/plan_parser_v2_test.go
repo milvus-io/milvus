@@ -1604,6 +1604,21 @@ func TestExpr_BinaryArith(t *testing.T) {
 		// to int64 and treats non-numeric / missing values as non-matching).
 		`(JSONField["A"] & 4) == 4`,
 		`(JSONField["B"] | 2) != 0`,
+		// shift operators on integer / JSON / array-element fields
+		`(Int64Field << 2) == 8`,
+		`(Int64Field >> 1) >= 5`,
+		`(Int32Field << 3) != 0`,
+		`(JSONField["A"] << 1) == 4`,
+		`(ArrayField[0] >> 2) < 4`,
+		`Int64Field == (1 << 3)`,
+		`Int64Field == (256 >> 2)`,
+		// bitwise NOT: constant folds; over a field it is rewritten to (x ^ -1)
+		`Int64Field == ~5`,
+		`~5 == Int64Field`,
+		`~Int64Field == 0`,
+		`~Int32Field != 0`,
+		`~JSONField["A"] == 0`,
+		`~ArrayField[0] >= 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1635,6 +1650,31 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`(Int64Field & Int32Field) == 4`,
 		`(Int64Field | Int32Field) != 0`,
 		`(Int64Field ^ Int32Field) == 0`,
+		// shifts on non-integer fields are invalid
+		`(FloatField << 1) == 0`,
+		`(DoubleField >> 1) == 0`,
+		// a negative or too-large shift amount is rejected at plan time
+		`(Int64Field << 64) == 0`,
+		`(Int64Field << -1) == 0`,
+		`(Int64Field >> 64) == 0`,
+		`Int64Field == (1 << 64)`,
+		`Int64Field == (1 >> 64)`,
+		// folding a shift over non-integer literals is invalid (integer-only)
+		`Int64Field == (1.5 << 1)`,
+		`Int64Field == (1.5 >> 1)`,
+		// shift between two fields is unsupported (right operand must be a constant)
+		`(Int64Field << Int32Field) == 0`,
+		// bitwise NOT on non-integer fields is invalid
+		`~FloatField == 0`,
+		`~DoubleField == 0`,
+		`~BoolField == 0`,
+		`~VarCharField == 0`,
+		// folding ~ over a non-integer literal is invalid (integer-only)
+		`Int64Field == ~1.5`,
+		// nested arithmetic (two arith ops before the comparison) is unsupported,
+		// consistent with the other arithmetic / bitwise operators
+		`(Int64Field >> 2) * 2 == 4`,
+		`(~Int64Field) + 1 == 0`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -1670,6 +1710,13 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		// reverse form (constant on the left) for the symmetric == / != ops
 		{`4 == (Int64Field & 4)`, planpb.ArithOpType_BitAnd, planpb.OpType_Equal, 4, 4},
 		{`0 != (Int32Field | 2)`, planpb.ArithOpType_BitOr, planpb.OpType_NotEqual, 2, 0},
+		// shift operators fuse the same way, carrying the shift amount as the operand
+		{`(Int64Field << 2) == 8`, planpb.ArithOpType_Shl, planpb.OpType_Equal, 2, 8},
+		{`(Int64Field >> 1) >= 5`, planpb.ArithOpType_Shr, planpb.OpType_GreaterEqual, 1, 5},
+		{`(Int32Field << 3) != 0`, planpb.ArithOpType_Shl, planpb.OpType_NotEqual, 3, 0},
+		// ~field is rewritten to (field ^ -1); it fuses as BitXor with operand -1
+		{`~Int64Field == 0`, planpb.ArithOpType_BitXor, planpb.OpType_Equal, -1, 0},
+		{`~Int32Field != 5`, planpb.ArithOpType_BitXor, planpb.OpType_NotEqual, -1, 5},
 	}
 	for _, c := range cases {
 		expr, err := ParseExpr(helper, c.expr, nil)
@@ -1692,9 +1739,12 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		expected int64
 	}
 	foldCases := []foldCase{
-		{`Int64Field == (7 & 3)`, 3}, // 7 & 3 = 3
-		{`Int64Field == (5 | 2)`, 7}, // 5 | 2 = 7
-		{`Int64Field == (6 ^ 3)`, 5}, // 6 ^ 3 = 5
+		{`Int64Field == (7 & 3)`, 3},     // 7 & 3 = 3
+		{`Int64Field == (5 | 2)`, 7},     // 5 | 2 = 7
+		{`Int64Field == (6 ^ 3)`, 5},     // 6 ^ 3 = 5
+		{`Int64Field == (1 << 3)`, 8},    // 1 << 3 = 8
+		{`Int64Field == (256 >> 2)`, 64}, // 256 >> 2 = 64
+		{`Int64Field == ~5`, -6},         // ~5 = -6
 	}
 	for _, c := range foldCases {
 		expr, err := ParseExpr(helper, c.expr, nil)

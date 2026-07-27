@@ -301,6 +301,16 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 		}
 	}
 
+	// A negative or too-large shift amount is undefined behavior in the C++
+	// executor, so reject it at plan time (constant-const folding is guarded
+	// separately in ShiftLeft/ShiftRight). Templated operands are validated when
+	// the placeholder value is filled in.
+	if (arithOp == planpb.ArithOpType_Shl || arithOp == planpb.ArithOpType_Shr) && !isTemplateExpr(operandExpr) {
+		if !IsInteger(operand) || operand.GetInt64Val() < 0 || operand.GetInt64Val() >= 64 {
+			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", operand.String())
+		}
+	}
+
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
 			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
@@ -712,7 +722,8 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
 		}
-	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor:
+	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
 		}
