@@ -171,8 +171,10 @@ func repackInsertDataForStreamingService(
 			if err != nil {
 				return nil, err
 			}
-			if err := validateStreamingInsertMessageSize(newMsg); err != nil {
-				return nil, err
+			if decorateHeader != nil {
+				if err := validateStreamingInsertMessageSize(newMsg); err != nil {
+					return nil, err
+				}
 			}
 			messages = append(messages, newMsg)
 		}
@@ -274,8 +276,10 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				if err != nil {
 					return nil, err
 				}
-				if err := validateStreamingInsertMessageSize(newMsg); err != nil {
-					return nil, err
+				if decorateHeader != nil {
+					if err := validateStreamingInsertMessageSize(newMsg); err != nil {
+						return nil, err
+					}
 				}
 				messages = append(messages, newMsg)
 			}
