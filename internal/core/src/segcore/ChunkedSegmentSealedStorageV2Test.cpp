@@ -2746,6 +2746,23 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
         EXPECT_EQ(observed("query").first, query_before_count.first)
             << "a count retrieve was attributed to query";
 
+        auto agg_plan = retrieve_plan(N);
+        agg_plan->operation_ = query::RetrieveOperation::Aggregate;
+        const auto before_agg = observed("agg");
+        const auto query_before_agg = observed("query");
+        const auto count_before_agg = observed("count");
+        auto agg_result = async_retrieve(segment.get(), agg_plan.get());
+        ASSERT_NE(agg_result, nullptr);
+        const auto after_agg = observed("agg");
+        EXPECT_EQ(after_agg.first, before_agg.first + 1);
+        EXPECT_DOUBLE_EQ(
+            after_agg.second - before_agg.second,
+            static_cast<double>(agg_result->scanned_total_bytes()));
+        EXPECT_EQ(observed("query").first, query_before_agg.first)
+            << "an aggregate retrieve was attributed to query";
+        EXPECT_EQ(observed("count").first, count_before_agg.first)
+            << "an aggregate retrieve was attributed to count";
+
         auto delete_ids = std::make_unique<IdArray>();
         delete_ids->mutable_int_id()->mutable_data()->Add(0);
         Timestamp delete_ts = MAX_TIMESTAMP;

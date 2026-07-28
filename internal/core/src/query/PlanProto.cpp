@@ -984,8 +984,18 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
               plan_node_proto.ShortDebugString());
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
-    if (plan_node_proto.has_query() && plan_node_proto.query().is_count()) {
-        retrieve_plan->operation_ = RetrieveOperation::Count;
+    if (plan_node_proto.has_query()) {
+        const auto& query = plan_node_proto.query();
+        if (query.group_by_field_ids_size() > 0) {
+            retrieve_plan->operation_ = RetrieveOperation::Aggregate;
+        } else if (query.aggregates_size() == 1 &&
+                   query.aggregates(0).op() == proto::plan::count) {
+            retrieve_plan->operation_ = RetrieveOperation::Count;
+        } else if (query.aggregates_size() > 0) {
+            retrieve_plan->operation_ = RetrieveOperation::Aggregate;
+        } else if (query.is_count()) {
+            retrieve_plan->operation_ = RetrieveOperation::Count;
+        }
     }
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);

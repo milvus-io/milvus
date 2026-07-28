@@ -203,7 +203,7 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
     EXPECT_EQ(
         plan->access_entries_,
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
-    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Query);
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Aggregate);
 }
 
 TEST(PlanProto, RetrievePlanPreservesCountOperation) {
@@ -218,4 +218,62 @@ TEST(PlanProto, RetrievePlanPreservesCountOperation) {
         schema, serialized.data(), serialized.size());
 
     EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Count);
+}
+
+TEST(PlanProto, RetrievePlanClassifiesStructuralCountOperation) {
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    planpb::PlanNode plan_node;
+    plan_node.mutable_query()->add_aggregates()->set_op(planpb::count);
+    auto serialized = plan_node.SerializeAsString();
+
+    auto plan = milvus::query::CreateRetrievePlanByExpr(
+        schema, serialized.data(), serialized.size());
+
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Count);
+}
+
+TEST(PlanProto, RetrievePlanClassifiesMixedAggregateOperation) {
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    auto field_id = schema->get_field_id(milvus::FieldName("age"));
+    planpb::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->add_aggregates()->set_op(planpb::count);
+    auto* sum = query->add_aggregates();
+    sum->set_op(planpb::sum);
+    sum->set_field_id(field_id.get());
+    auto serialized = plan_node.SerializeAsString();
+
+    auto plan = milvus::query::CreateRetrievePlanByExpr(
+        schema, serialized.data(), serialized.size());
+
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Aggregate);
+}
+
+TEST(PlanProto, RetrievePlanClassifiesGroupByOnlyAsAggregate) {
+    auto schema = BuildSchema();
+    auto field_id = schema->get_field_id(milvus::FieldName("age"));
+    milvus::proto::plan::PlanNode plan_node;
+    plan_node.mutable_query()->add_group_by_field_ids(field_id.get());
+    auto serialized = plan_node.SerializeAsString();
+
+    auto plan = milvus::query::CreateRetrievePlanByExpr(
+        schema, serialized.data(), serialized.size());
+
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Aggregate);
+}
+
+TEST(PlanProto, RetrievePlanDefaultsToQueryOperation) {
+    auto schema = BuildSchema();
+    milvus::proto::plan::PlanNode plan_node;
+    plan_node.mutable_query()->set_limit(10);
+    auto serialized = plan_node.SerializeAsString();
+
+    auto plan = milvus::query::CreateRetrievePlanByExpr(
+        schema, serialized.data(), serialized.size());
+
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Query);
 }

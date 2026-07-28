@@ -135,7 +135,8 @@ class SegmentInterface {
              Timestamp collection_ttl,
              int64_t entity_ttl_physical_time_us = 0) const = 0;
 
-    // Only used for test
+    // Test-only synchronous convenience overload. Production request paths
+    // enter through AsyncRetrieve and call the full primitive above.
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
@@ -532,10 +533,10 @@ class SegmentInternalInterface : public SegmentInterface {
     // Bring in base class Retrieve overloads to avoid name hiding
     using SegmentInterface::Retrieve;
 
-    // Synchronous execution primitive. QueryNode user requests enter and
-    // publish operation metrics through the C AsyncRetrieve/
-    // AsyncRetrieveByOffsets boundary; internal callers may invoke this
-    // primitive directly without being counted as user queries.
+    // Active synchronous execution primitive used by AsyncRetrieve and
+    // AsyncRetrieveByOffsets. QueryNode user requests enter and publish
+    // operation metrics through that C async boundary; internal callers may
+    // invoke this primitive directly without being counted as user queries.
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
