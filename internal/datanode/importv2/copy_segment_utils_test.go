@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type copySegmentCopierTarget struct {
@@ -61,6 +63,43 @@ func mockNoManifestLobFiles(t *testing.T) {
 	t.Helper()
 	mock := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
 	t.Cleanup(func() { mock.UnPatch() })
+}
+
+func TestCopyObjectWithTimeout(t *testing.T) {
+	t.Run("calls provider once", func(t *testing.T) {
+		attempts := 0
+		copier := newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error {
+			attempts++
+			return errors.New("copy failed")
+		})
+
+		err := copyObjectWithTimeout(context.Background(), copier, "source", "object", "target", "object")
+
+		require.Error(t, err)
+		assert.Equal(t, 1, attempts)
+	})
+
+	t.Run("stops at object timeout", func(t *testing.T) {
+		params := paramtable.Get()
+		key := params.DataNodeCfg.ImportCopyObjectTimeout.Key
+		require.NoError(t, params.Save(key, "1"))
+		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+
+		attempts := 0
+		copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, _, _, _ string) error {
+			attempts++
+			<-ctx.Done()
+			return errors.New("provider hid context error")
+		})
+		start := time.Now()
+
+		err := copyObjectWithTimeout(context.Background(), copier, "source", "object", "target", "object")
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Equal(t, 1, attempts)
+		assert.Less(t, time.Since(start), 2*time.Second)
+	})
 }
 
 func TestGenerateTargetPath(t *testing.T) {

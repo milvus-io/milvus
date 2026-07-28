@@ -166,6 +166,9 @@ func applySnapshotExternalSpecToConfig(
 		cfg.SecretAccessKeyID = secretKey
 		cfg.GcpCredentialJSON = ""
 		cfg.UseIAM = false
+		if strings.EqualFold(cfg.CloudProvider, objectstorage.CloudProviderAzure) {
+			cfg.IgnoreAzureConnectionString = true
+		}
 	}
 
 	if value := strings.ToLower(strings.TrimSpace(extfs[externalspec.ExtfsKeyStorageType])); value != "" {

@@ -26,6 +26,10 @@ type Config struct {
 	// SkipBucketCheck is for request-scoped clients whose permissions are
 	// validated by the first object read, write, or copy operation.
 	SkipBucketCheck bool
+
+	// IgnoreAzureConnectionString keeps request-scoped Azure account credentials
+	// from being overridden by the process-level connection string.
+	IgnoreAzureConnectionString bool
 }
 
 func NewDefaultConfig() *Config {

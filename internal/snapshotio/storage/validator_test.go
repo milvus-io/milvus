@@ -152,6 +152,29 @@ func TestApplySnapshotExternalSpecUseIAMPreservesAzureAccountName(t *testing.T) 
 	assert.Equal(t, "azure-account", cfg.AccessKeyID)
 	assert.Empty(t, cfg.SecretAccessKeyID)
 	assert.Empty(t, cfg.GcpCredentialJSON)
+	assert.False(t, cfg.IgnoreAzureConnectionString)
+}
+
+func TestApplySnapshotExternalSpecAzureRawCredentialsIgnoreConnectionString(t *testing.T) {
+	cfg := objectstorage.NewDefaultConfig()
+	cfg.CloudProvider = objectstorage.CloudProviderAzure
+	cfg.AccessKeyID = "instance-account"
+	cfg.SecretAccessKeyID = "instance-key"
+	instanceCfg := objectstorage.NewDefaultConfig()
+	instanceCfg.CloudProvider = objectstorage.CloudProviderAzure
+
+	_, _, err := applySnapshotExternalSpecToConfig(
+		cfg,
+		instanceCfg,
+		"azure",
+		"",
+		`{"extfs":{"cloud_provider":"azure","region":"public","access_key_id":"request-account","access_key_value":"request-key"}}`,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "request-account", cfg.AccessKeyID)
+	assert.Equal(t, "request-key", cfg.SecretAccessKeyID)
+	assert.True(t, cfg.IgnoreAzureConnectionString)
 }
 
 func TestApplySnapshotExternalSpecIgnoresRequestSSLCACert(t *testing.T) {

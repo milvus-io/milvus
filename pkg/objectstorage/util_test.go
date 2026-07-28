@@ -3,6 +3,7 @@ package objectstorage
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,6 +150,37 @@ func TestNewMinioClientSkipsBucketCheck(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, client)
 	assert.Zero(t, requestCount.Load())
+}
+
+func TestNewAzureClientCredentialPrecedence(t *testing.T) {
+	accountKey := base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901"))
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING",
+		"DefaultEndpointsProtocol=https;AccountName=ambientaccount;AccountKey="+accountKey+";EndpointSuffix=core.windows.net")
+
+	newConfig := func(ignoreConnectionString bool) *Config {
+		return &Config{
+			Address:                     "core.windows.net",
+			BucketName:                  "container",
+			AccessKeyID:                 "requestaccount",
+			SecretAccessKeyID:           accountKey,
+			SkipBucketCheck:             true,
+			IgnoreAzureConnectionString: ignoreConnectionString,
+		}
+	}
+
+	t.Run("instance configuration keeps ambient connection string", func(t *testing.T) {
+		client, err := NewAzureObjectStorageClient(context.Background(), newConfig(false))
+
+		require.NoError(t, err)
+		assert.Equal(t, "https://ambientaccount.blob.core.windows.net/", client.URL())
+	})
+
+	t.Run("request credentials override ambient connection string", func(t *testing.T) {
+		client, err := NewAzureObjectStorageClient(context.Background(), newConfig(true))
+
+		require.NoError(t, err)
+		assert.Equal(t, "https://requestaccount.blob.core.windows.net/", client.URL())
+	})
 }
 
 func tlsVersionName(v uint16) string {

@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // SegmentFiles organizes source files by type for copy operations.
@@ -60,7 +62,26 @@ type SegmentFiles struct {
 	JSONStats    []string
 }
 
-// CopySegmentAndIndexFiles copies all segment files and index files sequentially.
+// copyObjectWithTimeout bounds one provider-managed copy operation. Retrying
+// the whole call here is unsafe for asynchronous providers such as Azure.
+func copyObjectWithTimeout(
+	ctx context.Context,
+	copier storage.CrossBucketCopier,
+	sourceBucket string,
+	sourceObject string,
+	targetBucket string,
+	targetObject string,
+) error {
+	timeout := paramtable.Get().DataNodeCfg.ImportCopyObjectTimeout.GetAsDuration(time.Second)
+	copyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err := copier.CopyCrossBucket(copyCtx, sourceBucket, sourceObject, targetBucket, targetObject)
+	if ctxErr := copyCtx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
+}
 
 // transformManifestPath replaces source IDs in manifest path with target IDs.
 //
@@ -327,6 +348,7 @@ func generateMappingsFromFiles(
 	return mappings, nil
 }
 
+// CopySegmentAndIndexFiles copies all segment files and index files sequentially.
 func CopySegmentAndIndexFiles(
 	ctx context.Context,
 	sourceCM storage.ChunkManager,
@@ -370,7 +392,7 @@ func CopySegmentAndIndexFiles(
 			mlog.String("src", snapshotstorage.RedactSnapshotObjectPath(src)),
 			mlog.String("dst", dst))
 
-		if err := copier.CopyCrossBucket(ctx, sourceBucket, copySource, targetBucket, dst); err != nil {
+		if err := copyObjectWithTimeout(ctx, copier, sourceBucket, copySource, targetBucket, dst); err != nil {
 			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
 			fields = append(fields, mlog.String("src", snapshotstorage.RedactSnapshotObjectPath(src)), mlog.String("dst", dst), mlog.Err(err))

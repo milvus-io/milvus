@@ -287,7 +287,9 @@ Provider notes:
 - GCP native storage supports service-account JSON and Application Default
   Credentials through the existing config model.
 - Azure storage supports account key mode and the existing workload/managed
-  identity path. A request SAS token is not supported.
+  identity path. Request-level account key fields take precedence over the
+  process-level `AZURE_STORAGE_CONNECTION_STRING`; a request SAS token is not
+  supported.
 
 Restore persistence red line:
 
@@ -440,6 +442,12 @@ DataNode:
 - Copies StorageV1 PB paths, treats a StorageV2 manifest as a concrete object,
   and enumerates StorageV3 manifest objects and LOB files before copying them
   into local target paths.
+- Gives each object copy a refreshable
+  `dataNode.import.copyObjectTimeout` deadline. Provider SDKs own request-level
+  retries; DataNode does not replay the whole copy operation.
+- Azure starts an asynchronous copy once. If the SDK observes an existing
+  pending copy, the provider resumes polling that operation and validates its
+  source URL and copy ID instead of starting another copy.
 
 `snapshotstorage`:
 
@@ -535,6 +543,8 @@ Resolver and validator tests:
 - Native GCS `credential_json` maps to the object-storage service-account JSON
   field, while `role_arn`, `gcp_target_service_account`, SAS, anonymous auth,
   and dual credentials are rejected.
+- Azure request-level account keys override an ambient connection string while
+  Layer 1 instance configuration preserves the existing environment behavior.
 - URI query parameters and fragments are rejected and removed from defensive
   log redaction output.
 - Redacted spec output never contains secret values.
@@ -552,6 +562,13 @@ Restore tests:
   state with `external_spec`.
 - DataNode copy tasks rebuild source storage config and copy into local target
   paths.
+- DataNode invokes each provider copy once within one bounded object-copy
+  deadline; provider SDKs retain their request-level retries.
+- Azure retries transient copy-status polling without replaying
+  `StartCopyFromURL`, resumes a matching pending copy, and rejects source URL or
+  copy ID mismatches.
+- A copy implementation blocked on object storage exits when
+  `dataNode.import.copyObjectTimeout` expires.
 - Failure to read source metadata or manifests fails before scheduling unsafe
   work.
 - Go-client e2e covers both referenced restore from `DescribeSnapshot.s3Location`

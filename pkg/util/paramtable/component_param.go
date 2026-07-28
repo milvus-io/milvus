@@ -7196,6 +7196,7 @@ type dataNodeConfig struct {
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
 	ImportMaxWriteRetryAttempts ParamItem `refreshable:"true"`
+	ImportCopyObjectTimeout     ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -7568,6 +7569,22 @@ if this parameter <= 0, will set it as 10`,
 		DefaultValue: "0",
 	}
 	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
+
+	p.ImportCopyObjectTimeout = ParamItem{
+		Key:          "dataNode.import.copyObjectTimeout",
+		Version:      "2.7.0",
+		Doc:          "The timeout in seconds for copying one object during snapshot restore, including retries.",
+		DefaultValue: "3600",
+		PanicIfEmpty: false,
+		Export:       true,
+		Formatter: func(value string) string {
+			if getAsInt(value) <= 0 {
+				return "3600"
+			}
+			return value
+		},
+	}
+	p.ImportCopyObjectTimeout.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
