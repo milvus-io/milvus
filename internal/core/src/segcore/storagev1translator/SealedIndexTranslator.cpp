@@ -108,7 +108,9 @@ SealedIndexTranslator::SealedIndexTranslator(
         auto max_task_overhead =
             stream_load_info->encrypted
                 ? stream_load_info->max_task_transient_bytes
-                : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
+                : milvus::storage::SaturatingMultiply(
+                      milvus::storage::MaxEntryStreamTaskBytes(),
+                      milvus::storage::kFileStreamBufferMultiplier);
         auto memory_group =
             milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
                 milvus::ThreadPools::GetLoadExecutorWorkers());

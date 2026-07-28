@@ -85,29 +85,39 @@ ScalarIndexStreamMemoryOverhead(
     if (scalar_version < 3) {
         return index_size_in_bytes;
     }
-    if (encrypted) {
-        if (stream_load_info.has_value()) {
-            return storage::EncryptedEntryStreamMaxTransientBytes(
-                stream_load_info->total_transient_bytes,
-                stream_load_info->max_task_transient_bytes);
+    size_t total_transient_bytes;
+    size_t max_task_transient_bytes;
+    if (encrypted && stream_load_info.has_value()) {
+        total_transient_bytes = stream_load_info->total_transient_bytes;
+        max_task_transient_bytes = stream_load_info->max_task_transient_bytes;
+    } else {
+        total_transient_bytes = milvus::storage::EntryStreamTransientBytes(
+            index_size_in_bytes, encrypted);
+        max_task_transient_bytes = milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), encrypted);
+
+        // Without a concrete encrypted directory there is no trustworthy
+        // ciphertext task bound. When the runtime budget is disabled, keep
+        // the conservative whole-stream fallback instead of applying the
+        // executor bound.
+        if (encrypted &&
+            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+                    .CapacityBytes() == 0) {
+            return total_transient_bytes;
         }
-        auto stream_data_bound = milvus::storage::EntryStreamDataTransientBytes(
-            index_size_in_bytes, true);
-        return std::min<uint64_t>(
-            stream_data_bound,
-            milvus::storage::EntryStreamMaxTransientBytes(true));
     }
-    if (file_stream) {
-        auto stream_data_bound =
-            milvus::storage::PlainEntryFileStreamTransientBytes(
-                index_size_in_bytes);
-        return std::min<uint64_t>(
-            stream_data_bound,
-            milvus::storage::PlainEntryFileStreamMaxTransientBytes());
+
+    if (file_stream && !encrypted) {
+        total_transient_bytes = milvus::storage::SaturatingMultiply(
+            total_transient_bytes,
+            milvus::storage::kFileStreamBufferMultiplier);
+        max_task_transient_bytes = milvus::storage::SaturatingMultiply(
+            max_task_transient_bytes,
+            milvus::storage::kFileStreamBufferMultiplier);
     }
-    return std::min<uint64_t>(
-        index_size_in_bytes,
-        milvus::storage::EntryStreamMaxTransientBytes(false));
+
+    return milvus::storage::EntryStreamMaxTransientBytes(
+        total_transient_bytes, max_task_transient_bytes);
 }
 
 uint64_t

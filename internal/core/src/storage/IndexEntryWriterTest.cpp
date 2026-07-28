@@ -1188,13 +1188,13 @@ TEST_F(IndexEntryEncryptedV3Test,
               2 * (6 * slice_size + 17) + (6 * 100 + 17) + 29);
 
     milvus::SetLoadTransientBudgetBytes(0);
-    EXPECT_EQ(EncryptedEntryStreamMaxTransientBytes(
-                  info.total_transient_bytes, info.max_task_transient_bytes),
+    EXPECT_EQ(EntryStreamMaxTransientBytes(info.total_transient_bytes,
+                                           info.max_task_transient_bytes),
               info.total_transient_bytes);
 
     milvus::SetLoadTransientBudgetBytes(1);
-    EXPECT_EQ(EncryptedEntryStreamMaxTransientBytes(
-                  info.total_transient_bytes, info.max_task_transient_bytes),
+    EXPECT_EQ(EntryStreamMaxTransientBytes(info.total_transient_bytes,
+                                           info.max_task_transient_bytes),
               info.max_task_transient_bytes);
 }
 
@@ -1390,30 +1390,33 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     IndexEntryStreamConfigGuard guard;
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    const auto max_task_transient_bytes =
+        EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), false);
+    const auto unbounded_total = std::numeric_limits<size_t>::max();
 
     ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
     milvus::SetLoadTransientBudgetBytes(0);
     ASSERT_EQ(budget.CapacityBytes(), 0);
-    ASSERT_NE(EntryStreamMaxTransientBytes(),
-              std::numeric_limits<size_t>::max());
-    ASSERT_EQ(EntryStreamMaxTransientBytes(),
-              EntryStreamPoolBoundTransientBytes());
-
-    const size_t pool_bound_transient_bytes =
-        EntryStreamPoolBoundTransientBytes();
+    const auto pool_bound_transient_bytes =
+        EntryStreamMaxTransientBytes(unbounded_total, max_task_transient_bytes);
+    ASSERT_NE(pool_bound_transient_bytes, unbounded_total);
     ASSERT_LT(
         pool_bound_transient_bytes,
         static_cast<size_t>(std::numeric_limits<int64_t>::max()) - slice_size);
     const size_t oversized_budget = pool_bound_transient_bytes + slice_size;
     milvus::SetLoadTransientBudgetBytes(static_cast<int64_t>(oversized_budget));
     ASSERT_EQ(budget.CapacityBytes(), oversized_budget);
-    ASSERT_EQ(EntryStreamMaxTransientBytes(), pool_bound_transient_bytes);
+    ASSERT_EQ(
+        EntryStreamMaxTransientBytes(unbounded_total, max_task_transient_bytes),
+        pool_bound_transient_bytes);
 
     const size_t configured_budget = 3 * slice_size;
     milvus::SetLoadTransientBudgetBytes(
         static_cast<int64_t>(configured_budget));
     ASSERT_EQ(budget.CapacityBytes(), configured_budget);
-    ASSERT_EQ(EntryStreamMaxTransientBytes(), configured_budget);
+    ASSERT_EQ(
+        EntryStreamMaxTransientBytes(unbounded_total, max_task_transient_bytes),
+        configured_budget);
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
     const size_t tail_size = kTailMergeGrace + 17;
@@ -1447,26 +1450,28 @@ TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamUsesThreeBufferPoolBound) {
     IndexEntryStreamConfigGuard guard;
     milvus::SetLoadTransientBudgetBytes(0);
 
-    const auto max_tasks =
-        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
-            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    const auto max_tasks = static_cast<size_t>(
+        std::max(milvus::ComputeThreadPoolMaxThreads(
+                     milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()),
+                 milvus::ComputeThreadPoolMaxThreads(
+                     milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load())));
     const auto per_task_bound =
-        3 * (DefaultStreamSliceSize() + kTailMergeGrace);
-    const auto encrypted_pool_bound = max_tasks * per_task_bound;
+        EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), true);
+    const auto encrypted_pool_bound =
+        SaturatingMultiply(max_tasks, per_task_bound);
 
-    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(true), encrypted_pool_bound);
-    EXPECT_EQ(EntryStreamMaxTransientBytes(true),
-              std::numeric_limits<size_t>::max());
+    EXPECT_EQ(EntryStreamMaxTransientBytes(std::numeric_limits<size_t>::max(),
+                                           per_task_bound),
+              encrypted_pool_bound);
 }
 
 TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamAccountsForPlaintextCopies) {
     constexpr size_t stream_bytes = 8 * 1024 * 1024;
 
-    EXPECT_EQ(EntryStreamDataTransientBytes(stream_bytes, false), stream_bytes);
-    EXPECT_EQ(EntryStreamDataTransientBytes(stream_bytes, true),
-              3 * stream_bytes);
+    EXPECT_EQ(EntryStreamTransientBytes(stream_bytes, false), stream_bytes);
+    EXPECT_EQ(EntryStreamTransientBytes(stream_bytes, true), 3 * stream_bytes);
     EXPECT_EQ(
-        EntryStreamDataTransientBytes(std::numeric_limits<size_t>::max(), true),
+        EntryStreamTransientBytes(std::numeric_limits<size_t>::max(), true),
         std::numeric_limits<size_t>::max());
 }
 
@@ -1474,13 +1479,14 @@ TEST_F(IndexEntryWriterV3Test,
        PlainEntryFileStreamAccountsForAlignedWriteCopy) {
     constexpr size_t stream_bytes = 8 * 1024 * 1024;
 
-    EXPECT_EQ(PlainEntryFileStreamTransientBytes(stream_bytes),
+    EXPECT_EQ(SaturatingMultiply(stream_bytes, kFileStreamBufferMultiplier),
               2 * stream_bytes);
-    EXPECT_EQ(PlainEntryFileStreamTaskTransientBytes(),
+    EXPECT_EQ(SaturatingMultiply(MaxEntryStreamTaskBytes(),
+                                 kFileStreamBufferMultiplier),
               2 * (DefaultStreamSliceSize() + kTailMergeGrace));
-    EXPECT_EQ(
-        PlainEntryFileStreamTransientBytes(std::numeric_limits<size_t>::max()),
-        std::numeric_limits<size_t>::max());
+    EXPECT_EQ(SaturatingMultiply(std::numeric_limits<size_t>::max(),
+                                 kFileStreamBufferMultiplier),
+              std::numeric_limits<size_t>::max());
 }
 
 TEST_F(IndexEntryWriterV3Test,
@@ -1489,35 +1495,56 @@ TEST_F(IndexEntryWriterV3Test,
     const auto slice_size = DefaultStreamSliceSize();
     milvus::SetLoadTransientBudgetBytes(static_cast<int64_t>(slice_size));
 
-    const auto per_task_bound = 3 * (slice_size + kTailMergeGrace);
-    EXPECT_EQ(EntryStreamMaxTransientBytes(true), per_task_bound);
+    const auto per_task_bound =
+        EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), true);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(std::numeric_limits<size_t>::max(),
+                                           per_task_bound),
+              per_task_bound);
 }
 
 TEST_F(IndexEntryWriterV3Test, PlainEntryStreamIncludesOversizedSingleTask) {
     IndexEntryStreamConfigGuard guard;
     milvus::SetLoadTransientBudgetBytes(1 * 1024 * 1024);
 
-    EXPECT_EQ(EntryStreamMaxTransientBytes(),
-              DefaultStreamSliceSize() + kTailMergeGrace);
+    const auto per_task_bound =
+        EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), false);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(std::numeric_limits<size_t>::max(),
+                                           per_task_bound),
+              per_task_bound);
 }
 
 TEST_F(IndexEntryWriterV3Test, PlainEntryStreamPoolBoundCountsTailPerTask) {
-    const auto configured_tasks =
-        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
-            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetLoadTransientBudgetBytes(0);
+    const auto configured_tasks = static_cast<size_t>(
+        std::max(milvus::ComputeThreadPoolMaxThreads(
+                     milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()),
+                 milvus::ComputeThreadPoolMaxThreads(
+                     milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load())));
+    const auto per_task_bound =
+        EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), false);
 
-    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(),
-              configured_tasks * (DefaultStreamSliceSize() + kTailMergeGrace));
+    EXPECT_EQ(EntryStreamMaxTransientBytes(std::numeric_limits<size_t>::max(),
+                                           per_task_bound),
+              SaturatingMultiply(configured_tasks, per_task_bound));
 }
 
 TEST_F(IndexEntryWriterV3Test, EntryStreamPoolBoundUsesLiveWorkerFloor) {
-    const auto configured_tasks =
-        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
-            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetLoadTransientBudgetBytes(0);
+    const auto configured_tasks = static_cast<size_t>(
+        std::max(milvus::ComputeThreadPoolMaxThreads(
+                     milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()),
+                 milvus::ComputeThreadPoolMaxThreads(
+                     milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load())));
     const auto live_workers = configured_tasks + 1;
+    const auto per_task_bound =
+        EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), false);
 
-    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(false, live_workers),
-              live_workers * (DefaultStreamSliceSize() + kTailMergeGrace));
+    EXPECT_EQ(
+        EntryStreamMaxTransientBytes(
+            std::numeric_limits<size_t>::max(), per_task_bound, live_workers),
+        SaturatingMultiply(live_workers, per_task_bound));
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMergesSmallTail) {

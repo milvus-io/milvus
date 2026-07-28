@@ -493,8 +493,10 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
-    auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
+        kIndexSize,
+        milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
@@ -536,8 +538,10 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
-    auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
+        kIndexSize,
+        milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kIndexSize + kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, 0);
@@ -580,8 +584,10 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
-    auto stream_memory_overhead = std::min<uint64_t>(
-        kIndexSize, milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
+        kIndexSize,
+        milvus::storage::EntryStreamTransientBytes(
+            milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kLegacyCsrResidentBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
