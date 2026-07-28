@@ -228,6 +228,10 @@ func (g *fakeCollectionRuntimeGuard) CCollection() *segcore.CCollection {
 	return nil
 }
 
+func (g *fakeCollectionRuntimeGuard) PinnedCollection() *segments.Collection {
+	return nil
+}
+
 func (g *fakeCollectionRuntimeGuard) UpdateIndexMeta(_ context.Context, indexes []*indexpb.IndexInfo) error {
 	g.updatedIndexes = append([]*indexpb.IndexInfo(nil), indexes...)
 	return g.updateErr

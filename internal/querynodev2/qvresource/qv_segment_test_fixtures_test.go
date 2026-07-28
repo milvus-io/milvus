@@ -19,6 +19,8 @@ import (
 )
 
 type fakeQVCollectionManager struct {
+	collection      *segments.Collection
+	getCount        int
 	putCollectionID int64
 	putSchema       *schemapb.CollectionSchema
 	putIndexMeta    *segcorepb.CollectionIndexMeta
@@ -31,8 +33,9 @@ type fakeQVCollectionManager struct {
 	err             error
 }
 
-func (m *fakeQVCollectionManager) Get(collectionID int64) *segments.Collection {
-	return nil
+func (m *fakeQVCollectionManager) Get(int64) *segments.Collection {
+	m.getCount++
+	return m.collection
 }
 
 func (m *fakeQVCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
@@ -182,6 +185,7 @@ type fakeQVSegment struct {
 }
 
 type fakeQVCollectionRuntime struct {
+	collection    *segments.Collection
 	collectionID  int64
 	databaseName  string
 	schema        *schemapb.CollectionSchema
@@ -206,6 +210,10 @@ func (r fakeQVCollectionRuntime) SchemaVersion() int64 {
 
 func (r fakeQVCollectionRuntime) CCollection() *segcore.CCollection {
 	return nil
+}
+
+func (r fakeQVCollectionRuntime) PinnedCollection() *segments.Collection {
+	return r.collection
 }
 
 func (s *fakeQVSegment) ID() int64 {

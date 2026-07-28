@@ -379,6 +379,17 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 		newVecFieldID)
 }
 
+func (s *CollectionManagerSuite) TestCollectionUpdateIndexMeta() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	indexMeta.MaxIndexRowCount++
+
+	s.Require().NoError(coll.UpdateIndexMeta(indexMeta))
+	s.True(proto.Equal(indexMeta, coll.GetCCollection().IndexMeta()))
+}
+
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {
 	coll := s.cm.Get(1)
 	s.Require().NotNil(coll)

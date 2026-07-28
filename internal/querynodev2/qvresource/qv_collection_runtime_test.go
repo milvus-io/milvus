@@ -6,21 +6,25 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs(t *testing.T) {
-	collection := &fakeQVCollectionManager{}
+	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, &schemapb.CollectionSchema{Name: "coll"})
+	collection := &fakeQVCollectionManager{collection: localCollection}
 	provider := &fakeQVLoadMetadataProvider{
 		collection: &milvuspb.DescribeCollectionResponse{
 			CollectionID:    1,
@@ -49,6 +53,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 	require.NoError(t, err)
 	assert.False(t, retryable)
 	require.NotNil(t, guard)
+	assert.Same(t, localCollection, guard.(*queryViewCollectionRuntimeGuard).collection)
 
 	assert.Equal(t, int64(1), guard.CollectionID())
 	assert.Equal(t, "db", guard.DatabaseName())
@@ -135,31 +140,38 @@ func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *test
 	})
 }
 
-func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaRefsAndUnrefsCollection(t *testing.T) {
-	collection := &fakeQVCollectionManager{}
+func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaUsesPinnedCollection(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "coll"}
+	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
+	collection := &fakeQVCollectionManager{collection: localCollection}
 	guard := &queryViewCollectionRuntimeGuard{
-		collections:   collection,
-		collectionID:  1,
-		databaseName:  "db",
-		schema:        &schemapb.CollectionSchema{Name: "coll"},
-		schemaVersion: 9,
+		collections:  collection,
+		collection:   localCollection,
+		collectionID: 1,
+		schema:       schema,
 	}
 	indexes := []*indexpb.IndexInfo{{CollectionID: 1, FieldID: 100, IndexName: "vec_idx"}}
+
+	var updatedCollection *segments.Collection
+	var updatedMeta *segcorepb.CollectionIndexMeta
+	patch := mockey.Mock((*segments.Collection).UpdateIndexMeta).
+		To(func(collection *segments.Collection, meta *segcorepb.CollectionIndexMeta) error {
+			updatedCollection = collection
+			updatedMeta = meta
+			return nil
+		}).
+		Build()
+	t.Cleanup(func() {
+		patch.UnPatch()
+	})
 
 	err := guard.UpdateIndexMeta(context.Background(), indexes)
 	require.NoError(t, err)
 
-	assert.Equal(t, int64(1), collection.putCollectionID)
-	assert.Equal(t, "coll", collection.putSchema.GetName())
-	require.NotNil(t, collection.putIndexMeta)
-	require.Len(t, collection.putIndexMeta.GetIndexMetas(), 1)
-	assert.Equal(t, int64(100), collection.putIndexMeta.GetIndexMetas()[0].GetFieldID())
-	assert.Equal(t, "vec_idx", collection.putIndexMeta.GetIndexMetas()[0].GetIndexName())
-	require.NotNil(t, collection.putLoadMeta)
-	assert.Equal(t, querypb.LoadType_LoadCollection, collection.putLoadMeta.GetLoadType())
-	assert.Equal(t, int64(1), collection.putLoadMeta.GetCollectionID())
-	assert.Equal(t, "db", collection.putLoadMeta.GetDbName())
-	assert.Equal(t, uint64(9), collection.putLoadMeta.GetSchemaBarrierTs())
-	assert.Equal(t, int64(1), collection.unrefCollection)
-	assert.Equal(t, uint32(1), collection.unrefCount)
+	assert.Same(t, localCollection, updatedCollection)
+	require.Len(t, updatedMeta.GetIndexMetas(), 1)
+	assert.Equal(t, int64(100), updatedMeta.GetIndexMetas()[0].GetFieldID())
+	assert.Equal(t, "vec_idx", updatedMeta.GetIndexMetas()[0].GetIndexName())
+	assert.Zero(t, collection.putCount)
+	assert.Zero(t, collection.unrefCount)
 }
