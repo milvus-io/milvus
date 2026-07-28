@@ -767,6 +767,11 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 
 		tasks, err := m.createTasksForJob(ctx, freshJob)
 		if err != nil {
+			if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
+				log.Info(m.ctx, "async task creation stopped because job is no longer publishable",
+					mlog.Err(err))
+				return
+			}
 			// Non-retriable failures (empty source, zero-row source, etc.)
 			// must transition the job to Failed immediately. Otherwise the
 			// checker tick keeps re-running the same explore that will fail
@@ -888,10 +893,9 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		mlog.Int("unchangedFilePaths", ownershipSummary.UnchangedFilePaths))
 
 	// Allocate IDs and build every task before persisting the plan. This branch
-	// does not have the catalog batch update used on master, so task records are
-	// saved first and the ordered task IDs are published afterward as the commit
-	// marker. A partial save therefore remains unpublished and is ignored by
-	// scheduling, aggregation, and recovery.
+	// does not have the catalog batch update used on master, so AddTasksToJob
+	// holds the job and task locks while saving task records sequentially and
+	// publishes the ordered task IDs last as the commit marker.
 	rawTasks := make([]*datapb.ExternalCollectionRefreshTask, 0, len(taskPlans))
 	for _, plan := range taskPlans {
 		taskID, err := m.allocator.AllocID(ctx)
@@ -925,17 +929,19 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		rawTasks = append(rawTasks, task)
 	}
 
-	taskIDs := make([]int64, 0, len(rawTasks))
-	for _, task := range rawTasks {
-		if err = m.refreshMeta.AddTask(task); err != nil {
-			log.Warn(ctx, "failed to add task to meta", mlog.Err(err))
-			return nil, err
+	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
+		if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
+			latestJob := m.refreshMeta.GetJob(job.GetJobId())
+			if latestJob == nil ||
+				latestJob.GetState() == indexpb.JobState_JobStateFinished ||
+				latestJob.GetState() == indexpb.JobState_JobStateFailed {
+				// A terminal transition may have cleaned the job directory while
+				// Explore was still writing. Re-run the idempotent cleanup after the
+				// definitive pre-write rejection to remove any late manifest.
+				m.cleanupExploreTempForJob(job.GetJobId())
+			}
 		}
-		taskIDs = append(taskIDs, task.GetTaskId())
-	}
-
-	if err = m.refreshMeta.PublishTaskPlan(job.GetJobId(), taskIDs); err != nil {
-		log.Warn(ctx, "failed to publish task plan", mlog.Err(err))
+		log.Warn(ctx, "failed to add tasks to job", mlog.Err(err))
 		return nil, err
 	}
 

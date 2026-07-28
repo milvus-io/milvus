@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -32,6 +33,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// errExternalRefreshTaskPlanNotPublishable is an in-process control-flow
+// signal for task plans rejected before any catalog write is attempted.
+// createTasksForJob uses it to distinguish a definitive rejection from an
+// ambiguous catalog error, where deleting the Explore manifest could break a
+// plan that was committed despite the client observing an error.
+var errExternalRefreshTaskPlanNotPublishable = errors.New("external refresh task plan is not publishable")
 
 // externalCollectionRefreshMeta manages both Job and Task metadata for external collection refresh.
 // Job represents user-initiated refresh operations (API level), while Task represents
@@ -457,27 +465,73 @@ func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress 
 	return err
 }
 
-// PublishTaskPlan commits the complete ordered task list after every task
-// record has been persisted. An empty job task list is the unpublished state.
-func (m *externalCollectionRefreshMeta) PublishTaskPlan(jobID int64, taskIDs []int64) error {
-	_, err := m.mutateJob(jobID, "publish external refresh task plan", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
-		if job.GetState() != indexpb.JobState_JobStateInit {
-			return false, merr.WrapErrServiceInternalMsg(
-				"cannot publish external refresh task plan for job %d in state %s",
-				jobID,
-				job.GetState().String(),
-			)
+// AddTasksToJob persists task records first and the job task list last as the
+// publication marker. The 3.0 catalog does not support master's composite
+// update API, so the job and task locks are held across the pre-write guards,
+// sequential task saves, and final job save. A partial catalog write therefore
+// remains unpublished, and in-memory state changes only after the job save
+// succeeds.
+func (m *externalCollectionRefreshMeta) AddTasksToJob(jobID int64, tasks []*datapb.ExternalCollectionRefreshTask) error {
+	job, ok := m.jobs.Get(jobID)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+	}
+
+	m.jobLock.Lock(job.GetCollectionId())
+	defer m.jobLock.Unlock(job.GetCollectionId())
+	m.taskLock.Lock(jobID)
+	defer m.taskLock.Unlock(jobID)
+
+	// Re-fetch after lock so the persisted job carries the freshest TaskIds.
+	job, ok = m.jobs.Get(jobID)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+	}
+	// This is the production publication boundary. The checks must happen after
+	// re-fetching under jobLock so timeout/failure and publication are ordered:
+	// whichever acquires the lock first wins, and a late Explore result cannot
+	// append tasks to a terminal or already-published job.
+	if job.GetState() != indexpb.JobState_JobStateInit {
+		return merr.Wrapf(
+			errExternalRefreshTaskPlanNotPublishable,
+			"cannot publish external refresh task plan for job %d in state %s",
+			jobID,
+			job.GetState().String(),
+		)
+	}
+	if len(tasks) == 0 {
+		return merr.Wrapf(errExternalRefreshTaskPlanNotPublishable, "cannot publish empty task plan for job %d", jobID)
+	}
+	if len(job.GetTaskIds()) > 0 {
+		return merr.Wrapf(errExternalRefreshTaskPlanNotPublishable, "job %d already has a published task plan", jobID)
+	}
+
+	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+	for _, task := range tasks {
+		if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, task); err != nil {
+			mlog.Warn(m.ctx, "save task while publishing refresh plan failed",
+				mlog.Int64("jobID", jobID),
+				mlog.Int64("taskID", task.GetTaskId()),
+				mlog.Err(err))
+			return err
 		}
-		if len(taskIDs) == 0 {
-			return false, merr.WrapErrServiceInternalMsg("cannot publish empty task plan for job %d", jobID)
-		}
-		if len(job.GetTaskIds()) > 0 {
-			return false, merr.WrapErrServiceInternalMsg("job %d already has a published task plan", jobID)
-		}
-		job.TaskIds = append([]int64(nil), taskIDs...)
-		return false, nil
-	})
-	return err
+		cloneJob.TaskIds = append(cloneJob.TaskIds, task.GetTaskId())
+	}
+
+	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
+		mlog.Warn(m.ctx, "publish external refresh task plan failed",
+			mlog.Int64("jobID", jobID),
+			mlog.Err(err))
+		return err
+	}
+
+	for _, task := range tasks {
+		m.tasks.Insert(task.GetTaskId(), task)
+		m.addToJobTasks(task)
+	}
+	m.jobs.Insert(jobID, cloneJob)
+	m.addToCollectionJobs(cloneJob)
+	return nil
 }
 
 // DropJob removes a job and all its associated tasks

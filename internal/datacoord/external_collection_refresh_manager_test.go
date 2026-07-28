@@ -370,6 +370,7 @@ func TestCreateTasksForJob_PartialPersistenceIsUnpublished(t *testing.T) {
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments:    NewSegmentsInfo(),
 	}
+	cm := &recordingChunkManager{}
 	mgr := NewExternalCollectionRefreshManager(
 		ctx,
 		mt,
@@ -379,7 +380,7 @@ func TestCreateTasksForJob_PartialPersistenceIsUnpublished(t *testing.T) {
 		nil,
 		testCollectionGetter(mt),
 		nil,
-		nil,
+		cm,
 	).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
@@ -403,8 +404,74 @@ func TestCreateTasksForJob_PartialPersistenceIsUnpublished(t *testing.T) {
 	tasks, err := mgr.createTasksForJob(ctx, job)
 	assert.ErrorContains(t, err, "save second task failed")
 	assert.Empty(t, tasks)
-	assert.Len(t, refreshMeta.GetTasksByJobID(jobID), 1)
+	assert.Equal(t, 2, saveCalls)
+	assert.Empty(t, refreshMeta.GetTasksByJobID(jobID))
 	assert.Empty(t, refreshMeta.GetJob(jobID).GetTaskIds())
+	prefixes, removes := cm.snapshot()
+	assert.Empty(t, prefixes)
+	assert.Empty(t, removes)
+}
+
+func TestCreateTasksForJob_TerminalJobRejectsLatePlanAndCleansExplore(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	const (
+		jobID        = int64(1001)
+		collectionID = int64(100)
+	)
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	staleJob := &datapb.ExternalCollectionRefreshJob{
+		JobId:        jobID,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddJob(staleJob))
+	applied, err := refreshMeta.UpdateJobState(jobID, indexpb.JobState_JobStateFailed, "timeout")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+	}
+	cm := &recordingChunkManager{}
+	mgr := NewExternalCollectionRefreshManager(
+		ctx,
+		mt,
+		newStubScheduler(),
+		&stubAllocator{nextID: 2000},
+		refreshMeta,
+		nil,
+		testCollectionGetter(mt),
+		nil,
+		cm,
+	).(*externalCollectionRefreshManager)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+	saveCalls := 0
+	mockSaveTask := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+		To(func(_ context.Context, _ *datapb.ExternalCollectionRefreshTask) error {
+			saveCalls++
+			return nil
+		}).Build()
+	defer mockSaveTask.UnPatch()
+
+	tasks, err := mgr.createTasksForJob(ctx, staleJob)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
+	assert.Empty(t, tasks)
+	assert.Zero(t, saveCalls)
+	assert.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+	assert.Empty(t, refreshMeta.GetJob(jobID).GetTaskIds())
+	prefixes, removes := cm.snapshot()
+	assert.Equal(t, []string{"__explore_temp__/coord_1001/"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_1001"}, removes)
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
