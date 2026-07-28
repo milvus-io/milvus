@@ -1308,3 +1308,27 @@ func TestValidateImportRequest_L0ImportAlsoGatedByTheSwitch(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrImportFailed)
 	assert.Contains(t, err.Error(), "enableBinlogImport")
 }
+
+// TestValidateImportRequest_RejectsDuplicateOptionKeys guards the bypass found
+// by adversarial review on milvus#51894: every check reads options as a
+// repeated KV (first match wins) while the broadcast body folds them into a map
+// (last value wins), so [{backup,false},{backup,true}] used to validate as an
+// ordinary import -- skipping the ImportBinlog privilege check and the
+// enableBinlogImport switch -- and then execute as a binlog import. The ack
+// side deliberately does not re-check that switch, so the front gate is the
+// only gate and it must not be splittable.
+func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
+	paramtable.Init()
+
+	s := &Server{}
+
+	err := s.validateImportRequest(context.Background(),
+		[]*msgpb.ImportFile{{Paths: []string{"staging/a.json"}}},
+		[]*commonpb.KeyValuePair{
+			{Key: "backup", Value: "false"},
+			{Key: "backup", Value: "true"},
+		})
+
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "backup")
+}
