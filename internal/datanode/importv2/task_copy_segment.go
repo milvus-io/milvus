@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -87,9 +86,18 @@ type CopySegmentTask struct {
 	manager        TaskManager                         // Task manager for state updates and coordination
 	cm             storage.ChunkManager                // ChunkManager for file copy operations
 
-	// Cleanup tracking: records all successfully copied files for cleanup on failure
-	copiedFilesMu sync.Mutex // Protects copiedFiles for concurrent segment copies
-	copiedFiles   []string   // List of all successfully copied file paths
+	runtime *copySegmentRuntime // Shared by every TaskManager clone
+}
+
+// copySegmentRuntime contains execution ownership that must survive metadata
+// clones. Abort uses the same object as all submitted copy closures, so it can
+// prevent new work, wait for every accepted closure, and then clean the final
+// complete set of outputs.
+type copySegmentRuntime struct {
+	mu          sync.Mutex
+	copiedFiles []string
+	wg          sync.WaitGroup
+	aborted     bool
 }
 
 // NewCopySegmentTask creates a new copy segment task from a DataCoord request.
@@ -168,6 +176,7 @@ func NewCopySegmentTask(
 		req:            req,
 		manager:        manager,
 		cm:             cm,
+		runtime:        &copySegmentRuntime{},
 	}
 	return task
 }
@@ -252,6 +261,7 @@ func (t *CopySegmentTask) Clone() Task {
 		req:            t.req,
 		manager:        t.manager,
 		cm:             t.cm,
+		runtime:        t.runtime,
 	}
 }
 
@@ -315,15 +325,23 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	}
 
 	// Step 3: Submit all segment pairs to execution pool for parallel processing
+	t.runtime.mu.Lock()
+	if t.runtime.aborted {
+		t.runtime.mu.Unlock()
+		return nil
+	}
+	t.runtime.wg.Add(len(sources))
 	futures := make([]*conc.Future[any], 0, len(sources))
 	for i := range sources {
 		source := sources[i]
 		target := targets[i]
 		future := GetExecPool().Submit(func() (any, error) {
+			defer t.runtime.wg.Done()
 			return t.copySingleSegment(source, target)
 		})
 		futures = append(futures, future)
 	}
+	t.runtime.mu.Unlock()
 
 	return futures
 }
@@ -435,9 +453,9 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 // Parameters:
 //   - files: List of successfully copied file paths to record
 func (t *CopySegmentTask) recordCopiedFiles(files []string) {
-	t.copiedFilesMu.Lock()
-	defer t.copiedFilesMu.Unlock()
-	t.copiedFiles = append(t.copiedFiles, files...)
+	t.runtime.mu.Lock()
+	defer t.runtime.mu.Unlock()
+	t.runtime.copiedFiles = append(t.runtime.copiedFiles, files...)
 }
 
 // CleanupCopiedFiles removes all copied files for failed tasks.
@@ -458,24 +476,29 @@ func (t *CopySegmentTask) recordCopiedFiles(files []string) {
 //   - Without cleanup, storage leaks accumulate over time
 //
 // Error handling:
-//   - Cleanup failure is logged but doesn't prevent task removal
-//   - Best-effort cleanup: some files may remain if deletion fails
-//   - 30-second timeout prevents cleanup from blocking indefinitely
+//   - Abort uses cleanupCopiedFiles and propagates deletion failure, so the
+//     task remains registered and a later Drop RPC can retry.
+//   - This compatibility wrapper logs the error for older direct callers.
 //
 // Idempotency:
 //   - Safe to call multiple times (operation is idempotent)
 //   - Subsequent calls will attempt to delete same files again
 func (t *CopySegmentTask) CleanupCopiedFiles() {
+	if err := t.cleanupCopiedFiles(context.Background()); err != nil {
+		mlog.Error(t.ctx, "failed to cleanup copied files", mlog.Int64("taskID", t.taskID), mlog.Err(err))
+	}
+}
+
+func (t *CopySegmentTask) cleanupCopiedFiles(ctx context.Context) error {
 	// Step 1: Copy file list under lock (avoid holding lock during I/O)
-	t.copiedFilesMu.Lock()
-	files := make([]string, len(t.copiedFiles))
-	copy(files, t.copiedFiles)
-	t.copiedFilesMu.Unlock()
+	t.runtime.mu.Lock()
+	files := append([]string(nil), t.runtime.copiedFiles...)
+	t.runtime.mu.Unlock()
 
 	// Step 2: Early return if no files to cleanup
 	if len(files) == 0 {
 		mlog.Info(t.ctx, "no files to cleanup", mlog.Int64("taskID", t.taskID))
-		return
+		return nil
 	}
 
 	mlog.Info(t.ctx, "cleaning up copied files for failed task",
@@ -483,21 +506,32 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 		mlog.Int64("jobID", t.jobID),
 		mlog.Int("fileCount", len(files)))
 
-	// Step 3: Delete all copied files with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	if err := t.cm.MultiRemove(ctx, files); err != nil {
-		// Cleanup failure is logged but doesn't block task removal
 		mlog.Error(t.ctx, "failed to cleanup copied files",
 			mlog.Int64("taskID", t.taskID),
 			mlog.Int64("jobID", t.jobID),
 			mlog.Int("fileCount", len(files)),
 			mlog.Err(err))
+		return err
 	} else {
 		mlog.Info(t.ctx, "successfully cleaned up copied files",
 			mlog.Int64("taskID", t.taskID),
 			mlog.Int64("jobID", t.jobID),
 			mlog.Int("fileCount", len(files)))
 	}
+	return nil
+}
+
+// Abort prevents submission of new copy operations, cancels in-flight I/O,
+// joins every accepted copy closure, and only then removes all recorded output.
+// The task must remain in TaskManager when this returns an error so a later RPC
+// can retry cleanup with the same shared runtime state.
+func (t *CopySegmentTask) Abort(ctx context.Context) error {
+	t.runtime.mu.Lock()
+	t.runtime.aborted = true
+	t.cancel()
+	t.runtime.mu.Unlock()
+
+	t.runtime.wg.Wait()
+	return t.cleanupCopiedFiles(ctx)
 }

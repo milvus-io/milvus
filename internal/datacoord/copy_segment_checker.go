@@ -165,6 +165,8 @@ func (c *copySegmentChecker) Start() {
 					c.checkPendingJob(job)
 				case datapb.CopySegmentJobState_CopySegmentJobExecuting:
 					c.checkCopyingJob(job)
+				case datapb.CopySegmentJobState_CopySegmentJobPublishing:
+					c.retryPublishingJob(job)
 				case datapb.CopySegmentJobState_CopySegmentJobFailed:
 					c.checkFailedJob(job)
 				}
@@ -179,6 +181,16 @@ func (c *copySegmentChecker) Start() {
 			c.LogTaskStats()
 		}
 	}
+}
+
+func (c *copySegmentChecker) retryPublishingJob(job CopySegmentJob) {
+	var totalRows int64
+	for _, mapping := range job.GetIdMappings() {
+		if segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId()); segment != nil {
+			totalRows += segment.GetNumOfRows()
+		}
+	}
+	c.finishJob(job, totalRows)
 }
 
 // Close stops the checker gracefully.
@@ -576,9 +588,24 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	// Importing. NewCopySegmentMeta also reconciles active/failed jobs before the
 	// server becomes healthy, covering a crash between etcd batches for restores
 	// larger than metastore.maxEtcdTxnNum.
-	if current := c.copyMeta.GetJob(c.ctx, job.GetJobId()); current == nil || isTerminalCopyJobState(current.GetState()) {
-		log.Info(c.ctx, "skip finishing copy segment job: already in terminal state, leaving segment cleanup to the inspector")
+	current := c.copyMeta.GetJob(c.ctx, job.GetJobId())
+	if current == nil || (current.GetState() != datapb.CopySegmentJobState_CopySegmentJobExecuting &&
+		current.GetState() != datapb.CopySegmentJobState_CopySegmentJobPublishing) {
+		log.Info(c.ctx, "skip finishing copy segment job: job is no longer publishable")
 		return
+	}
+	if current.GetState() == datapb.CopySegmentJobState_CopySegmentJobExecuting {
+		claimed, err := c.copyMeta.UpdateJobInState(c.ctx, job.GetJobId(),
+			datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobPublishing))
+		if err != nil {
+			log.Error(c.ctx, "failed to persist copy segment publication claim", mlog.Err(err))
+			return
+		}
+		if !claimed {
+			log.Info(c.ctx, "skip finishing copy segment job: publication outcome was claimed concurrently")
+			return
+		}
 	}
 
 	operators := make([]UpdateOperator, 0, len(targetSegmentIDs)*2)
@@ -595,39 +622,18 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		}
 	}
 
-	// Step 3: Publish every target in one meta update. On error the in-memory
-	// view is unchanged, so no subset becomes visible; fail the job and let the
-	// inspector drop the targets. Startup reconciliation handles a process crash
-	// after only some underlying etcd batches were persisted.
-	if err := c.meta.UpdateSegmentsInfo(c.ctx, operators...); err != nil {
-		reason := fmt.Sprintf("failed to publish %d target segments: %v", len(targetSegmentIDs), err)
-		log.Error(c.ctx, "finishJob: failing job because target publication failed",
-			mlog.Int("totalSegments", len(targetSegmentIDs)), mlog.Err(err))
-		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(reason)); err != nil {
-			log.Error(c.ctx, "failed to update job state to Failed after publication failure", mlog.Err(err))
-		}
-		return
-	}
-	log.Info(c.ctx, "published all copy segment targets",
-		mlog.Int("targetSegments", len(targetSegmentIDs)))
-
-	// Step 4: Update job state to Completed
+	// Step 3: Persist every target update and Completed in one composite update.
+	// Publishing is an outcome fence: write failures leave the job there for a
+	// retry and can never turn a partially published success into Failed.
 	completeTs := uint64(time.Now().UnixNano())
-	applied, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
-		UpdateCopyJobCompleteTs(completeTs),
-		UpdateCopyJobTotalRows(totalRows))
+	applied, err := c.copyMeta.FinalizeJobPublication(c.ctx, job.GetJobId(), totalRows, completeTs, operators...)
 	if err != nil {
-		log.Error(c.ctx, "failed to update job state to Completed", mlog.Err(err))
+		log.Error(c.ctx, "finishJob: target publication failed; retrying from Publishing",
+			mlog.Int("totalSegments", len(targetSegmentIDs)), mlog.Err(err))
 		return
 	}
 	if !applied {
-		// A concurrent path already committed a terminal outcome (e.g. the job
-		// failed or timed out while segments were being flushed); this job did
-		// NOT complete, so don't report completion metrics/logs for it.
-		log.Info(c.ctx, "skip completing copy segment job: already in terminal state")
+		log.Info(c.ctx, "skip completing copy segment job: publication state changed")
 		return
 	}
 

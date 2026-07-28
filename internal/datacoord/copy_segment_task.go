@@ -325,7 +325,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// is deliberately before the RPC: once the worker has accepted the task,
 	// letting the InProgress write through is what gives DropTaskOnWorker a
 	// NodeID to clean up with.
-	if job == nil || isTerminalCopyJobState(job.GetState()) {
+	if job == nil || !isActiveCopyJobState(job.GetState()) {
 		mlog.Info(context.TODO(), "skip dispatching copy segment task: parent job is no longer active",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 		return
@@ -387,7 +387,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 // metadata moved elsewhere and therefore cannot be retried through NodeID.
 // ErrNodeNotFound is success-equivalent: the worker-side task is already gone.
 func dropUntrackedCopySegmentTask(cluster session.Cluster, nodeID, taskID int64) {
-	err := cluster.DropCopySegment(nodeID, taskID)
+	err := cluster.DropCopySegment(context.TODO(), nodeID, taskID, true)
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		mlog.Warn(context.TODO(), "failed to drop untracked copy segment task on datanode",
 			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID), mlog.Err(err))
@@ -593,14 +593,21 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 //     what eventually lets checkGC reclaim the task and its job.
 //   - Non-critical operation (task already finished)
 func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
+	t.dropTaskOnWorker(context.TODO(), cluster)
+}
+
+func (t *copySegmentTask) dropTaskOnWorker(ctx context.Context, cluster session.Cluster) {
 	nodeID := t.GetNodeId()
 	if nodeID == NullNodeID {
 		return
 	}
 	// ErrNodeNotFound means the node (and the in-memory task with it) is already
 	// gone — the drop's goal is achieved, proceed to clear the assignment.
-	if err := cluster.DropCopySegment(nodeID, t.GetTaskId()); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		mlog.Warn(context.TODO(), "failed to drop copy segment task on datanode",
+	job := t.copyMeta.GetJob(ctx, t.GetJobId())
+	abort := t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed ||
+		job == nil || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
+	if err := cluster.DropCopySegment(ctx, nodeID, t.GetTaskId(), abort); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		mlog.Warn(ctx, "failed to drop copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
@@ -608,13 +615,12 @@ func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
 	// reclaim the task after retention — GC skips any task still assigned to a
 	// node, and nothing else clears the assignment of a terminal task. Mirrors
 	// DropImportTask in the import pipeline; state/reason are not touched.
-	if updateErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
-		UpdateCopyTaskNodeID(NullNodeID)); updateErr != nil {
-		mlog.Warn(context.TODO(), "failed to clear copy segment task node assignment after drop",
+	if _, updateErr := t.copyMeta.ClearTaskNodeAssignment(ctx, t.GetTaskId(), nodeID); updateErr != nil {
+		mlog.Warn(ctx, "failed to clear copy segment task node assignment after drop",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(updateErr))...)
 		return
 	}
-	mlog.Info(context.TODO(), "drop copy segment task on datanode done",
+	mlog.Info(ctx, "drop copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 }
 

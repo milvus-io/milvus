@@ -393,8 +393,8 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_DropDoesNotBlockInspectL
 
 	release := make(chan struct{})
 	entered := make(chan struct{})
-	s.cluster.EXPECT().DropCopySegment(int64(20), int64(1030)).RunAndReturn(
-		func(int64, int64) error {
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(20), int64(1030), mock.Anything).RunAndReturn(
+		func(context.Context, int64, int64, bool) error {
 			close(entered)
 			<-release
 			return nil
@@ -428,13 +428,37 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_DropDoesNotBlockInspectL
 	s.inspector.processTerminal(task)
 }
 
+func (s *CopySegmentInspectorSuite) TestCloseCancelsDropAndFencesMetadataCommit() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	entered := make(chan struct{})
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(21), int64(1031), mock.Anything).
+		RunAndReturn(func(ctx context.Context, _ int64, _ int64, _ bool) error {
+			close(entered)
+			<-ctx.Done()
+			return ctx.Err()
+		}).Once()
+
+	task := s.addTerminalTaskWithAssignment(1031, 21,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	s.inspector.processTerminal(task)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		s.Fail("drop was never dispatched")
+	}
+
+	s.inspector.Close()
+	s.EqualValues(21, s.copyMeta.GetTask(context.Background(), 1031).GetNodeId(),
+		"an old inspector must not clear metadata after Close")
+}
+
 func (s *CopySegmentInspectorSuite) TestProcessTerminal_PoolSaturationDoesNotBlock() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 
 	release := make(chan struct{})
 	entered := make(chan struct{}, copySegmentDropConcurrency)
-	s.cluster.EXPECT().DropCopySegment(mock.Anything, mock.Anything).RunAndReturn(
-		func(int64, int64) error {
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, int64, int64, bool) error {
 			entered <- struct{}{}
 			<-release
 			return nil
@@ -463,7 +487,7 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_PoolSaturationDoesNotBlo
 	s.waitDropsSettled()
 
 	// Once capacity returns, the ninth task must be eligible for the next round.
-	s.cluster.EXPECT().DropCopySegment(int64(108), int64(2008)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(108), int64(2008), mock.Anything).Return(nil).Once()
 	s.inspector.processTerminal(ninth)
 	s.waitDropsSettled()
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), ninth.GetTaskId()).GetNodeId())
@@ -485,7 +509,7 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesDropUntilAssignme
 	// Round 1: the drop hits an ambiguous transport error (DataNode rolling
 	// restart). The assignment must be kept — clearing it could orphan a live
 	// worker-side task.
-	s.cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything).
 		Return(errors.New("rpc timeout")).Once()
 	s.inspector.processTerminal(task)
 	s.waitDropsSettled()
@@ -493,7 +517,7 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesDropUntilAssignme
 
 	// Round 2: the node is reachable again, the drop succeeds and the
 	// assignment is cleared, unblocking checkGC.
-	s.cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything).Return(nil).Once()
 	s.inspector.processTerminal(task)
 	s.waitDropsSettled()
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
@@ -517,13 +541,13 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesPersistFailure() 
 	task := s.addTerminalTaskWithAssignment(1002, 11,
 		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
 
-	s.cluster.EXPECT().DropCopySegment(int64(11), int64(1002)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(11), int64(1002), mock.Anything).Return(nil).Once()
 	s.inspector.processTerminal(task)
 	s.waitDropsSettled()
 	s.EqualValues(11, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
 
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
-	s.cluster.EXPECT().DropCopySegment(int64(11), int64(1002)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(11), int64(1002), mock.Anything).Return(nil).Once()
 	s.inspector.processTerminal(task)
 	s.waitDropsSettled()
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
@@ -754,8 +778,8 @@ func (s *CopySegmentInspectorSuite) TestInspect_RetriesDropForTerminalTasks() {
 	s.addTerminalTaskWithAssignment(1005, 13,
 		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
 
-	s.cluster.EXPECT().DropCopySegment(int64(12), int64(1004)).Return(nil).Once()
-	s.cluster.EXPECT().DropCopySegment(int64(13), int64(1005)).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(12), int64(1004), mock.Anything).Return(nil).Once()
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(13), int64(1005), mock.Anything).Return(nil).Once()
 
 	s.inspector.inspect()
 	s.waitDropsSettled()

@@ -943,6 +943,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment() {
 		dropReq := &datapb.DropCopySegmentRequest{
 			TaskID: 400,
 			JobID:  100,
+			Abort:  true,
 		}
 
 		status, err := s.node.DropCopySegment(s.ctx, dropReq)
@@ -1010,6 +1011,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
 		dropReq := &datapb.DropCopySegmentRequest{
 			TaskID: 500,
 			JobID:  200,
+			Abort:  true,
 		}
 
 		status, err = s.node.DropCopySegment(s.ctx, dropReq)
@@ -1312,6 +1314,7 @@ func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
 				taskcommon.ClusterIDKey: "cluster-0",
 				taskcommon.TypeKey:      taskcommon.CopySegment,
 				taskcommon.TaskIDKey:    "701",
+				taskcommon.TaskAbortKey: "true",
 			},
 		}
 

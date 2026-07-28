@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1820,6 +1822,7 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 
 func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	ctx := context.Background()
+	sourceManifest := packed.MarshalManifestPath("files/insert_log/100/10/11", 7)
 
 	snapshotData := &SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
@@ -1830,7 +1833,8 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 			SegmentLevel:   datapb.SegmentLevel_L1,
 			ChannelName:    "src-ch",
 			NumOfRows:      123,
-			StorageVersion: 3,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   sourceManifest,
 			IsSorted:       true,
 		}},
 	}
@@ -1843,7 +1847,11 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		assert.Equal(t, "dst-ch", seg.GetInsertChannel())
 		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
 		assert.True(t, seg.GetIsImporting())
-		assert.Equal(t, int64(3), seg.GetStorageVersion())
+		assert.Equal(t, int64(storage.StorageV3), seg.GetStorageVersion())
+		basePath, version, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+		require.NoError(t, err)
+		assert.Equal(t, "files/insert_log/200/20/2001", basePath)
+		assert.Equal(t, int64(7), version)
 		return nil
 	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
@@ -1877,6 +1885,97 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7))
 	require.NoError(t, err)
 	assert.True(t, addJobCalled)
+}
+
+func TestDeriveCopySegmentTargetManifestPath(t *testing.T) {
+	t.Run("non V3 does not require manifest", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV2,
+		}, 200, 20, 2001)
+		require.NoError(t, err)
+		assert.Empty(t, manifest)
+	})
+
+	t.Run("V3 requires manifest", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+		}, 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "requires manifest_path")
+	})
+
+	t.Run("V3 rejects malformed manifest", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "not-json",
+		}, 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "failed to unmarshal manifest path")
+	})
+
+	t.Run("V3 rejects unsupported base path", func(t *testing.T) {
+		manifest, err := deriveCopySegmentTargetManifestPath(&datapb.SegmentDescription{
+			SegmentId:      11,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("external/100/segments/11", 7),
+		}, 200, 20, 2001)
+		require.Error(t, err)
+		assert.Empty(t, manifest)
+		assert.Contains(t, err.Error(), "failed to derive manifest base path")
+	})
+}
+
+func TestCreateRestoreJob_RejectsV3WithoutManifestBeforePreRegistration(t *testing.T) {
+	ctx := context.Background()
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId:      11,
+			PartitionId:    10,
+			SegmentLevel:   datapb.SegmentLevel_L1,
+			ChannelName:    "src-ch",
+			StorageVersion: storage.StorageV3,
+		}},
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}))
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocN(int64(1)).Return(int64(2001), int64(2002), nil)
+
+	addJobCalled := false
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+			addJobCalled = true
+			return nil
+		}).Build()
+	defer mAddJob.UnPatch()
+
+	sm := &snapshotManager{
+		meta:            mt,
+		allocator:       mockAlloc,
+		copySegmentMeta: &copySegmentMeta{},
+	}
+	err := sm.createRestoreJob(
+		ctx,
+		200,
+		map[string]string{"src-ch": "dst-ch"},
+		map[int64]int64{10: 20},
+		snapshotData,
+		42,
+		7,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires manifest_path")
+	assert.False(t, addJobCalled)
+	assert.Nil(t, mt.GetSegment(ctx, 2001), "invalid V3 input must fail before target metadata is persisted")
 }
 
 // TestSnapshotManager_HasActivePins_Delegation verifies the manager-layer wrapper

@@ -122,6 +122,29 @@ func TestCatalog_Update_UpdateSegmentEncodingMatchesLegacy(t *testing.T) {
 	assert.Len(t, compositeSaves, 1)
 }
 
+func TestCatalog_Update_CopySegmentPublicationEncoding(t *testing.T) {
+	seg := &datapb.SegmentInfo{ID: 11, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed}
+	job := &datapb.CopySegmentJob{JobId: 7, State: datapb.CopySegmentJobState_CopySegmentJobCompleted}
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, removals)
+			assert.Contains(t, saves, buildSegmentPath(1, 2, 11))
+			jobValue, ok := saves[buildCopySegmentJobKey(7)]
+			assert.True(t, ok)
+			persisted := &datapb.CopySegmentJob{}
+			assert.NoError(t, proto.Unmarshal([]byte(jobValue), persisted))
+			assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, persisted.GetState())
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	assert.NoError(t, c.Update(context.TODO(),
+		metastore.UpdateSegment(seg),
+		metastore.SaveCopySegmentJob(job)))
+}
+
 // TestCatalog_Update_AlterSegmentEncodingMatchesLegacy proves AlterSegment
 // (the compaction compactFrom path) writes the same kvs as the legacy
 // AlterSegments - including the handleDroppedSegment GC-compat binlog write

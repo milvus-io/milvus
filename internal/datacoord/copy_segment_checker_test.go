@@ -449,7 +449,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	// Create segments
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -922,7 +922,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segments in Importing state
 	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
@@ -1098,7 +1098,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 	// Setup mocks: SaveCopySegmentJob is called once for AddJob, once for finishJob update
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Setup: Create job in Executing state with all tasks completed
@@ -1204,7 +1204,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
 }
 
-func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
+func (s *CopySegmentCheckerSuite) TestFinishJob_PublicationFailureStaysPublishing() {
 	snapshotName := "test_snapshot_flush_fail"
 	jobID := int64(600)
 
@@ -1212,8 +1212,9 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
-	// AlterSegments returns error to simulate atomic publication failure.
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
+	// The composite publication fails before its Completed commit marker.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("etcd unavailable")).Once()
 
 	// Setup: Create job in Executing state
 	job := &copySegmentJob{
@@ -1266,20 +1267,30 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	task.task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
-	// Execute: Check copying job - publication will fail due to AlterSegments error
+	// Execute: Check copying job - publication will fail after success is claimed.
 	s.checker.checkCopyingJob(job)
 
-	// Verify: Job marked as Failed (not Completed) and the target remains hidden.
+	// Verify: Publishing is an outcome fence and the target remains hidden.
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
-	s.Contains(updatedJob.GetReason(), "failed to publish")
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobPublishing, updatedJob.GetState())
 	for _, segmentID := range []int64{101, 102} {
 		updatedSegment := s.meta.GetSegment(context.TODO(), segmentID)
 		s.Equal(commonpb.SegmentState_Importing, updatedSegment.GetState())
 		s.True(updatedSegment.GetIsImporting())
 	}
 
-	// Verify: Ref count is released even on failure
+	// A later checker round retries from Publishing and commits visibility plus
+	// Completed together; no task work is re-run.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Once()
+	s.checker.retryPublishingJob(updatedJob)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted,
+		s.copyMeta.GetJob(context.TODO(), jobID).GetState())
+	for _, segmentID := range []int64{101, 102} {
+		updatedSegment := s.meta.GetSegment(context.TODO(), segmentID)
+		s.Equal(commonpb.SegmentState_Flushed, updatedSegment.GetState())
+		s.False(updatedSegment.GetIsImporting())
+	}
 }
 
 // TestFinishJob_SkipsWhenJobAlreadyTerminal: finishJob acting on a stale
@@ -1327,17 +1338,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_PublishesAllTargetSegments() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.MatchedBy(func(segments []*datapb.SegmentInfo) bool {
-		if len(segments) != 2 {
-			return false
-		}
-		ids := []int64{segments[0].GetID(), segments[1].GetID()}
-		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-		return ids[0] == 3101 && ids[1] == 3102 &&
-			segments[0].GetState() == commonpb.SegmentState_Flushed &&
-			segments[1].GetState() == commonpb.SegmentState_Flushed &&
-			!segments[0].GetIsImporting() && !segments[1].GetIsImporting()
-	})).Return(nil).Once()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	for _, segID := range []int64{3101, 3102} {
 		s.NoError(s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{

@@ -1220,6 +1220,7 @@ message DropCopySegmentRequest {
   string clusterID = 1;
   int64 jobID = 2;
   int64 taskID = 3;
+  bool abort = 4;  // Cancel execution and remove copied output before dropping the task
 }
 
 // VectorScalarIndexInfo contains metadata for copied vector/scalar indexes
@@ -1288,6 +1289,7 @@ enum CopySegmentJobState {
   CopySegmentJobExecuting = 2; // Executing copy segment tasks
   CopySegmentJobCompleted = 3; // All done
   CopySegmentJobFailed = 4;    // Failed
+  CopySegmentJobPublishing = 5; // Success claimed; atomically publishing target segments
 }
 
 // CopySegmentTaskState defines the state machine for copy segment tasks

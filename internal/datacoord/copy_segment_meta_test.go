@@ -83,6 +83,30 @@ func TestCopySegmentMeta(t *testing.T) {
 	suite.Run(t, new(CopySegmentMetaSuite))
 }
 
+func TestNewCopySegmentMeta_ReconcilesPublishingTargets(t *testing.T) {
+	ctx := context.Background()
+	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 901, CollectionID: 1, PartitionID: 2,
+		State: commonpb.SegmentState_Flushed, IsImporting: false,
+		InsertChannel: "ch",
+	})
+	assert.NoError(t, catalog.AddSegment(ctx, segment.SegmentInfo))
+	m := &meta{catalog: catalog, segments: NewSegmentsInfo()}
+	m.segments.SetSegment(901, segment)
+	assert.NoError(t, catalog.SaveCopySegmentJob(ctx, &datapb.CopySegmentJob{
+		JobId:      77,
+		State:      datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		IdMappings: []*datapb.CopySegmentIDMapping{{TargetSegmentId: 901}},
+	}))
+
+	_, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+	assert.NoError(t, err)
+	reconciled := m.GetSegment(ctx, 901)
+	assert.Equal(t, commonpb.SegmentState_Importing, reconciled.GetState())
+	assert.True(t, reconciled.GetIsImporting())
+}
+
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
@@ -1272,6 +1296,27 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_SkipsTerminalJob(
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, saved.GetState())
 	s.Empty(saved.GetReason())
 	s.Equal(int64(42), saved.GetTotalRows())
+}
+
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_SkipsPublishingJob() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        702,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	applied, err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 702,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("late failure"))
+	s.NoError(err)
+	s.False(applied)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		s.copyMeta.GetJob(context.TODO(), 702).GetState())
 }
 
 // TestUpdateJobStateAndReleaseRef_AppliesOnNonTerminalJob is the positive

@@ -1715,7 +1715,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_DoesNotResurrectTerminalTa
 				UpdateCopyTaskReason("sibling failed")))
 			return nil
 		}).Once()
-	cluster.EXPECT().DropCopySegment(int64(10), task.GetTaskId()).Return(nil).Once()
+	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), task.GetTaskId(), mock.Anything).Return(nil).Once()
 
 	task.CreateTaskOnWorker(10, cluster)
 
@@ -1836,14 +1836,14 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ClearNodeAssignmentFailureKe
 	// If clearing the assignment fails to persist, the NodeID must stay so the
 	// orphan is at least visible; state/reason are never touched by the drop.
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything).Return(nil).Once()
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	task.task.Load().NodeId = 10
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 
-	mockUpdate := mockey.Mock((*copySegmentMeta).UpdateTask).
-		Return(errors.New("catalog down")).Build()
+	mockUpdate := mockey.Mock((*copySegmentMeta).ClearTaskNodeAssignment).
+		Return(false, errors.New("catalog down")).Build()
 	defer mockUpdate.UnPatch()
 
 	task.DropTaskOnWorker(cluster)
@@ -1856,7 +1856,7 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ClearsNodeAssignment() {
 	// After a successful worker-side drop the meta NodeID must be cleared,
 	// otherwise checkGC skips the task (and its job) forever.
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
+	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything).Return(nil).Once()
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	task.task.Load().NodeId = 10
@@ -1874,7 +1874,7 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeGoneStillClearsAssignmen
 	// ErrNodeNotFound means the node (and its in-memory task) is already gone:
 	// the drop's goal is achieved, so the assignment must still be cleared.
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
+	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything).
 		Return(merr.WrapErrNodeNotFound(10)).Once()
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
@@ -1894,7 +1894,7 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_OtherErrorKeepsAssignment() 
 	// processTerminal re-runs the drop on every round until it converges — see
 	// TestProcessTerminal_RetriesDropUntilAssignmentCleared.
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
+	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything).
 		Return(errors.New("rpc timeout")).Once()
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)

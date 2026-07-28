@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -94,8 +96,12 @@ type copySegmentInspector struct {
 	// up to DataCoordCfg.RequestTimeoutSeconds (default 600s), and inspect()
 	// walks every job and task in one goroutine, so a single black-holing
 	// DataNode would otherwise freeze dispatch and cleanup for everything else.
-	dropPool     *conc.Pool[struct{}]
-	droppingTask *typeutil.ConcurrentSet[int64] // taskIDs with a drop in flight
+	dropPool        *conc.Pool[struct{}]
+	droppingTask    *typeutil.ConcurrentSet[int64] // taskIDs with a drop in flight
+	dropCtx         context.Context
+	dropCancel      context.CancelFunc
+	dropLifecycleMu sync.RWMutex
+	dropClosed      bool
 
 	closeOnce sync.Once     // Ensures Close is idempotent
 	closeChan chan struct{} // Channel to signal inspector shutdown
@@ -124,6 +130,7 @@ func NewCopySegmentInspector(
 	scheduler task.GlobalScheduler,
 	cluster session.Cluster,
 ) CopySegmentInspector {
+	dropCtx, dropCancel := context.WithCancel(ctx)
 	return &copySegmentInspector{
 		ctx:       ctx,
 		meta:      meta,
@@ -133,6 +140,8 @@ func NewCopySegmentInspector(
 		dropPool: conc.NewPool[struct{}](copySegmentDropConcurrency,
 			conc.WithExpiryDuration(time.Minute), conc.WithNonBlocking(true)),
 		droppingTask: typeutil.NewConcurrentSet[int64](),
+		dropCtx:      dropCtx,
+		dropCancel:   dropCancel,
 		closeChan:    make(chan struct{}),
 	}
 }
@@ -183,11 +192,14 @@ func (s *copySegmentInspector) Start() {
 // Safe to call multiple times (uses sync.Once internally).
 func (s *copySegmentInspector) Close() {
 	s.closeOnce.Do(func() {
+		s.dropLifecycleMu.Lock()
+		s.dropClosed = true
+		s.dropCancel()
 		close(s.closeChan)
-		// Release the drop workers. Not joined: an in-flight DropCopySegment can
-		// still be parked on an unresponsive node for the whole request timeout,
-		// and the drop is retried after restart anyway.
-		s.dropPool.Release()
+		s.dropLifecycleMu.Unlock()
+		if err := s.dropPool.ReleaseTimeout(30 * time.Second); err != nil {
+			mlog.Warn(s.ctx, "timed out draining copy segment drop workers", mlog.Err(err))
+		}
 	})
 }
 
@@ -258,7 +270,7 @@ func (s *copySegmentInspector) inspect() {
 		// target segment it produced must go, including those a sibling task
 		// completed successfully before the failure.
 		jobFailed := job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
-		jobActive := !isTerminalCopyJobState(job.GetState())
+		jobActive := isActiveCopyJobState(job.GetState())
 
 		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
@@ -401,7 +413,13 @@ func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
 		return
 	}
 	taskID := task.GetTaskId()
+	s.dropLifecycleMu.RLock()
+	if s.dropClosed {
+		s.dropLifecycleMu.RUnlock()
+		return
+	}
 	if !s.droppingTask.Insert(taskID) {
+		s.dropLifecycleMu.RUnlock()
 		// A drop from an earlier round is still waiting on this node.
 		return
 	}
@@ -409,9 +427,33 @@ func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
 		WrapCopySegmentTaskLog(task, mlog.FieldNodeID(task.GetNodeId()))...)
 	future := s.dropPool.Submit(func() (struct{}, error) {
 		defer s.droppingTask.Remove(taskID)
-		task.DropTaskOnWorker(s.cluster)
+		nodeID := task.GetNodeId()
+		job := s.copyMeta.GetJob(s.dropCtx, task.GetJobId())
+		abort := task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed ||
+			job == nil || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
+		err := s.cluster.DropCopySegment(s.dropCtx, nodeID, taskID, abort)
+		if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+			mlog.Warn(s.dropCtx, "failed to drop copy segment task on datanode",
+				WrapCopySegmentTaskLog(task, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+			return struct{}{}, nil
+		}
+
+		// Close takes the write side before canceling and draining. A worker that
+		// returns after leadership/lifecycle loss therefore cannot mutate task
+		// metadata. The expected-node condition also rejects a stale clear after
+		// reassignment.
+		s.dropLifecycleMu.RLock()
+		defer s.dropLifecycleMu.RUnlock()
+		if s.dropClosed || s.dropCtx.Err() != nil {
+			return struct{}{}, nil
+		}
+		if _, updateErr := s.copyMeta.ClearTaskNodeAssignment(s.dropCtx, taskID, nodeID); updateErr != nil {
+			mlog.Warn(s.dropCtx, "failed to clear copy segment task node assignment after drop",
+				WrapCopySegmentTaskLog(task, mlog.FieldNodeID(nodeID), mlog.Err(updateErr))...)
+		}
 		return struct{}{}, nil
 	})
+	s.dropLifecycleMu.RUnlock()
 	// A non-blocking ants pool reports saturation by returning an already
 	// completed future with an error. The closure did not run in that case, so
 	// release the in-flight marker here; the next inspection round retries it.

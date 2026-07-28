@@ -173,6 +173,59 @@ func TestBuildDeltaLogPathV3(t *testing.T) {
 	}
 }
 
+func TestReplaceSegmentIDsInPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		sourcePath string
+		expected   string
+		wantErr    bool
+	}{
+		{
+			name:       "insert log base path",
+			sourcePath: "files/insert_log/111/222/333",
+			expected:   "files/insert_log/444/555/666",
+		},
+		{
+			name:       "nested V3 data path",
+			sourcePath: "files/insert_log/111/222/333/_stats/bm25.100/1",
+			expected:   "files/insert_log/444/555/666/_stats/bm25.100/1",
+		},
+		{
+			name:       "other log type",
+			sourcePath: "files/stats_log/111/222/333/100/1",
+			expected:   "files/stats_log/444/555/666/100/1",
+		},
+		{
+			name:       "missing log type",
+			sourcePath: "files/111/222/333",
+			wantErr:    true,
+		},
+		{
+			name:       "truncated path",
+			sourcePath: "files/insert_log/111/222",
+			wantErr:    true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := ReplaceSegmentIDsInPath(test.sourcePath, 444, 555, 666)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if actual != test.expected {
+				t.Fatalf("ReplaceSegmentIDsInPath() = %q, want %q", actual, test.expected)
+			}
+		})
+	}
+}
+
 func TestExtractTextLogFilenames(t *testing.T) {
 	textStatsLogs := map[int64]*datapb.TextIndexStats{
 		100: {

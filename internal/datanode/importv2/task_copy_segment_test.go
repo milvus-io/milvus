@@ -17,9 +17,11 @@
 package importv2
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -492,6 +494,39 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 		assert.Equal(t, 0, len(copyTask.GetPartitionIDs()))
 		assert.Equal(t, 0, len(copyTask.GetSegmentResults()))
 	})
+}
+
+func TestCopySegmentTaskCloneSharesRuntime(t *testing.T) {
+	task := NewCopySegmentTask(&datapb.CopySegmentRequest{TaskID: 300}, NewTaskManager(), mocks.NewChunkManager(t)).(*CopySegmentTask)
+	clone := task.Clone().(*CopySegmentTask)
+	assert.Same(t, task.runtime, clone.runtime)
+	task.recordCopiedFiles([]string{"late-output"})
+	clone.runtime.mu.Lock()
+	defer clone.runtime.mu.Unlock()
+	assert.Equal(t, []string{"late-output"}, clone.runtime.copiedFiles)
+}
+
+func TestCopySegmentTaskAbortWaitsBeforeCleanup(t *testing.T) {
+	cm := mocks.NewChunkManager(t)
+	task := NewCopySegmentTask(&datapb.CopySegmentRequest{JobID: 1, TaskID: 301}, NewTaskManager(), cm).(*CopySegmentTask)
+	release := make(chan struct{})
+	task.runtime.wg.Add(1)
+	go func() {
+		defer task.runtime.wg.Done()
+		<-release
+		task.recordCopiedFiles([]string{"v3/target/_data/late-file"})
+	}()
+
+	cm.EXPECT().MultiRemove(mock.Anything, []string{"v3/target/_data/late-file"}).Return(nil).Once()
+	done := make(chan error, 1)
+	go func() { done <- task.Abort(context.Background()) }()
+	select {
+	case <-done:
+		t.Fatal("Abort returned before the copy closure exited")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	assert.NoError(t, <-done)
 }
 
 func TestCopySegmentTaskGetSegmentResults(t *testing.T) {
@@ -1079,24 +1114,24 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 		task.recordCopiedFiles(files1)
 		task.recordCopiedFiles(files2)
 
-		task.copiedFilesMu.Lock()
-		defer task.copiedFilesMu.Unlock()
+		task.runtime.mu.Lock()
+		defer task.runtime.mu.Unlock()
 
-		assert.Len(t, task.copiedFiles, 4)
-		assert.Contains(t, task.copiedFiles, "10001")
-		assert.Contains(t, task.copiedFiles, "10002")
-		assert.Contains(t, task.copiedFiles, "10003")
-		assert.Contains(t, task.copiedFiles, "10004")
+		assert.Len(t, task.runtime.copiedFiles, 4)
+		assert.Contains(t, task.runtime.copiedFiles, "10001")
+		assert.Contains(t, task.runtime.copiedFiles, "10002")
+		assert.Contains(t, task.runtime.copiedFiles, "10003")
+		assert.Contains(t, task.runtime.copiedFiles, "10004")
 	})
 
 	t.Run("record empty files", func(t *testing.T) {
 		newTask := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
 		newTask.recordCopiedFiles([]string{})
 
-		newTask.copiedFilesMu.Lock()
-		defer newTask.copiedFilesMu.Unlock()
+		newTask.runtime.mu.Lock()
+		defer newTask.runtime.mu.Unlock()
 
-		assert.Empty(t, newTask.copiedFiles)
+		assert.Empty(t, newTask.runtime.copiedFiles)
 	})
 
 	t.Run("concurrent recording", func(t *testing.T) {
@@ -1115,10 +1150,10 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 
 		wg.Wait()
 
-		newTask.copiedFilesMu.Lock()
-		defer newTask.copiedFilesMu.Unlock()
+		newTask.runtime.mu.Lock()
+		defer newTask.runtime.mu.Unlock()
 
-		assert.Len(t, newTask.copiedFiles, 10)
+		assert.Len(t, newTask.runtime.copiedFiles, 10)
 	})
 }
 
@@ -1300,10 +1335,10 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify files were recorded
-		task.copiedFilesMu.Lock()
-		defer task.copiedFilesMu.Unlock()
-		assert.Len(t, task.copiedFiles, 1)
-		assert.Contains(t, task.copiedFiles, "files/insert_log/444/555/666/1/10001")
+		task.runtime.mu.Lock()
+		defer task.runtime.mu.Unlock()
+		assert.Len(t, task.runtime.copiedFiles, 1)
+		assert.Contains(t, task.runtime.copiedFiles, "files/insert_log/444/555/666/1/10001")
 	})
 
 	t.Run("records partial files on failure", func(t *testing.T) {
@@ -1345,8 +1380,8 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.Error(t, err)
 
 		// Verify partial files were still recorded
-		task.copiedFilesMu.Lock()
-		defer task.copiedFilesMu.Unlock()
-		assert.True(t, len(task.copiedFiles) <= 1, "should record file copied before failure")
+		task.runtime.mu.Lock()
+		defer task.runtime.mu.Unlock()
+		assert.True(t, len(task.runtime.copiedFiles) <= 1, "should record file copied before failure")
 	})
 }

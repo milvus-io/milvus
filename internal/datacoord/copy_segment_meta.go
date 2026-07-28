@@ -85,6 +85,7 @@ type CopySegmentMeta interface {
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error)
+	FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, operators ...UpdateOperator) (bool, error)
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -97,6 +98,7 @@ type CopySegmentMeta interface {
 	ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error)
 	TaskAcceptsWorkerResult(ctx context.Context, taskID int64) bool
 	CompleteTaskIfActive(ctx context.Context, taskID int64, completeTs uint64) (bool, error)
+	ClearTaskNodeAssignment(ctx context.Context, taskID, expectedNodeID int64) (bool, error)
 	GetTask(ctx context.Context, taskID int64) CopySegmentTask
 	GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
@@ -554,6 +556,14 @@ func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
 		state == datapb.CopySegmentJobState_CopySegmentJobFailed
 }
 
+// isActiveCopyJobState reports states in which copy work may still fail or
+// time out. Publishing has already claimed the successful outcome and is only
+// allowed to retry its final visibility commit.
+func isActiveCopyJobState(state datapb.CopySegmentJobState) bool {
+	return state == datapb.CopySegmentJobState_CopySegmentJobPending ||
+		state == datapb.CopySegmentJobState_CopySegmentJobExecuting
+}
+
 // UpdateJobStateAndReleaseRef updates job state and unpins the source snapshot
 // if the job transitions to a terminal state (Completed/Failed).
 //
@@ -561,10 +571,10 @@ func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
 // while Job records are retained for audit purposes (3 hours).
 //
 // Terminal-state guard: the update is skipped when the *current* cached job is
-// already terminal. Every caller of this method drives a non-terminal job to
-// Completed/Failed, so a terminal job observed here always means a concurrent
-// path won the race and this caller is acting on a stale snapshot. Applying the
-// update anyway would rewrite the winner's outcome. The concrete case reported
+// already terminal or Publishing. Publishing has claimed the successful
+// outcome and may only transition to Completed through FinalizeJobPublication;
+// failure/timeout paths observing it are stale and must be rejected. Applying
+// the update anyway would rewrite the winner's outcome. The concrete case reported
 // in review: the checker loop processes one job snapshot through
 // checkCopyingJob (which may finishJob -> Completed) and then tryTimeoutJob in
 // the same round; the latter still sees the pre-loop Executing snapshot and,
@@ -583,14 +593,15 @@ func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
 // prevented by the terminal-state guard above: the first caller flips the job to
 // a terminal state under m.mu, so every later caller returns at the guard and
 // never reaches the Unpin call. Past the guard prevJob is therefore always
-// non-terminal and wasTerminal is always false; the `!wasTerminal` term in
+// active and wasTerminal is always false; the `!wasTerminal` term in
 // shouldUnpin is kept only as a local invariant assertion.
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error) {
 	m.mu.Lock()
-	if current, ok := m.jobs[jobID]; ok && isTerminalCopyJobState(current.GetState()) {
+	if current, ok := m.jobs[jobID]; ok && (isTerminalCopyJobState(current.GetState()) ||
+		current.GetState() == datapb.CopySegmentJobState_CopySegmentJobPublishing) {
 		currentState := current.GetState()
 		m.mu.Unlock()
-		mlog.Info(ctx, "copy segment job already in terminal state, skip state transition",
+		mlog.Info(ctx, "copy segment job outcome already fenced, skip state transition",
 			mlog.FieldJobID(jobID), mlog.String("currentState", currentState.String()))
 		return false, nil
 	}
@@ -644,6 +655,69 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 		mlog.String("snapshot", snapshotName),
 		mlog.String("previousState", previousState.String()),
 		mlog.String("newState", newState.String()))
+	return true, nil
+}
+
+// FinalizeJobPublication atomically persists all target segment visibility
+// changes followed by the Completed job record as the commit marker. The
+// in-memory segment and job caches are swapped only after the composite write
+// succeeds, so live readers never observe a partial publication. On an
+// oversized etcd update, the catalog's ordered fallback writes segment chunks
+// first and the Completed marker last; a crash before that marker leaves the
+// durable job in Publishing for startup reconciliation and retry.
+func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, operators ...UpdateOperator) (bool, error) {
+	m.mu.Lock()
+	job, ok := m.jobs[jobID]
+	if !ok || job.GetState() != datapb.CopySegmentJobState_CopySegmentJobPublishing {
+		m.mu.Unlock()
+		return false, nil
+	}
+
+	m.meta.segMu.Lock()
+	updatePack, err := m.meta.prepareUpdateSegmentsInfoLocked(ctx, operators...)
+	if err != nil {
+		m.meta.segMu.Unlock()
+		m.mu.Unlock()
+		return false, err
+	}
+
+	updatedJob := job.Clone()
+	UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted)(updatedJob)
+	UpdateCopyJobCompleteTs(completeTs)(updatedJob)
+	UpdateCopyJobTotalRows(totalRows)(updatedJob)
+
+	actions := make([]metastore.UpdateAction, 0, 1)
+	if updatePack != nil {
+		actions = make([]metastore.UpdateAction, 0, len(updatePack.segments)+1)
+		for _, segment := range updatePack.segments {
+			actions = append(actions, metastore.UpdateSegment(segment.SegmentInfo))
+		}
+	}
+	actions = append(actions, metastore.SaveCopySegmentJob(updatedJob.(*copySegmentJob).CopySegmentJob))
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		m.meta.segMu.Unlock()
+		m.mu.Unlock()
+		return false, err
+	}
+
+	if updatePack != nil {
+		m.meta.applyUpdateSegmentsInfoLocked(updatePack)
+	}
+	m.jobs[jobID] = updatedJob
+	m.meta.segMu.Unlock()
+	m.mu.Unlock()
+
+	if updatedJob.GetPinId() > 0 {
+		unpinCollID, unpinName, remaining, unpinErr := m.snapshotMeta.UnpinSnapshot(ctx, updatedJob.GetPinId())
+		if unpinErr != nil {
+			mlog.Warn(ctx, "failed to unpin source snapshot after copy-segment publication; pin will expire via TTL",
+				mlog.FieldJobID(jobID), mlog.Int64("pinID", updatedJob.GetPinId()), mlog.Err(unpinErr))
+			return true, nil
+		}
+		if unpinName != "" {
+			setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
+		}
+	}
 	return true, nil
 }
 
@@ -748,6 +822,22 @@ func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions 
 	return nil
 }
 
+// ClearTaskNodeAssignment clears a terminal cleanup handle only when it still
+// points at the node whose Drop RPC just succeeded. This prevents an old
+// inspector or delayed RPC from erasing a newer assignment.
+func (m *copySegmentMeta) ClearTaskNodeAssignment(ctx context.Context, taskID, expectedNodeID int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task := m.tasks.get(taskID)
+	if task == nil || task.GetNodeId() != expectedNodeID {
+		return false, nil
+	}
+	if err := m.updateTaskLocked(ctx, task, UpdateCopyTaskNodeID(NullNodeID)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // updateTaskLocked clones the task, applies the actions, persists the clone and
 // swaps it into the cache. Callers must hold m.mu.
 func (m *copySegmentMeta) updateTaskLocked(ctx context.Context, task CopySegmentTask, actions ...UpdateCopySegmentTaskAction) error {
@@ -815,7 +905,7 @@ func (m *copySegmentMeta) CommitTaskDispatch(ctx context.Context, taskID, nodeID
 	}
 
 	job, jobExists := m.jobs[task.GetJobId()]
-	jobActive := jobExists && !isTerminalCopyJobState(job.GetState())
+	jobActive := jobExists && isActiveCopyJobState(job.GetState())
 	if jobActive && task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending {
 		if err := m.updateTaskLocked(ctx, task,
 			UpdateCopyTaskNodeID(nodeID),
@@ -900,7 +990,7 @@ func (m *copySegmentMeta) ResolveTaskOnWorkerLoss(ctx context.Context, taskID in
 	}
 
 	job, ok := m.jobs[task.GetJobId()]
-	if ok && !isTerminalCopyJobState(job.GetState()) {
+	if ok && isActiveCopyJobState(job.GetState()) {
 		if err := m.updateTaskLocked(ctx, task,
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
 			UpdateCopyTaskNodeID(NullNodeID)); err != nil {
@@ -927,7 +1017,7 @@ func (m *copySegmentMeta) taskAcceptsResultLocked(taskID int64) bool {
 		return false
 	}
 	job, ok := m.jobs[task.GetJobId()]
-	return ok && !isTerminalCopyJobState(job.GetState())
+	return ok && isActiveCopyJobState(job.GetState())
 }
 
 // TaskAcceptsWorkerResult reports whether a worker result for taskID is still
