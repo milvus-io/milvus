@@ -183,12 +183,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
-	if err := s.validateExternalIndexFieldMaterialized(ctx, schema, req); err != nil {
-		mlog.Warn(ctx, "external index field is not materialized",
-			mlog.FieldFieldID(req.GetFieldID()), mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
 	isJSON := isJSONField(schema, req.GetFieldID())
 	if isJSON {
 		// check json_path and json_cast_type exist
@@ -318,6 +312,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 	}
+	if err := s.validateExternalIndexSchemaVersion(ctx, schema, req); err != nil {
+		mlog.Warn(ctx, "external collection is not refreshed for index creation",
+			mlog.FieldFieldID(req.GetFieldID()), mlog.Err(err))
+		return merr.Status(err), nil
+	}
 	if indexID == 0 {
 		if indexID, err = s.allocator.AllocID(ctx); err != nil {
 			mlog.Warn(ctx, "failed to alloc indexID", mlog.Err(err))
@@ -371,15 +370,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return merr.Success(), nil
 }
 
-// validateExternalIndexFieldMaterialized rejects external index builds when the
-// requested field is absent from any flushed external segment.
-func (s *Server) validateExternalIndexFieldMaterialized(ctx context.Context, schema *schemapb.CollectionSchema, req *indexpb.CreateIndexRequest) error {
+// validateExternalIndexSchemaVersion rejects external index creation until all
+// flushed or flushing segments have caught up with the current collection schema.
+func (s *Server) validateExternalIndexSchemaVersion(ctx context.Context, schema *schemapb.CollectionSchema, req *indexpb.CreateIndexRequest) error {
 	if !typeutil.IsExternalCollection(schema) {
-		return nil
-	}
-
-	field := typeutil.GetFieldByID(schema, req.GetFieldID())
-	if field.GetExternalField() == "" && !field.GetIsFunctionOutput() {
 		return nil
 	}
 
@@ -389,13 +383,24 @@ func (s *Server) validateExternalIndexFieldMaterialized(ctx context.Context, sch
 			return info.GetLevel() != datapb.SegmentLevel_L0 && isFlush(info)
 		}),
 	)
+	consistentSegments := 0
+	var inconsistentSegment *SegmentInfo
 	for _, segment := range segments {
-		if _, ok := getSegmentBinlogFields(segment)[req.GetFieldID()]; ok {
+		if segment.GetSchemaVersion() == schema.GetVersion() {
+			consistentSegments++
 			continue
 		}
-		return merr.WrapErrParameterInvalidMsg(
-			"external field %s is not materialized in segment %d; run RefreshExternalCollection before creating index",
-			field.GetName(), segment.GetID(),
+		if inconsistentSegment == nil {
+			inconsistentSegment = segment
+		}
+	}
+	if inconsistentSegment != nil {
+		err := merr.WrapErrCollectionSchemaVersionNotReady(
+			schema.GetName(), consistentSegments, len(segments),
+		)
+		return merr.Wrapf(err,
+			"external collection segment %d schema version %d does not match collection schema version %d; run RefreshExternalCollection before creating index",
+			inconsistentSegment.GetID(), inconsistentSegment.GetSchemaVersion(), schema.GetVersion(),
 		)
 	}
 	return nil
