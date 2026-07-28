@@ -1514,13 +1514,36 @@ func TestValidateImportFilePaths(t *testing.T) {
 		{"single dot segment", "files", "files/./insert_log/1/2/3/100/4", nil, true},
 		{"delta_log", "files", "files/delta_log/1/2/3/4", nil, true},
 		{"snapshots", "files", "files/snapshots/449/metadata/12.json", nil, true},
+		// Woodpecker's WAL lives under the same root; its segment reached the
+		// registry only after the milvus#51894 review flagged the omission.
+		{"woodpecker wal", "files", "files/wp/0/1/2.log", nil, true},
 		{"exact directory with no trailing content", "files", "files/insert_log", nil, true},
 		{"empty root path", "", "insert_log/1/2/3/100/4", nil, true},
+
+		// An absolute storage root is what storageType=local uses
+		// (localStorage.path). The candidate path and the deny list must be
+		// normalized into one namespace or none of these can ever match.
+		{"absolute root", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_log/1/2/3/100/4", nil, true},
+		{"absolute root, doubled slash", "/var/lib/milvus/data", "//var/lib/milvus/data/snapshots/449/metadata/1.json", nil, true},
+
+		// path.Clean collapses repeated slashes only once the key is rooted;
+		// stripping a single leading slash by hand leaves "//x" as "/x".
+		{"doubled leading slash", "files", "//files/insert_log/1/2/3/100/4", nil, true},
+		{"tripled leading slash", "files", "///files/insert_log/1/2/3/100/4", nil, true},
+
+		// LocalChunkManager passes the key straight to os.Open, where a leading
+		// ".." resolves against the process working directory.
+		{"leading dot dot", "files", "../files/insert_log/1/2/3/100/4", nil, true},
+		{"two leading dot dots", "files", "../../files/insert_log/1/2/3/100/4", nil, true},
 
 		// Must NOT be rejected: prefix collision on a non-boundary.
 		{"user directory sharing a prefix", "files", "files/insert_logs_2026/a.json", nil, false},
 		{"ordinary staging path", "files", "staging/a.json", nil, false},
 		{"user file named centroids", "files", "staging/centroids", nil, false},
+		{"absolute root, unrelated path", "/var/lib/milvus/data", "/home/user/data.json", nil, false},
+		{"absolute root, prefix collision", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_logs_2026/a.json", nil, false},
+		{"dot dot into an unrelated directory", "files", "../staging/a.json", nil, false},
+		{"caller top-level dir sharing the segment name", "files", "insert_log/mine.json", nil, false},
 
 		// Must NOT be rejected: backup and L0 import legitimately read binlogs.
 		{"backup import into insert_log", "files", "files/insert_log/1/2/3", backupOptions, false},
