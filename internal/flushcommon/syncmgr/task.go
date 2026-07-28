@@ -87,6 +87,9 @@ type SyncTask struct {
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
+	dataWritten     bool
+	preparedStats   *metacache.SegmentStats
+	preparedColumns []storagecommon.ColumnGroup
 
 	tr *timerecord.TimeRecorder
 
@@ -123,72 +126,80 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 
 	logger := t.getLogger()
-	defer func() {
-		if err != nil {
-			t.HandleError(err)
-		}
-	}()
 
 	segmentInfo, has := t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		if t.pack.isDrop {
 			logger.Info(ctx, "segment dropped, discard sync task")
+			t.releasePayload()
 			return nil
 		}
 		logger.Warn(ctx, "segment not found in metacache, may be already synced")
+		t.releasePayload()
 		return nil
 	}
 
-	columnGroups := t.getColumnGroups(segmentInfo)
+	columnGroups := t.preparedColumns
 
-	// statsWriter, when set (V2 / V3), exposes this sync's prepared cumulative
-	// stats. SyncTask.Run installs it on the metaCache only after the DataCoord
-	// ack below, so a failed/retried sync never double-counts.
-	var statsWriter interface {
-		PreparedStats() *metacache.SegmentStats
-	}
-
-	switch segmentInfo.GetStorageVersion() {
-	case storage.StorageV2:
-		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
-		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
-			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
-		statsWriter = writer
-	case storage.StorageV3:
-		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
-			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
-		statsWriter = writer
-	default:
-		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
-		if writerErr != nil {
-			return writerErr
+	if !t.dataWritten {
+		columnGroups = t.getColumnGroups(segmentInfo)
+		// statsWriter, when set (V2 / V3), exposes this sync's prepared cumulative
+		// stats. Freeze it with the logical task so a metadata retry does not write
+		// the payload again or publish different statistics.
+		var statsWriter interface {
+			PreparedStats() *metacache.SegmentStats
 		}
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
-	}
 
-	if err != nil {
-		logger.Warn(ctx, "failed to write sync data with storage v2 format", mlog.Err(err))
-		return err
-	}
-
-	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
-		count := int64(0)
-		for _, binlog := range binlogs {
-			for _, fbinlog := range binlog.GetBinlogs() {
-				count += fbinlog.GetEntriesNum()
+		switch segmentInfo.GetStorageVersion() {
+		case storage.StorageV2:
+			// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
+			writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
+				packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
+			t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+			statsWriter = writer
+		case storage.StorageV3:
+			writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
+				packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
+			t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+			statsWriter = writer
+		default:
+			writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
+			if writerErr != nil {
+				return writerErr
 			}
+			t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 		}
-		return count
+
+		if err != nil {
+			logger.Warn(ctx, "failed to write sync data", mlog.Err(err))
+			return err
+		}
+		t.dataWritten = true
+		t.preparedColumns = columnGroups
+		if statsWriter != nil {
+			t.preparedStats = statsWriter.PreparedStats()
+		}
+
+		getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
+			count := int64(0)
+			for _, binlog := range binlogs {
+				for _, fbinlog := range binlog.GetBinlogs() {
+					count += fbinlog.GetEntriesNum()
+				}
+			}
+			return count
+		}
+		metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
+		metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
+		metrics.DataNodeFlushedSize.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
+		metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource).Add(float64(t.batchRows))
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(paramtable.GetStringNodeID(), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+
+		// Metadata retry only needs the frozen binlogs, statistics and column
+		// groups above. Release the row payload as soon as object storage has
+		// accepted it instead of retaining a large pack across metadata retries.
+		t.releasePayload()
 	}
-	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
-	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
-	metrics.DataNodeFlushedSize.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
-
-	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource).Add(float64(t.batchRows))
-
-	metrics.DataNodeSave2StorageLatency.WithLabelValues(paramtable.GetStringNodeID(), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
@@ -197,8 +208,6 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			return err
 		}
 	}
-
-	t.pack.ReleaseData()
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows), metacache.UpdateManifestPath(t.manifestPath)}
 	if columnGroups != nil {
@@ -209,8 +218,8 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	}
 	// Install the prepared cumulative stats directly in the commit transaction:
 	// no digest work, the exact object whose Publish() DataCoord just persisted.
-	if statsWriter != nil {
-		actions = append(actions, metacache.SetStatistics(statsWriter.PreparedStats()))
+	if t.preparedStats != nil {
+		actions = append(actions, metacache.SetStatistics(t.preparedStats))
 	}
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
@@ -318,6 +327,19 @@ func (t *SyncTask) writeMeta(ctx context.Context) error {
 // to pair StartSyncing with Abort/FinishSyncing across a re-submission.
 func (t *SyncTask) BatchRows() int64 {
 	return t.batchRows
+}
+
+func (t *SyncTask) releasePayload() {
+	if t.pack != nil {
+		t.pack.ReleaseData()
+	}
+}
+
+// ReleasePayload discards the in-memory input owned by this logical task. It
+// is idempotent and is used only after the write buffer has decided that the
+// task will never be submitted again (shutdown or terminal failure).
+func (t *SyncTask) ReleasePayload() {
+	t.releasePayload()
 }
 
 func (t *SyncTask) SegmentID() int64 {

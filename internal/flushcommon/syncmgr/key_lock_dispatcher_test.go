@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type KeyLockDispatcherSuite struct {
@@ -149,6 +153,237 @@ func (s *KeyLockDispatcherSuite) TestCallbackPropagation() {
 	_, err := f.Await()
 	s.NoError(err)
 	s.True(callbackCalled.Load())
+}
+
+func (s *KeyLockDispatcherSuite) TestCloseRunsQueuedCallbacksOutsideDispatcherLock() {
+	ctx := context.Background()
+	d := newKeyLockDispatcher[int64](1)
+
+	blocker := make(chan struct{})
+	first := NewMockTask(s.T())
+	first.EXPECT().Run(ctx).Run(func(context.Context) {
+		<-blocker
+	}).Return(nil)
+	second := NewMockTask(s.T())
+
+	firstFuture := d.Submit(ctx, 1, first)
+	callbackEntered := make(chan struct{})
+	secondFuture := d.Submit(ctx, 1, second, func(err error) error {
+		close(callbackEntered)
+		// Re-enter Close. This deadlocked when the outer Close invoked callbacks
+		// while still holding d.mu.
+		d.Close()
+		return err
+	})
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		d.Close()
+	}()
+
+	select {
+	case <-callbackEntered:
+	case <-time.After(time.Second):
+		s.FailNow("queued callback was not invoked")
+	}
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		s.FailNow("Close deadlocked on a re-entrant callback")
+	}
+	_, err := secondFuture.Await()
+	s.ErrorIs(err, context.Canceled)
+
+	close(blocker)
+	_, err = firstFuture.Await()
+	s.NoError(err)
+}
+
+func (s *KeyLockDispatcherSuite) TestSubmitAfterCloseIsRejectedAndCleaned() {
+	d := newKeyLockDispatcher[int64](1)
+	d.Close()
+
+	task := NewMockTask(s.T())
+	callbackCount := atomic.NewInt32(0)
+	future := d.Submit(context.Background(), 1, task, func(err error) error {
+		callbackCount.Inc()
+		return err
+	})
+
+	_, err := future.Await()
+	s.ErrorIs(err, context.Canceled)
+	s.EqualValues(1, callbackCount.Load())
+	s.Zero(d.Pending())
+	d.mu.Lock()
+	s.Empty(d.queues)
+	s.Empty(d.inFlight)
+	d.mu.Unlock()
+}
+
+func (s *KeyLockDispatcherSuite) TestCloseCancelsSubmitBlockedByBackpressure() {
+	d := newKeyLockDispatcher[int64](1)
+	capacity := d.semaphore.Cap()
+	for range capacity {
+		s.Require().NoError(d.semaphore.Acquire(context.Background()))
+	}
+
+	task := NewMockTask(s.T())
+	callbackCount := atomic.NewInt32(0)
+	futureCh := make(chan *conc.Future[struct{}], 1)
+	go func() {
+		futureCh <- d.Submit(context.Background(), 1, task, func(err error) error {
+			callbackCount.Inc()
+			return err
+		})
+	}()
+
+	s.Eventually(func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.accepted == 1
+	}, time.Second, time.Millisecond)
+	s.Nil(d.beginClose())
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	s.NoError(d.waitClosed(waitCtx))
+	var future *conc.Future[struct{}]
+	select {
+	case future = <-futureCh:
+	case <-time.After(time.Second):
+		s.FailNow("Close did not cancel a Submit blocked on dispatcher backpressure")
+	}
+	_, err := future.Await()
+	s.ErrorIs(err, context.Canceled)
+	s.EqualValues(1, callbackCount.Load())
+	d.mu.Lock()
+	s.Zero(d.accepted)
+	d.mu.Unlock()
+
+	for range capacity {
+		d.semaphore.Release()
+	}
+}
+
+func (s *KeyLockDispatcherSuite) TestCallbackPanicDoesNotSkipLaterCleanup() {
+	attemptErr := errors.New("attempt failed")
+	cleanupCalled := false
+	panicValue, finalErr := runCallbacks(attemptErr, []func(error) error{
+		func(error) error {
+			panic("fatal callback")
+		},
+		func(err error) error {
+			cleanupCalled = true
+			s.ErrorIs(err, attemptErr)
+			return nil
+		},
+		func(err error) error {
+			s.ErrorIs(err, attemptErr)
+			return err
+		},
+	})
+
+	s.True(cleanupCalled)
+	s.Equal("fatal callback", panicValue)
+	s.ErrorIs(finalErr, attemptErr)
+}
+
+func (s *KeyLockDispatcherSuite) TestCallbackPanicWithoutAttemptErrorBecomesSystemError() {
+	cleanupCalled := false
+	panicValue, finalErr := runCallbacks(nil, []func(error) error{
+		func(error) error {
+			panic("fatal callback")
+		},
+		func(err error) error {
+			cleanupCalled = true
+			s.ErrorIs(err, merr.ErrServiceInternal)
+			return nil
+		},
+	})
+
+	s.True(cleanupCalled)
+	s.Equal("fatal callback", panicValue)
+	s.ErrorIs(finalErr, merr.ErrServiceInternal)
+}
+
+func (s *KeyLockDispatcherSuite) TestFutureCompletesAfterDispatcherCleanup() {
+	d := newKeyLockDispatcher[int64](1)
+	task := NewMockTask(s.T())
+	task.EXPECT().Run(mock.Anything).Return(nil).Once()
+
+	future := d.Submit(context.Background(), 1, task)
+	_, err := future.Await()
+	s.NoError(err)
+	s.Zero(d.Pending())
+	d.mu.Lock()
+	s.Empty(d.queues)
+	s.False(d.inFlight[1])
+	d.mu.Unlock()
+}
+
+func (s *KeyLockDispatcherSuite) TestPoolRejectionCompletesExactlyOnce() {
+	d := newKeyLockDispatcher[int64](1)
+	d.workerPool.Release()
+
+	task := NewMockTask(s.T())
+	callbackCount := atomic.NewInt32(0)
+	future := d.Submit(context.Background(), 1, task, func(err error) error {
+		callbackCount.Inc()
+		return err
+	})
+
+	_, err := future.Await()
+	s.Error(err)
+	s.EqualValues(1, callbackCount.Load())
+	s.Zero(d.Pending())
+}
+
+func (s *KeyLockDispatcherSuite) TestCloseWaitsForAsyncPoolSubmitHandoff() {
+	d := newKeyLockDispatcher[int64](1)
+
+	workerStarted := make(chan struct{})
+	releaseWorker := make(chan struct{})
+	workerFuture := d.workerPool.Submit(func() (struct{}, error) {
+		close(workerStarted)
+		<-releaseWorker
+		return struct{}{}, nil
+	})
+	<-workerStarted
+
+	task := NewMockTask(s.T())
+	callbackCount := atomic.NewInt32(0)
+	future := d.Submit(context.Background(), 1, task, func(err error) error {
+		callbackCount.Inc()
+		return err
+	})
+	s.Eventually(func() bool {
+		return d.workerPool.Waiting() > 0
+	}, time.Second, time.Millisecond, "dispatcher handoff did not block in workerPool.Submit")
+
+	s.Nil(d.beginClose())
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseDone <- d.workerPool.ReleaseTimeout(time.Second)
+	}()
+	s.Eventually(d.workerPool.IsClosed, time.Second, time.Millisecond)
+	close(releaseWorker)
+	s.NoError(<-releaseDone)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	s.NoError(d.waitClosed(waitCtx))
+
+	_, err := future.Await()
+	s.Error(err)
+	_, err = workerFuture.Await()
+	s.NoError(err)
+	s.EqualValues(1, callbackCount.Load())
+	s.Zero(d.Pending())
+	d.mu.Lock()
+	s.Zero(d.accepted)
+	s.Empty(d.queues)
+	s.Empty(d.inFlight)
+	d.mu.Unlock()
 }
 
 // TestMixedKeysConcurrency verifies a realistic scenario: multiple segments

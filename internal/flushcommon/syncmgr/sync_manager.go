@@ -51,7 +51,9 @@ type SyncManager interface {
 	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 	SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 
-	// Close waits for the task to finish and then shuts down the sync manager.
+	// Close fences new submissions and shuts down the sync manager. A nil return
+	// means every accepted task has completed callbacks, Future publication, and
+	// dispatcher accounting. On timeout, running tasks may complete asynchronously.
 	Close() error
 	TaskStatsJSON() string
 }
@@ -187,8 +189,22 @@ func (mgr *syncManager) TaskStatsJSON() string {
 func (mgr *syncManager) Close() error {
 	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, mgr.handler)
 	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
-	err := mgr.workerPool.ReleaseTimeout(timeout)
-	// Drain all remaining queued tasks that were never dispatched.
-	mgr.keyLockDispatcher.Close()
+	deadline := time.Now().Add(timeout)
+	panicValue := mgr.beginClose()
+	remaining := time.Until(deadline)
+	var err error
+	if remaining <= 0 {
+		err = context.DeadlineExceeded
+	} else {
+		err = mgr.workerPool.ReleaseTimeout(remaining)
+	}
+	if err == nil {
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		err = mgr.waitClosed(ctx)
+		cancel()
+	}
+	if panicValue != nil {
+		panic(panicValue)
+	}
 	return err
 }

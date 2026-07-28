@@ -239,6 +239,16 @@ func AbortSyncing(batchSize int64) SegmentAction {
 	}
 }
 
+// DiscardSyncing removes a task's syncing ownership without pretending that
+// its payload was restored to the write buffer. Use AbortSyncing only when the
+// exact batch is actually put back into a buffer.
+func DiscardSyncing(batchSize int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.syncingRows -= batchSize
+		info.syncingTasks--
+	}
+}
+
 func FinishSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows += batchSize

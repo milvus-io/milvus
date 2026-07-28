@@ -1840,8 +1840,8 @@ class InsertRecordGrowing {
             auto size = data->get_chunk_size(chunk_id);
             auto element_offset = data->get_element_offset(chunk_id);
             return SpanBase(data->get_chunk_data(chunk_id),
-                            get_valid_data_in(*valid, field_id)->get_chunk_data(
-                                element_offset),
+                            get_valid_data_in(*valid, field_id)
+                                ->get_chunk_data(element_offset),
                             size,
                             data->get_element_size());
         }
@@ -1855,7 +1855,8 @@ class InsertRecordGrowing {
         std::lock_guard<std::mutex> lck(field_write_mutex_);
         auto next = std::make_shared<ValidDataMap>(*CaptureValidData());
         next->emplace(field_id, std::move(valid_data));
-        std::atomic_store(&valid_data_, std::shared_ptr<const ValidDataMap>(next));
+        std::atomic_store(&valid_data_,
+                          std::shared_ptr<const ValidDataMap>(next));
     }
 
     // append a column of vector type

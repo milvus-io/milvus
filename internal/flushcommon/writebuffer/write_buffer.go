@@ -319,6 +319,8 @@ type writeBufferBase struct {
 	checkpoint     *msgpb.MsgPosition
 	processedTs    uint64
 	flushTimestamp *atomic.Uint64
+	syncCtx        context.Context
+	syncCancel     context.CancelFunc
 
 	// errHandler is fatal: it is used for sync tasks whose payload was yielded
 	// out of the buffer and that have no re-submit path, so the only safe
@@ -345,21 +347,15 @@ type writeBufferBase struct {
 	growingSourceRetryScheduled bool
 	growingSourceRetryTimer     *time.Timer
 
-	// Ordinary sync tasks that failed recoverably and are waiting to be
-	// re-submitted. The rows are NOT lost when a sync fails: yieldBuffer moved
-	// them into the task's SyncPack, so the task still owns them and re-running
-	// the same object replays exactly the same batch.
-	//
-	// While an entry is present, getSyncTask returns it instead of yielding a
-	// fresh batch for that segment. That is what keeps ordering intact: the
-	// key-locked dispatcher serializes tasks per segment but does not reorder a
-	// re-submission behind a newer batch, so a newer batch must not be built.
-	pendingSyncRetries        map[int64]*syncmgr.SyncTask
-	pendingSyncRetryBytes     int64
-	pendingSyncRetryScheduled bool
-	pendingSyncRetryTimer     *time.Timer
-	flushSourceModeNotifier   FlushSourceModeNotifier
-	closed                    bool
+	// ordinarySyncs owns every ordinary logical sync from the moment its
+	// payload leaves wb.buffers until final success or a true abort. Presence in
+	// this map is the per-segment gate: queued/running/retry-wait all prevent a
+	// second pack from being built for the same segment.
+	ordinarySyncs           map[int64]*ordinarySyncState
+	ordinaryRetryAfterFunc  retryAfterFunc
+	flushSourceModeNotifier FlushSourceModeNotifier
+	dropping                bool
+	closed                  bool
 
 	// pre build logger
 	logger                   *mlog.Logger
@@ -377,6 +373,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	if err != nil {
 		return nil, err
 	}
+	syncCtx, syncCancel := context.WithCancel(context.Background())
 
 	allowGrowingSourceFlush := typeutil.AllowGrowingSourceFlush(schema,
 		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
@@ -393,7 +390,6 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	if growingSourceRetryInterval == 0 {
 		growingSourceRetryInterval = defaultGrowingSourceRetryInterval
 	}
-
 	wb := &writeBufferBase{
 		channelName:                channel,
 		collectionID:               metacache.Collection(),
@@ -406,6 +402,8 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		syncCheckpoint:             newCheckpointCandiates(),
 		syncPolicies:               option.syncPolicies,
 		flushTimestamp:             flushTs,
+		syncCtx:                    syncCtx,
+		syncCancel:                 syncCancel,
 		errHandler:                 option.errorHandler,
 		growingSourceErrHandler:    option.growingSourceErrorHandler,
 		taskObserverCallback:       option.taskObserverCallback,
@@ -413,14 +411,22 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		growingSourceResolver:      growingSourceResolver,
 		growingSourceProgress:      make(map[int64]*growingSourceProgress),
 		growingSourceRetryInterval: growingSourceRetryInterval,
-		pendingSyncRetries:         make(map[int64]*syncmgr.SyncTask),
-		flushSourceModeNotifier:    option.flushSourceModeNotifier,
+		ordinarySyncs:              make(map[int64]*ordinarySyncState),
+		ordinaryRetryAfterFunc: func(delay time.Duration, f func()) retryTimer {
+			return time.AfterFunc(delay, f)
+		},
+		flushSourceModeNotifier: option.flushSourceModeNotifier,
 	}
 
 	wb.logger = mlog.With(mlog.Int64("collectionID", wb.collectionID),
 		mlog.String("channel", wb.channelName))
 	wb.cpRatedLogger = wb.logger
 	wb.growingSourceRatedLogger = wb.logger
+	if wb.errHandler == nil {
+		wb.errHandler = func(err error) {
+			panic(err)
+		}
+	}
 
 	// A nil handler would silently drop failure reporting for a path that is
 	// expected to fail and retry, so never leave it unset even when the option
@@ -612,6 +618,10 @@ func (wb *writeBufferBase) MemorySize() int64 {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
+	return wb.totalBufferedMemorySizeLocked()
+}
+
+func (wb *writeBufferBase) totalBufferedMemorySizeLocked() int64 {
 	var size int64
 	for _, segBuf := range wb.buffers {
 		size += segBuf.MemorySize()
@@ -633,16 +643,14 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 
 	ts := wb.checkpoint.GetTimestamp()
 	segmentIDs := wb.getSegmentsToSync(ts, policies...)
-	var syncTasks []syncmgr.Task
 	if len(segmentIDs) > 0 {
 		logger.Info(context.TODO(), "evict buffer find segments to sync", mlog.Int64s("segmentIDs", segmentIDs))
-		syncTasks = wb.getSyncTasksLocked(context.Background(), segmentIDs)
 	}
 
 	wb.mut.Unlock()
 
-	if len(syncTasks) > 0 {
-		futures := wb.submitSyncTasks(context.Background(), syncTasks)
+	if len(segmentIDs) > 0 {
+		futures := wb.syncSegments(wb.syncCtx, segmentIDs)
 		if len(futures) > 0 {
 			conc.AwaitAll(futures...)
 		}
@@ -843,59 +851,8 @@ func ordinarySyncFatal(err error) string {
 	}
 }
 
-func (wb *writeBufferBase) parkSyncRetryLocked(task *syncmgr.SyncTask) {
-	segmentID := task.SegmentID()
-	if _, exists := wb.pendingSyncRetries[segmentID]; !exists {
-		wb.pendingSyncRetryBytes += task.BatchRows()
-	}
-	wb.pendingSyncRetries[segmentID] = task
-	wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1),
-		"sync task parked for retry",
-		mlog.Int64("segmentID", segmentID),
-		mlog.Int("pending", len(wb.pendingSyncRetries)))
-	wb.scheduleSyncRetryLocked()
-}
-
-func (wb *writeBufferBase) clearSyncRetryLocked(segmentID int64) {
-	if task, ok := wb.pendingSyncRetries[segmentID]; ok {
-		wb.pendingSyncRetryBytes -= task.BatchRows()
-		if wb.pendingSyncRetryBytes < 0 {
-			wb.pendingSyncRetryBytes = 0
-		}
-		delete(wb.pendingSyncRetries, segmentID)
-	}
-}
-
-func (wb *writeBufferBase) scheduleSyncRetryLocked() {
-	if wb.closed || wb.pendingSyncRetryScheduled ||
-		wb.growingSourceRetryInterval < 0 || len(wb.pendingSyncRetries) == 0 {
-		return
-	}
-	wb.pendingSyncRetryScheduled = true
-	wb.pendingSyncRetryTimer = time.AfterFunc(wb.growingSourceRetryInterval,
-		wb.retrySyncTasks)
-}
-
-func (wb *writeBufferBase) retrySyncTasks() {
-	wb.mut.Lock()
-	wb.pendingSyncRetryScheduled = false
-	wb.pendingSyncRetryTimer = nil
-	if wb.closed || len(wb.pendingSyncRetries) == 0 {
-		wb.mut.Unlock()
-		return
-	}
-	segmentIDs := lo.Keys(wb.pendingSyncRetries)
-	wb.scheduleSyncRetryLocked()
-	syncTasks := wb.getSyncTasksLocked(context.Background(), segmentIDs)
-	wb.mut.Unlock()
-
-	if len(syncTasks) > 0 {
-		wb.submitSyncTasks(context.Background(), syncTasks)
-	}
-}
-
 func (wb *writeBufferBase) scheduleGrowingSourceRetryLocked() {
-	if wb.closed || wb.growingSourceRetryScheduled || wb.growingSourceRetryInterval < 0 || len(wb.growingSourceProgress) == 0 {
+	if wb.closed || wb.dropping || wb.growingSourceRetryScheduled || wb.growingSourceRetryInterval < 0 || len(wb.growingSourceProgress) == 0 {
 		return
 	}
 	wb.growingSourceRetryScheduled = true
@@ -907,7 +864,7 @@ func (wb *writeBufferBase) retryGrowingSourceProgress() {
 	wb.mut.Lock()
 	wb.growingSourceRetryScheduled = false
 	wb.growingSourceRetryTimer = nil
-	if wb.closed || wb.checkpoint == nil || len(wb.growingSourceProgress) == 0 {
+	if wb.closed || wb.dropping || wb.checkpoint == nil || len(wb.growingSourceProgress) == 0 {
 		wb.mut.Unlock()
 		return
 	}
@@ -920,12 +877,12 @@ func (wb *writeBufferBase) retryGrowingSourceProgress() {
 	var syncTasks []syncmgr.Task
 	if len(segmentIDs) > 0 {
 		wb.logger.Info(context.TODO(), "retry growing-source source sync", mlog.Int64s("segmentIDs", segmentIDs))
-		syncTasks = wb.getSyncTasksLocked(context.Background(), segmentIDs)
+		syncTasks = wb.getSyncTasksLocked(wb.syncCtx, segmentIDs)
 	}
 	wb.mut.Unlock()
 
 	if len(syncTasks) > 0 {
-		futures := wb.submitSyncTasks(context.Background(), syncTasks)
+		futures := wb.submitSyncTasks(wb.syncCtx, syncTasks)
 		if len(futures) > 0 {
 			conc.AwaitAll(futures...)
 		}
@@ -1076,10 +1033,59 @@ func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
 }
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
+	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		// Build and submit one task before moving to the next segment so a task
+		// that owns yielded data is never left detached from the sync manager.
+		wb.mut.Lock()
+		if wb.closed || wb.dropping {
+			wb.mut.Unlock()
+			break
+		}
+		tasks := wb.getSyncTasksLocked(ctx, []int64{segmentID})
+		wb.mut.Unlock()
+		if len(tasks) == 0 {
+			continue
+		}
+		result = append(result, wb.submitSyncTasks(ctx, tasks)...)
+	}
+	return result
+}
+
+// submitDropSegment builds the final task for one drained segment. Drop has
+// already blocked normal submissions and waited for any existing owner, so the
+// regular per-segment gate remains the only synchronization needed here.
+func (wb *writeBufferBase) submitDropSegment(ctx context.Context, segmentID int64) ([]*conc.Future[struct{}], *ordinarySyncState, error) {
 	wb.mut.Lock()
-	syncTasks := wb.getSyncTasksLocked(ctx, segmentIDs)
+	if wb.closed {
+		wb.mut.Unlock()
+		return nil, nil, nil
+	}
+	task, err := wb.getSyncTask(ctx, segmentID)
+	if err != nil {
+		if errors.Is(err, errGrowingSourceUnavailable) {
+			wb.rollbackGrowingSourceSyncCandidate(segmentID)
+		}
+		wb.mut.Unlock()
+		return nil, nil, err
+	}
+	if task == nil {
+		wb.mut.Unlock()
+		return nil, nil, merr.WrapErrServiceInternalMsg("segment %d still has an outstanding sync owner", segmentID)
+	}
+	var ordinaryState *ordinarySyncState
+	switch typedTask := task.(type) {
+	case *syncmgr.SyncTask:
+		typedTask.WithDrop()
+		ordinaryState = wb.ordinarySyncs[segmentID]
+	case *syncmgr.GrowingSourceSyncTask:
+		typedTask.WithDrop()
+	default:
+		wb.mut.Unlock()
+		return nil, nil, merr.WrapErrServiceInternalMsg("unsupported drop task %T for segment %d", task, segmentID)
+	}
 	wb.mut.Unlock()
-	return wb.submitSyncTasks(ctx, syncTasks)
+	return wb.submitSyncTasks(ctx, []syncmgr.Task{task}), ordinaryState, nil
 }
 
 // getSyncTasksLocked builds sync tasks and moves payload out of the write buffer.
@@ -1103,7 +1109,9 @@ func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []
 				mlog.Fatal(ctx, "failed to get sync task", mlog.FieldSegmentID(segmentID), mlog.Err(err))
 			}
 		}
-		result = append(result, syncTask)
+		if syncTask != nil {
+			result = append(result, syncTask)
+		}
 	}
 	return result
 }
@@ -1111,13 +1119,35 @@ func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []
 func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
 	result := make([]*conc.Future[struct{}], 0, len(syncTasks))
 	for _, syncTask := range syncTasks {
+		var ordinaryAttempt uint64
+		var ordinaryState *ordinarySyncState
+		if ordinaryTask, ok := syncTask.(*syncmgr.SyncTask); ok {
+			wb.mut.Lock()
+			state, exists := wb.ordinarySyncs[ordinaryTask.SegmentID()]
+			if exists && state.task == ordinaryTask && state.phase == ordinarySyncAttemptInFlight {
+				ordinaryAttempt = state.attempt
+				ordinaryState = state
+			}
+			wb.mut.Unlock()
+			if ordinaryAttempt == 0 {
+				continue
+			}
+		}
+
 		future, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
-			if wb.taskObserverCallback != nil {
-				wb.taskObserverCallback(syncTask, err)
+			if ordinaryTask, isOrdinary := syncTask.(*syncmgr.SyncTask); isOrdinary {
+				outcome := wb.handleOrdinarySyncResult(ctx, ordinaryTask, ordinaryAttempt, err)
+				return wb.finishOrdinarySyncOutcome(ordinaryState, syncTask, outcome)
 			}
 
 			var resyncGrowingSourceSegmentID int64
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
+				if err != nil {
+					// Run releases its source in a defer. Dispatcher rejection and
+					// queued-task cancellation never enter Run, so make the callback
+					// path idempotently cover both cases.
+					growingSourceTask.ReleaseSource()
+				}
 				wb.mut.Lock()
 				if progress, exists := wb.growingSourceProgress[growingSourceTask.SegmentID()]; exists {
 					if err != nil {
@@ -1173,7 +1203,7 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 							}
 						} else if len(progress.batches) == 0 {
 							segment, ok := wb.metaCache.GetSegmentByID(growingSourceTask.SegmentID())
-							if growingSourceTask.IsFlush() || !ok ||
+							if growingSourceTask.IsFlush() || growingSourceTask.IsDrop() || !ok ||
 								segment.State() == commonpb.SegmentState_Flushed ||
 								segment.State() == commonpb.SegmentState_Dropped {
 								delete(wb.growingSourceProgress, growingSourceTask.SegmentID())
@@ -1184,34 +1214,13 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 				wb.mut.Unlock()
 			}
 			if resyncGrowingSourceSegmentID != 0 {
-				wb.syncSegments(context.Background(), []int64{resyncGrowingSourceSegmentID})
-			}
-
-			if ordinaryTask, isOrdinary := syncTask.(*syncmgr.SyncTask); isOrdinary {
-				wb.mut.Lock()
-				if err != nil {
-					if reason := ordinarySyncFatal(err); reason == "" {
-						// Recoverable: hand the batch back to the metacache and
-						// park the task. It keeps its rows, so the retry replays
-						// the same range against an unadvanced checkpoint.
-						wb.metaCache.UpdateSegments(
-							metacache.AbortSyncing(ordinaryTask.BatchRows()),
-							metacache.WithSegmentIDs(ordinaryTask.SegmentID()))
-						wb.parkSyncRetryLocked(ordinaryTask)
-					} else {
-						mlog.Error(ctx, "sync task hit a non-retryable failure, escalating",
-							mlog.String("reason", reason),
-							mlog.FieldSegmentID(syncTask.SegmentID()))
-						defer wb.errHandler(errors.Wrapf(err,
-							"sync unrecoverable (%s), segmentID=%d", reason, syncTask.SegmentID()))
-					}
-				} else {
-					wb.clearSyncRetryLocked(ordinaryTask.SegmentID())
-				}
-				wb.mut.Unlock()
+				wb.syncSegments(wb.syncCtx, []int64{resyncGrowingSourceSegmentID})
 			}
 
 			if err != nil {
+				if wb.taskObserverCallback != nil {
+					wb.taskObserverCallback(syncTask, err)
+				}
 				return err
 			}
 
@@ -1223,11 +1232,37 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
 				mlog.Info(ctx, "flushed segment removed", mlog.FieldSegmentID(syncTask.SegmentID()), mlog.String("channel", syncTask.ChannelName()))
 			}
+			if wb.taskObserverCallback != nil {
+				wb.taskObserverCallback(syncTask, nil)
+			}
 			return nil
 		})
 		if err != nil {
+			if ordinaryTask, ok := syncTask.(*syncmgr.SyncTask); ok {
+				outcome := wb.handleOrdinarySyncResult(ctx, ordinaryTask, ordinaryAttempt, err)
+				err = wb.finishOrdinarySyncOutcome(ordinaryState, syncTask, outcome)
+				result = append(result, conc.Go(func() (struct{}, error) {
+					return struct{}{}, err
+				}))
+				continue
+			}
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
+				wb.mut.Lock()
+				if progress, exists := wb.growingSourceProgress[growingSourceTask.SegmentID()]; exists {
+					progress.failSync(err)
+					wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
+					wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
+					wb.scheduleGrowingSourceRetryLocked()
+				}
+				wb.mut.Unlock()
+				if wb.taskObserverCallback != nil {
+					wb.taskObserverCallback(syncTask, err)
+				}
+				result = append(result, conc.Go(func() (struct{}, error) {
+					return struct{}{}, err
+				}))
+				continue
 			}
 			mlog.Fatal(ctx, "failed to sync data", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
 		}
@@ -1239,7 +1274,9 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 // getSegmentsToSync applies all policies to get segments list to sync.
 // **NOTE** shall be invoked within mutex protection
 func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...SyncPolicy) []int64 {
-	buffers := lo.Values(wb.buffers)
+	buffers := lo.Filter(lo.Values(wb.buffers), func(buffer *segmentBuffer, _ int) bool {
+		return buffer != nil
+	})
 	segments := typeutil.NewSet[int64]()
 	for _, policy := range policies {
 		result := policy.SelectSegments(buffers, ts)
@@ -1255,6 +1292,13 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 	}
 
 	return lo.Filter(segments.Collect(), func(segmentID int64, _ int) bool {
+		if state, ok := wb.ordinarySyncs[segmentID]; ok {
+			// The older logical task owns ordering for this segment. Record the
+			// policy edge so its terminal success immediately schedules the tail,
+			// but do not build a second task yet.
+			state.pending = true
+			return false
+		}
 		progress, ok := wb.growingSourceProgress[segmentID]
 		if !ok {
 			return true
@@ -1599,32 +1643,44 @@ func (wb *writeBufferBase) newGrowingSegmentManifestPath(partitionID int64, segm
 }
 
 // bufferDelete buffers DeleteMsg into DeleteData.
-func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
+func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) int64 {
 	segBuf := wb.getOrCreateBuffer(segmentID, tss[0])
 	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
+	return bufSize
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
+	if state, ok := wb.ordinarySyncs[segmentID]; ok {
+		// A queued, running, or retry-wait task owns the older logical batch.
+		// Remember that another policy selected this segment, but leave all new
+		// rows in wb.buffers until the owner reaches a terminal state.
+		state.pending = true
+		return nil, nil
+	}
+	if progress, ok := wb.growingSourceProgress[segmentID]; ok && progress.syncing {
+		// Growing-source and write-buffer tasks share one segment-level gate.
+		// The keyed dispatcher would serialize two tasks, but it cannot prevent
+		// the second task from being built against counters that the first task
+		// has not committed yet.
+		if segment, exists := wb.metaCache.GetSegmentByID(segmentID); exists {
+			switch segment.State() {
+			case commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing, commonpb.SegmentState_Dropped:
+				progress.pendingFlush = true
+			}
+		}
+		return nil, nil
+	}
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
 		mlog.Warn(ctx, "segment info not found in meta cache", mlog.FieldSegmentID(segmentID))
 		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
-	// A recoverable failure left this segment's batch parked. Re-submit that
-	// exact task -- it still owns the rows -- and re-arm the syncing counter so
-	// each attempt remains one StartSyncing paired with one Abort/Finish.
-	// Building a newer batch here would let it overtake the parked one.
-	if task, ok := wb.pendingSyncRetries[segmentID]; ok {
-		wb.metaCache.UpdateSegments(metacache.StartSyncing(task.BatchRows()),
-			metacache.WithSegmentIDs(segmentID))
-		return task, nil
-	}
 	if progress, ok := wb.growingSourceProgress[segmentID]; ok && !wb.hasWriteBufferInsertPayload(segmentID) {
 		return wb.getGrowingSourceSyncTask(ctx, segmentInfo, progress)
 	}
 	var batchSize int64
-	var totalMemSize float64 = 0
+	var totalMemSize float64
 	var tsFrom, tsTo uint64
 
 	insert, bm25, delta, schema, timeRange, startPos := wb.yieldBuffer(segmentID)
@@ -1642,7 +1698,6 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		batchSize += int64(chunk.GetRowNum())
 		totalMemSize += float64(chunk.GetMemorySize())
 	}
-
 	if delta != nil {
 		totalMemSize += float64(delta.Size())
 	}
@@ -1663,7 +1718,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithCheckpoint(wb.checkpoint).
 		WithBatchRows(batchSize).
-		WithErrorHandler(wb.errHandler)
+		// HandleError is owned by syncManager and remains non-fatal for ordinary
+		// logical tasks. The write buffer classifies the attempt result and only
+		// invokes errHandler after proving the task cannot be retried.
+		WithErrorHandler(nil)
 
 	if len(bm25) != 0 {
 		pack.WithBM25Stats(bm25)
@@ -1678,8 +1736,6 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		pack.WithDrop()
 	}
 
-	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
-
 	task := syncmgr.NewSyncTask().
 		WithAllocator(wb.allocator).
 		WithMetaWriter(wb.metaWriter).
@@ -1687,12 +1743,20 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithSchema(schema).
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig()).
-		// The flush write path must keep retrying: aborting surfaces the error
-		// to SyncTask.HandleError, whose default callback panics the datanode.
-		// retry.Do short-circuits InputError-typed errors unless an explicit
-		// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
+		// Keep the storage write inside this logical attempt retrying until its
+		// context is canceled. Submission and metadata failures are handled by
+		// the per-segment logical retry state.
 		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
 			retry.RetryErr(func(error) bool { return true }))
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(
+		paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
+	wb.ordinarySyncs[segmentID] = &ordinarySyncState{
+		task:     task,
+		phase:    ordinarySyncAttemptInFlight,
+		attempt:  1,
+		retryCtx: ctx,
+		done:     make(chan struct{}),
+	}
 	return task, nil
 }
 
@@ -1809,21 +1873,198 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 	return uint(sizeLimit / int64(wb.estSizePerRecord))
 }
 
-func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
-	// sink all data and call Drop for meta writer
+func (wb *writeBufferBase) waitGrowingSourceSyncs(ctx context.Context) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	canceled := false
+	for {
+		wb.mut.RLock()
+		inFlight := false
+		for _, progress := range wb.growingSourceProgress {
+			if progress.syncing {
+				inFlight = true
+				break
+			}
+		}
+		wb.mut.RUnlock()
+		if !inFlight {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return nil
+		}
+		if canceled {
+			<-ticker.C
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			// Pre-existing attempts were submitted with wb.syncCtx before Drop
+			// took ownership. Cancel both generations, then keep waiting until the
+			// task callback has rolled back syncing rows and source ownership.
+			wb.syncCancel()
+			canceled = true
+		case <-ticker.C:
+		}
+	}
+}
+
+func (wb *writeBufferBase) waitDropRetry(ctx context.Context) error {
+	interval := wb.growingSourceRetryInterval
+	if interval < 0 {
+		interval = defaultGrowingSourceRetryInterval
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// syncDropSegment uses the same task construction, write path, retry
+// classification, and per-segment ownership as normal syncing. Drop only adds
+// the final task flag and waits synchronously so DropChannel cannot overtake an
+// unfinished retry.
+func (wb *writeBufferBase) syncDropSegment(ctx context.Context, cancel context.CancelFunc, segmentID int64) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		futures, ordinaryState, err := wb.submitDropSegment(ctx, segmentID)
+		if err != nil {
+			if errors.Is(err, errGrowingSourceUnavailable) {
+				if err := wb.waitDropRetry(ctx); err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+
+		if ordinaryState != nil {
+			return wb.waitOrdinarySyncWaiters(ctx, cancel, []*ordinarySyncState{ordinaryState})
+		}
+		if len(futures) == 0 {
+			return nil
+		}
+
+		err = conc.BlockOnAll(futures...)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if growingSourceSyncFatal(err) != "" {
+			return err
+		}
+		if err := wb.waitDropRetry(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+// abortDrop closes every local ownership path before Close propagates a Drop
+// failure. Data was not committed, so ordinary checkpoints stay pinned for WAL
+// replay. The write buffer has already been removed from its manager and cannot
+// safely accept more work after this point.
+func (wb *writeBufferBase) abortDrop(cancel context.CancelFunc, terminalErr error) {
+	waiters := wb.cancelOutstandingOrdinarySyncs(terminalErr, cancel)
+	for _, state := range waiters {
+		<-state.done
+	}
+	_ = wb.waitGrowingSourceSyncs(context.Background())
+
 	wb.mut.Lock()
+	if wb.growingSourceRetryTimer != nil {
+		wb.growingSourceRetryTimer.Stop()
+		wb.growingSourceRetryTimer = nil
+	}
+	wb.growingSourceRetryScheduled = false
+	wb.growingSourceProgress = make(map[int64]*growingSourceProgress)
+	bufferedBytes := wb.totalBufferedMemorySizeLocked()
+	if bufferedBytes > 0 {
+		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(
+			paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Sub(float64(bufferedBytes))
+	}
+	wb.buffers = make(map[int64]*segmentBuffer)
 	wb.closed = true
+	wb.dropping = false
+	wb.mut.Unlock()
+}
+
+func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
+	var dropCtx context.Context
+	var dropCancel context.CancelFunc
+	if drop {
+		dropCtx, dropCancel = context.WithCancel(ctx)
+	}
+
+	wb.mut.Lock()
 	wb.growingSourceRetryScheduled = false
 	if wb.growingSourceRetryTimer != nil {
 		wb.growingSourceRetryTimer.Stop()
 		wb.growingSourceRetryTimer = nil
 	}
 	if !drop {
+		wb.closed = true
+		wb.syncCancel()
+		completed := make([]*ordinarySyncState, 0)
+		waiters := make([]*ordinarySyncState, 0, len(wb.ordinarySyncs))
+		for _, state := range wb.ordinarySyncs {
+			switch state.phase {
+			case ordinarySyncRetryWait:
+				wb.discardOrdinarySyncLocked(state, true)
+				completed = append(completed, state)
+			default:
+				waiters = append(waiters, state)
+			}
+		}
 		wb.mut.Unlock()
+		for _, state := range completed {
+			state.complete(context.Canceled)
+		}
+		for _, state := range waiters {
+			<-state.done
+		}
+		_ = wb.waitGrowingSourceSyncs(context.Background())
 		return
 	}
+	wb.dropping = true
+	ordinaryTasks, ordinaryWaiters := wb.beginOrdinaryDropLocked(dropCtx)
+	wb.mut.Unlock()
+	defer dropCancel()
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			wb.mut.RLock()
+			closed := wb.closed
+			wb.mut.RUnlock()
+			if !closed {
+				terminalErr, ok := panicValue.(error)
+				if !ok {
+					terminalErr = merr.WrapErrServiceInternalMsg("drop callback panicked: %v", panicValue)
+				}
+				wb.abortDrop(dropCancel, terminalErr)
+			}
+			panic(panicValue)
+		}
+	}()
 
-	var syncTasks []syncmgr.Task
+	// Existing logical tasks own older batches and must reach terminal success
+	// before any buffered tail can be turned into the final drop task.
+	if err := wb.waitOrdinarySyncs(dropCtx, dropCancel, ordinaryTasks, ordinaryWaiters); err != nil {
+		mlog.Error(ctx, "failed to drain outstanding sync tasks while dropping write buffer", mlog.Err(err))
+		panic(err)
+	}
+	if err := wb.waitGrowingSourceSyncs(dropCtx); err != nil {
+		mlog.Error(ctx, "failed to drain outstanding growing-source tasks while dropping write buffer", mlog.Err(err))
+		panic(err)
+	}
+
+	wb.mut.Lock()
 	segmentIDs := typeutil.NewSet[int64]()
 	for id := range wb.buffers {
 		segmentIDs.Insert(id)
@@ -1831,73 +2072,33 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	for id := range wb.growingSourceProgress {
 		segmentIDs.Insert(id)
 	}
-	for _, id := range segmentIDs.Collect() {
-		syncTask, err := wb.getSyncTask(ctx, id)
-		if err != nil {
-			if wb.hasGrowingSourceProgress(id) {
-				mlog.Warn(ctx, "skip growing source sync while dropping write buffer",
-					mlog.Int64("segmentID", id),
-					mlog.String("channel", wb.channelName),
-					mlog.Err(err))
-				delete(wb.growingSourceProgress, id)
-				// flushSourceMode lives on metacache.SegmentInfo and is
-				// reclaimed when the segment is removed from metacache by
-				// the drop path (no manual cleanup needed here).
-			}
-			continue
-		}
-		switch t := syncTask.(type) {
-		case *syncmgr.SyncTask:
-			t.WithDrop()
-		case *syncmgr.GrowingSourceSyncTask:
-			t.WithDrop()
-		}
-		syncTasks = append(syncTasks, syncTask)
-	}
+	dropSegmentIDs := segmentIDs.Collect()
 	wb.mut.Unlock()
 
-	futures := wb.submitDropSyncTasks(ctx, syncTasks)
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		mlog.Error(ctx, "failed to sink write buffer data", mlog.Err(err))
-		// TODO change to remove channel in the future
+	for _, id := range dropSegmentIDs {
+		if err := wb.syncDropSegment(dropCtx, dropCancel, id); err != nil {
+			mlog.Error(ctx, "failed to sync final drop segment",
+				mlog.Int64("segmentID", id),
+				mlog.String("channel", wb.channelName),
+				mlog.Err(err))
+			panic(err)
+		}
+	}
+	if err := dropCtx.Err(); err != nil {
+		mlog.Error(ctx, "drop context canceled before channel metadata commit", mlog.Err(err))
 		panic(err)
 	}
-	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
+	err := wb.metaWriter.DropChannel(dropCtx, wb.channelName)
 	if err != nil {
 		mlog.Error(ctx, "failed to drop channel", mlog.Err(err))
 		// TODO change to remove channel in the future
 		panic(err)
 	}
-}
-
-func (wb *writeBufferBase) submitDropSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
-	futures := make([]*conc.Future[struct{}], 0, len(syncTasks))
-	for _, syncTask := range syncTasks {
-		f, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
-			if wb.taskObserverCallback != nil {
-				wb.taskObserverCallback(syncTask, err)
-			}
-
-			if err != nil {
-				return err
-			}
-			if syncTask.StartPosition() != nil {
-				wb.mut.Lock()
-				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
-				wb.mut.Unlock()
-			}
-			return nil
-		})
-		if err != nil {
-			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
-				growingSourceTask.ReleaseSource()
-			}
-			mlog.Fatal(ctx, "failed to sync segment", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
-		}
-		futures = append(futures, f)
-	}
-	return futures
+	wb.mut.Lock()
+	wb.closed = true
+	wb.dropping = false
+	wb.syncCancel()
+	wb.mut.Unlock()
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID

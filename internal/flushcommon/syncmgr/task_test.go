@@ -472,18 +472,41 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	s.Run("metawrite_fail", func() {
-		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
+		metaErr := errors.New("mocked")
+		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(metaErr).Once()
+		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Once()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 
 		task := s.getSuiteSyncTask(new(SyncPack).
+			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
 			WithCheckpoint(&msgpb.MsgPosition{
 				ChannelName: s.channelName,
 				MsgID:       []byte{1, 2, 3, 4},
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(1)))
+		s.NotEmpty(task.pack.insertData)
+		writeCallCount := func() int {
+			count := 0
+			for _, call := range s.chunkManager.Calls {
+				if call.Method == "Write" {
+					count++
+				}
+			}
+			return count
+		}
 
 		err := task.Run(ctx)
-		s.Error(err)
+		s.ErrorIs(err, metaErr)
+		s.True(task.dataWritten)
+		s.Empty(task.pack.insertData, "metadata retry must not retain the row payload")
+		firstWriteCalls := writeCallCount()
+		s.Positive(firstWriteCalls)
+
+		err = task.Run(ctx)
+		s.NoError(err)
+		s.Empty(task.pack.insertData)
+		s.Equal(firstWriteCalls, writeCallCount(), "metadata retry must not rewrite object-storage payloads")
 	})
 
 	s.Run("chunk_manager_save_fail", func() {
@@ -499,7 +522,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		err := task.Run(ctx)
 
 		s.Error(err)
-		s.True(flag)
+		s.False(flag, "SyncManager owns the single HandleError call")
 	})
 }
 

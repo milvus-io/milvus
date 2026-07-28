@@ -370,6 +370,12 @@ GrowingOffsetMapping::Append(const bool* valid_data,
                "into one growing segment must stay serial.",
                physical_idx,
                valid_count_);
+    AssertInfo(start_logical == total_count_,
+               "growing offset mapping requires logical offsets to be appended "
+               "in order: got start_logical={}, expected {}. Inserts into one "
+               "growing segment must stay serial.",
+               start_logical,
+               total_count_);
     for (int64_t i = 0; i < count; ++i) {
         if (valid_data[i]) {
             const auto logical_offset = start_logical + i;

@@ -257,6 +257,18 @@ TEST(OffsetMapping, GrowingValidCountBelowIgnoresRowsAppendedAfterBound) {
     }
 }
 
+TEST(OffsetMapping, GrowingAppendRejectsNonContiguousLogicalBatch) {
+    GrowingOffsetMapping mapping;
+    auto first = ToBoolBytes(MakeValid({1, 1}));
+    mapping.Append(reinterpret_cast<const bool*>(first.data()), 2, 0, 0);
+
+    auto non_contiguous = ToBoolBytes(MakeValid({1}));
+    EXPECT_ANY_THROW(mapping.Append(
+        reinterpret_cast<const bool*>(non_contiguous.data()), 1, 3, 2));
+    EXPECT_ANY_THROW(mapping.Append(
+        reinterpret_cast<const bool*>(non_contiguous.data()), 1, 1, 2));
+}
+
 TEST(OffsetMapping, SealedValidCountBelowConvertsLogicalBound) {
     SealedOffsetMapping mapping;
     auto v = ToBoolBytes(MakeValid({1, 0, 1, 1, 0, 1}));

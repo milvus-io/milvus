@@ -132,6 +132,18 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(1, len(info.Bm25logs()))
 }
 
+func (s *SegmentActionSuite) TestDiscardSyncingDoesNotRestoreMissingPayload() {
+	info := &SegmentInfo{}
+	UpdateBufferedRows(10)(info)
+	StartSyncing(10)(info)
+
+	DiscardSyncing(10)(info)
+
+	s.Zero(info.BufferRows())
+	s.Zero(info.SyncingRows())
+	s.True(WithNoSyncingTask().Filter(info))
+}
+
 func (s *SegmentActionSuite) TestMergeActions() {
 	info := &SegmentInfo{}
 

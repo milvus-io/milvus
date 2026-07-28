@@ -80,6 +80,557 @@ func (s *WriteBufferSuite) TestHasSegment() {
 	s.True(s.wb.HasSegment(segmentID))
 }
 
+func (s *WriteBufferSuite) TestOrdinarySyncStateBlocksSecondLogicalTask() {
+	segmentID := int64(1101)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+
+	s.wb.mut.Lock()
+	s.wb.ordinarySyncs[segmentID] = state
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID:    segmentID,
+		insertBuffer: &InsertBuffer{},
+		deltaBuffer:  &DeltaBuffer{},
+	}
+	tasks := s.wb.getSyncTasksLocked(context.Background(), []int64{segmentID})
+	_, buffered := s.wb.buffers[segmentID]
+	s.wb.mut.Unlock()
+
+	s.Empty(tasks)
+	s.True(state.pending)
+	s.True(buffered, "new rows must stay buffered behind the outstanding logical task")
+}
+
+func (s *WriteBufferSuite) TestGrowingObserverPanicHappensAfterLifecycleCleanup() {
+	segmentID := int64(1109)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil)
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.wb.growingSourceProgress[segmentID] = &growingSourceProgress{
+		segmentID: segmentID,
+		syncing:   true,
+	}
+	s.wb.taskObserverCallback = func(syncmgr.Task, error) {
+		panic("observer failure")
+	}
+	task := syncmgr.NewGrowingSourceSyncTask().
+		WithSegmentID(segmentID).
+		WithChannelName(s.channelName).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200})
+	s.syncMgr.EXPECT().SyncData(mock.Anything, task, mock.Anything).RunAndReturn(
+		func(_ context.Context, _ syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			func() {
+				defer func() { _ = recover() }()
+				_ = callbacks[0](nil)
+			}()
+			return conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil
+		}).Once()
+
+	_ = s.wb.submitSyncTasks(context.Background(), []syncmgr.Task{task})
+	s.False(s.wb.growingSourceProgress[segmentID].syncing)
+}
+
+func (s *WriteBufferSuite) TestDropRetriesGrowingSourceFailure() {
+	segmentID := int64(1110)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+	s.wb.checkpoint = &msgpb.MsgPosition{Timestamp: 200}
+	s.wb.growingSourceRetryInterval = time.Millisecond
+	s.wb.growingSourceResolver = func(int64, int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+		return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
+	}
+	s.wb.growingSourceProgress[segmentID] = &growingSourceProgress{
+		segmentID:    segmentID,
+		targetOffset: 0,
+	}
+
+	transientErr := errors.New("transient growing-source sync failure")
+	var attempts atomic.Int32
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+		return task.SegmentID() == segmentID && task.IsDrop()
+	}), mock.Anything).RunAndReturn(
+		func(_ context.Context, _ syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			attempt := attempts.Add(1)
+			var callbackErr error
+			if attempt == 1 {
+				callbackErr = transientErr
+			}
+			for _, callback := range callbacks {
+				callbackErr = callback(callbackErr)
+			}
+			return conc.Go(func() (struct{}, error) { return struct{}{}, callbackErr }), nil
+		}).Twice()
+	metaWriter := syncmgr.NewMockMetaWriter(s.T())
+	metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
+	s.wb.metaWriter = metaWriter
+
+	s.NotPanics(func() { s.wb.Close(context.Background(), true) })
+	s.EqualValues(2, attempts.Load())
+	s.NotContains(s.wb.growingSourceProgress, segmentID)
+}
+
+func (s *WriteBufferSuite) TestCloseWaitsForOrdinaryAndGrowingCleanup() {
+	segmentID := int64(1107)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateBufferedRows(10)(segment)
+	metacache.StartSyncing(10)(segment)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+	s.wb.growingSourceProgress[2207] = &growingSourceProgress{segmentID: 2207, syncing: true}
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		s.wb.Close(context.Background(), false)
+	}()
+
+	select {
+	case <-closeDone:
+		s.FailNow("Close returned before the ordinary callback cleaned its state")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	outcome := s.wb.handleOrdinarySyncResult(context.Background(), task, 1, context.Canceled)
+	s.ErrorIs(outcome.attemptErr, context.Canceled)
+	s.ErrorIs(s.wb.finishOrdinarySyncOutcome(state, task, outcome), context.Canceled)
+	select {
+	case <-closeDone:
+		s.FailNow("Close returned before growing-source cleanup")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.wb.mut.Lock()
+	s.wb.growingSourceProgress[2207].failSync(context.Canceled)
+	s.wb.mut.Unlock()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		s.FailNow("Close did not finish after all sync ownership was cleaned")
+	}
+	s.Zero(segment.BufferRows(), "discard must not claim the payload was restored to the buffer")
+	s.Zero(segment.SyncingRows())
+	s.True(metacache.WithNoSyncingTask().Filter(segment))
+	s.Zero(s.wb.MemorySize())
+}
+
+func (s *WriteBufferSuite) TestDropCancellationDiscardsOrdinaryTask() {
+	segmentID := int64(1111)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateBufferedRows(10)(segment)
+	metacache.StartSyncing(10)(segment)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+	s.wb.dropping = true
+
+	outcome := s.wb.handleOrdinarySyncResult(context.Background(), task, 1, context.Canceled)
+	s.ErrorIs(outcome.attemptErr, context.Canceled)
+	s.ErrorIs(s.wb.finishOrdinarySyncOutcome(state, task, outcome), context.Canceled)
+	s.NotContains(s.wb.ordinarySyncs, segmentID)
+	s.Zero(s.wb.MemorySize())
+	s.Zero(segment.BufferRows())
+	s.Zero(segment.SyncingRows())
+	s.True(metacache.WithNoSyncingTask().Filter(segment))
+}
+
+func (s *WriteBufferSuite) TestOrdinaryDoneWaitsForObserverCompletion() {
+	segmentID := int64(1114)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+
+	observerEntered := make(chan struct{})
+	releaseObserver := make(chan struct{})
+	s.wb.taskObserverCallback = func(syncmgr.Task, error) {
+		close(observerEntered)
+		<-releaseObserver
+	}
+	outcome := s.wb.handleOrdinarySyncResult(context.Background(), task, 1, nil)
+	finishDone := make(chan error, 1)
+	go func() {
+		finishDone <- s.wb.finishOrdinarySyncOutcome(state, task, outcome)
+	}()
+
+	select {
+	case <-observerEntered:
+	case <-time.After(time.Second):
+		s.FailNow("ordinary observer was not invoked")
+	}
+	select {
+	case <-state.done:
+		s.FailNow("ordinary done was published before observer completion")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseObserver)
+	select {
+	case err := <-finishDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("ordinary completion did not finish after observer returned")
+	}
+	<-state.done
+	s.NoError(state.terminalErr)
+}
+
+func (s *WriteBufferSuite) TestOrdinaryObserverPanicDoesNotSkipFatalHandler() {
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(1115).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{done: make(chan struct{})}
+	fatalErr := merr.WrapErrServiceInternalMsg("fatal ordinary sync")
+	fatalCalled := false
+	s.wb.taskObserverCallback = func(syncmgr.Task, error) {
+		panic("observer panic")
+	}
+	s.wb.errHandler = func(err error) {
+		fatalCalled = true
+		s.ErrorIs(err, fatalErr)
+	}
+
+	s.PanicsWithValue("observer panic", func() {
+		_ = s.wb.finishOrdinarySyncOutcome(state, task, ordinarySyncOutcome{
+			attemptErr:  fatalErr,
+			terminalErr: fatalErr,
+			fatalErr:    fatalErr,
+			terminal:    true,
+		})
+	})
+	s.True(fatalCalled)
+	<-state.done
+	s.ErrorIs(state.terminalErr, fatalErr)
+}
+
+func (s *WriteBufferSuite) TestOrdinaryWaitersObserveLaterTerminalErrorAndSettleAll() {
+	segmentID := int64(1116)
+	terminalErr := errors.New("terminal sync failure")
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	retrying := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	terminal := &ordinarySyncState{done: make(chan struct{})}
+	terminal.complete(terminalErr)
+	s.wb.ordinarySyncs[segmentID] = retrying
+	s.wb.dropping = true
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	dropCtx, dropCancel := context.WithCancel(context.Background())
+	defer dropCancel()
+	cancelObserved := make(chan struct{})
+	settleRelease := make(chan struct{})
+	go func() {
+		<-dropCtx.Done()
+		close(cancelObserved)
+		<-settleRelease
+		outcome := s.wb.handleOrdinarySyncResult(dropCtx, task, 1, context.Canceled)
+		_ = s.wb.finishOrdinarySyncOutcome(retrying, task, outcome)
+	}()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- s.wb.waitOrdinarySyncWaiters(dropCtx, dropCancel, []*ordinarySyncState{retrying, terminal})
+	}()
+
+	select {
+	case <-cancelObserved:
+	case <-time.After(time.Second):
+		s.FailNow("later terminal waiter did not cancel the Drop context")
+	}
+	select {
+	case <-result:
+		s.FailNow("wait returned before the retrying owner settled")
+	default:
+	}
+	close(settleRelease)
+	select {
+	case err := <-result:
+		s.ErrorIs(err, terminalErr)
+	case <-time.After(time.Second):
+		s.FailNow("wait did not return after every owner settled")
+	}
+	s.NotContains(s.wb.ordinarySyncs, segmentID)
+}
+
+func (s *WriteBufferSuite) TestBeginDropSnapshotsOrdinaryTerminalErrorAtomically() {
+	segmentID := int64(1117)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	dropCtx, dropCancel := context.WithCancel(context.Background())
+	defer dropCancel()
+	s.wb.mut.Lock()
+	s.wb.dropping = true
+	tasks, waiters := s.wb.beginOrdinaryDropLocked(dropCtx)
+	s.Empty(tasks)
+	s.Equal([]*ordinarySyncState{state}, waiters)
+
+	callbackStarted := make(chan struct{})
+	callbackDone := make(chan struct{})
+	go func() {
+		defer close(callbackDone)
+		close(callbackStarted)
+		outcome := s.wb.handleOrdinarySyncResult(dropCtx, task, 1, context.Canceled)
+		_ = s.wb.finishOrdinarySyncOutcome(state, task, outcome)
+	}()
+	<-callbackStarted
+	s.wb.mut.Unlock()
+
+	s.ErrorIs(s.wb.waitOrdinarySyncs(dropCtx, dropCancel, tasks, waiters), context.Canceled)
+	<-callbackDone
+	s.NotContains(s.wb.ordinarySyncs, segmentID)
+}
+
+func (s *WriteBufferSuite) TestGrowingAndOrdinaryShareSegmentAdmissionGate() {
+	segmentID := int64(1108)
+	s.wb.growingSourceProgress[segmentID] = &growingSourceProgress{
+		segmentID: segmentID,
+		syncing:   true,
+	}
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID:    segmentID,
+		insertBuffer: &InsertBuffer{},
+		deltaBuffer:  &DeltaBuffer{},
+	}
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(
+		metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil), true).Maybe()
+
+	futures := s.wb.syncSegments(context.Background(), []int64{segmentID})
+	s.Empty(futures)
+	s.Contains(s.wb.buffers, segmentID)
+	s.NotContains(s.wb.ordinarySyncs, segmentID)
+}
+
+type manualOrdinaryRetryTimer struct {
+	stopped atomic.Bool
+}
+
+func (t *manualOrdinaryRetryTimer) Stop() bool {
+	return !t.stopped.Swap(true)
+}
+
+func (s *WriteBufferSuite) TestOrdinaryRetrySchedulesOneAttemptAtATime() {
+	segmentID := int64(1103)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncRetryWait,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	var scheduled []func()
+	s.wb.ordinaryRetryAfterFunc = func(_ time.Duration, f func()) retryTimer {
+		scheduled = append(scheduled, f)
+		return &manualOrdinaryRetryTimer{}
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+
+	s.wb.mut.Lock()
+	s.wb.scheduleOrdinaryRetryLocked(state)
+	s.wb.scheduleOrdinaryRetryLocked(state)
+	s.wb.mut.Unlock()
+	s.Require().Len(scheduled, 1)
+
+	s.syncMgr.EXPECT().SyncData(mock.Anything, task, mock.Anything).Return(
+		conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil).Once()
+	scheduled[0]()
+	s.Equal(ordinarySyncAttemptInFlight, state.phase)
+	s.EqualValues(2, state.attempt)
+
+	// A stale timer callback cannot enqueue another copy while attempt 2 is
+	// queued/running.
+	scheduled[0]()
+	s.syncMgr.AssertExpectations(s.T())
+
+	// It also cannot enqueue after attempt 2 has failed and installed its own
+	// retry timer. The attempt generation, not just the phase, distinguishes the
+	// stale callback from the current one.
+	attemptErr := errors.New("attempt 2 failed")
+	outcome := s.wb.handleOrdinarySyncResult(context.Background(), task, 2, attemptErr)
+	s.ErrorIs(s.wb.finishOrdinarySyncOutcome(state, task, outcome), attemptErr)
+	s.Require().Len(scheduled, 2)
+	scheduled[0]()
+	s.syncMgr.AssertNumberOfCalls(s.T(), "SyncData", 1)
+}
+
+func (s *WriteBufferSuite) TestOrdinaryRetryUsesLogicalTaskContext() {
+	segmentID := int64(1113)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, metacache.NewEmptySegmentStats())
+	metacache.StartSyncing(10)(segment)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	retryCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	state := &ordinarySyncState{
+		task:     task,
+		phase:    ordinarySyncRetryWait,
+		attempt:  1,
+		retryCtx: retryCtx,
+		done:     make(chan struct{}),
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+
+	s.wb.retryOrdinarySync(segmentID, state, 1)
+
+	s.NotContains(s.wb.ordinarySyncs, segmentID)
+	s.Zero(s.wb.MemorySize())
+	<-state.done
+	s.ErrorIs(state.terminalErr, context.Canceled)
+	s.Zero(segment.SyncingRows())
+	s.True(metacache.WithNoSyncingTask().Filter(segment))
+	s.syncMgr.AssertNotCalled(s.T(), "SyncData", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func (s *WriteBufferSuite) TestOrdinaryFailureRetainsLogicalTaskAndCounters() {
+	segmentID := int64(1104)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &ordinarySyncState{
+		task:    task,
+		phase:   ordinarySyncAttemptInFlight,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	s.wb.ordinaryRetryAfterFunc = func(_ time.Duration, _ func()) retryTimer {
+		return &manualOrdinaryRetryTimer{}
+	}
+	s.wb.ordinarySyncs[segmentID] = state
+
+	attemptErr := errors.New("transient metadata failure")
+	outcome := s.wb.handleOrdinarySyncResult(context.Background(), task, 1, attemptErr)
+	s.ErrorIs(outcome.attemptErr, attemptErr)
+	s.Equal(ordinarySyncRetryWait, state.phase)
+	s.Same(state, s.wb.ordinarySyncs[segmentID])
+	s.NotNil(state.retryTimer)
+	// No AbortSyncing/StartSyncing call is expected for an attempt failure;
+	// the logical task keeps the original syncing-row ownership.
+	s.metacache.AssertExpectations(s.T())
+}
+
+func (s *WriteBufferSuite) TestDropDrainsOutstandingBeforeBufferedTail() {
+	segmentID := int64(1105)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Maybe()
+
+	metaWriter := syncmgr.NewMockMetaWriter(s.T())
+	metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
+	s.wb.metaWriter = metaWriter
+	s.wb.checkpoint = &msgpb.MsgPosition{Timestamp: 300}
+
+	firstTask := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	firstState := &ordinarySyncState{
+		task:    firstTask,
+		phase:   ordinarySyncRetryWait,
+		attempt: 1,
+		done:    make(chan struct{}),
+	}
+	s.wb.ordinarySyncs[segmentID] = firstState
+	tail, err := newSegmentBuffer(segmentID, s.collSchema)
+	s.Require().NoError(err)
+	s.wb.buffers[segmentID] = tail
+
+	var submitted []syncmgr.Task
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			submitted = append(submitted, task)
+			var callbackErr error
+			for _, callback := range callbacks {
+				callbackErr = callback(callbackErr)
+			}
+			return conc.Go(func() (struct{}, error) { return struct{}{}, callbackErr }), nil
+		}).Twice()
+
+	s.wb.Close(context.Background(), true)
+	s.Require().Len(submitted, 2)
+	s.False(submitted[0].IsDrop(), "the older logical task must retain its immutable flags")
+	s.True(submitted[1].IsDrop(), "the buffered tail is the final drop task")
+}
+
 func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 	segmentID := int64(1001)
 	var notifiedSegmentID int64
@@ -603,11 +1154,15 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
 			return task != nil && task.SegmentID() == 5 && task.IsDrop()
 		}), mock.Anything).RunAndReturn(
-			func(context.Context, syncmgr.Task, ...func(error) error) (*conc.Future[struct{}], error) {
+			func(_ context.Context, _ syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 				close(submitEntered)
 				<-releaseSubmit
+				var callbackErr error
+				for _, callback := range callbacks {
+					callbackErr = callback(callbackErr)
+				}
 				return conc.Go[struct{}](func() (struct{}, error) {
-					return struct{}{}, nil
+					return struct{}{}, callbackErr
 				}), nil
 			},
 		).Once()

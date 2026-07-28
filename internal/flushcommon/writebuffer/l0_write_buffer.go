@@ -60,6 +60,10 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
 	wb.mut.Lock()
+	if wb.closed || wb.dropping {
+		wb.mut.Unlock()
+		return merr.WrapErrChannelNotFound(wb.channelName)
+	}
 
 	for _, inData := range insertData {
 		if wb.allowGrowingSourceFlush {
@@ -74,8 +78,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			}
 		}
 
-		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
-		if err != nil {
+		if err := wb.bufferInsert(inData, startPos, endPos, schemaVersion); err != nil {
 			wb.mut.Unlock()
 			return err
 		}
@@ -85,7 +88,6 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
 	// and also skip filtering delete entries by bf.
 	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
-	// update buffer last checkpoint
 	wb.checkpoint = endPos
 	wb.updateProcessedTsLocked(endPos.GetTimestamp())
 
@@ -97,11 +99,10 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			delete(wb.l0Segments, partition)
 		}
 	}
-	syncTasks := wb.getSyncTasksLocked(context.Background(), segmentsSync)
 	wb.mut.Unlock()
 
-	if len(syncTasks) > 0 {
-		wb.submitSyncTasks(context.Background(), syncTasks)
+	if len(segmentsSync) > 0 {
+		wb.syncSegments(wb.syncCtx, segmentsSync)
 	}
 
 	return nil

@@ -542,16 +542,28 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		time.Sleep(50 * time.Millisecond)
 	})
 
-	s.Run("drop_close_skips_unavailable_growing_source", func() {
+	s.Run("drop_close_waits_for_pending_growing_source", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextRealMetaCache(textSchema)
+		metaCache := s.newTextRealMetaCache(textSchema)
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
-		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+		syncManager := syncmgr.NewMockSyncManager(s.T())
+		var sourceState atomic.Int32
+		sourceState.Store(int32(syncmgr.GrowingSourcePending))
+		var dropStarted atomic.Bool
+		pendingObserved := make(chan struct{}, 1)
+		wb, err := NewL0WriteBuffer(s.channelName, metaCache, syncManager, &writeBufferOption{
 			idAllocator:                s.allocator,
 			metaWriter:                 metaWriter,
-			growingSourceRetryInterval: time.Hour,
+			growingSourceRetryInterval: 10 * time.Millisecond,
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
-				return fakeGrowingFlushSource{}, syncmgr.GrowingSourcePending
+				state := syncmgr.GrowingSourceState(sourceState.Load())
+				if dropStarted.Load() && state == syncmgr.GrowingSourcePending {
+					select {
+					case pendingObserved <- struct{}{}:
+					default:
+					}
+				}
+				return fakeGrowingFlushSource{}, state
 			},
 		})
 		s.NoError(err)
@@ -563,16 +575,163 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
 
-		metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
-		s.NotPanics(func() {
-			wb.Close(context.Background(), true)
-		})
+		var syncCompleted atomic.Bool
+		var dropAfterSync atomic.Bool
+		submitted := make(chan *syncmgr.GrowingSourceSyncTask, 1)
+		syncManager.EXPECT().SyncData(mock.Anything, mock.AnythingOfType("*syncmgr.GrowingSourceSyncTask"), mock.Anything).
+			RunAndReturn(func(_ context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+				textTask := task.(*syncmgr.GrowingSourceSyncTask)
+				submitted <- textTask
+				return conc.Go(func() (struct{}, error) {
+					if textTask.BatchRows() > 0 {
+						metaCache.UpdateSegments(
+							metacache.FinishSyncing(textTask.BatchRows()),
+							metacache.WithSegmentIDs(textTask.SegmentID()),
+						)
+					}
+					var callbackErr error
+					for _, callback := range callbacks {
+						callbackErr = callback(callbackErr)
+					}
+					syncCompleted.Store(true)
+					return struct{}{}, callbackErr
+				}), nil
+			}).Once()
+		metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).
+			Run(func(context.Context, string) {
+				dropAfterSync.Store(syncCompleted.Load())
+			}).
+			Return(nil).
+			Once()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		closeResult := make(chan any, 1)
+		dropStarted.Store(true)
+		go func() {
+			var panicValue any
+			func() {
+				defer func() {
+					panicValue = recover()
+				}()
+				wb.Close(ctx, true)
+			}()
+			closeResult <- panicValue
+		}()
+
+		select {
+		case <-pendingObserved:
+		case <-time.After(time.Second):
+			s.FailNow("drop did not observe the pending growing source")
+		}
+		select {
+		case panicValue := <-closeResult:
+			s.FailNow("drop returned before the growing source became usable", "panic", panicValue)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		sourceState.Store(int32(syncmgr.GrowingSourceUsable))
+		select {
+		case panicValue := <-closeResult:
+			s.Nil(panicValue)
+		case <-time.After(time.Second):
+			s.FailNow("drop did not finish after the growing source became usable")
+		}
+
+		select {
+		case task := <-submitted:
+			s.True(task.IsDrop())
+			s.EqualValues(10, task.BatchRows())
+		case <-time.After(time.Second):
+			s.FailNow("drop did not submit the final growing-source task")
+		}
 
 		l0wb := wb.(*l0WriteBuffer)
 		s.NotContains(l0wb.growingSourceProgress, int64(1103))
-		// flushSourceMode lives on metacache.SegmentInfo and is reclaimed
-		// when the segment is removed from metacache by the drop path; no
-		// dedicated map to assert against on the writeBuffer side anymore.
+		s.False(l0wb.growingSourceRetryScheduled)
+		s.Nil(l0wb.growingSourceRetryTimer)
+		s.True(dropAfterSync.Load(), "DropChannel must run after the final source sync commits")
+		segment, ok := metaCache.GetSegmentByID(1103)
+		if ok {
+			s.Zero(segment.SyncingRows())
+			s.True(metacache.WithNoSyncingTask().Filter(segment))
+		}
+	})
+
+	s.Run("drop_close_pending_growing_source_honors_caller_timeout", func() {
+		textSchema := s.textSchema()
+		metaCache := s.newTextRealMetaCache(textSchema)
+		metaWriter := syncmgr.NewMockMetaWriter(s.T())
+		syncManager := syncmgr.NewMockSyncManager(s.T())
+		pendingObserved := make(chan struct{}, 1)
+		var dropStarted atomic.Bool
+		wb, err := NewL0WriteBuffer(s.channelName, metaCache, syncManager, &writeBufferOption{
+			idAllocator:                s.allocator,
+			metaWriter:                 metaWriter,
+			growingSourceRetryInterval: 5 * time.Millisecond,
+			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				if dropStarted.Load() {
+					select {
+					case pendingObserved <- struct{}{}:
+					default:
+					}
+				}
+				return fakeGrowingFlushSource{}, syncmgr.GrowingSourcePending
+			},
+		})
+		s.NoError(err)
+
+		_, msg := s.composeTextInsertMsg(1104, 10)
+		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+		s.NoError(err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		closeResult := make(chan any, 1)
+		dropStarted.Store(true)
+		go func() {
+			var panicValue any
+			func() {
+				defer func() {
+					panicValue = recover()
+				}()
+				wb.Close(ctx, true)
+			}()
+			closeResult <- panicValue
+		}()
+
+		select {
+		case <-pendingObserved:
+		case <-time.After(time.Second):
+			s.FailNow("drop did not observe the pending growing source")
+		}
+
+		var panicValue any
+		select {
+		case panicValue = <-closeResult:
+		case <-time.After(time.Second):
+			s.FailNow("drop did not honor the caller deadline")
+		}
+		s.Require().NotNil(panicValue)
+		panicErr, ok := panicValue.(error)
+		s.Require().True(ok, "drop should propagate the caller context error")
+		s.ErrorIs(panicErr, context.DeadlineExceeded)
+
+		l0wb := wb.(*l0WriteBuffer)
+		s.NotContains(l0wb.growingSourceProgress, int64(1104))
+		s.False(l0wb.growingSourceRetryScheduled)
+		s.Nil(l0wb.growingSourceRetryTimer)
+		s.True(l0wb.closed)
+		s.False(l0wb.dropping)
+		segment, ok := metaCache.GetSegmentByID(1104)
+		if ok {
+			s.Zero(segment.SyncingRows())
+			s.True(metacache.WithNoSyncingTask().Filter(segment))
+		}
+		metaWriter.AssertNotCalled(s.T(), "DropChannel", mock.Anything, s.channelName)
+		syncManager.AssertNotCalled(s.T(), "SyncData", mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	s.Run("pending_source_records_progress_instead_of_falling_back_to_writebuffer", func() {
