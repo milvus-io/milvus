@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -10,8 +11,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -145,6 +148,128 @@ func TestVChannelRecoveryModuleConsumesOnlyDirtySegments(t *testing.T) {
 	assert.Equal(t, []int64{30}, segmentIDs)
 }
 
+func TestVChannelRecoveryModuleConcurrentObserveAndSnapshot(t *testing.T) {
+	ctx := context.Background()
+	module := newTestModule(t, "p1", "v1")
+	module.runtime.Scheduler = &recordingScheduler{}
+	module.SwitchIntoMetaAndData()
+
+	const segmentCount = 500
+	messages := make([]message.ImmutableMessage, 0, segmentCount)
+	for i := 0; i < segmentCount; i++ {
+		messages = append(messages, newTestCreateSegmentMessage(t, "v1", int64(i+1), uint64(i+10)))
+	}
+	frontier := module.DataFrontier(moduleapi.Scope{
+		Type:     moduleapi.ScopeVChannel,
+		Kind:     moduleapi.DataProgressDurable,
+		VChannel: "v1",
+	})
+	require.NotNil(t, frontier)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for _, msg := range messages {
+			module.ObserveMessage(ctx, msg)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range messages {
+			module.ConsumeDirtySnapshots()
+			frontier.TimeTick()
+			module.IsActive()
+		}
+	}()
+	wg.Wait()
+
+	assert.Len(t, module.segments, segmentCount)
+}
+
+func TestRecoveredDurableSegmentRetriesMissingFinalCommit(t *testing.T) {
+	for name, state := range map[string]streamingpb.SegmentAssignmentState{
+		"flushed":    streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+		"tombstoned": streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			taskScheduler := &recordingScheduler{}
+			lifecycle := &recordingSegmentLifecycle{}
+			module := newTestModule(t, "p1", "v1")
+			module.runtime.Scheduler = taskScheduler
+			module.segmentLifecycle = lifecycle
+
+			meta := newTestGrowingSegmentMeta(10, 10)
+			meta.State = state
+			meta.CheckpointTimeTick = 30
+			meta.DataCheckpointTimeTick = 30
+			if state == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
+				meta.TombstoneTimeTick = 30
+			}
+			var view *segment.SegmentView
+			view = segment.NewSegmentViewFromMetaWithOptions(
+				meta,
+				&schemapb.CollectionSchema{Name: "c100"},
+				module.segmentOptions(10, func() *segment.SegmentView { return view })...,
+			)
+			module.segments = map[int64]*segment.SegmentView{10: view}
+
+			module.SwitchIntoMetaAndData()
+
+			require.Len(t, taskScheduler.tasks, 1)
+			frontier := module.DataFrontier(moduleapi.Scope{
+				Type:     moduleapi.ScopeVChannel,
+				Kind:     moduleapi.DataProgressDurable,
+				VChannel: "v1",
+			})
+			require.NotNil(t, frontier)
+			assert.Equal(t, uint64(29), frontier.TimeTick())
+			require.NoError(t, taskScheduler.tasks[0].Execute(ctx))
+
+			assert.Equal(t, []int64{10}, lifecycle.committedSegmentIDs)
+			assert.NotNil(t, view.AssignmentMeta().GetSealedAtDataVersion())
+		})
+	}
+}
+
+func TestManualFlushDeduplicatesPendingSegmentFinalCommit(t *testing.T) {
+	ctx := context.Background()
+	taskScheduler := &recordingScheduler{}
+	lifecycle := &recordingSegmentLifecycle{}
+	module := newTestModule(t, "p1", "v1")
+	module.runtime.Scheduler = taskScheduler
+	module.segmentLifecycle = lifecycle
+	newSegment := func(segmentID int64, createTimeTick uint64) *segment.SegmentView {
+		var view *segment.SegmentView
+		view = segment.NewSegmentViewFromMetaWithOptions(
+			newTestGrowingSegmentMeta(segmentID, createTimeTick),
+			&schemapb.CollectionSchema{Name: "c100"},
+			module.segmentOptions(segmentID, func() *segment.SegmentView { return view })...,
+		)
+		return view
+	}
+	module.segments = map[int64]*segment.SegmentView{
+		10: newSegment(10, 10),
+		20: newSegment(20, 35),
+	}
+	module.SwitchIntoMetaAndData()
+
+	first := module.ObserveMessage(ctx, newTestManualFlushMessage(t, "v1", 30))
+	second := module.ObserveMessage(ctx, newTestManualFlushMessage(t, "v1", 40))
+
+	require.NotNil(t, first.Data)
+	require.NotNil(t, second.Data)
+	require.Len(t, taskScheduler.tasks, 2)
+	for _, task := range taskScheduler.tasks {
+		require.NoError(t, task.Execute(ctx))
+	}
+
+	assert.Equal(t, []int64{10, 20}, lifecycle.committedSegmentIDs)
+	assert.Equal(t, int64(1), module.segments[10].AssignmentMeta().GetSealedAtDataVersion().GetStreamingVersion())
+	assert.Equal(t, int64(2), module.segments[20].AssignmentMeta().GetSealedAtDataVersion().GetStreamingVersion())
+}
+
 func newTestModule(t *testing.T, pchannel string, vchannel string) *VChannelRecoveryModule {
 	t.Helper()
 	module, err := NewModule(ModuleConfig{
@@ -238,6 +363,36 @@ type taskHandle struct{}
 func (taskHandle) Cancel() {}
 
 func (taskHandle) Wait(context.Context) error { return nil }
+
+type recordingSegmentLifecycle struct {
+	committedSegmentIDs []int64
+}
+
+func (l *recordingSegmentLifecycle) EnsureGrowingSegment(context.Context, *streamingpb.SegmentAssignmentMeta) error {
+	return nil
+}
+
+func (l *recordingSegmentLifecycle) CommitL1Segment(_ context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	l.committedSegmentIDs = append(l.committedSegmentIDs, meta.GetSegmentId())
+	return &viewpb.DataVersion{StreamingVersion: int64(len(l.committedSegmentIDs))}, nil
+}
+
+func newTestGrowingSegmentMeta(segmentID int64, createTimeTick uint64) *streamingpb.SegmentAssignmentMeta {
+	return &streamingpb.SegmentAssignmentMeta{
+		CollectionId:           100,
+		PartitionId:            10,
+		SegmentId:              segmentID,
+		Vchannel:               "v1",
+		State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		CheckpointTimeTick:     createTimeTick,
+		DataCheckpointTimeTick: createTimeTick,
+		PersistedStorage:       &streamingpb.L1SegmentPersistedStorage{},
+		Stat: &streamingpb.SegmentAssignmentStat{
+			CreateSegmentTimeTick: createTimeTick,
+			Level:                 datapb.SegmentLevel_L1,
+		},
+	}
+}
 
 func newTestRecoveryBarrierMessage(t *testing.T, timetick uint64) message.ImmutableMessage {
 	t.Helper()

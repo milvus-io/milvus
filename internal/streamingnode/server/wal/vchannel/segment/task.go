@@ -79,6 +79,12 @@ type commitL1SegmentTask struct {
 func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 	return t.execute(ctx, func(ctx context.Context) error {
 		segment := t.segment
+		segment.mu.Lock()
+		finalCommitDone := segment.finalCommitDone
+		segment.mu.Unlock()
+		if finalCommitDone {
+			return nil
+		}
 		if limiter := segment.commitL1Limiter; limiter != nil {
 			release, err := limiter.Acquire(ctx)
 			if err != nil {
@@ -97,6 +103,7 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 
 		segment.mu.Lock()
 		segment.MarkPendingDataDurable(t.timetick)
+		segment.finalCommitDone = true
 		sealedEvent, sealed := segment.markSealedAtDataVersionLocked(sealedAt)
 		segment.mu.Unlock()
 		segment.NotifyDataUpdated()
@@ -126,11 +133,30 @@ func (s *SegmentView) newFlushL1BufferTaskLocked() segmentTask {
 }
 
 func (s *SegmentView) newCommitL1SegmentTaskLocked(timetick uint64) segmentTask {
+	if !s.canScheduleFinalCommitLocked() {
+		return nil
+	}
+	return s.newCommitL1SegmentTaskWithFlushTimeTickLocked(timetick, s.enqueuePendingFlushChunkLocked())
+}
+
+func (s *SegmentView) newRecoveredCommitL1SegmentTaskLocked(timetick uint64) segmentTask {
+	if !s.canScheduleFinalCommitLocked() {
+		return nil
+	}
+	return s.newCommitL1SegmentTaskWithFlushTimeTickLocked(timetick, 0)
+}
+
+func (s *SegmentView) canScheduleFinalCommitLocked() bool {
+	return !s.finalCommitDone && (s.pendingFinalCommit == nil || s.pendingFinalCommit.Done())
+}
+
+func (s *SegmentView) newCommitL1SegmentTaskWithFlushTimeTickLocked(timetick, flushTimeTick uint64) segmentTask {
 	task := &commitL1SegmentTask{
 		segmentTaskBase: s.newSegmentTaskBaseLocked(),
 		timetick:        timetick,
-		flushTimeTick:   s.enqueuePendingFlushChunkLocked(),
+		flushTimeTick:   flushTimeTick,
 	}
+	s.pendingFinalCommit = task
 	s.pendingTasks = append(s.pendingTasks, task)
 	return task
 }

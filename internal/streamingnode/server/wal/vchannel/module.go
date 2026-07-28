@@ -58,6 +58,9 @@ type ModuleConfig struct {
 
 // VChannelRecoveryModule owns all recovery_storage state for one vchannel.
 type VChannelRecoveryModule struct {
+	// mu serializes WAL observation with snapshots and frontier reads. In
+	// particular, segments may grow when CreateSegment is observed while the
+	// recovery background task is collecting dirty snapshots.
 	mu       sync.Mutex
 	pchannel string
 	vchannel string
@@ -234,6 +237,8 @@ func (m *VChannelRecoveryModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapsho
 	if m == nil {
 		return nil
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.metaAndData = true
 	snapshots := make(moduleapi.CompositeModuleSnapshot, 0, 3)
 	if m.vchannelView != nil {
@@ -247,7 +252,7 @@ func (m *VChannelRecoveryModule) SwitchIntoMetaAndData() moduleapi.ModuleSnapsho
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	for id, view := range m.segments {
 		view.SwitchIntoMetaAndData()
-		m.refreshSegmentFrontier(id, view)
+		m.refreshSegmentFrontierLocked(id, view)
 		if view.IsGrowing() {
 			segments[id] = view.AssignmentMeta()
 		}
@@ -271,6 +276,8 @@ func (m *VChannelRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapsh
 	if m == nil {
 		return nil
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	snapshots := make([]moduleapi.DirtySnapshot, 0)
 	if m.vchannelView != nil {
 		if meta := m.vchannelView.ConsumeDirtyAndGetSnapshot(); meta != nil {
@@ -300,8 +307,7 @@ func (m *VChannelRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapsh
 				snapshot.GetCheckpointTimeTick(),
 				snapshot.GetDataCheckpointTimeTick(),
 				func() {
-					owner.MarkSnapshotPersisted(snapshot)
-					m.refreshSegmentFrontier(id, owner)
+					m.markSegmentSnapshotPersisted(id, owner, snapshot)
 				},
 			))
 		}
@@ -327,14 +333,25 @@ func (m *VChannelRecoveryModule) DataFrontier(scope moduleapi.Scope) walcheckpoi
 	if m == nil || !m.matchesScope(scope) {
 		return nil
 	}
-	return walcheckpoint.NewCompositeBarrier(
-		walcheckpoint.BarrierFunc(func() uint64 { return m.segmentFrontierTimeTick(scope) }),
-		walcheckpoint.BarrierFunc(func() uint64 { return m.transformFrontierTimeTick(scope.Kind) }),
-	)
+	return walcheckpoint.BarrierFunc(func() uint64 {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		segmentTimeTick := m.segmentFrontierTimeTick(scope)
+		transformTimeTick := m.transformFrontierTimeTick(scope.Kind)
+		if segmentTimeTick < transformTimeTick {
+			return segmentTimeTick
+		}
+		return transformTimeTick
+	})
 }
 
 func (m *VChannelRecoveryModule) IsActive() bool {
-	return m != nil && m.vchannelView != nil && m.vchannelView.IsActive()
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.vchannelView != nil && m.vchannelView.IsActive()
 }
 
 func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) moduleapi.ObserveResult {
@@ -443,7 +460,7 @@ func (m *VChannelRecoveryModule) handleCreateSegmentMessage(ctx context.Context,
 		result.Meta = view.MetaBarrier()
 	}
 	result = composeObserveResults(result, view.ObserveCreateSegmentMessageV2(ctx, msg))
-	m.markSegmentUpdated(id)
+	m.markSegmentUpdatedLocked(id)
 	return result
 }
 
@@ -455,7 +472,7 @@ func (m *VChannelRecoveryModule) handleInsertMessage(ctx context.Context, msg me
 			continue
 		}
 		result = composeObserveResults(result, view.ObserveInsertMessageV1(ctx, msg, partition))
-		m.markSegmentUpdated(view.ID())
+		m.markSegmentUpdatedLocked(view.ID())
 	}
 	m.markLatestInsertTimeTick(msg.VChannel(), msg.TimeTick(), result)
 	return result
@@ -483,7 +500,7 @@ func (m *VChannelRecoveryModule) handleTxnMessage(ctx context.Context, msg messa
 			}
 			observed[id] = struct{}{}
 			result = composeObserveResults(result, view.ObserveTxnMessage(ctx, msg))
-			m.markSegmentUpdated(id)
+			m.markSegmentUpdatedLocked(id)
 		}
 		return nil
 	})
@@ -495,7 +512,7 @@ func (m *VChannelRecoveryModule) handleFlushMessage(ctx context.Context, msg mes
 	id := msg.Header().GetSegmentId()
 	if segment := m.segments[id]; segment != nil {
 		result := segment.Flush(ctx, msg.TimeTick())
-		m.markSegmentUpdated(id)
+		m.markSegmentUpdatedLocked(id)
 		return result
 	}
 	return moduleapi.ObserveResult{}
@@ -520,7 +537,7 @@ func (m *VChannelRecoveryModule) flushAllSegmentsCreatedBefore(ctx context.Conte
 			continue
 		}
 		result = composeObserveResults(result, view.Flush(ctx, timetick))
-		m.markSegmentUpdated(view.ID())
+		m.markSegmentUpdatedLocked(view.ID())
 	}
 	return result
 }
@@ -532,7 +549,7 @@ func (m *VChannelRecoveryModule) flushPartitionSegmentsCreatedBefore(ctx context
 			continue
 		}
 		result = composeObserveResults(result, view.Flush(ctx, timetick))
-		m.markSegmentUpdated(view.ID())
+		m.markSegmentUpdatedLocked(view.ID())
 	}
 	return result
 }
@@ -630,24 +647,43 @@ func (m *VChannelRecoveryModule) dataFrontierTimeTick(kind moduleapi.DataProgres
 	return min(m.segmentFrontiers.All(), m.transformFrontierTimeTick(kind))
 }
 
-func (m *VChannelRecoveryModule) markSegmentUpdated(segmentID int64) {
+func (m *VChannelRecoveryModule) markSegmentUpdatedLocked(segmentID int64) {
 	view := m.segments[segmentID]
-	m.markSegmentViewUpdated(segmentID, view)
+	m.markSegmentViewUpdatedLocked(segmentID, view)
 }
 
 func (m *VChannelRecoveryModule) markSegmentViewUpdated(segmentID int64, view *segment.SegmentView) {
+	m.mu.Lock()
+	m.markSegmentViewUpdatedLocked(segmentID, view)
+	m.mu.Unlock()
+	m.notifyFrontierUpdated()
+}
+
+func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, view *segment.SegmentView) {
 	if view == nil {
 		return
 	}
 	m.markSegmentDirty(segmentID, view)
-	m.refreshSegmentFrontier(segmentID, view)
+	m.refreshSegmentFrontierLocked(segmentID, view)
 }
 
 func (m *VChannelRecoveryModule) markTransformSnapshotPersisted(snapshot *streamingpb.VChannelTransformLogMeta) {
+	m.mu.Lock()
 	m.transformLog.MarkSnapshotPersisted(snapshot)
-	if m.onFrontierUpdated != nil {
-		m.onFrontierUpdated()
-	}
+	m.mu.Unlock()
+	m.notifyFrontierUpdated()
+}
+
+func (m *VChannelRecoveryModule) markSegmentSnapshotPersisted(
+	segmentID int64,
+	view *segment.SegmentView,
+	snapshot *streamingpb.SegmentAssignmentMeta,
+) {
+	m.mu.Lock()
+	view.MarkSnapshotPersisted(snapshot)
+	m.refreshSegmentFrontierLocked(segmentID, view)
+	m.mu.Unlock()
+	m.notifyFrontierUpdated()
 }
 
 func (m *VChannelRecoveryModule) markSegmentDirty(segmentID int64, view *segment.SegmentView) {
@@ -664,11 +700,15 @@ func (m *VChannelRecoveryModule) takeDirtySegments() map[int64]*segment.SegmentV
 	return dirty
 }
 
-func (m *VChannelRecoveryModule) refreshSegmentFrontier(segmentID int64, view *segment.SegmentView) {
+func (m *VChannelRecoveryModule) refreshSegmentFrontierLocked(segmentID int64, view *segment.SegmentView) {
 	if view == nil {
 		return
 	}
-	if m.segmentFrontiers.Update(segmentID, view.CollectionID(), view.PartitionID(), view.DurableFrontierTimeTick()) && m.onFrontierUpdated != nil {
+	m.segmentFrontiers.Update(segmentID, view.CollectionID(), view.PartitionID(), view.DurableFrontierTimeTick())
+}
+
+func (m *VChannelRecoveryModule) notifyFrontierUpdated() {
+	if m.onFrontierUpdated != nil {
 		m.onFrontierUpdated()
 	}
 }

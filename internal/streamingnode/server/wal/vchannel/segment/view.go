@@ -60,8 +60,27 @@ func NewSegmentView(
 		onDataUpdated:         config.onDataUpdated,
 		onSegmentSealed:       config.onSegmentSealed,
 		schema:                schema,
+		finalCommitDone:       finalCommitDoneFromMeta(meta),
 		metaAndData:           config.metaAndData,
 		commitL1Limiter:       config.commitL1Limiter,
+	}
+}
+
+func finalCommitDoneFromMeta(meta *streamingpb.SegmentAssignmentMeta) bool {
+	return meta.GetSealedAtDataVersion() != nil
+}
+
+func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bool {
+	if finalCommitDoneFromMeta(meta) {
+		return false
+	}
+	switch meta.GetState() {
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+		streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
+		return meta.GetCheckpointTimeTick() > 0 &&
+			meta.GetDataCheckpointTimeTick() >= meta.GetCheckpointTimeTick()
+	default:
+		return false
 	}
 }
 
@@ -125,10 +144,17 @@ type SegmentView struct {
 	// lifecycle commits data-side segment state to the coordinator after object
 	// storage output is ready.
 	lifecycle    Lifecycle
-	packWriter   PackWriter            // writes pending insert data to object storage.
-	runtime      moduleapi.Runtime     // schedules segment-owned data tasks.
-	pendingTasks []segmentTask         // unfinished segment tasks used as predecessors.
-	pending      writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
+	packWriter   PackWriter        // writes pending insert data to object storage.
+	runtime      moduleapi.Runtime // schedules segment-owned data tasks.
+	pendingTasks []segmentTask     // unfinished segment tasks used as predecessors.
+	// pendingFinalCommit keeps repeated flush messages from enqueueing another
+	// final commit while the current one is pending or retrying.
+	pendingFinalCommit segmentTask
+	// finalCommitDone is process-local task state. Recovery only infers it from
+	// the persisted sealed version; a data checkpoint alone does not prove that
+	// the coordinator accepted the final commit.
+	finalCommitDone bool
+	pending         writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
 	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks,
 	// ordered by toTimeTick. Chunks stay here until segment data checkpoint advances
 	// over them.
@@ -341,7 +367,9 @@ func (s *SegmentView) Flush(_ context.Context, timetick uint64) moduleapi.Observ
 	}
 	task := s.newCommitL1SegmentTaskLocked(flushTimeTick)
 	result.Data = s.dataBarrier()
-	s.runtime.Scheduler.Submit(task)
+	if task != nil {
+		s.runtime.Scheduler.Submit(task)
+	}
 	return result
 }
 
@@ -542,7 +570,7 @@ func (info *SegmentView) DurableFrontierTimeTick() uint64 {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
-		if info.dirty {
+		if info.dirty || !info.finalCommitDone || info.hasPendingDataWorkLocked() {
 			return frontierBefore(info.meta.GetTombstoneTimeTick())
 		}
 		return math.MaxUint64
@@ -550,7 +578,11 @@ func (info *SegmentView) DurableFrontierTimeTick() uint64 {
 	if !info.hasPendingDataWorkLocked() {
 		return math.MaxUint64
 	}
-	return min(info.persistedMetaTimeTick, info.persistedDataTimeTick)
+	frontier := min(info.persistedMetaTimeTick, info.persistedDataTimeTick)
+	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED && !info.finalCommitDone {
+		frontier = min(frontier, frontierBefore(info.meta.GetCheckpointTimeTick()))
+	}
+	return frontier
 }
 
 func frontierBefore(timetick uint64) uint64 {
@@ -564,9 +596,10 @@ func (info *SegmentView) hasPendingDataWorkLocked() bool {
 	if info.meta.GetDataCheckpointTimeTick() > info.persistedDataTimeTick {
 		return true
 	}
-	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
-		info.meta.GetDataCheckpointTimeTick() < info.meta.GetCheckpointTimeTick() {
-		return true
+	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+		if !info.finalCommitDone || info.meta.GetDataCheckpointTimeTick() < info.meta.GetCheckpointTimeTick() {
+			return true
+		}
 	}
 	if len(info.pending.entries) > 0 || len(info.pendingFlushChunks) > 0 {
 		return true
@@ -643,8 +676,20 @@ func (info *SegmentView) HasReadyTombstoneFinalize() bool {
 
 func (info *SegmentView) SwitchIntoMetaAndData() {
 	info.mu.Lock()
-	defer info.mu.Unlock()
+	if info.metaAndData {
+		info.mu.Unlock()
+		return
+	}
 	info.metaAndData = true
+	var task segmentTask
+	if shouldRetryRecoveredFinalCommit(info.meta) {
+		task = info.newRecoveredCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick())
+	}
+	scheduler := info.runtime.Scheduler
+	info.mu.Unlock()
+	if task != nil {
+		scheduler.Submit(task)
+	}
 }
 
 func (info *SegmentView) SetSchema(schema *schemapb.CollectionSchema) {

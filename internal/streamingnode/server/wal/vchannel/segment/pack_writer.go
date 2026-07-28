@@ -309,15 +309,22 @@ func currentSplitForGrowingPack(
 	default:
 		return nil
 	}
-	if currentSplit := currentSplitFromPersistedStorage(schema, meta.GetPersistedStorage()); len(currentSplit) > 0 {
-		return currentSplit
+
+	currentSplit := currentSplitFromPersistedStorage(schema, meta.GetPersistedStorage())
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	if len(currentSplit) > 0 {
+		if meta.GetStorageVersion() == storage.StorageV3 {
+			return currentSplit
+		}
+		return storagecommon.FillColumnGroupFormats(currentSplit, writerFormat)
 	}
-	currentSplit := storagecommon.SplitColumns(
+
+	currentSplit = storagecommon.SplitColumns(
 		typeutil.GetAllFieldSchemas(schema),
 		calcGrowingColumnStats(insertData),
 		storagecommon.DefaultPolicies()...,
 	)
-	return storagecommon.FillColumnGroupFormats(currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
+	return storagecommon.FillColumnGroupFormats(currentSplit, writerFormat)
 }
 
 func calcGrowingColumnStats(insertData []*storage.InsertData) map[int64]storagecommon.ColumnStats {
