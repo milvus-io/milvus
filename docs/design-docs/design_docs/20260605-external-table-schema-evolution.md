@@ -37,9 +37,9 @@ function outputs become queryable after `RefreshExternalCollection`
 materializes them and QueryCoord finishes reloading the affected loaded
 segments. Added source-backed fields are schema-visible before refresh, but
 they are not considered materialized until refresh updates segment manifests
-and fake-binlog field coverage. Reads that reference an uncovered field use the
-existing execution-path error. Exact read-path error normalization is handled
-separately by
+and advances every active segment to the current collection schema version.
+Reads that reference an uncovered field use the existing execution-path error.
+Exact read-path error normalization is handled separately by
 [#50416](https://github.com/milvus-io/milvus/issues/50416). Drop operations
 become effective through schema filtering and index cache invalidation.
 
@@ -78,7 +78,8 @@ forward.
 3. **Metadata first, materialization later**: schema mutation succeeds after
    metadata is updated and broadcast. Added fields and functions are visible in
    schema immediately. Refresh is the durable materialization boundary for
-   generated function outputs and for DataCoord segment coverage metadata.
+   generated function outputs and for advancing DataCoord segment schema
+   versions.
 4. **Read-path behavior is explicit work**: this PR keeps already-covered fields
    serving while schema and refresh metadata move forward. Precise errors for
    requests that reference schema-visible but uncovered fields are tracked by
@@ -235,12 +236,12 @@ used after restart and during job aggregation.
 
 | Operation | API | Schema result | Materialization result | Loaded serving result |
 |-----------|-----|---------------|------------------------|-----------------------|
-| Add source-backed field | `AlterCollectionSchema(AddRequest)` | Adds a nullable source-backed field with `external_field`. | Refresh patches or rebuilds external manifests so active segments carry explicit coverage for the new source column. | Existing queries on old fields continue. Reads and index creation for the new field are not guaranteed until refresh updates segment coverage. |
+| Add source-backed field | `AlterCollectionSchema(AddRequest)` | Adds a nullable source-backed field with `external_field`. | Refresh patches or rebuilds external manifests and advances every active segment to the new schema version. | Existing queries on old fields continue. Reads on the new field wait for refresh and target switch; all new index creation waits for refresh. |
 | Add function | `AlterCollectionSchema(AddRequest)` | Adds exactly one built-in function and one new output field. | Refresh computes the generated output column and writes it into external manifests. | Existing queries continue. The output field becomes usable after refresh, index build, and target reopen/load. |
 | Add BM25 | `AlterCollectionSchema(AddRequest)` | Adds a BM25 function and sparse vector output field. | Refresh computes sparse vectors and BM25 stats. | BM25 search becomes usable after output columns, BM25 stats, index build, and loaded-target reopen are ready. |
-| Drop source-backed field | `AlterCollectionSchema(DropRequest)` | Removes the field from schema and records `DroppedFieldIds`. | No physical source rewrite. Future refresh ignores the dropped field. | New query plans cannot reference the field. QueryNode drops loaded index/cache state for the field. |
-| Drop function | `AlterCollectionSchema(DropRequest)` | Removes the function and its output field. | The generated column remains on storage but becomes unreachable. | The output field cannot be referenced. Its loaded index, stats references, and caches are invalidated. |
-| Drop BM25 | `AlterCollectionSchema(DropRequest)` | Removes the BM25 function and sparse output field. | BM25 stats remain on storage but become unreachable. | BM25 search on the dropped output field fails after schema update. Input text field remains queryable. |
+| Drop source-backed field | `AlterCollectionSchema(DropRequest)` | Removes the field from schema and records `DroppedFieldIds`. | No physical source rewrite. Refresh may reuse the manifest and then advance the segment schema version after validating the remaining fields. | New query plans cannot reference the field. QueryNode drops loaded index/cache state for the field. |
+| Drop function | `AlterCollectionSchema(DropRequest)` | Removes the function and its output field. | The generated column remains on storage but becomes unreachable. Refresh may reuse the manifest and then advance the segment schema version. | The output field cannot be referenced. Its loaded index, stats references, and caches are invalidated. |
+| Drop BM25 | `AlterCollectionSchema(DropRequest)` | Removes the BM25 function and sparse output field. | BM25 stats remain on storage but become unreachable. Refresh may reuse the manifest and then advance the segment schema version. | BM25 search on the dropped output field fails after schema update. Input text field remains queryable. |
 
 ## Internal Collection Compatibility
 
@@ -282,39 +283,39 @@ including after the target-only field has been dropped.
 
 ## Visibility And Materialization
 
-External loaded alter requires field-level readiness instead of relying only on
-collection schema version.
+External loaded alter separates schema visibility from durable materialization.
+DataCoord uses segment schema version as the durable certificate that refresh
+has reconciled a segment with the current collection schema.
 
 ### Definitions
 
 | State | Meaning | Owner |
 |-------|---------|-------|
 | Schema-visible | The latest collection schema contains the field/function. | RootCoord |
-| Durable-materialized | Every active healthy DataCoord segment contains the required manifest coverage for the field. | DataCoord |
+| Durable-materialized | Every active healthy DataCoord segment has been reconciled with the current collection schema and carries the same schema version. | DataCoord |
 | Serving-materialized | Every QueryCoord current-target segment in every loaded replica reports a manifest and index/stats state that can serve the field. | QueryCoord/QueryNode |
 | Queryable | The field is schema-visible and serving-materialized, or the operation does not require physical field data. | Proxy/QueryNode |
 
-### Field Coverage
+### Materialization Version
 
-The current implementation represents durable field coverage in committed
+The current implementation records durable refresh completion in committed
 segment metadata:
 
-1. Fake binlog `ChildFields` lists every field materialized by the segment.
-2. For source-backed fields, refresh patches the manifest and then rebuilds the
-   fake binlog coverage using the current schema.
-3. For generated function outputs, refresh requires the numeric output-field
-   column in the manifest and fake-binlog coverage for the field ID.
-4. BM25 outputs additionally require a non-empty BM25 statslog for each output
-   field.
-5. DataNode may inspect child fields and manifests while deciding whether a
-   segment can be reused. DataCoord `CreateIndex` uses fake-binlog coverage and
-   does not rescan external source files.
+1. Schema mutation increments the collection schema version immediately.
+2. DataNode inspects child fields, manifests, function-output columns, and BM25
+   stats while deciding whether a segment can be reused, patched, or rebuilt.
+3. New and patched segments are returned with the refresh schema version.
+4. After validating the worker result, DataCoord atomically advances every
+   reusable kept segment to the same refresh schema version.
+5. Fake binlog `ChildFields` remains a refresh/backfill implementation detail;
+   DataCoord index readiness does not depend on it.
 
 QueryCoord does not independently scan manifests to infer field
 materialization. DataCoord is the index-metadata entry point and rejects an
-explicit index request for an uncovered external field. Once legal index
-metadata and index files exist, QueryCoord is responsible for loading them.
-Manifest-path and data-version changes independently trigger segment reopen.
+explicit index request while any active segment schema version differs from the
+collection schema version. Once legal index metadata and index files exist,
+QueryCoord is responsible for loading them. Manifest-path and data-version
+changes independently trigger segment reopen.
 
 ### Load Before Refresh Contract
 
@@ -524,9 +525,8 @@ commit, target observation, and QueryNode segment reload.
    - new segment IDs for rebuilt segments;
    - patched manifest paths for reusable segments;
    - fake binlogs that cover the materialized field IDs;
-   - the refresh schema version on every patched or rebuilt segment;
+   - the refresh schema version on every kept, patched, or rebuilt segment;
    - storage version and data version updates as needed.
-   Unchanged kept segments preserve their actual older schema version.
 6. QueryCoord target observer sees the DataCoord segment metadata change and
    builds a next target.
 7. For patched segments that keep the same segment ID but receive a newer
@@ -655,8 +655,9 @@ The rules are:
 6. If the version changed, the refresh job fails with a retriable
    schema-changed error. Users rerun refresh.
 7. DataNode writes every refreshed or patched external segment with
-   `SegmentInfo.SchemaVersion = schema.version`. Unchanged kept segments retain
-   their real schema version.
+   `SegmentInfo.SchemaVersion = schema.version`. After validating reusable kept
+   segments, DataCoord advances them to the same version in the atomic refresh
+   commit. A kept segment ahead of the refresh version is rejected.
 8. DataCoord excludes external collections from
    `BumpSchemaVersionCompaction` scheduling.
 9. `AlterCollectionSchema` is allowed while a refresh job for the same
@@ -711,17 +712,21 @@ schema-mutation broadcast paths above.
 
 | Operation | Index behavior | Stats behavior |
 |-----------|----------------|----------------|
-| Add source-backed field | Creating an index on the new field is rejected until durable materialization is complete for every active segment. Loaded index becomes usable only after QueryCoord loads it. | No generated stats are required unless the field has scalar or JSON stats support. |
-| Add BM25 | The DDL creates bound index metadata, but the index inspector skips segments whose fake binlogs do not cover the output field. An explicit index request is rejected until refresh writes sparse output and BM25 stats. | Refresh writes `bm25.<fieldID>` stats into manifest. QueryNode cannot serve BM25 search until stats are loaded. |
-| Add MinHash/TextEmbedding | Bound index metadata is created with the field, but the index inspector skips segments until fake-binlog coverage includes the output field. An explicit index request is rejected before materialization. | No BM25 stats required. |
+| Add source-backed field | All new index creation is rejected until every active segment schema version matches the collection schema version. Loaded index becomes usable only after QueryCoord loads it. | No generated stats are required unless the field has scalar or JSON stats support. |
+| Add BM25 | The DDL creates bound index metadata, but the index inspector defers stale external segments until refresh advances their schema version after writing sparse output and BM25 stats. Explicit index creation uses the same version barrier. | Refresh writes `bm25.<fieldID>` stats into manifest. QueryNode cannot serve BM25 search until stats are loaded. |
+| Add MinHash/TextEmbedding | Bound index metadata is created with the field, but the index inspector defers stale external segments until refresh advances their schema version. Explicit index creation uses the same version barrier. | No BM25 stats required. |
 | Drop source field | RootCoord cascades index metadata drops on that field. QueryNode drops loaded index state and caches. | Existing source data remains in external files. |
 | Drop function/BM25 | RootCoord cascades indexes on all output fields. QueryNode drops loaded index state and BM25 stats references. | Existing generated stats remain on storage but are no longer reachable. |
 
-DataCoord owns external field coverage validation for index creation and build
-scheduling. QueryCoord consumes the resulting index metadata and files and
-loads or reopens the index without re-deriving materialization from collection
-schema version. A successful schema mutation alone is not enough to build or
-load an index on an added external field.
+Both add and drop operations increment the collection schema version. Therefore
+all new index creation waits for refresh after either operation, including an
+index on a field that was not directly changed.
+
+DataCoord owns the external segment schema-version barrier for index creation
+and build scheduling. QueryCoord consumes the resulting index metadata and
+files and loads or reopens the index without re-deriving materialization from
+segment contents. A successful schema mutation alone is not enough to create or
+build a new index before refresh completes.
 
 ## SDK And REST Surface
 
@@ -780,7 +785,7 @@ migrated.
 | Drop function removes last vector field | `cannot drop function {function}: it would leave no vector field in the collection` |
 | Refresh commits after schema changed | `external collection schema changed during refresh; rerun refresh` |
 | Query references added field before refresh and target switch | Request fails; exact error is tracked by [#50416](https://github.com/milvus-io/milvus/issues/50416). |
-| Create index on added field before refresh | `external field {field} is not materialized; run RefreshExternalCollection before creating index` |
+| Create index before all external segments reach the collection schema version | `external collection segment {segment} schema version {segment_version} does not match collection schema version {collection_version}; run RefreshExternalCollection before creating index` |
 
 ## Implementation Summary
 
@@ -818,15 +823,15 @@ migrated.
      snapshot.
    - Reject refresh commit if the current collection schema version differs
      from the persisted job schema version.
-   - Commit refreshed or patched external segments with the schema version used
-     by the refresh task.
+   - Commit every kept, refreshed, or patched external segment with the schema
+     version used by the refresh task.
 
 4. **Materialization state**
-   - Record durable field coverage in fake-binlog `ChildFields`.
    - Let DataNode inspect child fields and manifests when reusing or rebuilding
      external segments.
    - Let DataCoord reject explicit index creation and defer bound-index builds
-     when a required field is absent from segment coverage.
+     while any external segment schema version differs from the collection
+     schema version.
    - Keep QueryCoord focused on loading existing legal index metadata and
      reopening changed manifests.
 
@@ -884,8 +889,9 @@ migrated.
 | DataCoord unit | Refresh job/task metadata persists schema version using non-reserved field numbers. |
 | DataCoord unit | Refresh commit fails if current collection schema version differs from job schema version. |
 | DataCoord unit | Bump schema version policy skips external collections with stale segment schema versions. |
-| DataCoord unit | Fake-binlog coverage reports a source-backed added field missing before refresh. |
-| DataCoord unit | Fake-binlog coverage reports generated output fields present after refresh. |
+| DataCoord unit | Refresh advances reusable kept segments to the refresh schema version and rejects kept segments that are ahead. |
+| DataCoord unit | Explicit index creation and background index build require exact segment/collection schema-version equality for external collections. |
+| DataCoord unit | A caught-up external segment remains index-ready when recovered without fake binlogs. |
 | QueryCoord unit | Same segment ID with newer manifest path schedules reopen. |
 | QueryCoord unit | Current target is not promoted while distribution manifest is older than target manifest. |
 | QueryCoord unit | Current target is promoted after every replica reports target manifest readiness. |
@@ -935,7 +941,8 @@ Remaining Go E2E gaps are:
 2. Internal schema-bump compaction backfill for BM25 and MinHash.
 3. Dropping an external function while the collection remains loaded.
 4. Online source-field refresh followed by query without release/reload.
-5. Explicit index creation rejection before external field materialization.
+5. Explicit index creation rejection before external segments catch up to the
+   collection schema version.
 6. Schema alter racing with refresh dispatch or atomic refresh commit.
 7. Schema evolution for the `milvus-table` external format.
 
