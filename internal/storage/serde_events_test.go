@@ -143,7 +143,6 @@ func TestBinlogStreamWriter(t *testing.T) {
 		ok := rr.Next()
 		assert.True(t, ok)
 		rec := rr.Record()
-		defer rec.Release()
 		assert.Equal(t, int64(size), rec.NumRows())
 		ok = rr.Next()
 		assert.False(t, ok)
