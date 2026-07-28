@@ -254,28 +254,6 @@ class SimpleGeometryCacheManager {
         return cache;
     }
 
-    // Atomically replace (or install) the cache for one field.
-    //
-    // The caller populates a DETACHED cache first and hands it over here, so
-    // a half-populated cache is never visible: readers either see the whole
-    // previous cache or the whole new one. An in-flight reader that already
-    // holds the previous shared_ptr keeps it alive and consistent for the
-    // rest of its query. If the caller's build throws, it simply never calls
-    // this and the previous cache stays untouched -- as opposed to mutating
-    // the live cache in place, which on a replace-load (a default-filled
-    // column later replaced by the real one) exposed torn contents and, on a
-    // mid-load failure, left the contaminated cache in the map forever
-    // (caches are only ever built at load time). See PR #50951 review.
-    void
-    InstallCache(uint64_t segment_instance_uid,
-                 int64_t segment_id,
-                 FieldId field_id,
-                 std::shared_ptr<SimpleGeometryCache> cache) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        caches_[MakeCacheKey(segment_instance_uid, segment_id, field_id)] =
-            std::move(cache);
-    }
-
     std::shared_ptr<SimpleGeometryCache>
     GetCache(uint64_t segment_instance_uid,
              int64_t segment_id,

@@ -62,6 +62,7 @@
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
@@ -1250,6 +1251,108 @@ TEST_F(RTreeIndexTest, GIS_Index_Refine_ToleratesUnparseableCandidate) {
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS bad-refine test");
 }
 
+// Regression for the legacy-short-index self-heal: old builders dropped a
+// non-null corrupt/empty geometry but still persisted absolute null offsets.
+// Count() is then smaller than the segment row space, and a tail NULL offset is
+// outside the bitmap returned by parameterless IsNotNull(). Padding that bitmap
+// with true makes NOT ST_* select the NULL row.
+TEST_F(RTreeIndexTest, GIS_LegacyShortIndexPreservesTailNullUnderNot) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id =
+        schema->AddDebugField("geo", DataType::GEOMETRY, true /* nullable */);
+    schema->set_primary_field_id(pk_id);
+
+    constexpr int N = 6;
+    auto full_ds = DataGen(schema, N);
+    auto sealed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    std::vector<std::string> segment_wkbs(N, CreateWkbFromWkt("POINT(0 0)"));
+    segment_wkbs[N - 2].clear();  // legacy builder dropped this non-null row
+    segment_wkbs[N - 1].clear();  // payload for the genuine NULL tail row
+    const uint8_t valid_bitmap[] = {0x1F};
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         true);
+    geo_field_data->FillFieldData(
+        segment_wkbs.data(), valid_bitmap, segment_wkbs.size(), 0);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    sealed->LoadFieldData(load_info);
+
+    // Persist the exact legacy shape: rows 0..3 have tree entries, row 4 was a
+    // non-null corrupt/empty geometry dropped by the old builder, and row 5 is
+    // NULL. AddGeometry records the absolute null offset 5, but after reload
+    // Count() is reconstructed as four entries + one NULL = 5.
+    milvus::storage::FieldDataMeta short_field_meta{1, 1, 1, 500};
+    short_field_meta.field_schema.set_data_type(
+        ::milvus::proto::schema::DataType::Geometry);
+    short_field_meta.field_schema.set_nullable(true);
+    milvus::storage::IndexMeta short_index_meta{1, 500, 1, 1};
+    milvus::storage::FileManagerContext fm_ctx(
+        short_field_meta, short_index_meta, chunk_manager_, fs_);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
+    rtree_index->BuildWithRawDataForUT(4, segment_wkbs.data(), {});
+    rtree_index->AddGeometry(segment_wkbs[N - 1], N - 1, false);
+    ASSERT_EQ(rtree_index->Count(), N);
+    auto stats = rtree_index->UploadUnified({});
+
+    milvus::segcore::LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = 1;
+    info.field_id = geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.schema.set_nullable(true);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    nlohmann::json cfg_load;
+    cfg_load["index_files"] = stats->GetIndexFiles();
+    rtree_index->LoadUnified(cfg_load);
+    ASSERT_EQ(rtree_index->Count(), N - 1);
+    auto legacy_validity = rtree_index->IsNotNull();
+    ASSERT_EQ(legacy_validity.size(), N - 1);
+    ASSERT_TRUE(legacy_validity[N - 2]);
+    auto full_validity = rtree_index->IsNotNull(N);
+    ASSERT_FALSE(full_validity[N - 1]);
+    info.cache_index =
+        CreateTestCacheIndex("rtree_legacy_short_key", std::move(rtree_index));
+    sealed->LoadIndex(info);
+
+    auto intersects = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY, {}, true),
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        "POINT(100 100)");
+    auto not_intersects = std::make_shared<milvus::expr::LogicalUnaryExpr>(
+        milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, intersects);
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       not_intersects);
+    auto bits = ExecuteQueryExpr(plan, sealed.get(), N, MAX_TIMESTAMP);
+
+    ASSERT_EQ(bits.size(), static_cast<size_t>(N));
+    for (int i = 0; i < N - 1; ++i) {
+        EXPECT_TRUE(bits[i]) << "non-null row " << i;
+    }
+    EXPECT_FALSE(bits[N - 1]) << "NULL tail row must remain unknown under NOT";
+
+    sealed.reset();
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS legacy-short-index test");
+}
+
 namespace {
 // RAII toggle for the static geometry-cache switch: restores the previous
 // value even when a gtest ASSERT returns out of the test body early, so a
@@ -1390,6 +1493,14 @@ TEST_F(RTreeIndexTest, GIS_CacheOn_CorruptRow_LoadsAndQueries) {
     // The critical assertion: the load itself must tolerate the corrupt row.
     ASSERT_NO_THROW({ sealed->LoadFieldData(load_info); });
     seg_id = sealed->get_segment_id();
+    auto published_cache = sealed->GetGeometryCache(geo_id);
+    ASSERT_NE(published_cache, nullptr);
+    // Sealed caches live in the immutable published runtime state, not in the
+    // process-global manager. That is what makes a failed/cancelled reopen
+    // discard the staged replacement together with its unpublished column.
+    EXPECT_EQ(milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+                  sealed->segment_instance_uid(), seg_id, geo_id),
+              nullptr);
 
     // Query through the cache branch of the filter macros (cache is enabled
     // and populated by the load above).
@@ -1407,10 +1518,26 @@ TEST_F(RTreeIndexTest, GIS_CacheOn_CorruptRow_LoadsAndQueries) {
         EXPECT_EQ(bool(bits[i]), i != kBad) << "row " << i;
     }
 
-    auto sealed_instance_uid = sealed->segment_instance_uid();
-    sealed.reset();
-    milvus::exec::SimpleGeometryCacheManager::Instance().RemoveSegmentCaches(
-        sealed_instance_uid, seg_id);
+    // Model the critical failure boundary of reopen: field loading and cache
+    // construction mutate only a cloned runtime. If a later step throws or is
+    // cancelled before Publish(), discarding that clone must leave the old
+    // column/cache pair visible and must not leak the replacement globally.
+    auto* sealed_impl =
+        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(sealed.get());
+    ASSERT_NE(sealed_impl, nullptr);
+    auto staged_runtime = sealed_impl->TestCloneMutableRuntimeResourceState();
+    auto unpublished_cache =
+        std::make_shared<milvus::exec::SimpleGeometryCache>();
+    staged_runtime->geometry_caches[geo_id] = unpublished_cache;
+    EXPECT_EQ(sealed->GetGeometryCache(geo_id), published_cache);
+    EXPECT_NE(sealed->GetGeometryCache(geo_id), unpublished_cache);
+    staged_runtime.reset();
+    EXPECT_EQ(sealed->GetGeometryCache(geo_id), published_cache);
+
+    // Field retirement is another publication boundary: the cache must leave
+    // the runtime snapshot together with the raw column.
+    sealed->DropFieldData(geo_id);
+    EXPECT_EQ(sealed->GetGeometryCache(geo_id), nullptr);
 }
 
 // Regression for PR #50951 review (RTreeIndex::AddGeometry nullability): a row

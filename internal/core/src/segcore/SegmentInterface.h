@@ -69,6 +69,10 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 
+namespace milvus::exec {
+class SimpleGeometryCache;
+}
+
 namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
@@ -377,6 +381,12 @@ class SegmentInternalInterface : public SegmentInterface {
     segment_instance_uid() const {
         return segment_instance_uid_;
     }
+
+    // Growing segments use the process-level cache manager. Sealed segments
+    // override this to return the cache from their immutable published runtime
+    // snapshot, so a column replacement and its cache become visible together.
+    virtual std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const;
 
     virtual void
     prefetch_chunks(milvus::OpContext* op_ctx,

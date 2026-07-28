@@ -147,6 +147,13 @@ class RTreeIndex : public ScalarIndex<T> {
     TargetBitmap
     IsNotNull() override;
 
+    // Build validity in the caller's absolute row space. Legacy R-Tree files
+    // can contain null offsets beyond Count() when older builders dropped
+    // non-null empty/corrupt geometries, so sizing only by Count() loses those
+    // tail NULLs.
+    TargetBitmap
+    IsNotNull(int64_t row_count) override;
+
     const TargetBitmap
     InApplyFilter(
         size_t n,

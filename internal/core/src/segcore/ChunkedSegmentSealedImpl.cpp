@@ -1052,6 +1052,7 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
         current->skip_index ? current->skip_index->Clone() : state->skip_index;
     state->mmap_field_ids = current->mmap_field_ids;
     state->variable_fields_avg_size = current->variable_fields_avg_size;
+    state->geometry_caches = current->geometry_caches;
     state->row_count = current->row_count;
     return state;
 }
@@ -3361,6 +3362,17 @@ ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
     prefetch_chunks_locked(op_ctx, field_id);
 }
 
+std::shared_ptr<milvus::exec::SimpleGeometryCache>
+ChunkedSegmentSealedImpl::GetGeometryCache(FieldId field_id) const {
+    auto snapshot = CapturePublishedState();
+    if (snapshot == nullptr || snapshot->runtime == nullptr) {
+        return nullptr;
+    }
+    auto it = snapshot->runtime->geometry_caches.find(field_id);
+    return it != snapshot->runtime->geometry_caches.end() ? it->second
+                                                          : nullptr;
+}
+
 void
 ChunkedSegmentSealedImpl::ApplyFieldValidData(
     milvus::OpContext* op_ctx,
@@ -4064,6 +4076,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
     }
     if (runtime != nullptr) {
         runtime->fields.erase(field_id);
+        runtime->geometry_caches.erase(field_id);
         runtime->array_offsets_map.erase(field_id);
         runtime->mmap_field_ids.erase(field_id);
         // Average size describes the retrievable field value, not the
@@ -4078,6 +4091,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
     } else {
         auto next_runtime = CloneRuntimeResourceState(snapshot->runtime);
         next_runtime->fields.erase(field_id);
+        next_runtime->geometry_caches.erase(field_id);
         next_runtime->array_offsets_map.erase(field_id);
         next_runtime->mmap_field_ids.erase(field_id);
         // See the staged-runtime branch above: only schema removal retires
@@ -4849,10 +4863,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
-    // Clean up geometry cache for all fields in this segment
-    auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(segment_instance_uid(), get_segment_id());
-
     if (mmap_descriptor_ != nullptr) {
         auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         mm->UnRegister(mmap_descriptor_);
@@ -7030,25 +7040,15 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     generate_interim_index(field_id, num_rows, column, op_ctx, committer);
 
     // Build the geometry cache OUTSIDE the publish lock (it decodes the whole
-    // column), then install it atomically together with the column below, so
-    // GIS predicates and bulk_subscript never disagree about which version of
-    // the column they are reading.
+    // column), then stage it in the same immutable runtime snapshot as the
+    // column. Publishing the snapshot makes both visible with one atomic state
+    // swap; a cancelled/failed reopen simply discards the staged pair.
     std::shared_ptr<milvus::exec::SimpleGeometryCache> staged_geometry_cache;
     if (!SystemProperty::Instance().IsSystem(field_id) &&
         data_type == DataType::GEOMETRY &&
         segcore_config_.get_enable_geometry_cache()) {
         staged_geometry_cache = BuildGeometryCacheDetached(field_id, column);
     }
-    auto install_staged_geometry_cache = [&]() {
-        if (staged_geometry_cache != nullptr) {
-            milvus::exec::SimpleGeometryCacheManager::Instance().InstallCache(
-                segment_instance_uid(),
-                get_segment_id(),
-                field_id,
-                staged_geometry_cache);
-        }
-    };
-
     auto& field_meta = schema_snapshot->operator[](field_id);
     auto prepare_array_offsets = [&](RuntimeResourceState& target_runtime) {
         if (auto parsed_struct_name = GetStructNameForArrayField(field_meta);
@@ -7129,6 +7129,15 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 target_runtime.fields.emplace(field_id, column);
             }
 
+            if (data_type == DataType::GEOMETRY) {
+                if (staged_geometry_cache != nullptr) {
+                    target_runtime.geometry_caches.insert_or_assign(
+                        field_id, staged_geometry_cache);
+                } else {
+                    target_runtime.geometry_caches.erase(field_id);
+                }
+            }
+
             if (enable_mmap) {
                 target_runtime.mmap_field_ids.insert(field_id);
             } else {
@@ -7167,7 +7176,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
             std::unique_lock lck(mutex_);
             apply_loaded_column(target_runtime, old_column, staged_state);
-            install_staged_geometry_cache();
         });
         return;
     }
@@ -7184,7 +7192,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
         std::unique_lock lck(mutex_);
         apply_loaded_column(*runtime, old_column, *capture_snapshot());
-        install_staged_geometry_cache();
         return;
     }
 
@@ -7196,7 +7203,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     apply_loaded_column(*next_runtime, old_column, *current);
 
     auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
-    install_staged_geometry_cache();
     lck.unlock();
     if (SystemProperty::Instance().IsSystem(field_id)) {
         PublishRuntimeStateLocked(published_runtime);
@@ -7963,8 +7969,8 @@ ChunkedSegmentSealedImpl::BuildGeometryCacheDetached(
         // rows evaluated against not-yet-published geometry, untouched rows
         // read as gaps and judged non-matching -- and a throw partway would
         // strand that contaminated cache in the manager map forever, since
-        // caches are only ever built at load time. The caller installs this
-        // one atomically once it is complete.
+        // caches are only ever built at load time. The caller stages this one
+        // beside the replacement column in the next published runtime state.
         auto geometry_cache =
             std::make_shared<milvus::exec::SimpleGeometryCache>();
 

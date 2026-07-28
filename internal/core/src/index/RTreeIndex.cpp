@@ -489,13 +489,21 @@ RTreeIndex<T>::IsNull() {
 template <typename T>
 TargetBitmap
 RTreeIndex<T>::IsNotNull() {
-    int64_t count = Count();
-    TargetBitmap bitset(count, true);
+    return IsNotNull(Count());
+}
+
+template <typename T>
+TargetBitmap
+RTreeIndex<T>::IsNotNull(int64_t row_count) {
+    AssertInfo(row_count >= 0,
+               "R-Tree validity row count must be non-negative, got {}",
+               row_count);
+    TargetBitmap bitset(row_count, true);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     // See IsNull(): null_offset_ is not sorted by construction, so
     // bounds-check every offset rather than relying on a sorted-range shortcut.
     for (auto off : null_offset_) {
-        if (off < static_cast<size_t>(count)) {
+        if (off < static_cast<size_t>(row_count)) {
             bitset.reset(off);
         }
     }

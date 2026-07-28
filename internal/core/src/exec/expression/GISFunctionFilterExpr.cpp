@@ -52,10 +52,7 @@ namespace exec {
                                     const Geometry& right_source) {              \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
-        auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(   \
-            this->segment_->segment_instance_uid(),                              \
-            this->segment_->get_segment_id(),                                    \
-            field_id_);                                                          \
+        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
             auto cache_lock = geometry_cache->AcquireReadLock();                 \
             /* Cache-owned geometries share one GEOS context; drive the        \
@@ -123,10 +120,7 @@ namespace exec {
                                     const Geometry& right_source) {              \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
-        auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(   \
-            this->segment_->segment_instance_uid(),                              \
-            this->segment_->get_segment_id(),                                    \
-            field_id_);                                                          \
+        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
             auto cache_lock = geometry_cache->AcquireReadLock();                 \
             /* Cache-owned geometries share one GEOS context; drive the        \
@@ -189,10 +183,7 @@ namespace exec {
                                     TargetBitmapView valid_res) {                \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
-        auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(   \
-            this->segment_->segment_instance_uid(),                              \
-            this->segment_->get_segment_id(),                                    \
-            field_id_);                                                          \
+        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
             auto cache_lock = geometry_cache->AcquireReadLock();                 \
             /* Cache-owned geometries share one GEOS context; drive the        \
@@ -528,23 +519,18 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             auto tmp = idx_ptr->Query(ds);
             coarse_global_ = std::move(tmp);
         }
-        {
-            auto tmp_valid = idx_ptr->IsNotNull();
-            coarse_valid_global_ = std::move(tmp_valid);
-        }
-
         // Self-heal an index that reports fewer rows than the segment holds.
         //
         // RTreeIndex::Load recomputes the row count from the deserialized
         // tree, so an index built before empty/unparseable geometries were
-        // kept as placeholder entries under-reports by exactly the rows that
-        // build dropped -- and those are always NON-NULL rows with an empty
-        // or corrupt payload (genuinely null rows went to null_offset_ and
-        // are counted). Treat the missing tail as candidates and let exact
-        // refinement settle it: refinement fails to parse those payloads and
-        // rejects them, which is precisely the verdict a freshly built index
-        // produces via its placeholder MBR. Results therefore match a rebuilt
-        // index; the only cost is refining a few extra rows.
+        // kept as placeholder entries under-reports the segment row space.
+        // Treat the missing tail as candidates and let exact refinement settle
+        // it. The INDEX validity bitmap cannot be padded, though: Count() is an
+        // entry count while null offsets are absolute row ids, so a genuine
+        // NULL in the truncated tail is absent from IsNotNull(). Filling that
+        // tail with true would turn NULL into non-NULL and make NOT ST_* return
+        // it as a match. Ask the index to project its absolute null offsets
+        // into the segment row space instead.
         //
         // Padding beats asserting here: this is an expected upgrade state,
         // not a Milvus bug, and failing every geometry query on the segment
@@ -567,7 +553,14 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     active_count_ - coarse_rows);
             }
             coarse_global_.resize(active_count_, true);
-            coarse_valid_global_.resize(active_count_, true);
+
+            // null_offset_ uses absolute segment row ids, while Count() on a
+            // legacy index can under-report after older builders dropped
+            // non-null empty/corrupt rows. Ask the R-Tree to lay validity out
+            // directly in the segment row space so tail NULL offsets survive.
+            coarse_valid_global_ = idx_ptr->IsNotNull(active_count_);
+        } else {
+            coarse_valid_global_ = idx_ptr->IsNotNull();
         }
 
         coarse_cached_ = true;
@@ -600,11 +593,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 return;
 
             // Get simple geometry cache for this segment+field
-            auto geometry_cache =
-                SimpleGeometryCacheManager::Instance().GetCache(
-                    segment_->segment_instance_uid(),
-                    segment_->get_segment_id(),
-                    field_id_);
+            auto geometry_cache = segment_->GetGeometryCache(field_id_);
             if (geometry_cache) {
                 auto cache_lock = geometry_cache->AcquireReadLock();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {

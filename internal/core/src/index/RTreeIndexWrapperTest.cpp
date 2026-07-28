@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <string>
@@ -21,11 +22,12 @@
 #include <vector>
 
 #include "RTreeIndexWrapper.h"
-#include "test_utils/Constants.h"
+#include "common/EasyAssert.h"
 #include "common/Geometry.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
 #include "pb/plan.pb.h"
+#include "test_utils/Constants.h"
 
 class RTreeIndexWrapperTest : public ::testing::Test {
  protected:
@@ -219,6 +221,68 @@ TEST_F(RTreeIndexWrapperTest, TestInvalidWKB) {
     wrapper.add_geometry(invalid_wkb.data(), invalid_wkb.size(), 0);
 
     wrapper.finish();
+}
+
+TEST_F(RTreeIndexWrapperTest, FinishReportsBinaryWriteFailure) {
+    std::string index_path = test_dir_ + "/test_write_failure";
+    milvus::index::RTreeIndexWrapper wrapper(index_path, true);
+
+    // A directory at the binary-file path makes ofstream::open fail
+    // deterministically without depending on process permissions.
+    std::filesystem::create_directory(index_path + ".bgi");
+    try {
+        wrapper.finish();
+        FAIL() << "expected R-Tree binary write failure";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::FileWriteFailed);
+    }
+}
+
+TEST_F(RTreeIndexWrapperTest, LoadReportsMissingBinaryAsReadFailure) {
+    std::string index_path = test_dir_ + "/test_missing_binary";
+    milvus::index::RTreeIndexWrapper wrapper(index_path, false);
+
+    try {
+        wrapper.load();
+        FAIL() << "expected missing R-Tree binary failure";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::FileReadFailed);
+    }
+}
+
+TEST_F(RTreeIndexWrapperTest, LoadReportsCorruptBinaryAsDataFormatBroken) {
+    std::string index_path = test_dir_ + "/test_corrupt_binary";
+    {
+        milvus::index::RTreeIndexWrapper builder(index_path, true);
+        builder.finish();
+    }
+
+    const auto binary_path = index_path + ".bgi";
+    std::ifstream in(binary_path, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(in.is_open());
+    const auto original_size = in.tellg();
+    ASSERT_GT(original_size, 1);
+    std::string bytes(static_cast<size_t>(original_size), '\0');
+    in.seekg(0);
+    in.read(bytes.data(), original_size);
+    ASSERT_TRUE(in.good());
+    in.close();
+
+    bytes.resize(bytes.size() / 2);
+    {
+        std::ofstream out(binary_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.is_open());
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        ASSERT_TRUE(out.good());
+    }
+
+    milvus::index::RTreeIndexWrapper wrapper(index_path, false);
+    try {
+        wrapper.load();
+        FAIL() << "expected corrupt R-Tree binary failure";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::DataFormatBroken);
+    }
 }
 
 TEST_F(RTreeIndexWrapperTest, EmptyGeometryIsIndexedWithoutUndefinedMBR) {

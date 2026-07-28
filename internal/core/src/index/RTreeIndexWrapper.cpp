@@ -335,8 +335,17 @@ RTreeIndexWrapper::finish() {
 
     // Persist to disk: write meta and binary data file
     try {
-        // Write binary rtree data
-        RTreeSerializer::saveBinary(rtree_, index_path_ + ".bgi");
+        // Write binary rtree data. The serializer reports failures instead of
+        // throwing, so checking its result is part of the persistence
+        // contract: an index without a durable tree must never be uploaded as
+        // successfully built.
+        auto binary_path = index_path_ + ".bgi";
+        auto save_result = RTreeSerializer::saveBinary(rtree_, binary_path);
+        if (save_result != RTreeSerializer::BinaryIOResult::Success) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write R-Tree binary file: {}",
+                      binary_path);
+        }
 
         // Write meta json
         nlohmann::json meta;
@@ -356,6 +365,12 @@ RTreeIndexWrapper::finish() {
         }
         ofs.close();
         LOG_INFO("R-Tree meta written: {}.meta.json", index_path_);
+    } catch (const SegcoreError&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory writing R-Tree files for {}",
+                  index_path_);
     } catch (const std::exception& e) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   fmt::format("Failed to write R-Tree files: {}", e.what()));
@@ -384,15 +399,39 @@ RTreeIndexWrapper::load() {
                 if (meta.contains("dimension"))
                     dimension_ = meta["dimension"].get<uint32_t>();
             }
+        } catch (const std::bad_alloc&) {
+            throw;
         } catch (const std::exception& e) {
             LOG_WARN("Failed to read meta json: {}", e.what());
         }
 
-        // Read binary data
-        RTreeSerializer::loadBinary(rtree_, index_path_ + ".bgi");
+        // Deserialize into a temporary tree. A truncated archive can mutate
+        // its destination before reporting failure; only swap it into the live
+        // wrapper after the whole archive has been validated.
+        auto binary_path = index_path_ + ".bgi";
+        RTree loaded;
+        auto load_result = RTreeSerializer::loadBinary(loaded, binary_path);
+        if (load_result == RTreeSerializer::BinaryIOResult::OpenFailed ||
+            load_result == RTreeSerializer::BinaryIOResult::StreamFailed) {
+            ThrowInfo(ErrorCode::FileReadFailed,
+                      "Failed to read R-Tree binary file: {}",
+                      binary_path);
+        }
+        if (load_result == RTreeSerializer::BinaryIOResult::ArchiveFailed) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Corrupt R-Tree binary file: {}",
+                      binary_path);
+        }
+        rtree_.swap(loaded);
         rtree_needs_rebuild_ = false;
 
         LOG_INFO("R-Tree index (Boost) loaded from {}", index_path_);
+    } catch (const SegcoreError&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory loading R-Tree index from {}",
+                  index_path_);
     } catch (const std::exception& e) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   fmt::format("Failed to load R-Tree index from {}: {}",

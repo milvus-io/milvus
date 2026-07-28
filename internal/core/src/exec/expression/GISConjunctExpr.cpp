@@ -317,10 +317,7 @@ PhyGISRefineConjunctExpr::PrefetchRawData() {
     // bulk_subscript over their offsets -- never a sequential full-column scan,
     // so the base prefetch_chunks over EVERY chunk is mostly wasted. Warm the
     // column only when reads will actually span it.
-    auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-        segment_->segment_instance_uid(),
-        segment_->get_segment_id(),
-        st_->field_id);
+    auto geometry_cache = segment_->GetGeometryCache(st_->field_id);
     if (geometry_cache != nullptr) {
         // Reads come from the cache; the raw column is never touched.
         return;
@@ -427,12 +424,9 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
         }
 
-        // shared_ptr: an in-flight query keeps the cache alive past a
-        // concurrent segment drop (see SimpleGeometryCacheManager).
-        auto geometry_cache = SimpleGeometryCacheManager::Instance().GetCache(
-            segment_->segment_instance_uid(),
-            segment_->get_segment_id(),
-            st_->field_id);
+        // shared_ptr: an in-flight query keeps the published cache snapshot
+        // alive across a concurrent sealed-segment reopen/drop.
+        auto geometry_cache = segment_->GetGeometryCache(st_->field_id);
 
         if (geometry_cache) {
             auto cache_lock = geometry_cache->AcquireReadLock();

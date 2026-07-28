@@ -13,6 +13,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <sstream>
 #include <string>
 
@@ -34,47 +35,57 @@
 
 class RTreeSerializer {
  public:
+    enum class BinaryIOResult {
+        Success,
+        OpenFailed,
+        StreamFailed,
+        ArchiveFailed,
+    };
+
     template <typename RTreeType>
-    static bool
+    static BinaryIOResult
     saveBinary(const RTreeType& tree, const std::string& filename) {
         try {
             std::ofstream ofs(filename, std::ios::binary);
             if (!ofs.is_open()) {
-                std::cerr << "Cannot open file for writing: " << filename
-                          << std::endl;
-                return false;
+                return BinaryIOResult::OpenFailed;
             }
 
-            boost::archive::binary_oarchive oa(ofs);
-            oa << tree;
-
-            ofs.close();
-            return true;
-        } catch (const std::exception& e) {
-            std::cerr << "Serialization error: " << e.what() << std::endl;
-            return false;
+            {
+                boost::archive::binary_oarchive oa(ofs);
+                oa << tree;
+            }
+            ofs.flush();
+            if (!ofs.good()) {
+                return BinaryIOResult::StreamFailed;
+            }
+            return BinaryIOResult::Success;
+        } catch (const std::bad_alloc&) {
+            throw;
+        } catch (const std::exception&) {
+            return BinaryIOResult::ArchiveFailed;
         }
     }
 
     template <typename RTreeType>
-    static bool
+    static BinaryIOResult
     loadBinary(RTreeType& tree, const std::string& filename) {
         try {
             std::ifstream ifs(filename, std::ios::binary);
             if (!ifs.is_open()) {
-                std::cerr << "Cannot open file for reading: " << filename
-                          << std::endl;
-                return false;
+                return BinaryIOResult::OpenFailed;
             }
 
             boost::archive::binary_iarchive ia(ifs);
             ia >> tree;
-
-            ifs.close();
-            return true;
-        } catch (const std::exception& e) {
-            std::cerr << "Deserialization error: " << e.what() << std::endl;
-            return false;
+            if (ifs.bad()) {
+                return BinaryIOResult::StreamFailed;
+            }
+            return BinaryIOResult::Success;
+        } catch (const std::bad_alloc&) {
+            throw;
+        } catch (const std::exception&) {
+            return BinaryIOResult::ArchiveFailed;
         }
     }
 
