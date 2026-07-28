@@ -845,6 +845,20 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFail
 
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Run(func(context.Context, string) {
+			s.delegator.distribution.AddDistributions(SegmentEntry{
+				NodeID:      1,
+				SegmentID:   100,
+				PartitionID: 500,
+				Version:     1,
+				Level:       datapb.SegmentLevel_L1,
+			})
+			s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:         1,
+				SealedInTarget:        []int64{100},
+				SealedSegmentRowCount: map[int64]int64{100: 3},
+			}, []int64{500})
+		}).
 		Return(nil, merr.WrapErrIoTooManyRequests(remotePath, errors.New("storage throttled"))).Once()
 	cm.EXPECT().Reader(mock.Anything, remotePath).
 		Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
@@ -877,6 +891,9 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFail
 	segStats, ok := loadedStats.sealed.Get(100)
 	s.True(ok)
 	s.True(segStats.HasField(101))
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(3), fieldStats.NumRow())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsDoesNotRetryPermanentFailure() {

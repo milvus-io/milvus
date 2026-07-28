@@ -1483,7 +1483,35 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		s.NoError(err)
 	})
 
-	s.Run("worker_return_error", func() {
+	s.Run("worker_retry", func() {
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
+		worker1Calls := atomic.NewInt32(0)
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+			if worker1Calls.Inc() == 1 {
+				err := merr.WrapErrServiceUnavailableMsg("mocked")
+				return merr.Status(err), err
+			}
+			return merr.Success(), nil
+		}).Times(3)
+
+		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil).Times(3)
+
+		err := s.delegator.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
+		s.NoError(err)
+		s.Equal(int32(3), worker1Calls.Load())
+	})
+
+	s.Run("worker_return_non_retryable_error", func() {
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := cluster.NewMockWorker(s.T())
 		worker2 := cluster.NewMockWorker(s.T())
@@ -1492,7 +1520,8 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		workers[2] = worker2
 
 		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
-			return merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")
+			err := merr.WrapErrParameterInvalidMsg("mocked")
+			return merr.Status(err), err
 		}).Maybe()
 
 		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
@@ -2417,7 +2446,8 @@ func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	worker := cluster.NewMockWorker(t)
-	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")).Once()
+	workerErr := merr.WrapErrParameterInvalidMsg("mocked")
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Status(workerErr), workerErr).Once()
 	workerManager := cluster.NewMockManager(t)
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())

@@ -573,8 +573,9 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
+			var activateIfReadable bool
 			err := retry.Do(ctx, func() error {
+				activateIfReadable = sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
 				return idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable)
 			},
 				retry.Attempts(reopenBM25LoadRetryAttempts),

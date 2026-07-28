@@ -70,6 +70,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	updateSchemaWorkerRetryCount          = 5
+	updateSchemaWorkerRetryInitialBackoff = 500 * time.Millisecond
+	updateSchemaWorkerRetryMaxBackoff     = 5 * time.Second
+)
+
 // ShardDelegator is the interface definition.
 type ShardDelegator interface {
 	Collection() int64
@@ -1393,8 +1399,17 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 
 	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 1)
-		status, err := worker.UpdateSchema(ctx, req)
+		var status *commonpb.Status
+		err := retry.Do(ctx, func() error {
+			rpcCtx := retry.WithMaxAttemptsContext(ctx, 1)
+			var err error
+			status, err = worker.UpdateSchema(rpcCtx, req)
+			return merr.CheckRPCCall(status, err)
+		},
+			retry.Attempts(updateSchemaWorkerRetryCount+1),
+			retry.Sleep(updateSchemaWorkerRetryInitialBackoff),
+			retry.MaxSleepTime(updateSchemaWorkerRetryMaxBackoff),
+		)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
 	if err != nil {
