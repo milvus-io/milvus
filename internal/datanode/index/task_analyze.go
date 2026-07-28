@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -46,20 +47,24 @@ type analyzeTask struct {
 	queueDur time.Duration
 	manager  *TaskManager
 	analyze  analyzecgowrapper.CodecAnalyze
+
+	pluginContext *indexcgopb.StoragePluginContext
 }
 
 func NewAnalyzeTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.AnalyzeRequest,
 	manager *TaskManager,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *analyzeTask {
 	return &analyzeTask{
-		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
-		ctx:     ctx,
-		cancel:  cancel,
-		req:     req,
-		manager: manager,
-		tr:      timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:           ctx,
+		cancel:        cancel,
+		req:           req,
+		manager:       manager,
+		pluginContext: pluginContext,
+		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 	}
 }
 
@@ -162,7 +167,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		FieldSchema:     field,
 	}
 
-	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
+	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo, at.pluginContext)
 	if err != nil {
 		log.Error("failed to analyze data", zap.Error(err))
 		return err
@@ -224,4 +229,5 @@ func (at *analyzeTask) Reset() {
 	at.tr = nil
 	at.queueDur = 0
 	at.manager = nil
+	at.pluginContext = nil
 }

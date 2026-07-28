@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -119,7 +121,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockBinlogIO)
+		}, manager, s.mockBinlogIO, nil)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
 		binlog, err := task.sort(ctx)
@@ -169,7 +171,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockBinlogIO)
+		}, manager, s.mockBinlogIO, nil)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
 		_, err = task.sort(ctx)
@@ -198,11 +200,81 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			JSONStatsShreddingRatio:      0.3,
 			JSONStatsWriteBatchSize:      81920,
 		}
-		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options)
+		pluginContext := &indexcgopb.StoragePluginContext{
+			EncryptionZoneId: 17,
+			CollectionId:     req.GetCollectionID(),
+			EncryptionKey:    "unsafe-key",
+		}
+		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, pluginContext)
 
 		s.Equal(storage.StorageV2, params.StorageVersion)
 		s.Equal(int64(100), params.NumRows)
 		s.NotNil(params.SegmentInsertFiles)
+		s.Equal(pluginContext, params.StoragePluginContext)
+	})
+}
+
+func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
+	s.Run("json key stats build", func() {
+		const fieldID = int64(101)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		pluginContext := &indexcgopb.StoragePluginContext{
+			EncryptionZoneId: 17,
+			CollectionId:     s.collectionID,
+			EncryptionKey:    "unsafe-key",
+		}
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:       s.clusterID,
+			TaskID:          100,
+			CollectionID:    s.collectionID,
+			PartitionID:     s.partitionID,
+			TargetSegmentID: 102,
+			TaskVersion:     1,
+			NumRows:         10,
+			StorageVersion:  storage.StorageV2,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath:    s.T().TempDir(),
+				StorageType: "local",
+			},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "json", DataType: schemapb.DataType_JSON},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		manager := NewTaskManager(ctx)
+		manager.LoadOrStoreStatsTask(s.clusterID, req.GetTaskID(), &StatsTaskInfo{})
+		task := NewStatsTask(ctx, cancel, req, manager, nil, pluginContext)
+
+		var captured *indexcgopb.BuildIndexInfo
+		buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+			func(_ context.Context, info *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+				captured = info
+				return &indexcgowrapper.JSONKeyStatsResult{
+					MemSize: 10,
+					Files:   map[string]int64{"json-stats": 10},
+				}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+
+		err := task.createJSONKeyStats(
+			ctx,
+			req.GetStorageConfig(),
+			req.GetCollectionID(),
+			req.GetPartitionID(),
+			req.GetTargetSegmentID(),
+			req.GetTaskVersion(),
+			req.GetTaskID(),
+			common.JSONStatsDataFormatVersion,
+			req.GetInsertLogs(),
+			256,
+			0.3,
+			81920,
+		)
+		s.Require().NoError(err)
+		s.Require().NotNil(captured)
+		s.Equal(pluginContext, captured.GetStoragePluginContext())
 	})
 }
 

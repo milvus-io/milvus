@@ -23,7 +23,8 @@ extern "C" {
 CStatus
 Analyze(CAnalyze* res_analyze,
         const uint8_t* serialized_analyze_info,
-        const uint64_t len);
+        const uint64_t len,
+        const CPluginContext* plugin_context);
 
 CStatus
 DeleteAnalyze(CAnalyze analyze);

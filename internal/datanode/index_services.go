@@ -352,6 +352,10 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		log.Ctx(ctx).Warn("receive analyze task with invalid slot, set to 65535", zap.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 65535
 	}
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(req.GetClusterID(), req.GetTaskID(), &index.AnalyzeTaskInfo{
@@ -363,7 +367,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		log.Warn("duplicated analyze task", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager)
+	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		log.Warn("DataNode failed to schedule", zap.Error(err))
@@ -393,6 +397,10 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		log.Ctx(ctx).Warn("receive stats task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 64
 	}
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &index.StatsTaskInfo{
@@ -414,7 +422,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		return merr.Status(err), nil
 	}
 
-	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, io.NewBinlogIO(cm))
+	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, io.NewBinlogIO(cm), pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		log.Warn("DataNode failed to schedule", zap.Error(err))

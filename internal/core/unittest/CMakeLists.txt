@@ -57,6 +57,7 @@ set(MILVUS_TEST_FILES
         test_group_by_json.cpp
         test_growing_concurrent_reopen.cpp
         test_schema_reopen.cpp
+        test_cipher_plugin_context.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
