@@ -54,6 +54,9 @@ class IndexFactory {
         return instance;
     }
 
+    static bool
+    CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
+
     LoadResourceRequest
     IndexLoadResource(DataType field_type,
                       DataType element_type,
