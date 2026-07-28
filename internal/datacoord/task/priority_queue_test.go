@@ -30,6 +30,9 @@ func TestFIFOQueue_Push(t *testing.T) {
 	taskIDs = queue.TaskIDs()
 	assert.Equal(t, 2, len(taskIDs))
 	assert.Equal(t, 2, queue.TaskCount())
+	assert.Equal(t, 1, queue.TaskCountBy(func(task Task) bool {
+		return task.GetTaskID() == 2
+	}))
 }
 
 func TestFIFOQueue_Pop(t *testing.T) {
