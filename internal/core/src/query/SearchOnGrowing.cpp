@@ -196,22 +196,19 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
-        if (has_offset_mapping && !bitset.empty()) {
+        int64_t active_count = 0;
+        if (has_offset_mapping) {
             auto status =
                 offset_mapping.TransformBitset(bitset, transformed_bitset);
             if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
                 FillEmptySearchResult(search_result, num_queries, info.topk_);
                 return;
             }
-            if (status == OffsetMapping::BitsetTransformStatus::NoFilter) {
-                search_bitset = BitsetView{};
-            }
+            active_count = static_cast<int64_t>(transformed_bitset.size());
+        } else {
+            active_count = std::min(int64_t(bitset.size()),
+                                    segment.get_active_count(timestamp));
         }
-
-        auto active_count = has_offset_mapping
-                                ? offset_mapping.GetValidCount()
-                                : std::min(int64_t(bitset.size()),
-                                           segment.get_active_count(timestamp));
 
         // Check for nullable vector field with all null values
         if (active_count == 0) {
@@ -219,8 +216,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             FillEmptySearchResult(search_result, num_queries, info.topk_);
             return;
         }
-        if (has_offset_mapping && !bitset.empty() &&
-            !transformed_bitset.empty()) {
+        if (has_offset_mapping && !transformed_bitset.empty()) {
             search_bitset =
                 search_result.PinBitset(std::move(transformed_bitset));
         }
