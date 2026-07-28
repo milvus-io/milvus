@@ -663,5 +663,5 @@ class TestSearchNoneDefaultIndependent(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
                                  "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
-                                            "error: comparisons between VarChar and Int64 are not supported: "
+                                            "error: comparisons between float (VarChar) and 0 (Int64) are not supported: "
                                             "invalid parameter"})
