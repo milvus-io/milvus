@@ -56,6 +56,13 @@ func (r *SearchResult) ValidCount() int64 {
 	return int64(C.GetSearchResultValidCount(r.cSearchResult))
 }
 
+// GetMetricType returns the metric the producing segment actually searched
+// with. Unlike the plan metric, this remains populated when the request omitted
+// metric_type and segcore resolved it from the segment's own index configuration.
+func (r *SearchResult) GetMetricType() string {
+	return C.GoString(C.GetSearchResultMetricType(r.cSearchResult))
+}
+
 type RetrieveResult struct {
 	cRetrieveResult *C.CRetrieveResult
 }

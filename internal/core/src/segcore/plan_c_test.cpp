@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -23,6 +24,7 @@
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
+#include "query/Plan.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
 #include "test_utils/DataGen.h"
@@ -79,4 +81,36 @@ TEST(CApiTest, CPlan) {
     Test_CPlan<milvus::Float16Vector>(knowhere::metric::L2);
     Test_CPlan<milvus::BFloat16Vector>(knowhere::metric::L2);
     Test_CPlan<milvus::Int8Vector>(knowhere::metric::L2);
+}
+
+TEST(CApiTest, ParsePlaceholderGroupPreservesDataTypeInvalid) {
+    constexpr int64_t dim = 8;
+    constexpr int64_t num_queries = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto primary_key = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugVectorArrayField(
+        "array_vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::COSINE);
+    schema->set_primary_field_id(primary_key);
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_blob = handle.ParseSearch(
+        "", "array_vec", 5, knowhere::metric::COSINE, R"({"nprobe": 10})");
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_blob.data(), plan_blob.size());
+
+    auto query_vec = generate_float_vector(num_queries, dim);
+    std::vector<size_t> offsets = {0, 1, 2};
+    auto raw_group = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+        num_queries, dim, query_vec.data(), offsets);
+    auto blob = raw_group.SerializeAsString();
+
+    CPlaceholderGroup placeholder_group = nullptr;
+    auto status = ::ParsePlaceholderGroup(static_cast<CSearchPlan>(plan.get()),
+                                          blob.data(),
+                                          blob.size(),
+                                          &placeholder_group);
+    EXPECT_EQ(status.error_code, ErrorCode::DataTypeInvalid);
+    EXPECT_EQ(placeholder_group, nullptr);
+    free(const_cast<char*>(status.error_msg));
 }

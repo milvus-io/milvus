@@ -18,6 +18,7 @@ package rootcoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -728,6 +729,22 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
+
+	// collection.ttl.seconds is consumed from collection properties by Proxy and
+	// DataCoord. QueryNode receives the derived TTL timestamps on each request, so
+	// this property must not flush growing data or advance schema.Version.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "60"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	ttl, err := common.GetCollectionTTL(coll.Properties)
+	require.NoError(t, err)
+	require.Equal(t, 60*time.Second, ttl)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
@@ -743,8 +760,9 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 
 	// Create as external collection with both source and spec atomically set.
-	// Alter is no longer permitted to mutate source/spec; the TTL alter must
-	// nevertheless preserve them when it triggers a schema snapshot rebuild.
+	// User-facing Alter is not permitted to mutate source/spec; the internal
+	// refresh path is reserved for that tuple. A TTL alter must nevertheless
+	// preserve both fields when it triggers a schema snapshot rebuild.
 	testSchema := &schemapb.CollectionSchema{
 		Name:           collectionName,
 		Description:    "description",
@@ -853,6 +871,7 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 // Regression for #49335: refresh override path may carry source-only updates
@@ -896,6 +915,7 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 // Regression for #49335: alter that mixes external_source with a regular
@@ -940,6 +960,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {

@@ -2348,8 +2348,7 @@ func (_c *MockSegment_Version_Call) RunAndReturn(run func() int64) *MockSegment_
 func NewMockSegment(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockSegment {
+}) *MockSegment {
 	mock := &MockSegment{}
 	mock.Mock.Test(t)
 

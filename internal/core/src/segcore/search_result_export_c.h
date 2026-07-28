@@ -106,6 +106,11 @@ GetSearchResultMetadata(CSearchResult c_search_result,
                         int64_t* scanned_remote_bytes,
                         int64_t* scanned_total_bytes);
 
+// Returns a borrowed pointer to the metric the producing segment actually used.
+// The pointer remains valid until DeleteSearchResult is called.
+const char*
+GetSearchResultMetricType(CSearchResult c_search_result);
+
 #ifdef __cplusplus
 }
 #endif

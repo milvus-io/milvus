@@ -44,10 +44,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestResolveSearchMetricType(t *testing.T) {
+	t.Run("default metric comes from segments", func(t *testing.T) {
+		metricType, err := resolveSearchMetricType("", []string{"IP", "IP"})
+		require.NoError(t, err)
+		assert.Equal(t, "IP", metricType)
+	})
+
+	t.Run("explicit metric agrees with segments", func(t *testing.T) {
+		metricType, err := resolveSearchMetricType("L2", []string{"L2", "L2"})
+		require.NoError(t, err)
+		assert.Equal(t, "L2", metricType)
+	})
+
+	t.Run("inconsistent segments are retriable", func(t *testing.T) {
+		_, err := resolveSearchMetricType("", []string{"IP", "COSINE"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		assert.True(t, merr.Status(err).GetRetriable())
+	})
+
+	t.Run("segments that did not search contribute no metric", func(t *testing.T) {
+		metricType, err := resolveSearchMetricType("", []string{"", "L2", ""})
+		require.NoError(t, err)
+		assert.Equal(t, "L2", metricType)
+	})
+
+	t.Run("all skipped segments leave an omitted metric empty", func(t *testing.T) {
+		metricType, err := resolveSearchMetricType("", []string{"", ""})
+		require.NoError(t, err)
+		assert.Empty(t, metricType)
+	})
+}
 
 // testSegments holds pre-created segments and search results for testing.
 type testSegments struct {

@@ -451,7 +451,8 @@ ReduceHelper::RefineDistances() {
     MetricType metric_type = search_info.metric_type_;
     if (metric_type.empty()) {
         for (const auto& search_result : search_results_) {
-            if (search_result != nullptr && !search_result->metric_type_.empty()) {
+            if (search_result != nullptr &&
+                !search_result->metric_type_.empty()) {
                 metric_type = search_result->metric_type_;
                 break;
             }

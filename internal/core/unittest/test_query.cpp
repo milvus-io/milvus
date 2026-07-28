@@ -910,4 +910,117 @@ TEST(Query, VectorArrayElementLevelInference) {
             ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString()),
             std::exception);
     }
+
+    // Case 5: omitted metric + EmbList → infer embedding-list search. The
+    // segment validates the mode after resolving its own metric.
+    {
+        auto plan = make_plan("");
+        std::vector<size_t> offsets = {0, 1, 2};
+        auto ph_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+            num_queries, dim, query_vec.data(), offsets);
+        auto ph = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        EXPECT_FALSE(ph->at(0).element_level_);
+    }
+
+    // Case 6: omitted metric + plain vector → infer element-level search.
+    {
+        auto plan = make_plan("");
+        auto ph_raw =
+            CreatePlaceholderGroupFromBlob(num_queries, dim, query_vec.data());
+        auto ph = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        EXPECT_TRUE(ph->at(0).element_level_);
+    }
+}
+
+TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
+    constexpr int64_t dim = 8;
+    constexpr int64_t row_count = 32;
+    constexpr int64_t topk = 3;
+    constexpr int64_t query_count = 2;
+
+    auto run_case = [&](const MetricType& segment_metric,
+                        bool embedding_list_placeholder,
+                        bool expect_success) {
+        auto schema = std::make_shared<Schema>();
+        auto primary_key = schema->AddDebugField("pk", DataType::INT64);
+        auto array_vec = schema->AddDebugVectorArrayField(
+            "structA[array_vec]", DataType::VECTOR_FLOAT, dim, segment_metric);
+        schema->set_primary_field_id(primary_key);
+
+        std::map<std::string, std::string> index_params = {
+            {knowhere::meta::INDEX_TYPE,
+             knowhere::IndexEnum::INDEX_FAISS_IDMAP},
+            {knowhere::meta::METRIC_TYPE, segment_metric}};
+        std::map<std::string, std::string> type_params = {
+            {knowhere::meta::DIM, std::to_string(dim)}};
+        FieldIndexMeta field_index_meta(
+            array_vec, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_indexes = {
+            {array_vec, std::move(field_index_meta)}};
+        auto index_meta = std::make_shared<CollectionIndexMeta>(
+            row_count, std::move(field_indexes));
+
+        auto dataset = DataGen(schema, row_count, 42, 0, 1, 2);
+        auto sealed = CreateSealedSegment(schema, index_meta);
+        LoadGeneratedDataIntoSegment(dataset, sealed.get());
+        auto growing = CreateGrowingWithFieldDataLoaded(
+            schema, index_meta, SegcoreConfig::default_config(), dataset);
+
+        ScopedSchemaHandle handle(*schema);
+        auto plan_blob =
+            handle.ParseSearch("", "structA[array_vec]", topk, "", R"({})");
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
+
+        auto query_vectors = generate_float_vector(
+            embedding_list_placeholder ? query_count * 2 : query_count, dim);
+        milvus::proto::common::PlaceholderGroup raw_group;
+        if (embedding_list_placeholder) {
+            std::vector<size_t> offsets = {0, 2, 4};
+            raw_group = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+                query_count * 2, dim, query_vectors.data(), offsets);
+        } else {
+            raw_group = CreatePlaceholderGroupFromBlob(
+                query_count, dim, query_vectors.data());
+        }
+        auto placeholder =
+            ParsePlaceholderGroup(plan.get(), raw_group.SerializeAsString());
+        EXPECT_EQ(placeholder->at(0).element_level_,
+                  !embedding_list_placeholder);
+
+        auto verify_segment = [&](SegmentInterface* segment) {
+            if (expect_success) {
+                auto result = segment->Search(plan.get(),
+                                              placeholder.get(),
+                                              dataset.timestamps_.back() + 1);
+                ASSERT_NE(result, nullptr);
+                EXPECT_EQ(result->metric_type_, segment_metric);
+                EXPECT_EQ(result->element_level_, !embedding_list_placeholder);
+                EXPECT_FALSE(result->distances_.empty());
+                return;
+            }
+
+            try {
+                static_cast<void>(
+                    segment->Search(plan.get(),
+                                    placeholder.get(),
+                                    dataset.timestamps_.back() + 1));
+                FAIL() << "expected VECTOR_ARRAY search mode mismatch";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataTypeInvalid);
+            }
+        };
+
+        verify_segment(sealed.get());
+        verify_segment(growing.get());
+    };
+
+    // Both valid omitted-metric modes execute on sealed and growing segments.
+    run_case(knowhere::metric::MAX_SIM, true, true);
+    run_case(knowhere::metric::COSINE, false, true);
+
+    // The segment-resolved metric remains authoritative and rejects both
+    // placeholder/metric mode mismatch directions before vector search.
+    run_case(knowhere::metric::COSINE, true, false);
+    run_case(knowhere::metric::MAX_SIM, false, false);
 }

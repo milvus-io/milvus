@@ -8,6 +8,7 @@ import (
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
@@ -1341,6 +1342,40 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run fun
 	return _c
 }
 
+// UpdateIndexInfoList provides a mock function with given fields: indexInfos, version
+func (_m *MockShardDelegator) UpdateIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64) {
+	_m.Called(indexInfos, version)
+}
+
+// MockShardDelegator_UpdateIndexInfoList_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexInfoList'
+type MockShardDelegator_UpdateIndexInfoList_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexInfoList is a helper method to define mock.On call
+//   - indexInfos []*indexpb.IndexInfo
+//   - version int64
+func (_e *MockShardDelegator_Expecter) UpdateIndexInfoList(indexInfos interface{}, version interface{}) *MockShardDelegator_UpdateIndexInfoList_Call {
+	return &MockShardDelegator_UpdateIndexInfoList_Call{Call: _e.mock.On("UpdateIndexInfoList", indexInfos, version)}
+}
+
+func (_c *MockShardDelegator_UpdateIndexInfoList_Call) Run(run func(indexInfos []*indexpb.IndexInfo, version int64)) *MockShardDelegator_UpdateIndexInfoList_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]*indexpb.IndexInfo), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndexInfoList_Call) Return() *MockShardDelegator_UpdateIndexInfoList_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndexInfoList_Call) RunAndReturn(run func([]*indexpb.IndexInfo, int64)) *MockShardDelegator_UpdateIndexInfoList_Call {
+	_c.Run(run)
+	return _c
+}
+
 // UpdateSchema provides a mock function with given fields: ctx, sch
 func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error {
 	ret := _m.Called(ctx, sch)
@@ -1518,8 +1553,7 @@ func (_c *MockShardDelegator_Version_Call) RunAndReturn(run func() int64) *MockS
 func NewMockShardDelegator(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockShardDelegator {
+}) *MockShardDelegator {
 	mock := &MockShardDelegator{}
 	mock.Mock.Test(t)
 

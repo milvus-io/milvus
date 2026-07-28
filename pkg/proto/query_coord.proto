@@ -351,7 +351,9 @@ message LoadMetaInfo {
     string resource_group = 6; // Only used for metrics label.
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
-    uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
+    // Deprecated wire-compatible placeholder for legacy schema_version.
+    // New QueryNode paths ignore this field and order schema state by schema.Version only.
+    uint64 schema_barrier_ts = 9;
 }
 
 message WatchDmChannelsRequest {
@@ -818,7 +820,11 @@ message SyncDistributionRequest {
     schema.CollectionSchema schema = 5;
     LoadMetaInfo load_meta = 6;
     int64 replicaID = 7;
+    // Orders the complete index_info_list snapshot at request scope. Zero means
+    // this request (for example Remove or UpdatePartitionStats) carries no snapshot.
     int64 version = 8;
+    // Authoritative collection-index snapshot when version is non-zero. An empty
+    // list then means the collection's final index was dropped.
     repeated index.IndexInfo index_info_list = 9;
 }
 
@@ -1038,7 +1044,9 @@ message UpdateSchemaRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
-    uint64 schema_barrier_ts = 4; // Wire-compatible rename of legacy version; timestamp barrier used to fence stale load results.
+    // Deprecated wire-compatible placeholder for legacy version.
+    // New QueryNode paths ignore this field and order schema state by schema.Version only.
+    uint64 schema_barrier_ts = 4;
 }
 
 message UpdateIndexRequest {

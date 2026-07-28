@@ -821,7 +821,9 @@ func TestLocalSegmentReopenUsesSchemaVersion(t *testing.T) {
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
-			return request.Schema == schema && request.SchemaVersion == 1
+			return request.Schema == schema &&
+				request.SchemaVersion == 1 &&
+				request.MaxIndexRowCount > 0
 		})).
 		Return(nil)
 
@@ -936,9 +938,12 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
 		IndexInfos: []*querypb.FieldIndexInfo{
 			{
-				FieldID: 100,
-				IndexID: 1000,
-				NumRows: 5000,
+				FieldID:        100,
+				IndexID:        1000,
+				BuildID:        2000,
+				EnableIndex:    true,
+				IndexFilePaths: []string{"index/1000"},
+				NumRows:        5000,
 				IndexParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "DISKANN"},
 					{Key: common.DimKey, Value: "128"},

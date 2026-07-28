@@ -744,6 +744,9 @@ func (s *LocalSegment) syncFieldIndexes(indexInfos []*querypb.FieldIndexInfo) {
 
 	indexIDs := typeutil.NewSet[int64]()
 	for _, indexInfo := range indexInfos {
+		if isCollectionIndexConfigOnly(indexInfo) {
+			continue
+		}
 		indexID := indexInfo.GetIndexID()
 		indexIDs.Insert(indexID)
 		isLoaded, ok := isLoadedByIndexID[indexID]
@@ -1312,9 +1315,10 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		schema = served
 	}
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo:      newLoadInfo,
-		Schema:        schema,
-		SchemaVersion: uint64(schema.GetVersion()),
+		LoadInfo:         newLoadInfo,
+		Schema:           schema,
+		SchemaVersion:    uint64(schema.GetVersion()),
+		MaxIndexRowCount: estimateMaxIndexRowCount(ctx, schema),
 	})
 	if err != nil {
 		return err

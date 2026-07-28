@@ -106,6 +106,12 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			}
 		}
 	}
+	// WatchDmChannels reconstructs these load infos from SegmentInfo rather than
+	// receiving QueryCoord-packed SegmentLoadInfo objects. Make them self-contained
+	// before C++ creates the growing segments: segment index metadata is immutable
+	// after construction and is the only source for omitted-metric search and
+	// growing interim-index configuration.
+	segments.AppendCollectionIndexConfig(growingSegments, req.GetIndexInfoList())
 
 	return delegator.LoadGrowing(ctx, growingSegments, req.GetVersion())
 }

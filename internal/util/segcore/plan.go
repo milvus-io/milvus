@@ -68,6 +68,16 @@ func (plan *SearchPlan) setMetricType(metricType string) {
 	C.SetMetricType(plan.cSearchPlan, cmt)
 }
 
+// SetMetricTypeIfEmpty publishes the metric resolved by searched segments back
+// to the plan for the remaining reduce/export pipeline. An explicit request
+// metric is never overwritten.
+func (plan *SearchPlan) SetMetricTypeIfEmpty(metricType string) {
+	if metricType == "" || plan.GetMetricType() != "" {
+		return
+	}
+	plan.setMetricType(metricType)
+}
+
 func (plan *SearchPlan) GetMetricType() string {
 	cMetricType := C.GetMetricType(plan.cSearchPlan)
 	defer C.free(unsafe.Pointer(cMetricType))

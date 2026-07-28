@@ -134,28 +134,30 @@ ParsePlaceholderGroup(const Plan* plan,
         auto field_id = plan->tag2field_.at(element.tag_);
         auto& field_meta = plan->schema_->operator[](field_id);
 
-        // Determine element_level for VECTOR_ARRAY fields based on
-        // metric_type and placeholder type:
-        // non-embedding-list metric + plain vector type → element-level search
-        // embedding-list metric + emb-list placeholder → embedding-list search
-        // mismatch combinations → error
+        // The placeholder identifies which VECTOR_ARRAY search mode the request
+        // carries. An explicit metric must agree with it. When the request omits
+        // metric_type, defer that validation until the segment supplies its
+        // authoritative metric immediately before search.
         if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
             auto& metric = plan->plan_node_->search_info_.metric_type_;
-            bool emb_list_metric =
-                knowhere::get_el_metric_type(metric).has_value();
             bool emb_list_ph = is_emb_list_placeholder(ph.type());
-            if (emb_list_metric != emb_list_ph) {
-                ThrowInfo(DataTypeInvalid,
-                          fmt::format(
-                              "search type mismatch for VECTOR_ARRAY field {}: "
-                              "metric_type {} {} embedding list search, "
-                              "but search data is {}",
-                              field_meta.get_name().get(),
-                              metric,
-                              emb_list_metric ? "requires" : "does not support",
-                              emb_list_ph ? "embedding list" : "plain vector"));
+            if (!metric.empty()) {
+                bool emb_list_metric =
+                    knowhere::get_el_metric_type(metric).has_value();
+                if (emb_list_metric != emb_list_ph) {
+                    ThrowInfo(
+                        DataTypeInvalid,
+                        fmt::format(
+                            "search type mismatch for VECTOR_ARRAY field {}: "
+                            "metric_type {} {} embedding list search, "
+                            "but search data is {}",
+                            field_meta.get_name().get(),
+                            metric,
+                            emb_list_metric ? "requires" : "does not support",
+                            emb_list_ph ? "embedding list" : "plain vector"));
+                }
             }
-            element.element_level_ = !emb_list_metric;
+            element.element_level_ = !emb_list_ph;
         } else {
             element.element_level_ = false;
         }

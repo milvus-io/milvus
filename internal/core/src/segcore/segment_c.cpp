@@ -531,8 +531,7 @@ AsyncSearch(CTraceContext c_trace,
             }
             search_result->read_lease_ = std::move(read_lease);
             if (!filter_only &&
-                !milvus::PositivelyRelated(
-                    plan->plan_node_->search_info_.metric_type_)) {
+                !milvus::PositivelyRelated(search_result->metric_type_)) {
                 for (auto& dis : search_result->distances_) {
                     dis *= -1;
                 }

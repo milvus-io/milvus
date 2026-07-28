@@ -76,6 +76,7 @@
 #include "segcore/FieldIndexing.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentIndexMeta.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
@@ -1590,17 +1591,7 @@ SegmentGrowingImpl::search_batch_pks(
 
 MetricType
 SegmentGrowingImpl::ResolveMetricType(FieldId field_id) const {
-    for (const auto& index_info : load_info_.index_infos()) {
-        if (index_info.fieldid() != field_id.get()) {
-            continue;
-        }
-        for (const auto& kv : index_info.index_params()) {
-            if (kv.key() == knowhere::meta::METRIC_TYPE) {
-                return kv.value();
-            }
-        }
-    }
-    return MetricType();
+    return ResolveMetricTypeFromIndexMeta(index_meta_, field_id);
 }
 
 void
@@ -1612,13 +1603,18 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const BitsetView& bitset,
                                   milvus::OpContext* op_context,
                                   SearchResult& output) const {
-    // Same contract as the sealed path: the plan only carries a metric when the
-    // request named one, so otherwise this segment supplies it. A growing segment
-    // has no loaded vector index, so its own load info is the only source -- the
-    // delegator stamps the channel's index configuration in when it creates the
-    // segment from the stream.
-    if (search_info.metric_type_.empty()) {
-        search_info.metric_type_ = ResolveMetricType(search_info.field_id_);
+    // Same contract as the sealed path: use the growing segment's immutable
+    // construction-time index configuration to fill an omitted request metric or
+    // reject an explicit mismatch before brute-force/interim-index search runs.
+    search_info.metric_type_ =
+        ResolveSearchMetricType(search_info.metric_type_,
+                                ResolveMetricType(search_info.field_id_),
+                                search_info.field_id_);
+    auto& field_meta = schema_->operator[](search_info.field_id_);
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        ValidateVectorArraySearchMode(search_info.metric_type_,
+                                      search_info.element_level(),
+                                      search_info.field_id_);
     }
     output.metric_type_ = search_info.metric_type_;
     query::SearchOnGrowing(*this,

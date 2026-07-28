@@ -533,7 +533,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 				return err
 			}
 			if len(bm25Paths) > 0 {
-				return merr.WrapErrServiceInternal("load contains BM25 stats before delegator BM25 oracle is initialized")
+				return merr.WrapErrServiceNotReadyMsg("load contains BM25 stats before delegator BM25 oracle is initialized")
 			}
 		}
 		return nil
@@ -592,7 +592,7 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
-		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+		return merr.WrapErrServiceNotReadyMsg("reopen contains BM25 stats before delegator BM25 oracle is initialized")
 	}
 
 	pool := segments.GetLoadPool()
@@ -630,31 +630,25 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	return nil
 }
 
-// syncCollectionMeta refreshes the delegator node's CCollection IndexMeta and
-// channel-local function runtime after a forwarded worker load. Worker LoadSegments
-// already updates IndexMeta on the target worker, but the delegator must stay in sync.
-func (sd *shardDelegator) syncCollectionMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if len(req.GetIndexInfoList()) > 0 {
-		schema := req.GetSchema()
-		if schema == nil {
-			schema = sd.collection.Schema()
-		}
-
-		loadMeta := req.GetLoadMeta()
-		if loadMeta == nil {
-			loadMeta = &querypb.LoadMetaInfo{
-				CollectionID: req.GetCollectionID(),
-			}
-		}
-
-		meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
-		if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
-			return err
-		}
-		sd.collectionManager.Unref(req.GetCollectionID(), 1)
+// syncPostLoadCollectionState refreshes shared collection/function state after
+// a non-Reopen load. The RPC entry point publishes the request-level index
+// snapshot only after this entire load succeeds.
+func (sd *shardDelegator) syncPostLoadCollectionState(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if len(req.GetIndexInfoList()) == 0 {
+		return nil
 	}
 
-	sd.setFieldIndexes(req.GetIndexInfoList())
+	schema := req.GetSchema()
+	if schema == nil {
+		schema = sd.collection.Schema()
+	}
+
+	loadMeta := req.GetLoadMeta()
+	if loadMeta == nil {
+		loadMeta = &querypb.LoadMetaInfo{
+			CollectionID: req.GetCollectionID(),
+		}
+	}
 
 	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, req.GetIndexInfoList(), loadMeta); err != nil {
 		return err
@@ -742,16 +736,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	// A reopen must NOT advance the delegator's served schema or register runners here:
 	// those arrive via the stream UpdateSchema (served schema + idfOracle + function
-	// runners), which is the #50989/#51062 load-wins fix. Reopen DOES refresh the index
-	// meta (handleReopenPostLoad -> Collection.UpdateIndexMeta, so search-plan HasField
-	// sees newly-indexed fields) and backfill BM25 stats into the oracle — neither
-	// advances the served schema.
+	// runners), which is the #50989/#51062 load-wins fix. The worker has already
+	// reopened successfully, so backfill BM25 stats; the RPC entry point publishes
+	// the complete request-level index snapshot after this returns successfully.
+	// Neither step advances the served schema.
 	if req.GetLoadScope() == querypb.LoadScope_Reopen {
 		return sd.handleReopenPostLoad(ctx, req)
 	}
 
-	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
-		log.Warn(ctx, "failed to sync collection index meta on delegator", mlog.Err(err))
+	if err := sd.syncPostLoadCollectionState(ctx, req); err != nil {
+		log.Warn(ctx, "failed to sync collection state on delegator", mlog.Err(err))
 		return err
 	}
 
@@ -840,7 +834,11 @@ func (sd *shardDelegator) addDistributionIfSchemaVersionOK(loadSchemaVersion uin
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
 	if loadSchemaVersion < sd.servedSchemaVersion {
-		return merr.WrapErrServiceInternal("schema version changed")
+		return merr.WrapErrServiceUnavailableMsg(
+			"schema version changed during segment load, load version %d, served version %d",
+			loadSchemaVersion,
+			sd.servedSchemaVersion,
+		)
 	}
 
 	// alter distribution

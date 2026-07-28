@@ -20,7 +20,9 @@
 #include <string>
 #include <utility>
 
+#include "common/EasyAssert.h"
 #include "common/IndexMeta.h"
+#include "knowhere/emb_list_utils.h"
 #include "pb/segcore.pb.h"
 
 namespace milvus::segcore {
@@ -41,7 +43,8 @@ namespace milvus::segcore {
 // segment size budget -- the same expression the collection-wide index meta used
 // -- and stamps it onto SegmentLoadInfo.
 inline IndexMetaPtr
-BuildSegmentIndexMeta(const milvus::proto::segcore::SegmentLoadInfo* load_info) {
+BuildSegmentIndexMeta(
+    const milvus::proto::segcore::SegmentLoadInfo* load_info) {
     std::map<FieldId, FieldIndexMeta> field_metas;
     if (load_info != nullptr) {
         for (const auto& index_info : load_info->index_infos()) {
@@ -63,6 +66,71 @@ BuildSegmentIndexMeta(const milvus::proto::segcore::SegmentLoadInfo* load_info) 
         load_info != nullptr ? load_info->max_index_row_count() : 0;
     return std::make_shared<CollectionIndexMeta>(max_index_row_cnt,
                                                  std::move(field_metas));
+}
+
+inline MetricType
+ResolveMetricTypeFromIndexMeta(const IndexMetaPtr& index_meta,
+                               FieldId field_id) {
+    if (index_meta == nullptr || !index_meta->HasField(field_id)) {
+        return {};
+    }
+    const auto& index_params =
+        index_meta->GetFieldIndexMeta(field_id).GetIndexParams();
+    auto metric = index_params.find(knowhere::meta::METRIC_TYPE);
+    return metric == index_params.end() ? MetricType() : metric->second;
+}
+
+// A search may omit its metric, but the producing segment may not: score
+// orientation, reduce ordering, and refinement all depend on the metric the
+// segment actually searched with. When the request names one explicitly it
+// must match the segment's own index configuration before any search runs.
+inline MetricType
+ResolveSearchMetricType(const MetricType& requested_metric,
+                        const MetricType& segment_metric,
+                        FieldId field_id) {
+    if (segment_metric.empty()) {
+        // Legacy/test-created segments may not carry index configuration. An
+        // explicit request metric is still sufficient to execute them safely;
+        // only an omitted request requires the segment to supply the metric.
+        if (!requested_metric.empty()) {
+            return requested_metric;
+        }
+        ThrowInfo(FieldNotLoaded,
+                  "segment has no metric type for vector field {}",
+                  field_id.get());
+    }
+    if (!requested_metric.empty() && requested_metric != segment_metric) {
+        ThrowInfo(MetricTypeNotMatch,
+                  "metric type of field index is not the same as search "
+                  "request, field {}, field index: {}, search request: {}",
+                  field_id.get(),
+                  segment_metric,
+                  requested_metric);
+    }
+    return requested_metric.empty() ? segment_metric : requested_metric;
+}
+
+// VECTOR_ARRAY supports two distinct request shapes. Plain vector placeholders
+// search individual array elements and therefore require a scalar-vector metric;
+// embedding-list placeholders search rows and require a MAX_SIM_* metric. The
+// plan can validate this immediately only when the request names a metric. When
+// it does not, validate against the segment-resolved metric at the last boundary
+// before search execution.
+inline void
+ValidateVectorArraySearchMode(const MetricType& metric_type,
+                              bool element_level,
+                              FieldId field_id) {
+    bool embedding_list_metric =
+        knowhere::get_el_metric_type(metric_type).has_value();
+    if (embedding_list_metric == element_level) {
+        ThrowInfo(DataTypeInvalid,
+                  "search type mismatch for VECTOR_ARRAY field {}: metric_type "
+                  "{} {} embedding list search, but search data is {}",
+                  field_id.get(),
+                  metric_type,
+                  embedding_list_metric ? "requires" : "does not support",
+                  element_level ? "plain vector" : "embedding list");
+    }
 }
 
 }  // namespace milvus::segcore

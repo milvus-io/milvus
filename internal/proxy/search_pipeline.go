@@ -210,7 +210,10 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "searchReduceOperator")
 	defer sp.End()
 	toReduceResults := inputs[0].([]*internalpb.SearchResults)
-	metricType := getMetricType(toReduceResults)
+	metricType, err := resolveSearchResultMetricType(op.queryInfos[0].GetMetricType(), toReduceResults)
+	if err != nil {
+		return nil, err
+	}
 	result, err := reduceResults(
 		op.traceCtx, toReduceResults, op.nq, op.topK, op.offset,
 		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs)
@@ -281,7 +284,10 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 	for index, internalResults := range multipleInternalResults {
 		subReq := op.subReqs[index]
 		// Since the metrictype in the request may be empty, it can only be obtained from the result
-		subMetricType := getMetricType(internalResults)
+		subMetricType, err := resolveSearchResultMetricType(op.queryInfos[index].GetMetricType(), internalResults)
+		if err != nil {
+			return nil, err
+		}
 		result, err := reduceResults(
 			op.traceCtx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), subMetricType,
 			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs)

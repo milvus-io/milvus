@@ -90,6 +90,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error
+	UpdateIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64)
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -139,31 +140,44 @@ func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegator
 }
 
 // WithIndexInfoList seeds the channel's index configuration from the watch request.
-func WithIndexInfoList(indexInfos []*indexpb.IndexInfo) ShardDelegatorOption {
+func WithIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64) ShardDelegatorOption {
 	return func(sd *shardDelegator) {
-		sd.setFieldIndexes(indexInfos)
+		sd.setFieldIndexes(indexInfos, version)
 	}
 }
 
 // setFieldIndexes replaces the channel's index configuration. Only the configuration
 // half of FieldIndexInfo is populated; index files belong to a specific segment and
 // are never collection-wide.
-func (sd *shardDelegator) setFieldIndexes(indexInfos []*indexpb.IndexInfo) {
-	if len(indexInfos) == 0 {
-		return
-	}
+func (sd *shardDelegator) setFieldIndexes(indexInfos []*indexpb.IndexInfo, version int64) {
 	fieldIndexes := make([]*querypb.FieldIndexInfo, 0, len(indexInfos))
 	for _, info := range indexInfos {
+		if info == nil {
+			continue
+		}
+		cloned := typeutil.Clone(info)
 		fieldIndexes = append(fieldIndexes, &querypb.FieldIndexInfo{
 			FieldID:     info.GetFieldID(),
 			IndexName:   info.GetIndexName(),
 			IndexID:     info.GetIndexID(),
-			IndexParams: info.GetIndexParams(),
+			IndexParams: append(cloned.GetIndexParams(), cloned.GetTypeParams()...),
 		})
 	}
 	sd.fieldIndexMut.Lock()
 	defer sd.fieldIndexMut.Unlock()
+	if sd.fieldIndexVersionSet && version <= sd.fieldIndexVersion {
+		return
+	}
+	sd.fieldIndexVersion = version
+	sd.fieldIndexVersionSet = true
 	sd.fieldIndexes = fieldIndexes
+}
+
+// UpdateIndexInfoList publishes an authoritative collection-index snapshot for
+// future stream-created growing segments. Request-level versions order complete
+// snapshots; per-segment distribution versions must never be used here.
+func (sd *shardDelegator) UpdateIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64) {
+	sd.setFieldIndexes(indexInfos, version)
 }
 
 // getFieldIndexes returns the channel's index configuration for stamping into a
@@ -226,8 +240,10 @@ type shardDelegator struct {
 	// carries an index list. Only the configuration fields are meaningful: a growing
 	// segment has no index files, just the params (metric type, index type) its
 	// interim index is built from.
-	fieldIndexMut sync.RWMutex
-	fieldIndexes  []*querypb.FieldIndexInfo
+	fieldIndexMut        sync.RWMutex
+	fieldIndexes         []*querypb.FieldIndexInfo
+	fieldIndexVersion    int64
+	fieldIndexVersionSet bool
 
 	// current forward policy
 	l0ForwardPolicy string

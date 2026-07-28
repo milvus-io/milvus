@@ -888,6 +888,76 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 	}
 }
 
+func (suite *ServiceSuite) TestLoadSegmentsReopenAcceptsAuthoritativeIndexSnapshots() {
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	tests := []struct {
+		name          string
+		indexInfoList []*indexpb.IndexInfo
+		wantIndexes   int
+	}{
+		{
+			name: "legacy sparse segment info is enriched",
+			indexInfoList: []*indexpb.IndexInfo{
+				{
+					FieldID: 101,
+					IndexID: 1000,
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.MetricTypeKey, Value: "IP"},
+					},
+				},
+			},
+			wantIndexes: 1,
+		},
+		{
+			name:        "empty snapshot clears the final index",
+			wantIndexes: 0,
+		},
+	}
+
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			loader := suite.node.loader
+			mockLoader := segments.NewMockLoader(suite.T())
+			suite.node.loader = mockLoader
+			defer func() { suite.node.loader = loader }()
+
+			info := &querypb.SegmentLoadInfo{
+				SegmentID:     suite.validSegmentIDs[0],
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionIDs[0],
+				InsertChannel: suite.vchannel,
+				Level:         datapb.SegmentLevel_L1,
+			}
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, mock.Anything, schema).
+				Run(func(_ context.Context, infos []*querypb.SegmentLoadInfo, _ *schemapb.CollectionSchema) {
+					suite.Require().Len(infos, 1)
+					suite.Len(infos[0].GetIndexInfos(), test.wantIndexes)
+					if test.wantIndexes > 0 {
+						suite.Equal(int64(1000), infos[0].GetIndexInfos()[0].GetIndexID())
+						suite.Empty(infos[0].GetIndexInfos()[0].GetIndexFilePaths())
+					}
+				}).Return(nil).Once()
+
+			status, err := suite.node.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:    rand.Int63(),
+					TargetID: suite.node.session.ServerID,
+				},
+				CollectionID:  suite.collectionID,
+				DstNodeID:     suite.node.session.ServerID,
+				Infos:         []*querypb.SegmentLoadInfo{info},
+				Schema:        schema,
+				NeedTransfer:  false,
+				LoadScope:     querypb.LoadScope_Reopen,
+				IndexInfoList: test.indexInfoList,
+			})
+			suite.Require().NoError(err)
+			suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+		})
+	}
+}
+
 func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	ctx := context.Background()
 	// data
@@ -932,11 +1002,29 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		delegator := &delegator.MockShardDelegator{}
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+		snapshotVersion := int64(101)
+		indexInfos := []*indexpb.IndexInfo{
+			{
+				FieldID: 101,
+				IndexID: 1000,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "IP"},
+				},
+			},
+		}
 
 		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
 		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
 		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
-		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+			Run(func(_ context.Context, req *querypb.LoadSegmentsRequest) {
+				for _, info := range req.GetInfos() {
+					// Preserve the sparse wire form until the destination worker
+					// consumes it, so an old worker never sees config-only entries.
+					suite.Empty(info.GetIndexInfos())
+				}
+			}).Return(nil)
+		delegator.EXPECT().UpdateIndexInfoList(indexInfos, snapshotVersion).Once()
 		// data
 		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		req := &querypb.LoadSegmentsRequest{
@@ -949,11 +1037,51 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			Infos:         suite.genSegmentLoadInfos(schema, nil),
 			Schema:        schema,
 			NeedTransfer:  true,
-			IndexInfoList: []*indexpb.IndexInfo{{}},
+			Version:       snapshotVersion,
+			IndexInfoList: indexInfos,
 		}
 
 		// LoadSegment
 		status, err := suite.node.LoadSegments(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
+	suite.Run("reopen_empty_index_snapshot", func() {
+		delegator := &delegator.MockShardDelegator{}
+		suite.node.delegators.Insert(suite.vchannel, delegator)
+		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+		snapshotVersion := int64(102)
+
+		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+			Run(func(_ context.Context, req *querypb.LoadSegmentsRequest) {
+				suite.Empty(req.GetIndexInfoList())
+				suite.Empty(req.GetInfos()[0].GetIndexInfos())
+			}).Return(nil)
+		delegator.EXPECT().UpdateIndexInfoList([]*indexpb.IndexInfo(nil), snapshotVersion).Once()
+
+		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+		status, err := suite.node.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID: suite.collectionID,
+			DstNodeID:    suite.node.session.ServerID,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     suite.validSegmentIDs[0],
+					CollectionID:  suite.collectionID,
+					PartitionID:   suite.partitionIDs[0],
+					InsertChannel: suite.vchannel,
+					Level:         datapb.SegmentLevel_L1,
+				},
+			},
+			Schema:       schema,
+			NeedTransfer: true,
+			LoadScope:    querypb.LoadScope_Reopen,
+			Version:      snapshotVersion,
+		})
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 	})
@@ -2185,6 +2313,98 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 	suite.True(versionMatch)
+}
+
+func (suite *ServiceSuite) TestSyncDistributionPublishesRequestLevelIndexSnapshot() {
+	ctx := context.Background()
+	channel := "request-level-index-snapshot-channel"
+	requestVersion := int64(200)
+	actionVersion := int64(100)
+	partitions := []int64{suite.partitionIDs[0]}
+	indexInfos := []*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "IP"},
+			},
+		},
+	}
+	action := &querypb.SyncAction{
+		Type:          querypb.SyncType_UpdateVersion,
+		Version:       actionVersion,
+		TargetVersion: 300,
+	}
+
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().AddExcludedSegments(mock.Anything).Twice()
+	mockDelegator.EXPECT().SyncTargetVersion(action, partitions).Once()
+	// IndexInfoList is a complete request-level snapshot. Its ordering key is
+	// SyncDistributionRequest.Version, never the per-action segment version.
+	mockDelegator.EXPECT().UpdateIndexInfoList(indexInfos, requestVersion).Once()
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	status, err := suite.node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      channel,
+		Actions:      []*querypb.SyncAction{action},
+		LoadMeta: &querypb.LoadMetaInfo{
+			PartitionIDs: partitions,
+		},
+		Version:       requestVersion,
+		IndexInfoList: indexInfos,
+	})
+	suite.Require().NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestSyncDistributionVersionZeroDoesNotPublishIndexSnapshot() {
+	ctx := context.Background()
+	channel := "no-index-snapshot-channel"
+	partitionStatsVersions := map[int64]int64{suite.partitionIDs[0]: 10}
+
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().SyncPartitionStats(mock.Anything, partitionStatsVersions).Once()
+	mockDelegator.EXPECT().ReleaseSegments(
+		mock.Anything,
+		mock.MatchedBy(func(req *querypb.ReleaseSegmentsRequest) bool {
+			return req.GetCollectionID() == suite.collectionID &&
+				len(req.GetSegmentIDs()) == 1 && req.GetSegmentIDs()[0] == 1000
+		}),
+		true,
+	).Return(nil).Once()
+	suite.node.delegators.Insert(channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	status, err := suite.node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      channel,
+		Actions: []*querypb.SyncAction{
+			{
+				Type:                   querypb.SyncType_UpdatePartitionStats,
+				PartitionStatsVersions: partitionStatsVersions,
+			},
+			{
+				Type:      querypb.SyncType_Remove,
+				SegmentID: 1000,
+			},
+		},
+		// Remove and partition-stats requests carry no authoritative index
+		// snapshot. Version zero must leave the existing snapshot untouched.
+		Version: 0,
+	})
+	suite.Require().NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	mockDelegator.AssertNotCalled(suite.T(), "UpdateIndexInfoList", mock.Anything, mock.Anything)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_PartialSetFailureReportsLeaderViewDelta() {

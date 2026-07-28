@@ -376,6 +376,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct PublishedSegmentState {
         SchemaPtr schema;
         std::shared_ptr<const SegmentLoadInfo> load_info;
+        IndexMetaPtr index_meta;
         std::shared_ptr<const RuntimeResourceState> runtime;
         Timestamp commit_ts{0};
         bool use_take_for_output{false};
@@ -392,6 +393,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct StateDelta {
         std::optional<SchemaPtr> schema;
         std::optional<std::shared_ptr<const SegmentLoadInfo>> load_info;
+        std::optional<IndexMetaPtr> index_meta;
         std::optional<std::shared_ptr<const RuntimeResourceState>> runtime;
         std::optional<Timestamp> commit_ts;
         std::optional<BitsetType> published_index_ready_bitset;
@@ -1310,12 +1312,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          Timestamp collection_ttl) const override;
 
     // The metric this segment would actually search a field with: from its loaded
-    // vector index, else from its own load info. Empty when neither is available.
-    // Takes the caller's already-captured runtime state so the metric and the
-    // search come from the same published snapshot.
+    // vector index, else from the index configuration published with the same
+    // segment snapshot.
     MetricType
-    ResolveMetricType(const std::shared_ptr<const RuntimeResourceState>& runtime,
-                      FieldId field_id) const;
+    ResolveMetricType(
+        const std::shared_ptr<const RuntimeResourceState>& runtime,
+        const IndexMetaPtr& index_meta,
+        FieldId field_id) const;
 
     void
     vector_search(SearchInfo& search_info,
@@ -1425,6 +1428,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<const PublishedSegmentState>
     BuildPublishedState(const SchemaPtr& schema,
                         const std::shared_ptr<const SegmentLoadInfo>& load_info,
+                        IndexMetaPtr index_meta,
                         Timestamp commit_ts) const;
 
     std::shared_ptr<PublishedSegmentState>
@@ -1533,6 +1537,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
         bool
         IsVectorIndexReady(FieldId field_id);
+
+        IndexMetaPtr
+        GetIndexMeta() const {
+            return staged_state_ != nullptr ? staged_state_->index_meta
+                                            : nullptr;
+        }
+
+        SchemaPtr
+        GetSchema() const {
+            return staged_state_ != nullptr ? staged_state_->schema : nullptr;
+        }
 
         void
         StageVectorIndexMutationLocked(FieldId field_id,
@@ -2261,8 +2276,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     std::unordered_set<FieldId> pending_text_index_fields_;
 
-    // only useful in binlog
-    IndexMetaPtr col_index_meta_;
     SegcoreConfig segcore_config_;
 
     SegmentStats stats_{};

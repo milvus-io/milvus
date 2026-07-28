@@ -24,11 +24,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -92,8 +95,10 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	var err error
 	// mock
 	loadSegmetns := []int64{}
+	var loadedInfos []*querypb.SegmentLoadInfo
 	delegator := delegator.NewMockShardDelegator(suite.T())
 	delegator.EXPECT().LoadGrowing(mock.Anything, mock.Anything, mock.Anything).Run(func(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) {
+		loadedInfos = infos
 		for _, info := range infos {
 			loadSegmetns = append(loadSegmetns, info.SegmentID)
 		}
@@ -108,6 +113,15 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 			},
 		},
 		SegmentInfos: make(map[int64]*datapb.SegmentInfo),
+		IndexInfoList: []*indexpb.IndexInfo{
+			{
+				FieldID: 101,
+				IndexID: 10,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "IP"},
+				},
+			},
+		},
 	}
 
 	// unflushed segment not in segmentInfos, will skip
@@ -135,6 +149,10 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
 	suite.Equal(1, len(loadSegmetns))
+	suite.Require().Len(loadedInfos, 1)
+	suite.Require().Len(loadedInfos[0].GetIndexInfos(), 1)
+	suite.Equal(int64(10), loadedInfos[0].GetIndexInfos()[0].GetIndexID())
+	suite.Equal("IP", loadedInfos[0].GetIndexInfos()[0].GetIndexParams()[0].GetValue())
 
 	// normal load with binlogs
 	loadSegmetns = loadSegmetns[:0]

@@ -639,6 +639,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 				Version:     action.Version(),
 			},
 		},
+		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
 	}
 

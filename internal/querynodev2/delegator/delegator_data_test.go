@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -162,7 +163,6 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 			LoadType:     querypb.LoadType_LoadCollection,
 			PartitionIDs: []int64{1001, 1002},
 		})
-
 }
 
 func (s *DelegatorDataSuite) genTextCollection() {
@@ -198,7 +198,6 @@ func (s *DelegatorDataSuite) genTextCollection() {
 			LoadType:     querypb.LoadType_LoadCollection,
 			PartitionIDs: []int64{1001},
 		})
-
 }
 
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
@@ -766,6 +765,33 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsBM25StatsRequiresOracleForRetry() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker1, nil).Once()
+
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:     100,
+		PartitionID:   500,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+		DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+		Level:         datapb.SegmentLevel_L1,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+		Bm25Logs:      bm25LogsForField(101, "bm25stats/load/segment_100/field_101/0"),
+	}
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, info).Return(nil, nil).Once()
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos:        []*querypb.SegmentLoadInfo{info},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	s.True(merr.Status(err).GetRetriable())
+}
+
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
 	s.genCollectionWithFunction()
 
@@ -1001,7 +1027,148 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRet
 	})
 
 	s.Error(err)
-	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	s.True(merr.Status(err).GetRetriable())
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenPreservesSparseIndexRequest() {
+	s.delegator.setFieldIndexes([]*indexpb.IndexInfo{
+		{
+			FieldID:   101,
+			IndexID:   1,
+			IndexName: "old-index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+			},
+		},
+	}, 1)
+
+	worker1 := &cluster.MockWorker{}
+	var workerRequest *querypb.LoadSegmentsRequest
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Run(func(_ context.Context, req *querypb.LoadSegmentsRequest) {
+			workerRequest = typeutil.Clone(req)
+		}).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Version:      3,
+		IndexInfoList: []*indexpb.IndexInfo{
+			{
+				FieldID:   101,
+				IndexID:   2,
+				IndexName: "new-index",
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "IP"},
+				},
+			},
+		},
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: s.vchannelName,
+			},
+		},
+	})
+
+	s.NoError(err)
+	// Snapshot publication belongs to the QueryNode RPC entry point, after the
+	// entire forwarded load succeeds. The delegator load itself must not publish
+	// the request snapshot using a per-segment distribution version.
+	indexes := s.delegator.getFieldIndexes()
+	s.Require().Len(indexes, 1)
+	s.Equal(int64(1), indexes[0].GetIndexID())
+	s.Equal("L2", funcutil.KeyValuePair2Map(indexes[0].GetIndexParams())[common.MetricTypeKey])
+	s.Require().NotNil(workerRequest)
+	// The delegator must preserve the sparse wire request for an old destination
+	// worker. A new worker enriches it in QueryNode.LoadSegments before consuming it.
+	s.Empty(workerRequest.GetInfos()[0].GetIndexInfos())
+}
+
+func (s *DelegatorDataSuite) TestIndexInfoSnapshotsAreVersioned() {
+	s.delegator.UpdateIndexInfoList([]*indexpb.IndexInfo{
+		{
+			FieldID:   101,
+			IndexID:   1,
+			IndexName: "old-index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+			},
+		},
+	}, 1)
+
+	s.delegator.UpdateIndexInfoList([]*indexpb.IndexInfo{
+		{
+			FieldID:   101,
+			IndexID:   2,
+			IndexName: "new-index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "IP"},
+			},
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		},
+	}, 3)
+	indexes := s.delegator.getFieldIndexes()
+	s.Require().Len(indexes, 1)
+	s.Equal(int64(2), indexes[0].GetIndexID())
+	s.Equal("IP", funcutil.KeyValuePair2Map(indexes[0].GetIndexParams())[common.MetricTypeKey])
+	s.Equal("128", funcutil.KeyValuePair2Map(indexes[0].GetIndexParams())[common.DimKey])
+
+	// A stale request may finish after the newer request, but its snapshot must
+	// not roll the channel config back.
+	s.delegator.UpdateIndexInfoList([]*indexpb.IndexInfo{
+		{
+			FieldID:   101,
+			IndexID:   1,
+			IndexName: "stale-index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+			},
+		},
+	}, 2)
+	indexes = s.delegator.getFieldIndexes()
+	s.Require().Len(indexes, 1)
+	s.Equal(int64(2), indexes[0].GetIndexID())
+	s.Equal("IP", funcutil.KeyValuePair2Map(indexes[0].GetIndexParams())[common.MetricTypeKey])
+
+	// Equal versions are duplicate snapshots, not an opportunity to replace
+	// state with a different payload.
+	s.delegator.UpdateIndexInfoList([]*indexpb.IndexInfo{
+		{
+			FieldID:   101,
+			IndexID:   3,
+			IndexName: "equal-version-index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "COSINE"},
+			},
+		},
+	}, 3)
+	indexes = s.delegator.getFieldIndexes()
+	s.Require().Len(indexes, 1)
+	s.Equal(int64(2), indexes[0].GetIndexID())
+	s.Equal("IP", funcutil.KeyValuePair2Map(indexes[0].GetIndexParams())[common.MetricTypeKey])
+
+	// An empty newer authoritative snapshot must clear the previous channel
+	// config; otherwise a later stream-created growing segment inherits a dropped index.
+	s.delegator.UpdateIndexInfoList(nil, 4)
+	s.Empty(s.delegator.getFieldIndexes())
+}
+
+func (s *DelegatorDataSuite) TestStaleSchemaLoadFenceIsRetriable() {
+	s.delegator.servedSchemaVersion = 2
+
+	err := s.delegator.addDistributionIfSchemaVersionOK(1)
+
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.Status(err).GetRetriable())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
@@ -1327,21 +1494,17 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
+func (s *DelegatorDataSuite) TestSyncPostLoadCollectionStateUpdatesFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	s.Require().Nil(s.delegator.getIDFOracle())
-	err := s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
+	err := s.delegator.syncPostLoadCollectionState(ctx, &querypb.LoadSegmentsRequest{
 		CollectionID:  s.collectionID,
 		Schema:        schema,
 		LoadMeta:      &querypb.LoadMetaInfo{},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
 	})
 	s.Require().NoError(err)
-	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
-	s.Equal(uint64(1), s.delegator.schemaBarrierTs)
-	s.Require().NotNil(s.delegator.getIDFOracle())
 
 	// The load path advanced the SHARED collection snapshot and registered the
 	// function runner. UpdateSchema no longer no-ops just because the shared
@@ -1365,19 +1528,6 @@ func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
 	})
 	s.Require().NoError(err)
 	s.True(ok)
-}
-
-func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelegatorSchema() {
-	ctx := context.Background()
-	s.delegator.Start()
-	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
-	schema.Version = 1
-	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
-	s.manager.Collection.Unref(s.collectionID, 1)
-
-	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{CollectionID: s.collectionID}))
-	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
-	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {

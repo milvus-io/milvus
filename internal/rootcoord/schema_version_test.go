@@ -73,8 +73,8 @@ func TestSchemaVersionBumpHasSingleEntry(t *testing.T) {
 
 // TestSchemaPropertiesChangedIsDenyListed guards invariant I2: the decision to
 // broadcast a schema snapshot is derived from property CONTENT, so a property key
-// added later refreshes on QueryNode without anyone registering it. Only the two
-// QueryCoord-only keys are exempt.
+// added later refreshes on QueryNode without anyone registering it. Only properties
+// with an explicit non-schema delivery/consumer path are exempt.
 func TestSchemaPropertiesChangedIsDenyListed(t *testing.T) {
 	kv := func(pairs ...string) []*commonpb.KeyValuePair {
 		out := make([]*commonpb.KeyValuePair, 0, len(pairs)/2)
@@ -106,12 +106,11 @@ func TestSchemaPropertiesChangedIsDenyListed(t *testing.T) {
 		}
 	})
 
-	t.Run("querycoord-only properties do not refresh", func(t *testing.T) {
-		// These have their own AlterLoadConfig channel; bumping on them would fence
-		// every in-flight segment load on the shard into a retry on each resize.
+	t.Run("properties with non-schema consumers do not refresh", func(t *testing.T) {
 		for _, key := range []string{
 			common.CollectionReplicaNumber,
 			common.CollectionResourceGroups,
+			common.CollectionTTLConfigKey,
 		} {
 			assert.False(t, schemaPropertiesChanged(kv(key, "1"), kv(key, "2")), "key %s must not refresh", key)
 		}
@@ -134,10 +133,9 @@ func TestSchemaPropertiesChangedIsDenyListed(t *testing.T) {
 			kv(common.TimezoneKey, "UTC"),
 			kv(common.TimezoneKey, "Asia/Shanghai")))
 
-		assert.Len(t, coordOnlyPropertyKeys, 2,
+		assert.Len(t, schemaRefreshExcludedPropertyKeys, 3,
 			"adding a key here silently stops QueryNode from ever seeing it change; "+
-				"only do it for a property QueryCoord consumes through its own channel "+
-				"AND that automation rewrites frequently")
+				"only do it for a property with a verified non-schema consumer path")
 	})
 
 	t.Run("order insensitive", func(t *testing.T) {

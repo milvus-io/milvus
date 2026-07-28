@@ -98,12 +98,12 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
         auto group = (CPlaceholderGroup)res.release();
         *res_placeholder_group = group;
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (milvus::SegcoreError& e) {
         *res_placeholder_group = nullptr;
-        return status;
+        return milvus::FailureCStatus(e.get_error_code(), e.what());
+    } catch (std::exception& e) {
+        *res_placeholder_group = nullptr;
+        return milvus::FailureCStatus(&e);
     }
 }
 

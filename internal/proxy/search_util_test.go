@@ -20,8 +20,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {
@@ -36,4 +40,28 @@ func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {
 	})
 
 	assert.Equal(t, namespace, searchReq.GetNamespace())
+}
+
+func TestResolveSearchResultMetricType(t *testing.T) {
+	metricType, err := resolveSearchResultMetricType("", []*internalpb.SearchResults{
+		{MetricType: metric.IP},
+		{}, // a shard that searched no segments
+		{MetricType: metric.IP},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, metric.IP, metricType)
+
+	metricType, err = resolveSearchResultMetricType(metric.L2, []*internalpb.SearchResults{
+		{MetricType: metric.L2},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, metric.L2, metricType)
+
+	_, err = resolveSearchResultMetricType("", []*internalpb.SearchResults{
+		{MetricType: metric.IP},
+		{MetricType: metric.COSINE},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.True(t, merr.Status(err).GetRetriable())
 }

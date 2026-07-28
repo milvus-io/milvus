@@ -1918,12 +1918,14 @@ type LoadMetaInfo struct {
 	CollectionID int64    `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
 	PartitionIDs []int64  `protobuf:"varint,3,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
 	// Deprecated: Marked as deprecated in query_coord.proto.
-	MetricType      string                   `protobuf:"bytes,4,opt,name=metric_type,json=metricType,proto3" json:"metric_type,omitempty"`
-	DbName          string                   `protobuf:"bytes,5,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`                      // Only used for metrics label.
-	ResourceGroup   string                   `protobuf:"bytes,6,opt,name=resource_group,json=resourceGroup,proto3" json:"resource_group,omitempty"` // Only used for metrics label.
-	LoadFields      []int64                  `protobuf:"varint,7,rep,packed,name=load_fields,json=loadFields,proto3" json:"load_fields,omitempty"`
-	DbProperties    []*commonpb.KeyValuePair `protobuf:"bytes,8,rep,name=db_properties,json=dbProperties,proto3" json:"db_properties,omitempty"`
-	SchemaBarrierTs uint64                   `protobuf:"varint,9,opt,name=schema_barrier_ts,json=schemaBarrierTs,proto3" json:"schema_barrier_ts,omitempty"` // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
+	MetricType    string                   `protobuf:"bytes,4,opt,name=metric_type,json=metricType,proto3" json:"metric_type,omitempty"`
+	DbName        string                   `protobuf:"bytes,5,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`                      // Only used for metrics label.
+	ResourceGroup string                   `protobuf:"bytes,6,opt,name=resource_group,json=resourceGroup,proto3" json:"resource_group,omitempty"` // Only used for metrics label.
+	LoadFields    []int64                  `protobuf:"varint,7,rep,packed,name=load_fields,json=loadFields,proto3" json:"load_fields,omitempty"`
+	DbProperties  []*commonpb.KeyValuePair `protobuf:"bytes,8,rep,name=db_properties,json=dbProperties,proto3" json:"db_properties,omitempty"`
+	// Deprecated wire-compatible placeholder for legacy schema_version.
+	// New QueryNode paths ignore this field and order schema state by schema.Version only.
+	SchemaBarrierTs uint64 `protobuf:"varint,9,opt,name=schema_barrier_ts,json=schemaBarrierTs,proto3" json:"schema_barrier_ts,omitempty"`
 }
 
 func (x *LoadMetaInfo) Reset() {
@@ -5560,15 +5562,19 @@ type SyncDistributionRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Base          *commonpb.MsgBase          `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	CollectionID  int64                      `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	Channel       string                     `protobuf:"bytes,3,opt,name=channel,proto3" json:"channel,omitempty"`
-	Actions       []*SyncAction              `protobuf:"bytes,4,rep,name=actions,proto3" json:"actions,omitempty"`
-	Schema        *schemapb.CollectionSchema `protobuf:"bytes,5,opt,name=schema,proto3" json:"schema,omitempty"`
-	LoadMeta      *LoadMetaInfo              `protobuf:"bytes,6,opt,name=load_meta,json=loadMeta,proto3" json:"load_meta,omitempty"`
-	ReplicaID     int64                      `protobuf:"varint,7,opt,name=replicaID,proto3" json:"replicaID,omitempty"`
-	Version       int64                      `protobuf:"varint,8,opt,name=version,proto3" json:"version,omitempty"`
-	IndexInfoList []*indexpb.IndexInfo       `protobuf:"bytes,9,rep,name=index_info_list,json=indexInfoList,proto3" json:"index_info_list,omitempty"`
+	Base         *commonpb.MsgBase          `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	CollectionID int64                      `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	Channel      string                     `protobuf:"bytes,3,opt,name=channel,proto3" json:"channel,omitempty"`
+	Actions      []*SyncAction              `protobuf:"bytes,4,rep,name=actions,proto3" json:"actions,omitempty"`
+	Schema       *schemapb.CollectionSchema `protobuf:"bytes,5,opt,name=schema,proto3" json:"schema,omitempty"`
+	LoadMeta     *LoadMetaInfo              `protobuf:"bytes,6,opt,name=load_meta,json=loadMeta,proto3" json:"load_meta,omitempty"`
+	ReplicaID    int64                      `protobuf:"varint,7,opt,name=replicaID,proto3" json:"replicaID,omitempty"`
+	// Orders the complete index_info_list snapshot at request scope. Zero means
+	// this request (for example Remove or UpdatePartitionStats) carries no snapshot.
+	Version int64 `protobuf:"varint,8,opt,name=version,proto3" json:"version,omitempty"`
+	// Authoritative collection-index snapshot when version is non-zero. An empty
+	// list then means the collection's final index was dropped.
+	IndexInfoList []*indexpb.IndexInfo `protobuf:"bytes,9,rep,name=index_info_list,json=indexInfoList,proto3" json:"index_info_list,omitempty"`
 }
 
 func (x *SyncDistributionRequest) Reset() {
@@ -7810,10 +7816,12 @@ type UpdateSchemaRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Base            *commonpb.MsgBase          `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	CollectionID    int64                      `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	Schema          *schemapb.CollectionSchema `protobuf:"bytes,3,opt,name=schema,proto3" json:"schema,omitempty"`
-	SchemaBarrierTs uint64                     `protobuf:"varint,4,opt,name=schema_barrier_ts,json=schemaBarrierTs,proto3" json:"schema_barrier_ts,omitempty"` // Wire-compatible rename of legacy version; timestamp barrier used to fence stale load results.
+	Base         *commonpb.MsgBase          `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	CollectionID int64                      `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	Schema       *schemapb.CollectionSchema `protobuf:"bytes,3,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Deprecated wire-compatible placeholder for legacy version.
+	// New QueryNode paths ignore this field and order schema state by schema.Version only.
+	SchemaBarrierTs uint64 `protobuf:"varint,4,opt,name=schema_barrier_ts,json=schemaBarrierTs,proto3" json:"schema_barrier_ts,omitempty"`
 }
 
 func (x *UpdateSchemaRequest) Reset() {

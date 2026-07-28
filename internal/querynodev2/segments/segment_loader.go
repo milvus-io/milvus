@@ -1069,6 +1069,9 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 
 	for _, indexInfo := range loadInfo.IndexInfos {
+		if isCollectionIndexConfigOnly(indexInfo) {
+			continue
+		}
 		segment.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{
 				FieldID: indexInfo.GetFieldID(),
@@ -2423,7 +2426,7 @@ func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 // "param num_load_thread is empty" while loading a DISKANN index).
 func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 	for _, indexInfo := range indexInfos {
-		if indexInfo == nil {
+		if indexInfo == nil || isCollectionIndexConfigOnly(indexInfo) {
 			continue
 		}
 		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())

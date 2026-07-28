@@ -37,28 +37,30 @@ func nextSchemaSnapshot(coll *model.Collection) *schemapb.CollectionSchema {
 	return schema
 }
 
-// coordOnlyPropertyKeys are the collection properties that never reach QueryNode's
-// effective schema. QueryCoord reads them straight off the collection meta and
-// already has a dedicated channel for them (getAlterLoadConfigOfAlterCollection), so
-// routing them through the schema snapshot buys nothing and costs a lot: every
+// schemaRefreshExcludedPropertyKeys are collection properties that do not need a
+// QueryNode schema refresh. Replica/resource-group settings have a dedicated
+// QueryCoord channel; collection.ttl.seconds is carried on query requests and is
+// consumed by Proxy/DataCoord rather than the QueryNode collection schema. Routing
+// any of them through the schema snapshot buys nothing and costs a lot: every
 // schema.Version bump fences all in-flight segment loads on the shard
-// (shardDelegator.addDistributionIfSchemaVersionOK) into a retry, and these two keys
-// are driven by elastic resize rather than by a human running DDL.
+// (shardDelegator.addDistributionIfSchemaVersionOK) into a retry and makes
+// StreamingNode seal/flush the collection's growing segments.
 //
 // This is deliberately a DENY-list, not an allow-list. An unregistered new property
 // lands in the snapshot and refreshes normally, so the cost of forgetting to classify
 // one is an extra broadcast — never a silently dropped setting, which is the failure
 // mode that shipped mmap/warmup changes that only took effect after release+load.
-var coordOnlyPropertyKeys = typeutil.NewSet(
+var schemaRefreshExcludedPropertyKeys = typeutil.NewSet(
 	common.CollectionReplicaNumber,
 	common.CollectionResourceGroups,
+	common.CollectionTTLConfigKey,
 )
 
 // projectSchemaProperties drops the QueryCoord-only properties from a property set
 // destined for a schema snapshot.
 func projectSchemaProperties(props []*commonpb.KeyValuePair) common.KeyValuePairs {
 	return lo.Filter(props, func(kv *commonpb.KeyValuePair, _ int) bool {
-		return !coordOnlyPropertyKeys.Contain(kv.GetKey())
+		return !schemaRefreshExcludedPropertyKeys.Contain(kv.GetKey())
 	})
 }
 

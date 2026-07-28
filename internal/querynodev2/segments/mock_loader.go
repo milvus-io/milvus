@@ -324,8 +324,7 @@ func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context,
 func NewMockLoader(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockLoader {
+}) *MockLoader {
 	mock := &MockLoader{}
 	mock.Mock.Test(t)
 

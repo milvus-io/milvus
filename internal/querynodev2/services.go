@@ -262,7 +262,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		queryView,
 		node.binlogSaver,
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
-		delegator.WithIndexInfoList(req.GetIndexInfoList()),
+		delegator.WithIndexInfoList(req.GetIndexInfoList(), req.GetVersion()),
 	)
 	if err != nil {
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))
@@ -485,7 +485,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	defer node.lifetime.Done()
 
 	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// Reopen with an empty authoritative snapshot is how dropping the final
+	// collection index removes the segment's old index configuration.
+	if len(req.GetIndexInfoList()) == 0 && req.GetLoadScope() != querypb.LoadScope_Reopen {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
@@ -533,9 +535,17 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			log.Warn(ctx, "delegator failed to load segments", mlog.Err(err))
 			return merr.Status(err), nil
 		}
+		delegator.UpdateIndexInfoList(req.GetIndexInfoList(), req.GetVersion())
 
 		return merr.Success(), nil
 	}
+
+	// Enrich only when this QueryNode is the final worker consuming the request.
+	// Keeping transfer requests sparse preserves new-leader -> old-worker rolling
+	// compatibility: old workers do not understand config-only FieldIndexInfo
+	// entries and may report them as loaded indexes. A new destination worker runs
+	// this same shim after the delegator clears NeedTransfer.
+	segments.AppendCollectionIndexConfig(req.GetInfos(), req.GetIndexInfoList())
 
 	// A reopened segment must NOT advance the delegator's SERVED collection schema: the
 	// served schema advances only via the stream UpdateSchema, so its derived-state
@@ -1567,6 +1577,12 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	if err != nil {
 		log.Warn(ctx, "failed to sync distribution", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+	// Version zero means this request did not carry an index snapshot (for
+	// example Remove or UpdatePartitionStats). A non-zero request version orders
+	// the complete snapshot, including an empty list that drops the final index.
+	if req.GetVersion() != 0 {
+		shardDelegator.UpdateIndexInfoList(req.GetIndexInfoList(), req.GetVersion())
 	}
 
 	// in case of target node offline, when try to remove segment from leader's distribution, use wildcardNodeID(-1) to skip nodeID check

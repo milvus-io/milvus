@@ -51,8 +51,18 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
 		return result != nil && (result.GetSlicedBlob() != nil || result.GetResultData() != nil)
 	})
+	metricType, err := resolveSearchResultMetricType(info.GetMetricType(), results)
+	if err != nil {
+		return nil, err
+	}
+	if info.GetMetricType() == "" {
+		info.SetMetricType(metricType)
+	}
 
 	if len(results) == 1 {
+		if results[0].GetMetricType() == "" && metricType != "" {
+			results[0].MetricType = metricType
+		}
 		mlog.Debug(ctx, "Shortcut return ReduceSearchResults", mlog.Any("result info", info))
 		return results[0], nil
 	}
@@ -72,10 +82,6 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		}
 		if r.GetIsRecallEvaluation() {
 			isRecallEvaluation = true
-		}
-		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
-		if info.GetMetricType() == "" {
-			info.SetMetricType(r.MetricType)
 		}
 	}
 
@@ -132,6 +138,32 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
 	return searchResults, nil
+}
+
+// resolveSearchResultMetricType validates the metric at the worker -> shard
+// reduce boundary. Empty entries are allowed for workers that searched no
+// segments; every worker that reports a metric must agree with the explicit
+// request metric (when present) and with every other worker.
+func resolveSearchResultMetricType(requestMetric string, results []*internalpb.SearchResults) (string, error) {
+	metricType := requestMetric
+	for _, result := range results {
+		resultMetric := result.GetMetricType()
+		if resultMetric == "" {
+			continue
+		}
+		if metricType == "" {
+			metricType = resultMetric
+			continue
+		}
+		if metricType != resultMetric {
+			return "", merr.WrapErrServiceUnavailableMsg(
+				"query node workers resolved inconsistent metric types, expected %s, got %s",
+				metricType,
+				resultMetric,
+			)
+		}
+	}
+	return metricType, nil
 }
 
 func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {

@@ -359,8 +359,7 @@ func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, 
 func NewMockCollectionManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockCollectionManager {
+}) *MockCollectionManager {
 	mock := &MockCollectionManager{}
 	mock.Mock.Test(t)
 
