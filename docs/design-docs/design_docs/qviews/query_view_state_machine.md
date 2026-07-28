@@ -114,13 +114,16 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Dropping | SN confirms Down | None (no additional persistence) |
+| Dropping | SN confirms Down or reports Dropped | None (no additional persistence) |
 | Unrecoverable | Any node reports Unrecoverable | Persist Unrecoverable to ETCD |
 
 **Possible Peer States (and Coord's reaction):**
-- **SN**: Up / Down / Unrecoverable
+- **SN**: Up / Down / Dropped / Unrecoverable
   - Up (Down push not yet delivered) → Coord re-pushes Down.
   - Down → Coord transitions to Dropping.
+  - Dropped → Coord transitions to Dropping. This fast-forwards recovery when
+    Coord regresses from the unpersisted Dropping state to persisted Down while
+    SN has already completed Dropped.
   - Unrecoverable → Coord transitions to Unrecoverable.
 - **QN**: Ready / Unrecoverable
   - Ready → Coord does nothing.
