@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -549,28 +550,25 @@ func normalizeExternalRefreshUpdatedSegment(
 }
 
 // externalRefreshNewSegmentAlreadyApplied recognizes an idempotent replay of a
-// new, non-baseline segment. It compares every field authored or normalized by
-// the refresh apply path. Stats metadata populated by later tasks is excluded;
-// any difference in a refresh-owned field remains an ID collision.
+// new, non-baseline segment. A manifest base path belongs to one segment, and
+// its versions move forward as that segment gains later manifest updates. An
+// equal or newer existing version therefore means the incoming refresh result
+// has already been applied or superseded and must not be written again.
+//
+// Do not compare fake binlogs here: V3 catalog persistence intentionally strips
+// them, so their in-memory representation does not survive DataCoord restart.
 func externalRefreshNewSegmentAlreadyApplied(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
 	if existing == nil || incoming == nil {
 		return false
 	}
-	return existing.GetID() == incoming.GetID() &&
-		existing.GetCollectionID() == incoming.GetCollectionID() &&
-		existing.GetPartitionID() == incoming.GetPartitionID() &&
-		existing.GetInsertChannel() == incoming.GetInsertChannel() &&
-		existing.GetState() == incoming.GetState() &&
-		existing.GetNumOfRows() == incoming.GetNumOfRows() &&
-		existing.GetManifestPath() == incoming.GetManifestPath() &&
-		existing.GetSchemaVersion() == incoming.GetSchemaVersion() &&
-		existing.GetStorageVersion() == incoming.GetStorageVersion() &&
-		existing.GetLevel() == incoming.GetLevel() &&
-		existing.GetIsSorted() == incoming.GetIsSorted() &&
-		proto.Equal(
-			&datapb.SegmentInfo{Binlogs: existing.GetBinlogs()},
-			&datapb.SegmentInfo{Binlogs: incoming.GetBinlogs()},
-		)
+	if existing.GetID() != incoming.GetID() ||
+		existing.GetCollectionID() != incoming.GetCollectionID() ||
+		existing.GetPartitionID() != incoming.GetPartitionID() {
+		return false
+	}
+
+	comparison, err := packed.CompareManifestPath(existing.GetManifestPath(), incoming.GetManifestPath())
+	return err == nil && comparison >= 0
 }
 
 func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {

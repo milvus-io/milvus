@@ -445,68 +445,109 @@ func TestExternalCollectionRefreshMeta_UpdateJobProgress(t *testing.T) {
 	})
 }
 
-func TestExternalCollectionRefreshMeta_PublishTaskPlan(t *testing.T) {
-	t.Run("save_failed", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit},
-		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
-		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
-		defer mockListTasks.UnPatch()
+func TestExternalCollectionRefreshMeta_AddTasksToJob(t *testing.T) {
+	newTask := func(taskID int64) *datapb.ExternalCollectionRefreshTask {
+		return &datapb.ExternalCollectionRefreshTask{TaskId: taskID, JobId: 1, CollectionId: 100}
+	}
 
+	t.Run("success", func(t *testing.T) {
+		catalog := &stubCatalog{jobs: []*datapb.ExternalCollectionRefreshJob{{
+			JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit,
+		}}}
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
-		defer mockSave.UnPatch()
-
-		err = meta.PublishTaskPlan(1, []int64{1001})
-		assert.Error(t, err)
+		err = meta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{newTask(1001), newTask(1002)})
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1001, 1002}, meta.GetJob(1).GetTaskIds())
+		assert.NotNil(t, meta.GetTask(1001))
+		assert.NotNil(t, meta.GetTask(1002))
+		assert.Len(t, catalog.updateActions, 1)
+		assert.Len(t, catalog.updateActions[0], 3)
 	})
 
-	t.Run("success", func(t *testing.T) {
-		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit},
+	t.Run("catalog_update_failed", func(t *testing.T) {
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit,
+			}},
+			updateErr: errors.New("save task plan failed"),
 		}
-		meta := createMetaTestRefreshMeta(t, jobs, nil)
-
-		err := meta.PublishTaskPlan(1, []int64{1001})
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		job := meta.GetJob(1)
-		assert.Contains(t, job.GetTaskIds(), int64(1001))
+		err = meta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{newTask(1001)})
+		assert.ErrorContains(t, err, "save task plan failed")
+		assert.False(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
+		assert.Empty(t, meta.GetJob(1).GetTaskIds())
+		assert.Nil(t, meta.GetTask(1001))
 	})
 
 	t.Run("terminal_job", func(t *testing.T) {
-		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed},
-		}
-		meta := createMetaTestRefreshMeta(t, jobs, nil)
+		catalog := &stubCatalog{jobs: []*datapb.ExternalCollectionRefreshJob{{
+			JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed,
+		}}}
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
 
-		err := meta.PublishTaskPlan(1, []int64{1001})
+		err = meta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{newTask(1001)})
 		assert.ErrorContains(t, err, "state JobStateFailed")
+		assert.True(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
+		assert.Empty(t, catalog.updateActions)
 		assert.Empty(t, meta.GetJob(1).GetTaskIds())
+		assert.Nil(t, meta.GetTask(1001))
+	})
+
+	t.Run("empty_plan", func(t *testing.T) {
+		catalog := &stubCatalog{jobs: []*datapb.ExternalCollectionRefreshJob{{
+			JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit,
+		}}}
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		err = meta.AddTasksToJob(1, nil)
+		assert.ErrorContains(t, err, "empty task plan")
+		assert.True(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
+		assert.Empty(t, catalog.updateActions)
+	})
+
+	t.Run("already_published", func(t *testing.T) {
+		existingTask := newTask(1001)
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001},
+			}},
+			tasks: []*datapb.ExternalCollectionRefreshTask{existingTask},
+		}
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		err = meta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{newTask(1002)})
+		assert.ErrorContains(t, err, "already has a published task plan")
+		assert.True(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
+		assert.Empty(t, catalog.updateActions)
+		assert.Equal(t, []int64{1001}, meta.GetJob(1).GetTaskIds())
+		assert.Nil(t, meta.GetTask(1002))
 	})
 
 	t.Run("job_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.PublishTaskPlan(999, []int64{1001})
+		err := meta.AddTasksToJob(999, []*datapb.ExternalCollectionRefreshTask{newTask(1001)})
 		assert.Error(t, err)
+		assert.False(t, errors.Is(err, errExternalRefreshTaskPlanNotPublishable))
 	})
+}
 
-	t.Run("missing_committed_task", func(t *testing.T) {
-		meta := createMetaTestRefreshMeta(t, []*datapb.ExternalCollectionRefreshJob{{
-			JobId:        1,
-			CollectionId: 100,
-			TaskIds:      []int64{1001},
-		}}, nil)
+func TestExternalCollectionRefreshMeta_GetCommittedTasksByJobIDMissingTask(t *testing.T) {
+	meta := createMetaTestRefreshMeta(t, []*datapb.ExternalCollectionRefreshJob{{
+		JobId:        1,
+		CollectionId: 100,
+		TaskIds:      []int64{1001},
+	}}, nil)
 
-		_, err := meta.GetCommittedTasksByJobID(1)
-		assert.ErrorContains(t, err, "references missing task 1001")
-	})
+	_, err := meta.GetCommittedTasksByJobID(1)
+	assert.ErrorContains(t, err, "references missing task 1001")
 }
 
 func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {

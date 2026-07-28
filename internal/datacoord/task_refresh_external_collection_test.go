@@ -1576,9 +1576,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 		ExternalSource: "s3://bucket/path",
 		ExternalSpec:   "iceberg",
 	}
-	assert.NoError(t, refreshMeta.AddTask(task1))
-	assert.NoError(t, refreshMeta.AddTask(task2))
-	assert.NoError(t, refreshMeta.PublishTaskPlan(1, []int64{1001, 1002}))
+	assert.NoError(t, refreshMeta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{task1, task2}))
 
 	mt := &meta{
 		catalog:     catalog,
@@ -1686,6 +1684,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
+	manifestBasePath := "files/insert_log/100/1/10"
 	catalog := &stubCatalog{}
 	mt := &meta{
 		collections: newTestCollections(collectionID),
@@ -1693,6 +1692,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		catalog:     catalog,
 	}
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	incoming.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 1)
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
@@ -1704,7 +1704,12 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	)
 	assert.NoError(t, err)
 
+	// Match the V3 catalog representation after a DataCoord restart: the
+	// manifest and aggregate stats survive, while fake binlogs do not. Also
+	// advance the manifest to model a later stats/index update.
 	persisted := mt.segments.GetSegment(segmentID).Clone()
+	persisted.Binlogs = nil
+	persisted.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 2)
 	persisted.TextStatsLogs = map[int64]*datapb.TextIndexStats{1: {FieldID: 1}}
 	persisted.JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {FieldID: 2}}
 	mt.segments.SetSegment(segmentID, persisted)
@@ -1720,18 +1725,33 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	)
 	assert.NoError(t, err)
 	assert.Nil(t, catalog.alteredSegments)
+	assert.Equal(t, packed.MarshalManifestPath(manifestBasePath, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
+	assert.Empty(t, mt.segments.GetSegment(segmentID).GetBinlogs())
 	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1))
 	assert.Contains(t, mt.segments.GetSegment(segmentID).GetJsonKeyStats(), int64(2))
 
-	mismatchedReplay := proto.Clone(incoming).(*datapb.SegmentInfo)
-	mismatchedReplay.Binlogs[0].Binlogs[0].MemorySize++
+	differentBaseReplay := proto.Clone(incoming).(*datapb.SegmentInfo)
+	differentBaseReplay.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/999", 1)
 	err = applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
 		nil,
 		nil,
-		[]*datapb.SegmentInfo{mismatchedReplay},
+		[]*datapb.SegmentInfo{differentBaseReplay},
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collides with existing metadata")
+
+	newerReplay := proto.Clone(incoming).(*datapb.SegmentInfo)
+	newerReplay.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 3)
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		nil,
+		nil,
+		[]*datapb.SegmentInfo{newerReplay},
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")

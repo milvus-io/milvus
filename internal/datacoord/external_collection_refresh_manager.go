@@ -767,6 +767,11 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 
 		tasks, err := m.createTasksForJob(ctx, freshJob)
 		if err != nil {
+			if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
+				log.Info(m.ctx, "async task creation stopped because job is no longer publishable",
+					mlog.Err(err))
+				return
+			}
 			// Non-retriable failures (empty source, zero-row source, etc.)
 			// must transition the job to Failed immediately. Otherwise the
 			// checker tick keeps re-running the same explore that will fail
@@ -927,6 +932,17 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	}
 
 	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
+		if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
+			latestJob := m.refreshMeta.GetJob(job.GetJobId())
+			if latestJob == nil ||
+				latestJob.GetState() == indexpb.JobState_JobStateFinished ||
+				latestJob.GetState() == indexpb.JobState_JobStateFailed {
+				// A terminal transition may have cleaned the job directory while
+				// Explore was still writing. Re-run the idempotent cleanup after the
+				// definitive pre-write rejection to remove any late manifest.
+				m.cleanupExploreTempForJob(job.GetJobId())
+			}
+		}
 		log.Warn(ctx, "failed to add tasks to job", mlog.Err(err))
 		return nil, err
 	}
