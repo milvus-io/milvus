@@ -337,6 +337,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "username for etcd authentication",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
@@ -346,6 +347,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "password for etcd authentication",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
 
@@ -1160,7 +1162,8 @@ Environment variable: PULSAR_ADDRESS
 pulsar.address and pulsar.port together generate the valid access to Pulsar.
 Pulsar preferentially acquires the valid IP address from the environment variable PULSAR_ADDRESS when Milvus is started.
 Default value applies when Pulsar is running on the same network with Milvus.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1225,8 +1228,9 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 	p.AuthPlugin.Init(base.mgr)
 
 	p.AuthParams = ParamItem{
-		Key:     "pulsar.authParams",
-		Version: "2.2.0",
+		Key:       "pulsar.authParams",
+		Version:   "2.2.0",
+		Sensitive: true,
 		Formatter: func(authParams string) string {
 			jsonMap := make(map[string]string)
 			params := strings.Split(authParams, ",")
@@ -1311,6 +1315,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	k.SaslUsername.Init(base.mgr)
 
@@ -1319,6 +1324,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	k.SaslPassword.Init(base.mgr)
 
@@ -1372,22 +1378,25 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.KafkaTLSCACert.Init(base.mgr)
 
 	k.KafkaTLSKeyPassword = ParamItem{
-		Key:     "kafka.ssl.tlsKeyPassword",
-		Version: "2.3.11",
-		Doc:     "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
-		Export:  true,
+		Key:       "kafka.ssl.tlsKeyPassword",
+		Version:   "2.3.11",
+		Doc:       "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
+		Export:    true,
+		Sensitive: true,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
 
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ConsumerExtraConfig.Init(base.mgr)
 
 	k.ProducerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.producer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ProducerExtraConfig.Init(base.mgr)
 
@@ -1560,7 +1569,8 @@ Environment variable: MINIO_ADDRESS
 minio.address and minio.port together generate the valid access to MinIO or S3 service.
 MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
 Default value applies when MinIO or S3 is running on the same network with Milvus.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1574,7 +1584,8 @@ Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_ACCESS_KEY_ID, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.AccessKeyID.Init(base.mgr)
 
@@ -1588,7 +1599,8 @@ Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.SecretAccessKey.Init(base.mgr)
 
@@ -1704,7 +1716,8 @@ When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		DefaultValue: "",
 		Doc: `The JSON content contains the gcs service account credentials.
 Used only for the "gcpnative" cloud provider.`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.GcpCredentialJSON.Init(base.mgr)
 
@@ -1714,7 +1727,8 @@ Used only for the "gcpnative" cloud provider.`,
 		Version:      "2.0.0",
 		Doc: `Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
 Leave it empty if you want to use AWS default endpoint`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.IAMEndpoint.Init(base.mgr)
 	p.LogLevel = ParamItem{

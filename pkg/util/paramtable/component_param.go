@@ -192,8 +192,18 @@ func (p *ComponentParam) GetAll() map[string]string {
 	return p.baseTable.mgr.GetConfigs()
 }
 
+// GetAllRaw returns all configuration values without projection redaction.
+func (p *ComponentParam) GetAllRaw() map[string]string {
+	return p.baseTable.mgr.GetConfigsRaw()
+}
+
 func (p *ComponentParam) GetConfigsView() map[string]string {
 	return p.baseTable.mgr.GetConfigsView()
+}
+
+// GetConfigsViewRaw returns configuration values and sources without projection redaction.
+func (p *ComponentParam) GetConfigsViewRaw() map[string]string {
+	return p.baseTable.mgr.GetConfigsViewRaw()
 }
 
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
@@ -900,6 +910,7 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.SuperUsers.Init(base.mgr)
 
@@ -910,6 +921,7 @@ like the old password verification when updating the credential`,
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -1598,18 +1610,20 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.SampleFraction.Init(base.mgr)
 
 	t.JaegerURL = ParamItem{
-		Key:     "trace.jaeger.url",
-		Version: "2.3.0",
-		Doc:     "when exporter is jaeger should set the jaeger's URL",
-		Export:  true,
+		Key:       "trace.jaeger.url",
+		Version:   "2.3.0",
+		Doc:       "when exporter is jaeger should set the jaeger's URL",
+		Export:    true,
+		Sensitive: true,
 	}
 	t.JaegerURL.Init(base.mgr)
 
 	t.OtlpEndpoint = ParamItem{
-		Key:     "trace.otlp.endpoint",
-		Version: "2.3.0",
-		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
-		Export:  true,
+		Key:       "trace.otlp.endpoint",
+		Version:   "2.3.0",
+		Doc:       `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
+		Export:    true,
+		Sensitive: true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
@@ -1636,6 +1650,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
+		Sensitive:    true,
 	}
 	t.OtlpHeaders.Init(base.mgr)
 
@@ -2195,6 +2210,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "6",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
+		NonSensitive: true,
 	}
 	p.MinPasswordLength.Init(base.mgr)
 
@@ -2218,6 +2234,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Key:          "proxy.maxPasswordLength",
 		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		NonSensitive: true,
 		Formatter: func(v string) string {
 			n := getAsInt(v)
 			if n <= 0 || n > 72 {
@@ -5893,6 +5910,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
+		NonSensitive: true,
 	}
 	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
 
