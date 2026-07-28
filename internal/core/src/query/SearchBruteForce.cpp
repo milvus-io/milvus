@@ -73,19 +73,26 @@ CheckBruteForceSearchParam(const FieldMeta& field,
     // IVF search would reject is currently accepted here. Validate so both
     // paths return identical errors. Type check is strict (not coercive) to
     // preserve knowhere's "Type conflict" / "Out of range" contracts.
-    if (search_info.search_params_.contains("nprobe")) {
+    if (search_info.search_params_.is_object() &&
+        search_info.search_params_.contains("nprobe")) {
         const auto& nprobe_val = search_info.search_params_["nprobe"];
-        if (!nprobe_val.is_number_integer()) {
+        if (nprobe_val.is_number_integer()) {
+            int64_t nprobe = nprobe_val.get<int64_t>();
+            if (nprobe < 1 || nprobe > 65536) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "Out of range in json: param 'nprobe' (" +
+                              nprobe_val.dump() +
+                              ") should be in range [1, 65536]");
+            }
+        } else if (nprobe_val.is_number_float() || nprobe_val.is_boolean() ||
+                   nprobe_val.is_null()) {
             ThrowInfo(ErrorCode::UnexpectedError,
                       "Type conflict in json: param 'nprobe' (" +
                           nprobe_val.dump() + ") should be integer");
         }
-        int64_t nprobe = nprobe_val.get<int64_t>();
-        if (nprobe < 1 || nprobe > 65536) {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "Out of range in json: param 'nprobe' (" +
-                          nprobe_val.dump() + ") should be in range [1, 65536]");
-        }
+        // String values are left to the existing brute-force behavior
+        // (issue #41767 tracks string nprobe type checking separately; it
+        // is out of scope for the nprobe=0 fix in #47729).
     }
 }
 

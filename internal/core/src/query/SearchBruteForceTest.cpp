@@ -207,40 +207,54 @@ TEST(CheckBruteForceSearchParam, NprobeValidation) {
         return info;
     };
 
+    // Returns true iff the call threw whose what() contains substr. Catches
+    // std::exception so it is robust to the exact exception type milvus uses
+    // (SegcoreError and its subclasses derive from std::exception).
+    auto threw_with = [](const FieldMeta& f,
+                         const SearchInfo& info,
+                         const std::string& substr) -> bool {
+        try {
+            CheckBruteForceSearchParam(f, info);
+            return false;
+        } catch (const std::exception& e) {
+            return std::string(e.what()).find(substr) != std::string::npos;
+        }
+    };
+
+    auto assert_no_throw = [&](const std::string& json_str) {
+        EXPECT_NO_THROW(CheckBruteForceSearchParam(field, make_info(json_str)));
+    };
+    auto assert_throw = [&](const std::string& json_str,
+                            const std::string& substr) {
+        EXPECT_TRUE(threw_with(field, make_info(json_str), substr))
+            << "expected throw containing '" << substr << "' for " << json_str;
+    };
+
     // valid values pass
-    EXPECT_NO_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 1})")));
-    EXPECT_NO_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 8})")));
-    EXPECT_NO_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 65536})")));
+    assert_no_throw(R"({"nprobe": 1})");
+    assert_no_throw(R"({"nprobe": 8})");
+    assert_no_throw(R"({"nprobe": 65536})");
     // missing nprobe passes (not every search specifies it)
-    EXPECT_NO_THROW(CheckBruteForceSearchParam(field, make_info(R"({})")));
+    assert_no_throw(R"({})");
 
     // out of range [1, 65536] — including the 0 case from issue #47729
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 0})")),
-        SegcoreError);
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": -1})")),
-        SegcoreError);
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 65537})")),
-        SegcoreError);
+    assert_throw(R"({"nprobe": 0})",
+                 "Out of range in json: param 'nprobe' (0)");
+    assert_throw(R"({"nprobe": -1})",
+                 "Out of range in json: param 'nprobe' (-1)");
+    assert_throw(R"({"nprobe": 65537})",
+                 "Out of range in json: param 'nprobe' (65537)");
 
     // type conflict — must NOT be coerced to 0 (the original proxy-layer bug)
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": null})")),
-        SegcoreError);
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": true})")),
-        SegcoreError);
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 32.0})")),
-        SegcoreError);
-    EXPECT_THROW(
-        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": "8"})")),
-        SegcoreError);
+    assert_throw(R"({"nprobe": null})",
+                 "Type conflict in json: param 'nprobe' (null)");
+    assert_throw(R"({"nprobe": true})",
+                 "Type conflict in json: param 'nprobe' (true)");
+    assert_throw(R"({"nprobe": 32.0})",
+                 "Type conflict in json: param 'nprobe' (32.0)");
+    // String-form nprobe is accepted today (issue #41767, out of scope for
+    // #47729); brute-force keeps the legacy behavior rather than rejecting.
+    assert_no_throw(R"({"nprobe": "8"})");
 }
 
 TEST(PrepareBFSearchParams, BM25ParamsFromIndexInfo) {
