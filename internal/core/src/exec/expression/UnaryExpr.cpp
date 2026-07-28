@@ -1669,50 +1669,55 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
         auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
-            int64_t batch_size;
-            if (input != nullptr) {
-                batch_size = input->size();
-            } else {
-                batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                                 ? active_count_ - overflow_check_pos_
-                                 : batch_size_;
-                overflow_check_pos_ += batch_size;
-            }
-            auto valid = (input != nullptr)
-                             ? ProcessChunksForValidByOffsets<T>(
-                                   UseIndexCursor(), *input)
-                             : ProcessChunksForValid<T>(UseIndexCursor());
-            auto res_vec = std::make_shared<ColumnVector>(
-                TargetBitmap(batch_size), std::move(valid));
-            TargetBitmapView res(res_vec->GetRawData(), batch_size);
-            TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
+            auto make_overflow_result =
+                [this, input](bool match_value) -> ColumnVectorPtr {
+                TargetBitmap valid;
+                if (expr_->column_.element_level_) {
+                    // Element batches are derived from the row cursor so
+                    // MoveCursor()-based short-circuiting stays aligned.
+                    // Individual elements cannot be null; their containing
+                    // row's validity is applied by the element consumer.
+                    auto batch_size =
+                        GetNextRealBatchSize(input, /*element_level=*/true);
+                    valid = TargetBitmap(batch_size, true);
+                    if (input == nullptr) {
+                        MoveCursor();
+                    }
+                } else if (input != nullptr) {
+                    valid = ProcessChunksForValidByOffsets<T>(UseIndexCursor(),
+                                                              *input);
+                } else {
+                    valid = ProcessChunksForValid<T>(UseIndexCursor());
+                }
+
+                auto batch_size = valid.size();
+                TargetBitmap res(batch_size, match_value);
+                if (match_value) {
+                    res &= valid;
+                }
+                return std::make_shared<ColumnVector>(std::move(res),
+                                                      std::move(valid));
+            };
             switch (expr_->op_type_) {
                 case proto::plan::GreaterThan:
                 case proto::plan::GreaterEqual: {
                     if (milvus::query::lt_lb<T>(val)) {
-                        res.set();
-                        res &= valid_res;
-                        return res_vec;
+                        return make_overflow_result(true);
                     }
-                    return res_vec;
+                    return make_overflow_result(false);
                 }
                 case proto::plan::LessThan:
                 case proto::plan::LessEqual: {
                     if (milvus::query::gt_ub<T>(val)) {
-                        res.set();
-                        res &= valid_res;
-                        return res_vec;
+                        return make_overflow_result(true);
                     }
-                    return res_vec;
+                    return make_overflow_result(false);
                 }
                 case proto::plan::Equal: {
-                    res.reset();
-                    return res_vec;
+                    return make_overflow_result(false);
                 }
                 case proto::plan::NotEqual: {
-                    res.set();
-                    res &= valid_res;
-                    return res_vec;
+                    return make_overflow_result(true);
                 }
                 default: {
                     ThrowInfo(UnexpectedError,
