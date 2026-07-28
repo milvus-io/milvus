@@ -390,9 +390,6 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 						expectedSchemaVersion,
 					))
 				}
-				if existing.GetSchemaVersion() < expectedSchemaVersion {
-					modPack.Get(segmentID).SchemaVersion = expectedSchemaVersion
-				}
 				continue
 			}
 			if incoming == nil {
@@ -425,6 +422,13 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				"new external refresh segment %d collides with existing metadata",
 				segmentID,
 			))
+		}
+
+		for segmentID := range keptSegmentMap {
+			existing := modPack.meta.segments.GetSegment(segmentID)
+			if existing.GetSchemaVersion() < expectedSchemaVersion {
+				modPack.Get(segmentID).SchemaVersion = expectedSchemaVersion
+			}
 		}
 		return true
 	}
