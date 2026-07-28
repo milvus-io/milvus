@@ -459,6 +459,50 @@ func (s *VectorArraySuite) TestSlice() {
 	s.Equal(0, sliced4.Len())
 }
 
+func (s *VectorArraySuite) TestCompactSliceDoesNotMutateSource() {
+	row := func(data []float32) *schemapb.VectorField {
+		return &schemapb.VectorField{
+			Dim: 2,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: data},
+			},
+		}
+	}
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: "emb",
+		ValidData: []bool{false, true, true},
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Dim:         2,
+						ElementType: schemapb.DataType_FloatVector,
+						Data: []*schemapb.VectorField{
+							row(nil),
+							row([]float32{1, 2}),
+							row([]float32{3, 4}),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	source, err := FieldDataColumn(fd, 0, -1)
+	s.Require().NoError(err)
+	sliced := source.Slice(0, -1)
+	sliced.CompactNullableValues()
+
+	value, err := source.Get(1)
+	s.Require().NoError(err)
+	s.Equal([]entity.FloatVector{{1, 2}}, value)
+	value, err = source.Get(2)
+	s.Require().NoError(err)
+	s.Equal([]entity.FloatVector{{3, 4}}, value)
+}
+
 func (s *VectorArraySuite) TestSlicePreservesConcreteTypeAndPublicAppendShape() {
 	byteVector := []byte{1, 2, 3, 4}
 	cases := []struct {

@@ -209,12 +209,12 @@ func (c *columnVectorArrayBase[T]) slice(start, end int) *columnVectorArrayBase[
 		fieldType:   c.fieldType,
 		elementType: c.elementType,
 		dim:         c.dim,
-		values:      c.values[valueStart:valueEnd],
+		values:      append([][]T(nil), c.values[valueStart:valueEnd]...),
 		nullable:    c.nullable,
 		sparseMode:  c.sparseMode,
 	}
 	if c.nullable {
-		result.validData = c.validData[start:end]
+		result.validData = append([]bool(nil), c.validData[start:end]...)
 		result.rebuildIndexMapping()
 	}
 	return result
