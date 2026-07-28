@@ -285,16 +285,6 @@ func (s *statsInspectorSuite) putExternalStatsTask(taskID, segmentID UniqueID, s
 	})
 }
 
-func (s *statsInspectorSuite) countStatsTasks(subJobType indexpb.StatsSubJob) int {
-	count := 0
-	for _, statsTask := range s.mt.statsTaskMeta.GetAllTasks() {
-		if statsTask.GetSubJobType() == subJobType {
-			count++
-		}
-	}
-	return count
-}
-
 func (s *statsInspectorSuite) TestStart() {
 	s.inspector.Start()
 	time.Sleep(10 * time.Millisecond) // Give goroutines some time to start
@@ -404,8 +394,10 @@ func (s *statsInspectorSuite) TestTriggerStatsTasksAlternatesSubJobOrder() {
 	s.Contains(order, indexpb.StatsSubJob_TextIndexJob)
 }
 
-// A trigger count of 0 disables JSON key index submission.
-func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsZeroLimit() {
+// jsonShreddingTriggerCount is deprecated, but 0 used to disable JSON key index
+// submission outright and must keep doing so instead of silently turning
+// shredding back on after an upgrade.
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZero() {
 	segmentID := UniqueID(230)
 	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/230", 1))
 
@@ -421,31 +413,6 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsZeroLimit() 
 
 	s.inspector.triggerJSONKeyIndexStatsTask()
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
-}
-
-func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskRateLimit() {
-	Params.Save(Params.DataCoordCfg.JSONStatsTriggerCount.Key, "2")
-	Params.Save(Params.DataCoordCfg.JSONStatsTriggerInterval.Key, "10")
-	defer Params.Reset(Params.DataCoordCfg.JSONStatsTriggerCount.Key)
-	defer Params.Reset(Params.DataCoordCfg.JSONStatsTriggerInterval.Key)
-
-	segmentIDs := []UniqueID{231, 232, 233, 234}
-	for _, segmentID := range segmentIDs {
-		s.putExternalSegment(segmentID, false, storage.StorageV3,
-			packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", segmentID), 1))
-	}
-
-	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.Equal(2, s.countStatsTasks(indexpb.StatsSubJob_JsonKeyIndexJob))
-
-	// The same interval has no remaining JSON submission budget.
-	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.Equal(2, s.countStatsTasks(indexpb.StatsSubJob_JsonKeyIndexJob))
-
-	// Once the interval elapses, the budget resets and two more tasks can be submitted.
-	s.inspector.lastJSONStatsTrigger = time.Now().Add(-11 * time.Minute).Unix()
-	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.Equal(4, s.countStatsTasks(indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
 // Every trigger loop must give up as soon as the scheduler is backlogged instead
