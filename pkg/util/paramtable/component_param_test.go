@@ -242,6 +242,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1024, Params.MaxUserDescriptionLength.GetAsInt())
 
 		t.Logf("MaxFieldNum: %d", Params.MaxFieldNum.GetAsInt64())
+		assert.Equal(t, int64(256), Params.MaxFieldNum.GetAsInt64())
 
 		t.Logf("MaxVectorFieldNum: %d", Params.MaxVectorFieldNum.GetAsInt64())
 
