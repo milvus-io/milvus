@@ -37,7 +37,9 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -2033,6 +2035,51 @@ func TestNewSnapshotManager(t *testing.T) {
 	)
 
 	assert.NotNil(t, sm)
+}
+
+func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(100)
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+		&milvuspb.DescribeCollectionResponse{DbName: "default"}, nil,
+	).Once()
+
+	sm := NewSnapshotManager(
+		nil,
+		nil,
+		nil,
+		mockAllocator,
+		nil,
+		mockBroker,
+		nil,
+		nil, // indexEngineVersionManager
+	)
+
+	broadcasterCalled := false
+	startBroadcaster := func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+		broadcasterCalled = true
+		return nil, nil
+	}
+
+	err := sm.RestoreIndexes(ctx, &SnapshotData{
+		Indexes: []*indexpb.IndexInfo{
+			{
+				IndexName: "fm_idx",
+				FieldID:   101,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+				},
+			},
+		},
+	}, collectionID, startBroadcaster, "snapshot")
+
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	assert.False(t, broadcasterCalled)
 }
 
 // --- Test ReadSnapshotData ---

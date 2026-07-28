@@ -11,11 +11,14 @@
 
 #include "indexbuilder/ScalarIndexCreator.h"
 
+#include <charconv>
 #include <cstdint>
 #include <exception>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <system_error>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -29,6 +32,76 @@
 #include "nlohmann/json.hpp"
 
 namespace milvus::indexbuilder {
+
+namespace {
+
+uint32_t
+ParseFMIndexParam(const Config& config,
+                  const std::string& key,
+                  uint32_t default_value,
+                  uint32_t min_value,
+                  uint32_t max_value,
+                  bool require_power_of_two) {
+    if (!config.contains(key) || config.at(key).is_null()) {
+        return default_value;
+    }
+
+    const auto& value = config.at(key);
+    std::string raw;
+    if (value.is_string()) {
+        raw = value.get<std::string>();
+    } else if (value.is_number_unsigned()) {
+        raw = std::to_string(value.get<uint64_t>());
+    } else if (value.is_number_integer()) {
+        auto parsed = value.get<int64_t>();
+        if (parsed < 0) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "{} for FMINDEX must be an integer in [{}, {}], got {}",
+                      key,
+                      min_value,
+                      max_value,
+                      parsed);
+        }
+        raw = std::to_string(parsed);
+    } else {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "{} for FMINDEX must be an integer, got {}",
+                  key,
+                  value.dump());
+    }
+
+    // Go's create-index checker uses strconv.Atoi, which accepts a leading
+    // plus sign. Keep the C++ defense-in-depth parser in lockstep so a request
+    // accepted synchronously cannot fail later in the asynchronous build.
+    std::string_view digits(raw);
+    if (!digits.empty() && digits.front() == '+') {
+        digits.remove_prefix(1);
+    }
+    uint64_t parsed = 0;
+    auto [end, ec] =
+        std::from_chars(digits.data(), digits.data() + digits.size(), parsed);
+    if (digits.empty() || ec != std::errc{} ||
+        end != digits.data() + digits.size() || parsed < min_value ||
+        parsed > max_value) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "{} for FMINDEX must be an integer in [{}, {}], got '{}'",
+                  key,
+                  min_value,
+                  max_value,
+                  raw);
+    }
+    if (require_power_of_two && (parsed & (parsed - 1)) != 0) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "{} for FMINDEX must be a power of two in [{}, {}], got {}",
+                  key,
+                  min_value,
+                  max_value,
+                  parsed);
+    }
+    return static_cast<uint32_t>(parsed);
+}
+
+}  // namespace
 
 ScalarIndexCreator::ScalarIndexCreator(
     DataType dtype,
@@ -58,6 +131,23 @@ ScalarIndexCreator::ScalarIndexCreator(
                                config, milvus::index::MAX_GRAM)
                                .value());
             index_info.ngram_params = std::make_optional(ngram_params);
+        } else if (index_type_ == milvus::index::FMINDEX_INDEX_TYPE) {
+            milvus::index::FMIndexParams fmindex_params{};
+            fmindex_params.sa_sample_rate =
+                ParseFMIndexParam(config,
+                                  milvus::index::FM_SA_SAMPLE_RATE,
+                                  /*default_value=*/8,
+                                  /*min_value=*/4,
+                                  /*max_value=*/256,
+                                  /*require_power_of_two=*/false);
+            fmindex_params.block_bytes =
+                ParseFMIndexParam(config,
+                                  milvus::index::FM_BLOCK_BYTES,
+                                  /*default_value=*/64,
+                                  /*min_value=*/8,
+                                  /*max_value=*/128,
+                                  /*require_power_of_two=*/true);
+            index_info.fmindex_params = std::make_optional(fmindex_params);
         }
     }
     // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.

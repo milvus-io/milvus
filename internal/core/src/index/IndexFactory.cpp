@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -43,6 +44,7 @@
 #include "index/JsonFlatIndex.h"
 #include "index/JsonHybridScalarIndex.h"
 #include "index/JsonScalarIndexWrapper.h"
+#include "index/FMIndex.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
 #include "index/RTreeIndex.h"
@@ -636,6 +638,37 @@ IndexFactory::ScalarIndexLoadResource(
         request.max_disk_cost = index_size_in_bytes;
 
         request.has_raw_data = false;
+    } else if (index_type == milvus::index::FMINDEX_INDEX_TYPE) {
+        // FM-index is a single flat blob. A LoadView (mmap) load views every
+        // serialized array in place — wavelet words, sampled bitvector,
+        // sampled-SA values, doc boundaries; nothing is heap-copied. What the
+        // load DOES rebuild on the heap is the rank directories plus small
+        // derived vectors and the wrapper's null bitmap. At the default
+        // fm_block_bytes=64 the wavelet rank directory is roughly 1/8 of its
+        // packed words, so index_size can substantially overstate steady heap
+        // usage, especially when per-row document boundaries dominate the
+        // blob. Keep index_size as the deliberately conservative pre-load
+        // admission/peak bound; after LoadView succeeds FMIndex replaces the
+        // cache cell's memory_bytes with its measured resident heap while
+        // retaining file_bytes.
+        if (mmap_enable) {
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                index_size_in_bytes + stream_memory_overhead;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            // Deserialize MOVES the reader entry buffer into owned_blob_ (no
+            // intermediate copies), so the resident set is the owned blob (~1x)
+            // plus the rebuilt rank directories (~1x blob): both steady and
+            // peak are ~2x. (Without the move overload the peak was ~4x from
+            // three simultaneous full copies.)
+            request.final_memory_cost = 2 * index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
+        request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
             // V3 streaming: stream to temp file (mmap'd), then MMapIndexData
@@ -786,6 +819,11 @@ IndexFactory::CreatePrimitiveScalarIndex(
                 return std::make_unique<NgramInvertedIndex>(
                     file_manager_context, ngram_params.value());
             }
+            auto& fmindex_params = create_index_info.fmindex_params;
+            if (fmindex_params.has_value()) {
+                return std::make_unique<FMIndex>(file_manager_context,
+                                                 fmindex_params.value());
+            }
             return CreatePrimitiveScalarIndex<std::string>(
                 create_index_info, file_manager_context);
         }
@@ -913,7 +951,8 @@ IndexFactory::CreateJsonIndex(
         }
     }
 
-    // Inverted / NGram (existing paths)
+    // Inverted / NGram (existing paths). FMINDEX is VARCHAR-only in this
+    // release — JSON string paths are a follow-up — so it never reaches here.
     AssertInfo(
         index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE,
         "Invalid index type for json index: {}",
