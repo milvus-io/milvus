@@ -344,20 +344,57 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 	mlog.Info(context.TODO(), "create copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
-	err = t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
-		UpdateCopyTaskNodeID(nodeID),
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress))
+	resolution, err := t.copyMeta.CommitTaskDispatch(context.TODO(), t.GetTaskId(), nodeID,
+		fmt.Sprintf("copy segment task was accepted by node %d after parent job terminated", nodeID))
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to update copy segment task state",
+		mlog.Warn(context.TODO(), "failed to commit copy segment task dispatch, dropping untracked worker task",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		dropUntrackedCopySegmentTask(cluster, nodeID, t.GetTaskId())
 		return
 	}
+
+	switch resolution {
+	case taskDispatchAlreadyTracked:
+		mlog.Debug(context.TODO(), "copy segment task dispatch already tracked",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		return
+	case taskDispatchCleanupTracked:
+		// The worker accepted the task, but the task/job became terminal while
+		// the RPC was in flight. CommitTaskDispatch preserved that terminal
+		// outcome and recorded this node solely as a retry handle for cleanup.
+		mlog.Info(context.TODO(), "copy segment task became inactive during dispatch, dropping accepted worker task",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		t.DropTaskOnWorker(cluster)
+		return
+	case taskDispatchCleanupUntracked:
+		mlog.Info(context.TODO(), "copy segment task dispatch no longer matches metadata, dropping accepted worker task",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		dropUntrackedCopySegmentTask(cluster, nodeID, t.GetTaskId())
+		return
+	case taskDispatchApplied:
+		// Continue below and report the pending -> executing transition.
+	}
+
 	// Record pending duration
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Pending).Observe(float64(pendingDuration.Milliseconds()))
 	mlog.Info(context.TODO(), "copy segment task start to execute",
 		WrapCopySegmentTaskLog(t, mlog.Int64("scheduledNodeID", nodeID),
 			mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+}
+
+// dropUntrackedCopySegmentTask removes a worker task that was accepted after
+// metadata moved elsewhere and therefore cannot be retried through NodeID.
+// ErrNodeNotFound is success-equivalent: the worker-side task is already gone.
+func dropUntrackedCopySegmentTask(cluster session.Cluster, nodeID, taskID int64) {
+	err := cluster.DropCopySegment(nodeID, taskID)
+	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		mlog.Warn(context.TODO(), "failed to drop untracked copy segment task on datanode",
+			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID), mlog.Err(err))
+		return
+	}
+	mlog.Info(context.TODO(), "dropped untracked copy segment task on datanode",
+		mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 }
 
 // ===========================================================================================

@@ -1691,6 +1691,42 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_SkipsDispatchWhenJobTermin
 	s.EqualValues(NullNodeID, updated.GetNodeId())
 }
 
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_DoesNotResurrectTerminalTask() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	cluster.EXPECT().CreateCopySegment(int64(10), mock.Anything, int64(100)).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64) error {
+			// Simulate a sibling failure while CreateCopySegment is in flight.
+			s.NoError(copyMeta.UpdateJob(ctx, task.GetJobId(),
+				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+				UpdateCopyJobReason("sibling failed")))
+			s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+				UpdateCopyTaskReason("sibling failed")))
+			return nil
+		}).Once()
+	cluster.EXPECT().DropCopySegment(int64(10), task.GetTaskId()).Return(nil).Once()
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	updated := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updated.GetState())
+	s.Equal("sibling failed", updated.GetReason())
+	s.EqualValues(NullNodeID, updated.GetNodeId())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		copyMeta.GetJob(ctx, task.GetJobId()).GetState())
+}
+
 // TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterJobFailed is the
 // regression for the stale-result race: for a restore split across tasks A and
 // B, A fails -> markTaskAndJobFailed puts the job in Failed -> the next checker

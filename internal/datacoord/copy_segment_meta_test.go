@@ -26,7 +26,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -224,6 +226,122 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	task2 := copyMeta.GetTask(context.TODO(), 1002)
 	s.NotNil(task2)
 	s.Equal(int64(1002), task2.GetTaskId())
+}
+
+func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ReconcilesPartialPublication() {
+	ctx := context.Background()
+	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := &meta{catalog: catalog, segments: NewSegmentsInfo()}
+
+	segments := []*datapb.SegmentInfo{
+		{ID: 101, CollectionID: 1, PartitionID: 10, State: commonpb.SegmentState_Flushed, IsImporting: false},
+		{ID: 102, CollectionID: 1, PartitionID: 10, State: commonpb.SegmentState_Importing, IsImporting: true},
+		{ID: 201, CollectionID: 1, PartitionID: 10, State: commonpb.SegmentState_Flushed, IsImporting: false},
+		{ID: 301, CollectionID: 1, PartitionID: 10, State: commonpb.SegmentState_Flushed, IsImporting: false},
+	}
+	for _, segment := range segments {
+		m.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+	}
+
+	jobs := []*datapb.CopySegmentJob{
+		{
+			JobId: 1,
+			State: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{TargetSegmentId: 101},
+				{TargetSegmentId: 102},
+			},
+		},
+		{
+			JobId:      2,
+			State:      datapb.CopySegmentJobState_CopySegmentJobFailed,
+			IdMappings: []*datapb.CopySegmentIDMapping{{TargetSegmentId: 201}},
+		},
+		{
+			JobId:      3,
+			State:      datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			IdMappings: []*datapb.CopySegmentIDMapping{{TargetSegmentId: 301}},
+		},
+	}
+	for _, job := range jobs {
+		s.NoError(catalog.SaveCopySegmentJob(ctx, job))
+	}
+
+	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+	s.Require().NoError(err)
+	s.NotNil(copyMeta)
+
+	activePublished := m.GetSegment(ctx, 101)
+	s.Equal(commonpb.SegmentState_Importing, activePublished.GetState())
+	s.True(activePublished.GetIsImporting())
+	activeHidden := m.GetSegment(ctx, 102)
+	s.Equal(commonpb.SegmentState_Importing, activeHidden.GetState())
+	s.True(activeHidden.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Dropped, m.GetSegment(ctx, 201).GetState())
+	s.Equal(commonpb.SegmentState_Flushed, m.GetSegment(ctx, 301).GetState())
+}
+
+func (s *CopySegmentMetaSuite) TestCommitTaskDispatchOutcomes() {
+	testCases := []struct {
+		name           string
+		jobState       datapb.CopySegmentJobState
+		taskState      datapb.CopySegmentTaskState
+		existingNodeID int64
+		dispatchNodeID int64
+		wantResolution taskDispatchResolution
+		wantState      datapb.CopySegmentTaskState
+		wantNodeID     int64
+	}{
+		{
+			name: "active pending is applied", jobState: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskPending, existingNodeID: NullNodeID,
+			dispatchNodeID: 10, wantResolution: taskDispatchApplied,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, wantNodeID: 10,
+		},
+		{
+			name: "same active assignment is idempotent", jobState: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, existingNodeID: 10,
+			dispatchNodeID: 10, wantResolution: taskDispatchAlreadyTracked,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, wantNodeID: 10,
+		},
+		{
+			name: "terminal task stays terminal and tracks cleanup", jobState: datapb.CopySegmentJobState_CopySegmentJobFailed,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskFailed, existingNodeID: NullNodeID,
+			dispatchNodeID: 10, wantResolution: taskDispatchCleanupTracked,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskFailed, wantNodeID: 10,
+		},
+		{
+			name: "different assignment is not overwritten", jobState: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, existingNodeID: 11,
+			dispatchNodeID: 10, wantResolution: taskDispatchCleanupUntracked,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, wantNodeID: 11,
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			ctx := context.Background()
+			catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+			copyMeta, err := NewCopySegmentMeta(ctx, catalog, nil, nil, nil)
+			s.Require().NoError(err)
+			s.NoError(copyMeta.AddJob(ctx, &copySegmentJob{
+				CopySegmentJob: &datapb.CopySegmentJob{JobId: 100, State: tc.jobState},
+				tr:             timerecord.NewTimeRecorder("job"),
+			}))
+			task := &copySegmentTask{tr: timerecord.NewTimeRecorder("task"), times: taskcommon.NewTimes()}
+			task.task.Store(&datapb.CopySegmentTask{
+				TaskId: 1001, JobId: 100, State: tc.taskState, NodeId: tc.existingNodeID,
+			})
+			s.NoError(copyMeta.AddTask(ctx, task))
+
+			resolution, err := copyMeta.CommitTaskDispatch(ctx, 1001, tc.dispatchNodeID, "job inactive")
+			s.NoError(err)
+			s.Equal(tc.wantResolution, resolution)
+			updated := copyMeta.GetTask(ctx, 1001)
+			s.Equal(tc.wantState, updated.GetState())
+			s.Equal(tc.wantNodeID, updated.GetNodeId())
+		})
+	}
 }
 
 func (s *CopySegmentMetaSuite) TestAddJob_Success() {

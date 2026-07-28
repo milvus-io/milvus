@@ -570,50 +570,48 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	// failed restore queryable. Losing this race means the job is failed, so the
 	// inspector's job-scoped cleanup owns the segments from here.
 	//
-	// Known residual window: the check and the flushes are not atomic, so a job
-	// that goes terminal *between* them still publishes before Step 4 rejects
-	// the Completed transition. It is bounded by one inspect interval (2s) and
-	// is hard to reach in practice — tryTimeoutJob runs sequentially after
-	// checkCopyingJob in the same goroutine, and the cross-goroutine paths need
-	// a worker to report Failed for an already-Completed task.
+	// All segment operators are passed to one UpdateSegmentsInfo call. That call
+	// holds meta.segMu across catalog persistence and the in-memory swap, so live
+	// readers cannot observe segment A as Flushed while segment B is still
+	// Importing. NewCopySegmentMeta also reconciles active/failed jobs before the
+	// server becomes healthy, covering a crash between etcd batches for restores
+	// larger than metastore.maxEtcdTxnNum.
 	if current := c.copyMeta.GetJob(c.ctx, job.GetJobId()); current == nil || isTerminalCopyJobState(current.GetState()) {
 		log.Info(c.ctx, "skip finishing copy segment job: already in terminal state, leaving segment cleanup to the inspector")
 		return
 	}
 
-	var flushFailures int
-	if len(targetSegmentIDs) > 0 {
-		for _, segID := range targetSegmentIDs {
-			segment := c.meta.GetSegment(c.ctx, segID)
-			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
-				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
-				opImporting := UpdateIsImporting(segID, false)
-				if err := c.meta.UpdateSegmentsInfo(c.ctx, op, opImporting); err != nil {
-					log.Error(c.ctx, "failed to update segment state to Flushed",
-						mlog.FieldSegmentID(segID),
-						mlog.Err(err))
-					flushFailures++
-				} else {
-					log.Info(c.ctx, "updated segment state to Flushed",
-						mlog.FieldSegmentID(segID))
-				}
-			}
+	operators := make([]UpdateOperator, 0, len(targetSegmentIDs)*2)
+	for _, segID := range targetSegmentIDs {
+		segment := c.meta.GetSegment(c.ctx, segID)
+		if segment == nil {
+			continue
+		}
+		if segment.GetState() != commonpb.SegmentState_Flushed {
+			operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Flushed))
+		}
+		if segment.GetIsImporting() {
+			operators = append(operators, UpdateIsImporting(segID, false))
 		}
 	}
 
-	// Step 3: Fail the job if any segment flush failed (prevents silent data availability issues)
-	if flushFailures > 0 {
-		reason := fmt.Sprintf("%d/%d segments failed to flush to Flushed state", flushFailures, len(targetSegmentIDs))
-		log.Error(c.ctx, "finishJob: failing job due to segment flush failures",
-			mlog.Int("flushFailures", flushFailures),
-			mlog.Int("totalSegments", len(targetSegmentIDs)))
+	// Step 3: Publish every target in one meta update. On error the in-memory
+	// view is unchanged, so no subset becomes visible; fail the job and let the
+	// inspector drop the targets. Startup reconciliation handles a process crash
+	// after only some underlying etcd batches were persisted.
+	if err := c.meta.UpdateSegmentsInfo(c.ctx, operators...); err != nil {
+		reason := fmt.Sprintf("failed to publish %d target segments: %v", len(targetSegmentIDs), err)
+		log.Error(c.ctx, "finishJob: failing job because target publication failed",
+			mlog.Int("totalSegments", len(targetSegmentIDs)), mlog.Err(err))
 		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(reason)); err != nil {
-			log.Error(c.ctx, "failed to update job state to Failed after flush failures", mlog.Err(err))
+			log.Error(c.ctx, "failed to update job state to Failed after publication failure", mlog.Err(err))
 		}
 		return
 	}
+	log.Info(c.ctx, "published all copy segment targets",
+		mlog.Int("targetSegments", len(targetSegmentIDs)))
 
 	// Step 4: Update job state to Completed
 	completeTs := uint64(time.Now().UnixNano())

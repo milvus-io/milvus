@@ -125,12 +125,13 @@ func NewCopySegmentInspector(
 	cluster session.Cluster,
 ) CopySegmentInspector {
 	return &copySegmentInspector{
-		ctx:          ctx,
-		meta:         meta,
-		copyMeta:     copyMeta,
-		scheduler:    scheduler,
-		cluster:      cluster,
-		dropPool:     conc.NewPool[struct{}](copySegmentDropConcurrency, conc.WithExpiryDuration(time.Minute)),
+		ctx:       ctx,
+		meta:      meta,
+		copyMeta:  copyMeta,
+		scheduler: scheduler,
+		cluster:   cluster,
+		dropPool: conc.NewPool[struct{}](copySegmentDropConcurrency,
+			conc.WithExpiryDuration(time.Minute), conc.WithNonBlocking(true)),
 		droppingTask: typeutil.NewConcurrentSet[int64](),
 		closeChan:    make(chan struct{}),
 	}
@@ -388,8 +389,8 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 // blocks for up to DataCoordCfg.RequestTimeoutSeconds (default 600s) and inspect()
 // is a single goroutine walking every job, so an inline call would let one
 // unresponsive DataNode stall dispatch and cleanup for every other job. Only one
-// drop per task is in flight at a time, so the retry-every-round behaviour cannot
-// pile up goroutines against a node that never answers.
+// drop per task is in flight at a time, and pool submission is non-blocking, so
+// neither repeated rounds nor a ninth stuck task can stall the inspection loop.
 //
 // Racing the scheduler's own drop is harmless: meta writes are serialized under
 // the meta lock, the DropTask RPC is idempotent, and clearing an already-cleared
@@ -404,11 +405,23 @@ func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
 		// A drop from an earlier round is still waiting on this node.
 		return
 	}
-	mlog.Info(s.ctx, "retrying worker-side drop of terminal copy segment task",
+	mlog.RatedInfo(s.ctx, 1, "retrying worker-side drop of terminal copy segment task",
 		WrapCopySegmentTaskLog(task, mlog.FieldNodeID(task.GetNodeId()))...)
-	s.dropPool.Submit(func() (struct{}, error) {
+	future := s.dropPool.Submit(func() (struct{}, error) {
 		defer s.droppingTask.Remove(taskID)
 		task.DropTaskOnWorker(s.cluster)
 		return struct{}{}, nil
 	})
+	// A non-blocking ants pool reports saturation by returning an already
+	// completed future with an error. The closure did not run in that case, so
+	// release the in-flight marker here; the next inspection round retries it.
+	select {
+	case <-future.Inner():
+		if err := future.Err(); err != nil {
+			s.droppingTask.Remove(taskID)
+			mlog.RatedWarn(s.ctx, 1, "copy segment drop pool is full, retry in next inspection round",
+				WrapCopySegmentTaskLog(task, mlog.FieldNodeID(task.GetNodeId()), mlog.Err(err))...)
+		}
+	default:
+	}
 }

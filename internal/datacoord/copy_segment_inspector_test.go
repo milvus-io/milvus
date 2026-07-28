@@ -428,6 +428,47 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_DropDoesNotBlockInspectL
 	s.inspector.processTerminal(task)
 }
 
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_PoolSaturationDoesNotBlock() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, copySegmentDropConcurrency)
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(int64, int64) error {
+			entered <- struct{}{}
+			<-release
+			return nil
+		}).Times(copySegmentDropConcurrency)
+
+	for i := 0; i < copySegmentDropConcurrency; i++ {
+		task := s.addTerminalTaskWithAssignment(int64(2000+i), int64(100+i),
+			datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+		s.inspector.processTerminal(task)
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			s.FailNow("drop pool worker did not start")
+		}
+	}
+
+	ninth := s.addTerminalTaskWithAssignment(2008, 108,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	started := time.Now()
+	s.inspector.processTerminal(ninth)
+	s.Less(time.Since(started), time.Second, "a full drop pool must not block the inspector")
+	s.False(s.inspector.droppingTask.Contain(ninth.GetTaskId()),
+		"a rejected submission must release its retry marker")
+
+	close(release)
+	s.waitDropsSettled()
+
+	// Once capacity returns, the ninth task must be eligible for the next round.
+	s.cluster.EXPECT().DropCopySegment(int64(108), int64(2008)).Return(nil).Once()
+	s.inspector.processTerminal(ninth)
+	s.waitDropsSettled()
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), ninth.GetTaskId()).GetNodeId())
+}
+
 // TestProcessTerminal_RetriesDropUntilAssignmentCleared is the liveness
 // regression for the review finding: the scheduler calls DropTaskOnWorker
 // exactly once before removing the task from its running set, so an ambiguous

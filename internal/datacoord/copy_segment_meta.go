@@ -21,12 +21,14 @@ import (
 
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -91,6 +93,7 @@ type CopySegmentMeta interface {
 	// Task operations
 	AddTask(ctx context.Context, task CopySegmentTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
+	CommitTaskDispatch(ctx context.Context, taskID, nodeID int64, inactiveReason string) (taskDispatchResolution, error)
 	ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error)
 	TaskAcceptsWorkerResult(ctx context.Context, taskID int64) bool
 	CompleteTaskIfActive(ctx context.Context, taskID int64, completeTs uint64) (bool, error)
@@ -322,6 +325,9 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 
 	copySegmentMeta.jobs = jobs
 	copySegmentMeta.tasks = tasks
+	if err := copySegmentMeta.reconcileRestoredTargetSegments(ctx); err != nil {
+		return nil, err
+	}
 
 	// Note: no ref-count rebuild is needed on restart. Restore protection is provided
 	// by pins persisted on SnapshotInfo (see createRestoreJob / RestoreSnapshot phase 0),
@@ -340,6 +346,63 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	// TTL (dataCoord.snapshot.restorePinTTLSeconds) caps the blast radius.
 
 	return copySegmentMeta, nil
+}
+
+// reconcileRestoredTargetSegments repairs the visibility state left by a
+// crash during a batched restore publication before DataCoord starts serving.
+//
+// meta.UpdateSegmentsInfo keeps the in-memory update atomic under segMu, but
+// the catalog may split a large AlterSegments call across several etcd
+// transactions. If DataCoord crashes after one batch, some target segments can
+// be persisted as Flushed while the parent job is still Executing/Failed. On
+// restart those segments must be hidden (active job) or Dropped (failed job)
+// before QueryCoord can observe them.
+func (m *copySegmentMeta) reconcileRestoredTargetSegments(ctx context.Context) error {
+	if m.meta == nil {
+		return nil
+	}
+
+	operators := make([]UpdateOperator, 0)
+	for _, job := range m.jobs {
+		if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobCompleted {
+			continue
+		}
+
+		for _, mapping := range job.GetIdMappings() {
+			segmentID := mapping.GetTargetSegmentId()
+			segment := m.meta.GetSegment(ctx, segmentID)
+			if segment == nil {
+				continue
+			}
+
+			if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
+				if segment.GetState() != commonpb.SegmentState_Dropped {
+					operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped))
+				}
+				continue
+			}
+
+			// Active jobs must keep every target hidden. Only reset states that
+			// can result from a partial publication; never resurrect a segment
+			// that was already Dropped by failure cleanup.
+			if segment.GetState() == commonpb.SegmentState_Flushed {
+				operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Importing))
+			}
+			if segment.GetState() != commonpb.SegmentState_Dropped && !segment.GetIsImporting() {
+				operators = append(operators, UpdateIsImporting(segmentID, true))
+			}
+		}
+	}
+
+	if len(operators) == 0 {
+		return nil
+	}
+	if err := m.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return merr.Wrap(err, "reconcile restored copy-segment target visibility")
+	}
+	mlog.Info(ctx, "reconciled restored copy-segment target visibility",
+		mlog.Int("operatorCount", len(operators)))
+	return nil
 }
 
 // ===========================================================================================
@@ -698,6 +761,98 @@ func (m *copySegmentMeta) updateTaskLocked(ctx context.Context, task CopySegment
 	// update memory task atomically
 	task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
 	return nil
+}
+
+// taskDispatchResolution describes how DataCoord accounted for a copy task
+// after the worker accepted its CreateCopySegment RPC.
+type taskDispatchResolution int
+
+const (
+	// taskDispatchApplied: the task was still Pending under an active job and
+	// is now persisted as InProgress on the selected node.
+	taskDispatchApplied taskDispatchResolution = iota
+	// taskDispatchAlreadyTracked: another concurrent/idempotent dispatch
+	// already persisted the same task on the same node. No cleanup or metrics
+	// should be emitted by this caller.
+	taskDispatchAlreadyTracked
+	// taskDispatchCleanupTracked: the task/job became terminal while the RPC
+	// was in flight. The accepted node assignment was persisted on a terminal
+	// task so DropTaskOnWorker (and later the inspector) can clean it up.
+	taskDispatchCleanupTracked
+	// taskDispatchCleanupUntracked: the accepted worker task cannot safely be
+	// represented in the current metadata (missing task or another node is
+	// already tracked). The caller must drop this exact node directly.
+	taskDispatchCleanupUntracked
+)
+
+// isTerminalCopyTaskState reports whether a copy task state is final.
+func isTerminalCopyTaskState(state datapb.CopySegmentTaskState) bool {
+	return state == datapb.CopySegmentTaskState_CopySegmentTaskCompleted ||
+		state == datapb.CopySegmentTaskState_CopySegmentTaskFailed
+}
+
+// CommitTaskDispatch atomically commits the result of a successful worker
+// CreateCopySegment RPC without resurrecting a task or dispatching a dead job.
+//
+// The RPC necessarily happens outside m.mu. While it is in flight, a sibling
+// task can fail the parent job and checkFailedJob can move this task to Failed.
+// An unconditional Pending/Failed -> InProgress write would then revive a
+// terminal task. This method re-checks task and job state under one write lock:
+//
+//   - Pending task + active job -> InProgress + nodeID;
+//   - terminal/inactive task with no assignment -> preserve/converge terminal
+//     state and persist nodeID so cleanup is retryable;
+//   - same task already InProgress on this node -> idempotent no-op;
+//   - otherwise -> do not overwrite existing metadata; caller directly drops
+//     the newly accepted worker task.
+func (m *copySegmentMeta) CommitTaskDispatch(ctx context.Context, taskID, nodeID int64, inactiveReason string) (taskDispatchResolution, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	task := m.tasks.get(taskID)
+	if task == nil {
+		return taskDispatchCleanupUntracked, nil
+	}
+
+	job, jobExists := m.jobs[task.GetJobId()]
+	jobActive := jobExists && !isTerminalCopyJobState(job.GetState())
+	if jobActive && task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending {
+		if err := m.updateTaskLocked(ctx, task,
+			UpdateCopyTaskNodeID(nodeID),
+			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress)); err != nil {
+			return taskDispatchCleanupUntracked, err
+		}
+		return taskDispatchApplied, nil
+	}
+
+	if jobActive && task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress && task.GetNodeId() == nodeID {
+		return taskDispatchAlreadyTracked, nil
+	}
+
+	// A different assignment is already authoritative. Never overwrite it:
+	// doing so would lose the only retry handle for that worker-side task.
+	if task.GetNodeId() != NullNodeID {
+		return taskDispatchCleanupUntracked, nil
+	}
+
+	if isTerminalCopyTaskState(task.GetState()) {
+		if err := m.updateTaskLocked(ctx, task, UpdateCopyTaskNodeID(nodeID)); err != nil {
+			return taskDispatchCleanupUntracked, err
+		}
+		return taskDispatchCleanupTracked, nil
+	}
+
+	if !jobActive {
+		if err := m.updateTaskLocked(ctx, task,
+			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+			UpdateCopyTaskNodeID(nodeID),
+			UpdateCopyTaskReason(inactiveReason)); err != nil {
+			return taskDispatchCleanupUntracked, err
+		}
+		return taskDispatchCleanupTracked, nil
+	}
+
+	return taskDispatchCleanupUntracked, nil
 }
 
 // workerLossResolution is the outcome of ResolveTaskOnWorkerLoss.

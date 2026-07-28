@@ -1212,7 +1212,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
-	// AlterSegments returns error to simulate flush failure
+	// AlterSegments returns error to simulate atomic publication failure.
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
 
 	// Setup: Create job in Executing state
@@ -1225,23 +1225,26 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			IdMappings: []*datapb.CopySegmentIDMapping{
 				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+				{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
 			},
 		},
 		tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.copyMeta.AddJob(context.TODO(), job)
 
-	// Create target segment in Growing state (needs flush to Flushed)
-	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            101,
-			State:         commonpb.SegmentState_Growing,
-			NumOfRows:     100,
-			CollectionID:  s.collectionID,
-			InsertChannel: "ch1",
-		},
+	for _, segmentID := range []int64{101, 102} {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				State:         commonpb.SegmentState_Importing,
+				IsImporting:   true,
+				NumOfRows:     100,
+				CollectionID:  s.collectionID,
+				InsertChannel: "ch1",
+			},
+		}
+		s.meta.AddSegment(context.TODO(), segment)
 	}
-	s.meta.AddSegment(context.TODO(), segment)
 
 	// Create a completed task
 	task := &copySegmentTask{
@@ -1255,18 +1258,26 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 		JobId:        jobID,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+			{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
+		},
 	}
 	task.task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
-	// Execute: Check copying job - flush will fail due to AlterSegments error
+	// Execute: Check copying job - publication will fail due to AlterSegments error
 	s.checker.checkCopyingJob(job)
 
-	// Verify: Job marked as Failed (not Completed) due to flush failure
+	// Verify: Job marked as Failed (not Completed) and the target remains hidden.
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
-	s.Contains(updatedJob.GetReason(), "failed to flush")
+	s.Contains(updatedJob.GetReason(), "failed to publish")
+	for _, segmentID := range []int64{101, 102} {
+		updatedSegment := s.meta.GetSegment(context.TODO(), segmentID)
+		s.Equal(commonpb.SegmentState_Importing, updatedSegment.GetState())
+		s.True(updatedSegment.GetIsImporting())
+	}
 
 	// Verify: Ref count is released even on failure
 }
@@ -1316,7 +1327,17 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_PublishesAllTargetSegments() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.MatchedBy(func(segments []*datapb.SegmentInfo) bool {
+		if len(segments) != 2 {
+			return false
+		}
+		ids := []int64{segments[0].GetID(), segments[1].GetID()}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		return ids[0] == 3101 && ids[1] == 3102 &&
+			segments[0].GetState() == commonpb.SegmentState_Flushed &&
+			segments[1].GetState() == commonpb.SegmentState_Flushed &&
+			!segments[0].GetIsImporting() && !segments[1].GetIsImporting()
+	})).Return(nil).Once()
 
 	for _, segID := range []int64{3101, 3102} {
 		s.NoError(s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
