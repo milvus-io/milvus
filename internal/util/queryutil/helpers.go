@@ -17,7 +17,7 @@
 // The merge/slice helpers in this file consume RetrieveResults produced by
 // segcore (and merged across query nodes), never raw user input, so every
 // data-shape assertion below classifies as ServiceInternal: a violation means
-// a segcore/Milvus bug, and must not be attributed to the user (fail_input)
+// a segcore/Milvus bug, and must not be attributed to the user (cause="user")
 // or suppress cross-replica failover the way an InputError would.
 
 package queryutil
