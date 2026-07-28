@@ -361,6 +361,19 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
+	// The PK reservation was sized at broadcast from an upper bound; pre-import has
+	// since produced the exact row count. Compare them here, before any segment is
+	// written, instead of letting pkCursor.take trip mid-import on the datanode.
+	for _, fileStat := range task.GetFileStats() {
+		f := fileStat.GetImportFile()
+		reserved := f.GetPkIdEnd() - f.GetPkIdBegin()
+		if reserved > 0 && fileStat.GetTotalRows() > reserved {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"reserved PK range too small for file %v: %d rows, %d ids reserved",
+				f.GetPaths(), fileStat.GetTotalRows(), reserved)
+		}
+	}
+
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)

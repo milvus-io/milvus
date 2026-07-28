@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"math"
-	"math/bits"
 
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/sbinet/npyio"
@@ -183,7 +182,7 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 		r, err := npyio.NewReader(importutilv2common.NewRetryableReader(ctx, path, cmReader))
 		if err != nil {
 			cmReader.Close()
-			return 0, merr.WrapErrImportSysFailedMsg("read numpy header failed, err=%v", err)
+			return 0, merr.WrapErrImportFailedMsg("read numpy header failed, err=%v", err)
 		}
 		shape := r.Header.Descr.Shape
 		cmReader.Close()
@@ -207,7 +206,7 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 	defer retryableReader.Close()
 	pr, err := file.NewParquetReader(retryableReader)
 	if err != nil {
-		return 0, merr.WrapErrImportSysFailedMsg("new parquet reader failed, err=%v", err)
+		return 0, merr.WrapErrImportFailedMsg("new parquet reader failed, err=%v", err)
 	}
 	defer pr.Close()
 	return pr.NumRows(), nil
@@ -228,25 +227,52 @@ func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
 	if err != nil {
 		return err
 	}
-	if err := sizeReservations(bounds, exacts); err != nil {
-		return err
-	}
-	var total int64
-	for _, b := range bounds {
-		total += b
-	}
-	if total == 0 {
-		return nil
-	}
-	begin, _, err := common.AllocAutoIDN(allocN, total, clusterID)
-	if err != nil {
-		return err
-	}
-	cur := begin
-	for i, f := range files {
-		f.PkIdBegin = cur
-		f.PkIdEnd = cur + bounds[i]
-		cur = f.PkIdEnd
+	sizeReservations(bounds, exacts)
+	return reserveRanges(bounds, files, allocN, clusterID)
+}
+
+// maxIDsPerAllocBatch mirrors the per-call ceiling of rootCoordAllocator.AllocN.
+const maxIDsPerAllocBatch = int64(math.MaxUint32)
+
+// reserveRanges writes each file its own contiguous [PkIdBegin, PkIdEnd) slice,
+// chunking the allocation so that no single allocN call exceeds the allocator's
+// per-batch ceiling. Files are packed greedily and a file's range never straddles
+// two batches, so every range stays contiguous while the import as a whole is not
+// capped at one batch: the reservation total may exceed the ceiling, only a single
+// file may not.
+func reserveRanges(bounds []int64, files []*internalpb.ImportFile,
+	allocN func(int64) (int64, int64, error), clusterID uint64,
+) error {
+	for i := 0; i < len(bounds); {
+		var batch int64
+		j := i
+		for ; j < len(bounds); j++ {
+			if bounds[j] > maxIDsPerAllocBatch {
+				return merr.WrapErrParameterInvalidMsg(
+					"import file %d needs %d primary keys, more than one allocation batch holds (max %d)",
+					j, bounds[j], maxIDsPerAllocBatch)
+			}
+			if batch+bounds[j] > maxIDsPerAllocBatch {
+				break
+			}
+			batch += bounds[j]
+		}
+		if batch == 0 {
+			// Only reachable once every remaining bound is zero, which
+			// sizeReservations rules out; guards against a non-advancing loop.
+			return nil
+		}
+		begin, _, err := common.AllocAutoIDN(allocN, batch, clusterID)
+		if err != nil {
+			return err
+		}
+		cur := begin
+		for k := i; k < j; k++ {
+			files[k].PkIdBegin = cur
+			files[k].PkIdEnd = cur + bounds[k]
+			cur = files[k].PkIdEnd
+		}
+		i = j
 	}
 	return nil
 }
@@ -288,64 +314,26 @@ func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 // slightly more rows than the footer/header advertised. A byte-derived estimate is
 // already a gross over-estimate, so multiplying it would only waste id space.
 //
-// The allocator rejects a single batch above MaxUint32, so when the total does not
-// fit: exact reservations give up their headroom first, then the estimates are
-// scaled down proportionally. A reservation that would shrink to zero is an error
-// rather than a clamp -- the datanode treats an empty range as "no range" and
-// silently falls back to its local allocator, which is the divergence this whole
-// mechanism exists to prevent.
-func sizeReservations(bounds []int64, exacts []bool) error {
+// Every reservation is at least one id. The datanode reads an empty range as "no
+// range" and silently falls back to its local allocator, which is the divergence
+// this whole mechanism exists to prevent, so a zero-row file still gets a slice.
+//
+// Reservations are never shrunk to fit an allocation ceiling: the JSON/CSV bound
+// is only usable because it is guaranteed not to under-count, and scaling it down
+// would break that guarantee and surface as a mid-import failure on the datanode.
+// reserveRanges splits the allocation across batches instead.
+func sizeReservations(bounds []int64, exacts []bool) {
 	factor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 	if factor < 1 {
 		factor = 1
 	}
-
-	var exactTotal, estimateTotal int64
 	for i, b := range bounds {
 		if exacts[i] {
-			bounds[i] = b * factor
-			exactTotal += bounds[i]
-		} else {
-			estimateTotal += b
+			b *= factor
 		}
-	}
-	if exactTotal+estimateTotal <= math.MaxUint32 {
-		return nil
-	}
-
-	// Surrender the exact headroom before touching the estimates.
-	exactTotal = 0
-	for i := range bounds {
-		if exacts[i] {
-			bounds[i] /= factor
-			exactTotal += bounds[i]
+		if b < 1 {
+			b = 1
 		}
+		bounds[i] = b
 	}
-	if exactTotal > math.MaxUint32 {
-		return merr.WrapErrParameterInvalidMsg(
-			"import is too large to reserve primary keys in one batch: %d rows, max %d",
-			exactTotal, uint64(math.MaxUint32))
-	}
-	if exactTotal+estimateTotal <= math.MaxUint32 {
-		return nil
-	}
-
-	budget := int64(math.MaxUint32) - exactTotal
-	for i, b := range bounds {
-		if exacts[i] {
-			continue
-		}
-		// b*budget overflows int64 for realistic inputs (a 16GiB text file alone
-		// bounds at ~1.7e10 rows), so carry the product in 128 bits. budget <
-		// estimateTotal here, so the quotient is smaller than b and cannot overflow.
-		hi, lo := bits.Mul64(uint64(b), uint64(budget))
-		q, _ := bits.Div64(hi, lo, uint64(estimateTotal))
-		scaled := int64(q)
-		if scaled < 1 {
-			return merr.WrapErrParameterInvalidMsg(
-				"import has too many files to reserve primary keys: file %d would get an empty range", i)
-		}
-		bounds[i] = scaled
-	}
-	return nil
 }
