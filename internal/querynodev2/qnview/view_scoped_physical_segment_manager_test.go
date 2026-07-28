@@ -217,6 +217,84 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	}
 }
 
+func TestViewScopedPhysicalSegmentManager_PreservesLatestStreamSnapshotForPendingResourceRetry(t *testing.T) {
+	tests := []struct {
+		name                    string
+		emitLatestBeforeFailure bool
+	}{
+		{name: "snapshot arrives while load is running", emitLatestBeforeFailure: true},
+		{name: "snapshot arrives after resource failure"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			meta := buildHandlerTestMeta(1)
+			view := &viewpb.QueryViewOfQueryNode{
+				NodeId:     1,
+				Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
+			}
+			key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+			scheduler := &fakeNodeScheduler{}
+			stream := &fakeSegmentLoadInfoStream{}
+			mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler, stream)
+
+			mgr.Acquire(AcquirePhysicalSegments{
+				Key: key, Meta: meta, View: view,
+				Collection:             &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
+				OnSegmentUnrecoverable: func(segmentID int64, err error) { t.Fatalf("unexpected failed segment %d: %v", segmentID, err) },
+			})
+
+			snapshot := SegmentLoadInfoSnapshot{
+				CollectionID: testCollectionID,
+				SegmentID:    1000,
+				Revision:     SegmentLoadInfoRevision{Revision: 100},
+				LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
+			}
+			require.NoError(t, stream.Emit(snapshot))
+			require.NoError(t, stream.Emit(SegmentLoadInfoSnapshot{
+				CollectionID: testCollectionID,
+				SegmentID:    1001,
+				Revision:     SegmentLoadInfoRevision{Revision: 11},
+				LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1001, PartitionID: 10, CollectionID: testCollectionID},
+			}))
+			require.Len(t, scheduler.tasks, 2)
+			taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
+			for _, task := range scheduler.tasks {
+				taskBySegment[task.SegmentID] = task
+			}
+			latest := snapshot
+			latest.Revision = SegmentLoadInfoRevision{Revision: 1}
+			latest.LoadInfo = &querypb.SegmentLoadInfo{
+				SegmentID:    1000,
+				PartitionID:  10,
+				CollectionID: testCollectionID,
+				NumOfRows:    1,
+			}
+
+			if test.emitLatestBeforeFailure {
+				require.NoError(t, stream.Emit(latest))
+			}
+			taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+			if !test.emitLatestBeforeFailure {
+				require.NoError(t, stream.Emit(latest))
+			}
+			if test.emitLatestBeforeFailure {
+				require.Len(t, scheduler.tasks, 2)
+			} else {
+				require.Len(t, scheduler.tasks, 3)
+			}
+
+			taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
+			require.Len(t, scheduler.tasks, 3)
+			retry := scheduler.tasks[2]
+			require.Equal(t, int64(1000), retry.SegmentID)
+			require.Equal(t, latest, retry.Snapshot)
+
+			retry.OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+			require.Empty(t, scheduler.updates)
+		})
+	}
+}
+
 func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForPendingRetryCallback(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
 	view := &viewpb.QueryViewOfQueryNode{

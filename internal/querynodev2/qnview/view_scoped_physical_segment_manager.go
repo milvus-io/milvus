@@ -249,7 +249,7 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		OnLoaded: func(segment TransformSegment) {
 			defer done()
 			if segment == nil {
-				notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, nil)
+				notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, submission.snapshot, nil)
 				m.submitSegmentLoadSubmissions(retries)
 				m.closeSubscriptions(subscriptions)
 				for _, notify := range notifications {
@@ -270,7 +270,7 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		},
 		OnUnrecoverable: func(err error) {
 			defer done()
-			notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, err)
+			notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, submission.snapshot, err)
 			m.submitSegmentLoadSubmissions(retries)
 			m.closeSubscriptions(subscriptions)
 			for _, notify := range notifications {
@@ -338,6 +338,8 @@ func (m *ViewScopedPhysicalSegmentManager) recordSegmentSnapshot(ctx context.Con
 		}
 		loadCtx, loadCancel := context.WithCancel(context.Background())
 		loadDone := onceLoadDone(m.trackPendingLoadAttemptLocked(state))
+		state.pending = false
+		state.pendingSnapshot = nil
 		state.loading = true
 		state.loadCancel = loadCancel
 		state.loadDone = loadDone
@@ -472,7 +474,7 @@ func (m *ViewScopedPhysicalSegmentManager) cancelSegmentUpdateLocked(state *phys
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(segmentID int64, err error) ([]func(), []segmentLoadSubmission, []SegmentLoadInfoSubscription) {
+func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(segmentID int64, snapshot SegmentLoadInfoSnapshot, err error) ([]func(), []segmentLoadSubmission, []SegmentLoadInfoSubscription) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -490,6 +492,10 @@ func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(segmentID int
 	}
 	if isSegmentResourceInsufficient(err) && m.hasOtherLoadingSegmentLocked(segmentID) {
 		state.pending = true
+		if state.pendingSnapshot == nil {
+			snapshotCopy := snapshot
+			state.pendingSnapshot = &snapshotCopy
+		}
 		return nil, nil, nil
 	}
 
@@ -517,6 +523,7 @@ func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(segmentID int
 	state.requests = make(map[qviews.QueryViewKey]segmentLoadRequest)
 	state.loading = false
 	state.pending = false
+	state.pendingSnapshot = nil
 	state.loadCancel = nil
 	state.loadDone = nil
 	subscription := m.detachSubscriptionLocked(state)
@@ -644,12 +651,15 @@ func (m *ViewScopedPhysicalSegmentManager) collectPendingLoadSubmissionsLocked()
 		loadDone := onceLoadDone(m.trackPendingLoadAttemptLocked(state))
 		state.pending = false
 		state.loading = true
+		snapshot := *state.pendingSnapshot
+		state.pendingSnapshot = nil
 		state.loadCancel = loadCancel
 		state.loadDone = loadDone
 		submissions = append(submissions, segmentLoadSubmission{
 			segmentID: segmentID,
 			ctx:       loadCtx,
 			request:   request,
+			snapshot:  snapshot,
 			done:      chainLoadDone(loadDone, loadCancel),
 		})
 	}
