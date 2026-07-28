@@ -191,8 +191,12 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 		return f.Name
 	})...)
 	schemaFields := make(map[string]*entity.Field, len(sch.Fields))
+	var dynamicSchemaField *entity.Field
 	for _, field := range sch.Fields {
 		schemaFields[field.Name] = field
+		if field.IsDynamic {
+			dynamicSchemaField = field
+		}
 	}
 	dynamicNames := outputSet.Complement(schemaFieldSet)
 	structOutputParents := make(map[string]string)
@@ -276,8 +280,27 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 			}
 			columns = append(columns, col)
 		}
-		if sch.EnableDynamicField && len(dynamicNames) > 0 {
-			dynamicColumn = column.NewColumnJSONBytes("", nil)
+		if sch.EnableDynamicField && (dynamicSchemaField != nil || len(dynamicNames) > 0) {
+			dynamicFieldName := ""
+			dynamicFieldNullable := false
+			dynamicFieldRequested := false
+			if dynamicSchemaField != nil {
+				dynamicFieldName = dynamicSchemaField.Name
+				dynamicFieldNullable = dynamicSchemaField.Nullable
+				_, dynamicFieldRequested = outputSet[dynamicFieldName]
+			}
+			if dynamicFieldRequested || len(dynamicNames) > 0 {
+				dynamicColumn = column.NewColumnJSONBytes(dynamicFieldName, nil).WithIsDynamic(true)
+				if dynamicFieldNullable {
+					dynamicColumn.SetNullable(true)
+					if err := dynamicColumn.ValidateNullable(); err != nil {
+						return nil, errors.Wrapf(err, "create empty dynamic field %q", dynamicFieldName)
+					}
+				}
+				if dynamicFieldRequested {
+					columns = append(columns, dynamicColumn)
+				}
+			}
 		}
 	}
 
