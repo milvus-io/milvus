@@ -369,14 +369,14 @@ TEST_P(GrowingIndexTest, Correctness) {
     }
 }
 
-TEST(GrowingIndex, GrowingSourceFlushDoesNotRetainIndexedVectorChunks) {
+TEST(GrowingIndex, IndexedVectorOwnershipStopsRawWritesAfterSynchronization) {
     constexpr int64_t dim = 4;
     constexpr int64_t row_count = 100;
 
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
     schema->set_primary_field_id(pk);
 
     std::map<std::string, std::string> index_params = {
@@ -422,9 +422,31 @@ TEST(GrowingIndex, GrowingSourceFlushDoesNotRetainIndexedVectorChunks) {
     ASSERT_NE(segment_impl, nullptr);
 
     insert(segment.get());
-    EXPECT_EQ(segment_impl->get_insert_record().get_data_base(vec)->num_chunk(),
-              0);
-    EXPECT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec));
+    auto* raw_vector = segment_impl->get_insert_record().get_data_base(vec);
+    ASSERT_EQ(raw_vector->num_chunk(), 0);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec));
+    const auto raw_logical_count =
+        raw_vector->get_offset_mapping().GetTotalCount();
+    ASSERT_EQ(raw_logical_count, row_count);
+
+    insert(segment.get());
+
+    EXPECT_EQ(segment->get_row_count(), 2 * row_count);
+    EXPECT_EQ(raw_vector->num_chunk(), 0);
+    EXPECT_EQ(raw_vector->get_offset_mapping().GetTotalCount(),
+              raw_logical_count);
+
+    std::vector<int64_t> offsets(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        offsets[i] = row_count + i;
+    }
+    auto field_data =
+        segment_impl->bulk_subscript(nullptr, vec, offsets.data(), row_count);
+    ASSERT_EQ(field_data->valid_data_size(), row_count);
+    const auto valid_count = std::count(
+        field_data->valid_data().begin(), field_data->valid_data().end(), true);
+    EXPECT_EQ(field_data->vectors().float_vector().data_size(),
+              valid_count * dim);
 }
 
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
