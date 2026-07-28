@@ -227,3 +227,18 @@ func TestIsAutoCommit(t *testing.T) {
 	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
 	assert.False(t, IsAutoCommit(opts))
 }
+
+func TestValidateNoDuplicateKeys(t *testing.T) {
+	assert.NoError(t, ValidateNoDuplicateKeys(nil))
+	assert.NoError(t, ValidateNoDuplicateKeys(Options{
+		{Key: "backup", Value: "true"},
+		{Key: "l0_import", Value: "false"},
+	}))
+
+	err := ValidateNoDuplicateKeys(Options{
+		{Key: "backup", Value: "false"},
+		{Key: "backup", Value: "true"},
+	})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "backup")
+}

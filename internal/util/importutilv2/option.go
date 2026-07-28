@@ -75,6 +75,29 @@ const (
 
 type Options []*commonpb.KeyValuePair
 
+// ValidateNoDuplicateKeys rejects an option list carrying the same key twice.
+//
+// Import options are read in two incompatible ways. Every check reads them as a
+// repeated KV list via funcutil.GetAttrByKeyFromRepeatedKV, which returns the
+// FIRST match, while the broadcast body folds them into a map via
+// funcutil.KeyValuePair2Map, where the LAST value wins. A duplicate key
+// therefore lets a request be validated under one value and executed under
+// another: options=[{backup,false},{backup,true}] passes as an ordinary import,
+// skipping the ImportBinlog privilege check and the enableBinlogImport switch,
+// then runs as a binlog import.
+//
+// Call this before any option is read.
+func ValidateNoDuplicateKeys(options Options) error {
+	seen := make(map[string]struct{}, len(options))
+	for _, kv := range options {
+		if _, ok := seen[kv.GetKey()]; ok {
+			return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", kv.GetKey())
+		}
+		seen[kv.GetKey()] = struct{}{}
+	}
+	return nil
+}
+
 func GetTimeoutTs(options Options) (uint64, error) {
 	var timeoutTs uint64 = math.MaxUint64
 	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV(Timeout, options)
