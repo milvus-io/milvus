@@ -71,6 +71,8 @@ type statsTask struct {
 	manager  *TaskManager
 	binlogIO io.BinlogIO
 
+	pluginContext *indexcgopb.StoragePluginContext
+
 	deltaLogs   []string
 	logIDOffset int64
 	currentTime time.Time
@@ -88,17 +90,19 @@ func NewStatsTask(ctx context.Context,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
 	binlogIO io.BinlogIO,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *statsTask {
 	return &statsTask{
-		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
-		ctx:         ctx,
-		cancel:      cancel,
-		req:         req,
-		manager:     manager,
-		binlogIO:    binlogIO,
-		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
-		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
-		logIDOffset: 0,
+		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:           ctx,
+		cancel:        cancel,
+		req:           req,
+		manager:       manager,
+		binlogIO:      binlogIO,
+		pluginContext: pluginContext,
+		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		currentTime:   tsoutil.PhysicalTime(req.GetCurrentTs()),
+		logIDOffset:   0,
 	}
 }
 
@@ -386,6 +390,7 @@ func (st *statsTask) Reset() {
 	st.cancel = nil
 	st.tr = nil
 	st.manager = nil
+	st.pluginContext = nil
 }
 
 func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -502,7 +507,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil, st.pluginContext)
 
 			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
 			if err != nil {
@@ -638,7 +643,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 				JSONStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
 				JSONStatsWriteBatchSize:      jsonStatsWriteBatchSize,
 			}
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, st.pluginContext)
 
 			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
 			if err != nil {
@@ -700,6 +705,7 @@ func buildIndexParams(
 	field *schemapb.FieldSchema,
 	storageConfig *indexcgopb.StorageConfig,
 	options *BuildIndexOptions,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *indexcgopb.BuildIndexInfo {
 	if options == nil {
 		options = &BuildIndexOptions{}
@@ -732,6 +738,9 @@ func buildIndexParams(
 			req.GetTargetSegmentID(),
 		)
 		log.Info("build index params", zap.Any("segment insert files", params.SegmentInsertFiles))
+	}
+	if pluginContext != nil {
+		params.StoragePluginContext = pluginContext
 	}
 
 	return params
