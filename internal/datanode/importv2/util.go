@@ -408,8 +408,9 @@ type pkCursor struct {
 func (c *pkCursor) take(n int) (int64, error) {
 	if c.next+int64(n) > c.end {
 		return 0, merr.WrapErrImportFailed(fmt.Sprintf(
-			"import file produced more rows than its reserved PK range [%d, %d); "+
-				"files may differ between clusters or exceeded the sizing bound", c.begin, c.end))
+			"import file produced more rows than its reserved PK range [%d, %d): the "+
+				"reservation is too small, or this file differs from the one the "+
+				"primary cluster sized", c.begin, c.end))
 	}
 	start := c.next
 	c.next += int64(n)

@@ -188,6 +188,15 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		var cur *pkCursor
 		if file.GetPkIdEnd() > file.GetPkIdBegin() {
 			cur = &pkCursor{begin: file.GetPkIdBegin(), end: file.GetPkIdEnd(), next: file.GetPkIdBegin()}
+		} else if pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema()); err == nil &&
+			pkField.GetAutoID() && !importutilv2.IsBackup(req.GetOptions()) && !importutilv2.IsL0Import(req.GetOptions()) {
+			// The coordinator assigns a range to every autoID import, so an absent one
+			// means this job predates the mechanism or the coordinator is older than
+			// this datanode. Keys then come from the local allocator, which diverges
+			// from the source cluster if the job is replicated -- log it so the
+			// rolling-upgrade window is greppable instead of silent.
+			mlog.Warn(t.ctx, "no PK range on an autoID import file, falling back to the local allocator",
+				WrapLogFields(t, mlog.String("file", file.String()))...)
 		}
 		start := time.Now()
 		err = t.importFile(reader, cur)
