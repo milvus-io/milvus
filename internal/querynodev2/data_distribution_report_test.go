@@ -214,6 +214,7 @@ func TestGetDataDistributionDeltaReportInvalidatesBaseWhileBuilding(t *testing.T
 	segment.EXPECT().LastDeltaTimestamp().Return(uint64(30))
 	segment.EXPECT().Indexes().Return(nil)
 	segment.EXPECT().GetFieldJSONIndexStats().Return(nil)
+	segment.EXPECT().MemSize().Return(int64(1024))
 	segment.EXPECT().LoadInfo().RunAndReturn(func() *querypb.SegmentLoadInfo {
 		blockOnce.Do(func() {
 			close(blocked)
@@ -286,6 +287,7 @@ func TestGetDataDistributionSkipsStaleCommitAfterConcurrentReset(t *testing.T) {
 	segment.EXPECT().LastDeltaTimestamp().Return(uint64(30))
 	segment.EXPECT().Indexes().Return(nil)
 	segment.EXPECT().GetFieldJSONIndexStats().Return(nil)
+	segment.EXPECT().MemSize().Return(int64(1024))
 	segment.EXPECT().LoadInfo().RunAndReturn(func() *querypb.SegmentLoadInfo {
 		blockOnce.Do(func() {
 			close(blocked)
