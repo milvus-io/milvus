@@ -60,6 +60,10 @@ message GenericValue {
     double float_val = 3;
     string string_val = 4;
     Array array_val = 5;
+    // Raw binary payload, carried from a schemapb.TemplateValue.bytes_val. Used
+    // to pass a client pre-built membership-filter blob into an expression
+    // (e.g. bloom_match) without base64-inflating a string field.
+    bytes bytes_val = 6;
   };
 }
 
@@ -297,6 +301,12 @@ message TimestamptzArithCompareExpr {
   GenericValue compare_value = 5;
 }
 
+message BloomFilterExpr {
+  ColumnInfo column_info = 1;
+  // MBF1-enveloped Parquet Split-Block Bloom Filter blob (see design doc 20260707).
+  bytes filter_blob = 2;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -319,6 +329,7 @@ message Expr {
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
     ElementFilterExpr element_filter_expr = 19;
     MatchExpr match_expr = 21;
+    BloomFilterExpr bloom_filter_expr = 22;
   };
   bool is_template = 20;
 }

@@ -198,6 +198,11 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 		result.Val = &schemapb.TemplateValue_BoolVal{BoolVal: v}
 	case string:
 		result.Val = &schemapb.TemplateValue_StringVal{StringVal: v}
+	case BloomFilterBlob:
+		// A client pre-built filter blob travels as raw bytes: proto3 bytes has
+		// no UTF-8 constraint, so the ~32 MB blob rides the wire with zero
+		// base64 inflation.
+		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
 	default:
 		if reflect.TypeOf(val).Kind() == reflect.Slice {
 			return slice2TmplValue(val)

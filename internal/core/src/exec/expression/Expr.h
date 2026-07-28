@@ -238,6 +238,31 @@ class Expr : public std::enable_shared_from_this<Expr> {
         return false;
     }
 
+    // Called when this expression's output feeds a null-rejecting consumer:
+    // one that treats an UNKNOWN (NULL) row exactly like FALSE, such as the
+    // top-level filter, which folds UNKNOWN into the excluded set. Nodes
+    // whose operands keep that property (AND/OR) override this to accept the
+    // mark and propagate it to their inputs; everywhere else (in particular
+    // NOT, where FALSE and UNKNOWN produce different results) the default
+    // no-op stops the propagation.
+    virtual void
+    MarkNullRejecting() {
+    }
+
+    // Whether this expression's result may be cached by ExprResCacheManager.
+    // Cacheability propagates from children: a composite expression is
+    // cacheable only if every child is. Expressions whose compact cache key
+    // cannot encode their full identity override this to false.
+    virtual bool
+    IsCacheable() const {
+        for (const auto& input : inputs_) {
+            if (input && !input->IsCacheable()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     virtual bool
     CanUseNestedIndex() const {
         return false;
@@ -344,8 +369,11 @@ class SegmentExpr : public Expr {
         // (TextIndex/PkIndex/JsonStats) and the RawData path never pay for a
         // PinCells() cold fetch under tiered storage.
 
-        // if index not include raw data, also need load data
-        if (segment_->HasFieldData(field_id_)) {
+        // Snapshot field-data availability together with num_data_chunk_.
+        // Execution-path selection may happen after a concurrent reopen/load;
+        // both decisions must observe the same construction-time view.
+        has_field_data_at_init_ = segment_->HasFieldData(field_id_);
+        if (has_field_data_at_init_) {
             if (segment_->is_chunked()) {
                 num_data_chunk_ = segment_->num_chunk_data(field_id_);
             } else {
@@ -2917,6 +2945,10 @@ class SegmentExpr : public Expr {
     // the pin, num_index_chunk_ == pinned_index_.size() always.
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
     bool pinned_index_initialized_{false};
+
+    // Snapshot taken during construction so expressions that need raw data or
+    // reverse lookup choose their execution path from a consistent view.
+    bool has_field_data_at_init_{false};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
