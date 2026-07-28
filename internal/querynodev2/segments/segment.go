@@ -475,18 +475,37 @@ func NewSegment(ctx context.Context,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (Segment, error) {
+	return newSegmentWithLoadSchemaVersion(ctx, collection, manager, segmentType, version, collection.SchemaVersion(), loadInfo)
+}
+
+func newSegmentWithLoadSchemaVersion(ctx context.Context,
+	collection *Collection,
+	manager SegmentManager,
+	segmentType SegmentType,
+	version int64,
+	loadSchemaVersion uint64,
+	loadInfo *querypb.SegmentLoadInfo,
+) (Segment, error) {
 	/*
 		CStatus
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
 	*/
 	if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
-		return NewL0Segment(collection, segmentType, version, loadInfo)
+		segment, err := NewL0Segment(collection, segmentType, version, loadInfo)
+		if err != nil {
+			return nil, err
+		}
+		if versioned, ok := segment.(interface{ SetLoadSchemaVersion(uint64) }); ok {
+			versioned.SetLoadSchemaVersion(loadSchemaVersion)
+		}
+		return segment, nil
 	}
 
 	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
 	if err != nil {
 		return nil, err
 	}
+	base.SetLoadSchemaVersion(loadSchemaVersion)
 
 	var locker *state.LoadStateLock
 	switch segmentType {
@@ -1300,6 +1319,11 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	return s.reopenWithSchema(ctx, newLoadInfo, schema, schemaVersion, s.collection.SchemaVersion())
+}
+
+func (s *LocalSegment) reopenWithSchema(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema, segcoreSchemaVersion uint64, loadSchemaVersion uint64) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
@@ -1312,17 +1336,16 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,
-		SchemaVersion: schemaVersion,
+		SchemaVersion: segcoreSchemaVersion,
 	})
 	if err != nil {
 		return err
 	}
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
-	s.SetLoadSchemaVersion(s.collection.SchemaVersion())
+	s.SetLoadSchemaVersion(loadSchemaVersion)
 	if s.relatedDataSize != nil {
 		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
 	}

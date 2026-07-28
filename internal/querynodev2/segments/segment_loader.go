@@ -227,6 +227,16 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	version int64,
 	segments ...*querypb.SegmentLoadInfo,
 ) ([]Segment, error) {
+	return loader.LoadWithSchema(ctx, collectionID, segmentType, version, nil, segments...)
+}
+
+func (loader *segmentLoader) LoadWithSchema(ctx context.Context,
+	collectionID int64,
+	segmentType SegmentType,
+	version int64,
+	requestSchema *schemapb.CollectionSchema,
+	segments ...*querypb.SegmentLoadInfo,
+) ([]Segment, error) {
 	if len(segments) == 0 {
 		mlog.Info(context.TODO(), "no segment to load")
 		return nil, nil
@@ -238,10 +248,14 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		mlog.Warn(context.TODO(), "failed to get collection", mlog.Err(err))
 		return nil, err
 	}
-	for _, segment := range segments {
-		configureUseTakeForOutput(segment, collection.Schema())
+	if requestSchema == nil {
+		requestSchema = collection.Schema()
 	}
-	if err := loader.reopenLoadedSegmentsIfStale(ctx, collection, segmentType, segments...); err != nil {
+	requestSchemaVersion := uint64(requestSchema.GetVersion())
+	for _, segment := range segments {
+		configureUseTakeForOutput(segment, requestSchema)
+	}
+	if err := loader.reopenLoadedSegmentsIfStale(ctx, collection, requestSchema, segmentType, segments...); err != nil {
 		return nil, err
 	}
 	// Filter out loaded & loading segments
@@ -283,12 +297,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return nil, err
 		}
 
-		segment, err := NewSegment(
+		segment, err := newSegmentWithLoadSchemaVersion(
 			ctx,
 			collection,
 			loader.manager.Segment,
 			segmentType,
 			version,
+			requestSchemaVersion,
 			loadInfo,
 		)
 		if err != nil {
@@ -334,16 +349,15 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return merr.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		schema := collection.Schema()
-		isExternalCollection := typeutil.IsExternalCollection(schema)
-		isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-			HasExternalPrimaryKey(schema)
+		isExternalCollection := typeutil.IsExternalCollection(requestSchema)
+		isMilvusTableRealPK := typeutil.NewStorageColumnResolver(requestSchema).IsMilvusTable() &&
+			HasExternalPrimaryKey(requestSchema)
 		if !segment.PkCandidateExist() {
 			mlog.Debug(context.TODO(), "loading PK candidate for segment", mlog.Int64("segmentID", segment.ID()))
 			if isExternalCollection {
 				var candidate pkoracle.Candidate
 				if isMilvusTableRealPK {
-					bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+					bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type(), requestSchema)
 					if err != nil {
 						return merr.Wrap(err, "At LoadBloomFilter")
 					}
@@ -381,7 +395,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 					}
 				}
 			} else if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type(), requestSchema)
 				if err != nil {
 					return merr.Wrap(err, "At LoadBloomFilter")
 				}
@@ -419,8 +433,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	}
 
 	// Wait for all segments loaded
-	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
-	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
+	if err := loader.waitSegmentLoadDone(ctx, segmentType, segments, version, requestSchema); err != nil {
 		mlog.Warn(context.TODO(), "failed to wait the filtered out segments load done", mlog.Err(err))
 		return nil, err
 	}
@@ -462,12 +475,12 @@ type loadSchemaVersionedSegment interface {
 	LoadSchemaVersion() uint64
 }
 
-func (loader *segmentLoader) reopenLoadedSegmentsIfStale(ctx context.Context, collection *Collection, segmentType SegmentType, infos ...*querypb.SegmentLoadInfo) error {
+func (loader *segmentLoader) reopenLoadedSegmentsIfStale(ctx context.Context, collection *Collection, requestSchema *schemapb.CollectionSchema, segmentType SegmentType, infos ...*querypb.SegmentLoadInfo) error {
 	if segmentType != SegmentTypeSealed {
 		return nil
 	}
 
-	requiredSchemaVersion := collection.SchemaVersion()
+	requiredSchemaVersion := uint64(requestSchema.GetVersion())
 	staleInfos := make([]*querypb.SegmentLoadInfo, 0)
 	for _, info := range infos {
 		segment := loader.manager.Segment.GetWithType(info.GetSegmentID(), segmentType)
@@ -488,7 +501,7 @@ func (loader *segmentLoader) reopenLoadedSegmentsIfStale(ctx context.Context, co
 		mlog.Int64s("segmentIDs", lo.Map(staleInfos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
 			return info.GetSegmentID()
 		})))
-	return loader.ReopenSegments(ctx, staleInfos)
+	return loader.ReopenSegmentsWithSchema(ctx, requestSchema, staleInfos)
 }
 
 func loadedSegmentNeedsReopen(segment Segment, incoming *querypb.SegmentLoadInfo, requiredSchemaVersion uint64) bool {
@@ -500,7 +513,10 @@ func loadedSegmentNeedsReopen(segment Segment, incoming *querypb.SegmentLoadInfo
 		return true
 	}
 	if incoming.GetManifestPath() != "" && incoming.GetManifestPath() != current.GetManifestPath() {
-		return true
+		cmp, err := packed.CompareManifestPath(incoming.GetManifestPath(), current.GetManifestPath())
+		if err == nil && cmp > 0 {
+			return true
+		}
 	}
 	if versioned, ok := segment.(loadSchemaVersionedSegment); ok {
 		return versioned.LoadSchemaVersion() < requiredSchemaVersion
@@ -632,9 +648,16 @@ func (loader *segmentLoader) freeRequestResource(requestResourceResult requestRe
 	loader.committedResourceNotifier.NotifyAll()
 }
 
-func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs []int64, version int64) error {
-	for _, segmentID := range segmentIDs {
-		if loader.manager.Segment.GetWithType(segmentID, segmentType) != nil {
+func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, loadInfos []*querypb.SegmentLoadInfo, version int64, requestSchema *schemapb.CollectionSchema) error {
+	requestSchemaVersion := uint64(requestSchema.GetVersion())
+	for _, loadInfo := range loadInfos {
+		segmentID := loadInfo.GetSegmentID()
+		if segment := loader.manager.Segment.GetWithType(segmentID, segmentType); segment != nil {
+			if loadedSegmentNeedsReopen(segment, loadInfo, requestSchemaVersion) {
+				if err := loader.reopenSegmentsWithSchema(ctx, requestSchema, []*querypb.SegmentLoadInfo{loadInfo}); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 
@@ -673,6 +696,12 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 
 		// try to update segment version after wait segment loaded
 		loader.manager.Segment.UpdateBy(IncreaseVersion(version), WithType(segmentType), WithID(segmentID))
+		if segment := loader.manager.Segment.GetWithType(segmentID, segmentType); segment != nil &&
+			loadedSegmentNeedsReopen(segment, loadInfo, requestSchemaVersion) {
+			if err := loader.reopenSegmentsWithSchema(ctx, requestSchema, []*querypb.SegmentLoadInfo{loadInfo}); err != nil {
+				return err
+			}
+		}
 
 		mlog.Info(context.TODO(), "segment loaded...", mlog.Int64("segmentID", segmentID))
 	}
@@ -684,7 +713,7 @@ func (loader *segmentLoader) GetChunkManager() storage.ChunkManager {
 }
 
 // load single bloom filter
-func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType) (*pkoracle.BloomFilterSet, error) {
+func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType, requestSchemas ...*schemapb.CollectionSchema) (*pkoracle.BloomFilterSet, error) {
 	partitionID := loadInfo.PartitionID
 	segmentID := loadInfo.SegmentID
 	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
@@ -699,6 +728,9 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	mlog.Info(context.TODO(), "start loading remote...", mlog.Int("segmentNum", 1))
 
 	schema := collection.Schema()
+	if len(requestSchemas) > 0 && requestSchemas[0] != nil {
+		schema = requestSchemas[0]
+	}
 	isExternalCollection := typeutil.IsExternalCollection(schema)
 	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
 		HasExternalPrimaryKey(schema)
@@ -2497,11 +2529,25 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	return loader.ReopenSegmentsWithSchema(ctx, nil, loadInfos)
+}
+
+func (loader *segmentLoader) ReopenSegmentsWithSchema(ctx context.Context,
+	requestSchema *schemapb.CollectionSchema,
+	loadInfos []*querypb.SegmentLoadInfo,
+) error {
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
 	defer loader.unregister(infos...)
 
+	return loader.reopenSegmentsWithSchema(ctx, requestSchema, infos)
+}
+
+func (loader *segmentLoader) reopenSegmentsWithSchema(ctx context.Context,
+	requestSchema *schemapb.CollectionSchema,
+	infos []*querypb.SegmentLoadInfo,
+) error {
 	// use full resource in case of whole segment reopen
 	// TODO use calculated resource from segcore after supported
 	requestResourceResult, err := loader.requestResource(ctx, infos...)
@@ -2518,11 +2564,23 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			continue
 		}
 		collection := loader.manager.Collection.Get(info.GetCollectionID())
+		reopenSchema := requestSchema
+		segcoreSchemaVersion := uint64(0)
 		if collection != nil {
-			configureUseTakeForOutput(info, collection.Schema())
+			_, segcoreSchemaVersion = collection.SchemaAndSegcoreVersion()
+			if reopenSchema == nil {
+				reopenSchema = collection.Schema()
+			}
+			configureUseTakeForOutput(info, reopenSchema)
 		}
 
-		err := segment.Reopen(ctx, info)
+		var err error
+		if localSegment, ok := segment.(*LocalSegment); ok && reopenSchema != nil && segcoreSchemaVersion > 0 {
+			requestSchemaVersion := uint64(reopenSchema.GetVersion())
+			err = localSegment.reopenWithSchema(ctx, info, reopenSchema, segcoreSchemaVersion, requestSchemaVersion)
+		} else {
+			err = segment.Reopen(ctx, info)
+		}
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))
 			return err

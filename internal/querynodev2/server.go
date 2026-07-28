@@ -385,7 +385,7 @@ func (node *QueryNode) Init() error {
 				return NewLocalWorker(node), nil
 			}
 
-			sessions, _, err := node.session.GetSessions(node.ctx, typeutil.QueryNodeRole)
+			sessions, _, err := node.session.GetSessions(ctx, typeutil.QueryNodeRole)
 			if err != nil {
 				return nil, err
 			}
@@ -397,9 +397,12 @@ func (node *QueryNode) Init() error {
 					break
 				}
 			}
+			if addr == "" {
+				return nil, merr.WrapErrNodeNotAvailable(nodeID, "querynode session address not found")
+			}
 
 			return cluster.NewPoolingRemoteWorker(func() (types.QueryNodeClient, error) {
-				return grpcquerynodeclient.NewClient(node.ctx, addr, nodeID)
+				return grpcquerynodeclient.NewClient(ctx, addr, nodeID)
 			})
 		})
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()

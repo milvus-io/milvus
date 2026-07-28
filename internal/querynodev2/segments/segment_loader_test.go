@@ -289,7 +289,7 @@ func (suite *SegmentLoaderSuite) TestReopenLoadedSegmentWithStaleSchemaVersionBe
 		Reopen(mock.Anything, mock.MatchedBy(func(req *segcore.ReopenRequest) bool {
 			return req.LoadInfo == newLoadInfo &&
 				req.Schema.GetVersion() == 2 &&
-				req.SchemaVersion == 2
+				req.SchemaVersion == 42
 		})).
 		Return(nil).
 		Once()
@@ -310,11 +310,71 @@ func (suite *SegmentLoaderSuite) TestReopenLoadedSegmentWithStaleSchemaVersionBe
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 	suite.manager.Segment.Put(ctx, SegmentTypeSealed, segment)
-	collection.setSchema(newSchema, 2, 2, 2)
+	collection.setSchema(newSchema, 2, 2, 42)
 
-	suite.Require().NoError(loader.reopenLoadedSegmentsIfStale(ctx, collection, SegmentTypeSealed, newLoadInfo))
+	suite.Require().NoError(loader.reopenLoadedSegmentsIfStale(ctx, collection, newSchema, SegmentTypeSealed, newLoadInfo))
 	suite.Equal(uint64(2), segment.LoadSchemaVersion())
 	suite.Equal(int32(1), segment.LoadInfo().GetDataVersion())
+}
+
+func (suite *SegmentLoaderSuite) TestWaitSegmentLoadDoneReopensStaleInFlightLoadResult() {
+	ctx := context.Background()
+	loader := suite.loader.(*segmentLoader)
+
+	oldSchema := suite.manager.Collection.Get(suite.collectionID).Schema()
+	oldSchema.Version = 1
+	newSchema := typeutil.Clone(oldSchema)
+	newSchema.Version = 2
+	collection := suite.manager.Collection.Get(suite.collectionID)
+	collection.setSchema(newSchema, 2, 2, 42)
+
+	oldLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  suite.collectionID,
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		DataVersion:   1,
+	}
+	newLoadInfo := typeutil.Clone(oldLoadInfo)
+
+	csegment := mock_segcore.NewMockCSegment(suite.T())
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.MatchedBy(func(req *segcore.ReopenRequest) bool {
+			return req.LoadInfo == newLoadInfo &&
+				req.Schema.GetVersion() == 2 &&
+				req.SchemaVersion == 42
+		})).
+		Return(nil).
+		Once()
+
+	result := newLoadResult()
+	loader.loadingSegments.Insert(suite.segmentID, result)
+	defer loader.loadingSegments.GetAndRemove(suite.segmentID)
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		segment := &LocalSegment{
+			baseSegment: baseSegment{
+				collection:         collection,
+				loadInfo:           atomic.NewPointer(oldLoadInfo),
+				version:            atomic.NewInt64(1),
+				segmentType:        SegmentTypeSealed,
+				resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+				needUpdatedVersion: atomic.NewInt64(0),
+				loadSchemaVersion:  atomic.NewUint64(1),
+			},
+			ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+			csegment:       csegment,
+			fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+			fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+		}
+		suite.manager.Segment.Put(ctx, SegmentTypeSealed, segment)
+		result.SetResult(success)
+	}()
+
+	suite.Require().NoError(loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, []*querypb.SegmentLoadInfo{newLoadInfo}, 2, newSchema))
+	segment := suite.manager.Segment.GetSealed(suite.segmentID).(loadSchemaVersionedSegment)
+	suite.Equal(uint64(2), segment.LoadSchemaVersion())
 }
 
 func (suite *SegmentLoaderSuite) TestLoad() {
@@ -1637,7 +1697,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			suite.loader.notifyLoadFinish(infos...)
 		}()
 
-		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, infos, 0, suite.manager.Collection.Get(suite.collectionID).Schema())
 		suite.NoError(err)
 	})
 
@@ -1656,14 +1716,14 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			suite.loader.unregister(infos...)
 		}()
 
-		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, infos, 0, suite.manager.Collection.Get(suite.collectionID).Schema())
 		suite.Error(err)
 	})
 
 	suite.Run("wait_timeout", func() {
 		suite.SetupTest()
 
-		suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
 			CollectionID:  suite.collectionID,
@@ -1674,7 +1734,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, []int64{suite.segmentID}, 0)
+		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, infos, 0, suite.manager.Collection.Get(suite.collectionID).Schema())
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
 	})

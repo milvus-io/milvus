@@ -118,16 +118,29 @@ type ShardDelegator interface {
 
 var _ ShardDelegator = (*shardDelegator)(nil)
 
+type shardDelegatorBuildOptions struct {
+	initialSchema             *schemapb.CollectionSchema
+	leaderViewUpdatedCallback func(channel string)
+}
+
 // ShardDelegatorOption customizes shard delegator creation.
-type ShardDelegatorOption func(*shardDelegator)
+type ShardDelegatorOption func(*shardDelegatorBuildOptions)
+
+// WithInitialSchema sets the per-vchannel initial schema snapshot. WatchDmChannels
+// must use the schema carried by the watch request, not the shared collection
+// snapshot that another vchannel may have already advanced.
+func WithInitialSchema(schema *schemapb.CollectionSchema) ShardDelegatorOption {
+	return func(opts *shardDelegatorBuildOptions) {
+		if schema != nil {
+			opts.initialSchema = typeutil.Clone(schema)
+		}
+	}
+}
 
 // WithLeaderViewUpdatedCallback registers a callback for leader view changes.
 func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegatorOption {
-	return func(sd *shardDelegator) {
-		sd.leaderViewUpdatedCallback = callback
-		if sd.distribution != nil {
-			sd.distribution.leaderViewUpdatedCallback = callback
-		}
+	return func(opts *shardDelegatorBuildOptions) {
+		opts.leaderViewUpdatedCallback = callback
 	}
 }
 
@@ -982,7 +995,7 @@ func organizeSubTask[T any](ctx context.Context,
 		segmentIDs := lo.Map(segments, func(item SegmentEntry, _ int) int64 {
 			return item.SegmentID
 		})
-		if skipEmpty && len(segmentIDs) == 0 {
+		if len(segmentIDs) == 0 && (skipEmpty || workerID != paramtable.GetNodeID()) {
 			return nil
 		}
 		// update request
@@ -1542,6 +1555,11 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	binlogSaver segments.BinlogSaver,
 	opts ...ShardDelegatorOption,
 ) (ShardDelegator, error) {
+	buildOptions := &shardDelegatorBuildOptions{}
+	for _, opt := range opts {
+		opt(buildOptions)
+	}
+
 	log := mlog.With(mlog.Int64("collectionID", collectionID),
 		mlog.Int64("replicaID", replicaID),
 		mlog.String("channel", channel),
@@ -1553,7 +1571,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
-	initialSchema := collection.Schema()
+	initialSchema := buildOptions.initialSchema
+	if initialSchema == nil {
+		initialSchema = collection.Schema()
+	}
 	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), initialSchema); err != nil {
 		return nil, err
 	}
@@ -1607,9 +1628,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		catchingUpStreamingData:       atomic.NewBool(catchingUpStreamingData),
 		skipStreamingForExternalTable: skipStreamingForExternalTable,
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
+		leaderViewUpdatedCallback:     buildOptions.leaderViewUpdatedCallback,
 	}
-	for _, opt := range opts {
-		opt(sd)
+	if sd.distribution != nil {
+		sd.distribution.leaderViewUpdatedCallback = buildOptions.leaderViewUpdatedCallback
 	}
 
 	hasBM25Field := lo.ContainsBy(initialSchema.GetFunctions(), func(tf *schemapb.FunctionSchema) bool {

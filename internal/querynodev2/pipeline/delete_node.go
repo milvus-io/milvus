@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -206,6 +207,7 @@ func isUpdateSchemaRetryable(err error) bool {
 		return true
 	}
 	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, grpc.ErrClientConnClosing) ||
 		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, merr.ErrNodeNotAvailable) {
 		return true

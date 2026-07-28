@@ -542,7 +542,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
+			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, false); err != nil {
 				mlog.Warn(ctx, "failed to load bm25 stats for segment",
 					mlog.FieldCollectionID(req.GetCollectionID()),
 					mlog.FieldSegmentID(info.GetSegmentID()),
@@ -624,6 +624,15 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 	if len(req.GetIndexInfoList()) == 0 {
 		return nil
 	}
+	if req.GetSchema() != nil {
+		if current := sd.collectionManager.Get(req.GetCollectionID()); current != nil &&
+			current.SchemaVersion() > uint64(req.GetSchema().GetVersion()) {
+			sd.getLogger(ctx).Info(ctx, "skip stale collection index meta sync",
+				mlog.Uint64("currentSchemaVersion", current.SchemaVersion()),
+				mlog.Int32("requestSchemaVersion", req.GetSchema().GetVersion()))
+			return nil
+		}
+	}
 
 	schema, _ := sd.delegatorSchemaSnapshot()
 	if schema == nil {
@@ -670,10 +679,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	if err := sd.checkLoadSchemaVersionReady(ctx, req); err != nil {
 		return err
 	}
-
-	orphanLoadInfos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
-	})
 
 	// pin all segments to prevent delete buffer has been cleaned up during worker load segments
 	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
@@ -734,7 +739,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Debug(ctx, "work loads segments done")
 
 	if err := sd.checkLoadSchemaVersionReady(ctx, req); err != nil {
-		sd.releaseOrphanLoadedSegments(ctx, worker, targetNodeID, req, orphanLoadInfos)
 		return err
 	}
 
@@ -800,39 +804,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 		return nil
 	})
-}
-
-func (sd *shardDelegator) releaseOrphanLoadedSegments(
-	ctx context.Context,
-	worker cluster.Worker,
-	targetNodeID int64,
-	loadReq *querypb.LoadSegmentsRequest,
-	infos []*querypb.SegmentLoadInfo,
-) {
-	if len(infos) == 0 || loadReq.GetLoadScope() != querypb.LoadScope_Full {
-		return
-	}
-
-	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
-		return info.GetSegmentID()
-	})
-	req := &querypb.ReleaseSegmentsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			commonpbutil.WithTargetID(targetNodeID),
-		),
-		NodeID:       targetNodeID,
-		CollectionID: loadReq.GetCollectionID(),
-		SegmentIDs:   segmentIDs,
-		Scope:        querypb.DataScope_Historical,
-		Shard:        sd.vchannelName,
-	}
-	if err := worker.ReleaseSegments(ctx, req); err != nil {
-		sd.getLogger(ctx).Warn(ctx, "failed to release orphan worker segments after schema gate rejection",
-			mlog.Int64("workerID", targetNodeID),
-			mlog.Int64s("segmentIDs", segmentIDs),
-			mlog.Err(err))
-	}
 }
 
 func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error) error {
