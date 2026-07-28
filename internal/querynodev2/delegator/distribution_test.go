@@ -591,6 +591,33 @@ func (s *DistributionSuite) TestRemoveDistributionsAfterCloseKeepsReaderBarrier(
 	}
 }
 
+// TestPinReadableSegmentsAfterCloseFails covers the opposite ordering of the test
+// above: Close() first, pin afterwards. Close() expires the current snapshot, so
+// with no reader pinned its cleared channel is already closed -- a late pin would
+// get a snapshot whose reader barrier is spent, and the next RemoveDistributions
+// would return that already-closed channel. QueryStream takes no delegator
+// lifetime, so it can still reach PinReadableSegments after Close().
+func (s *DistributionSuite) TestPinReadableSegmentsAfterCloseFails() {
+	s.dist.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   1,
+		PartitionID: 1,
+	})
+	// update target version, make distribution serviceable
+	s.dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1000,
+		SealedSegmentRowCount: map[int64]int64{1: 100},
+	}, []int64{1})
+
+	// Serviceable on its own is not enough once the distribution is closed.
+	s.Require().True(s.dist.Serviceable())
+	s.dist.Close()
+
+	_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
+	s.Error(err)
+	s.Equal(int64(-1), version)
+}
+
 func (s *DistributionSuite) TestPeek() {
 	type testCase struct {
 		tag      string
@@ -1568,6 +1595,17 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 	}
 }
 
+// stopSnapshotLoop stops the background snapshot goroutine without marking the
+// distribution closed. Tests that patch channelQueryView methods need the loop
+// quiescent, but PinReadableSegments refuses a closed distribution, so Close()
+// cannot serve that purpose. It shares closeOnce so a later Close() is a no-op.
+func stopSnapshotLoop(d *distribution) {
+	d.closeOnce.Do(func() {
+		close(d.snapshotClose)
+	})
+	<-d.snapshotDone
+}
+
 func TestPinReadableSegments(t *testing.T) {
 	// Helper function to create test distribution
 	setupDistribution := func() *distribution {
@@ -1585,7 +1623,7 @@ func TestPinReadableSegments(t *testing.T) {
 		// Flush pending snapshot and stop background goroutine to avoid
 		// data race with mockey patches in sub-tests.
 		dist.Flush()
-		dist.Close()
+		stopSnapshotLoop(dist)
 		return dist
 	}
 
@@ -1671,7 +1709,7 @@ func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
 
 	// Stop background goroutine to avoid data race with mockey patches.
 	dist.Flush()
-	dist.Close()
+	stopSnapshotLoop(dist)
 
 	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
 	// This tests the case where load ratio is satisfied but serviceable is false
@@ -1707,7 +1745,7 @@ func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
 
 	// Stop background goroutine to avoid data race with mockey patches.
 	dist.Flush()
-	dist.Close()
+	stopSnapshotLoop(dist)
 
 	// Test case: requireFullResult=false, loadRatioSatisfy=false
 	// This tests the case where partial result is requested but load ratio is insufficient
@@ -1741,7 +1779,7 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 
 	// Stop background goroutine to avoid data race with mockey patches.
 	dist.Flush()
-	dist.Close()
+	stopSnapshotLoop(dist)
 
 	// Test case 1: requiredLoadRatio = 0.0 (edge case)
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
@@ -1805,7 +1843,7 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 
 	// Stop background goroutine to avoid data race with mockey patches.
 	dist.Flush()
-	dist.Close()
+	stopSnapshotLoop(dist)
 
 	// Call PinReadableSegments with partial result enabled (requiredLoadRatio < 1.0)
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)

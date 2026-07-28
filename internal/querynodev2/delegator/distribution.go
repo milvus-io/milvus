@@ -213,6 +213,17 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
+	// Close() expires the current snapshot, so with no reader pinned its cleared
+	// channel is already closed. Pinning it afterwards would hand out a snapshot
+	// whose reader barrier is spent, and the next RemoveDistributions would let
+	// ReleaseSegments unload those segments while this reader is still fanning out
+	// to them. This check is atomic against Close(): the pin holds d.mut.RLock and
+	// Close holds d.mut.Lock, so either the pin wins and its inUse keeps the
+	// barrier up, or it observes closed here and gives up.
+	if d.closed.Load() {
+		return nil, nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName, "channel distribution is closed")
+	}
+
 	requireFullResult := requiredLoadRatio >= 1.0
 	loadRatioSatisfy := d.queryView.GetLoadedRatio() >= requiredLoadRatio
 	var isServiceable bool
