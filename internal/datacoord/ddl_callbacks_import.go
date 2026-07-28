@@ -104,6 +104,14 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // original jobID. Retrying the same key once the limit frees up resolves normally;
 // minting a fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	// Must run before any option is read: checks read options as a repeated KV
+	// (first match wins) while the broadcast body folds them into a map (last
+	// value wins), so a duplicate key would validate under one value and
+	// execute under another.
+	if err := importutilv2.ValidateNoDuplicateKeys(options); err != nil {
+		return err
+	}
+
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
