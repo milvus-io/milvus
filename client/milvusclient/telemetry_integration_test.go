@@ -143,13 +143,13 @@ func TestTelemetryIntegration(t *testing.T) {
 			},
 		}
 
-		manager.processCommands(commands)
+		manager.processProtoCommands(toProtoCommands(commands))
 
 		// Check state
 		fmt.Printf("\nConfig hash: %s\n", manager.GetConfigHash())
 
 		// Get pending replies
-		replies := manager.getPendingReplies()
+		replies := drainPendingReplies(manager)
 		fmt.Printf("Pending replies: %d\n", len(replies))
 		for _, r := range replies {
 			fmt.Printf("  Command %s: success=%v\n", r.CommandId, r.Success)
@@ -177,7 +177,7 @@ func TestTelemetryIntegration(t *testing.T) {
 		metrics := manager.collectMetrics()
 		fmt.Printf("Metrics count: %d\n", len(metrics))
 
-		replies := manager.getPendingReplies()
+		replies := drainPendingReplies(manager)
 		fmt.Printf("Pending replies: %d\n", len(replies))
 	})
 }

@@ -18,6 +18,8 @@ package milvusclient
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"strconv"
 	"time"
 
@@ -40,7 +42,86 @@ const (
 
 	// ClientRequestMsecKey temp const value, TODO use common package def after upgrading milvus/pkg version
 	ClientRequestMsecKey string = "client-request-unixmsec"
+
+	// ClientRequestIDKey carries a caller-supplied ID used to correlate a request with the
+	// server-side logs it produces. The server parses it as an OpenTelemetry TraceID and
+	// adopts it as the trace ID for the request, but only when no W3C `traceparent` was
+	// propagated. See pkg/tracer/client_request_id_propagator.go.
+	//
+	// The value MUST be a 32-character lowercase hex string (a 16-byte OTel TraceID);
+	// anything else is ignored by the server.
+	ClientRequestIDKey string = "client_request_id"
+
+	// traceIDHexLen is the encoded length of a 16-byte OpenTelemetry TraceID.
+	traceIDHexLen = 32
 )
+
+// clientRequestIDKeyType is the context key used to carry a caller-supplied request ID.
+type clientRequestIDKeyType struct{}
+
+// WithClientRequestID returns a context that makes the SDK send `id` as the
+// client_request_id header on every request issued with it. The server adopts `id` as the
+// trace ID for those requests, so it shows up in Milvus server logs and can be used to
+// find everything a specific client call did -- the same mechanism pymilvus exposes via
+// CallContext(client_request_id=...).
+//
+// `id` must be a 32-character lowercase hex OpenTelemetry TraceID (as produced by
+// trace.TraceID.String()); NewClientRequestID generates a conforming one. An invalid value
+// is dropped rather than sent, because the server would silently ignore it anyway.
+//
+// This is opt-in by design. The header is NOT sent by default because of how the server
+// consumes it: pkg/tracer/client_request_id_propagator.go builds a remote span context
+// with no sampled flag, and the server's ParentBased sampler maps an unsampled remote
+// parent to NeverSample. So a request carrying client_request_id is excluded from trace
+// sampling regardless of trace.sampleFraction. Use this for log correlation; it is not a
+// substitute for W3C traceparent propagation.
+func WithClientRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, clientRequestIDKeyType{}, id)
+}
+
+// NewClientRequestID returns a random, well-formed ID suitable for WithClientRequestID.
+// It returns "" if the system entropy source fails.
+func NewClientRequestID() string {
+	return newClientRequestID()
+}
+
+// isValidTraceIDHex reports whether s is a well-formed, non-zero 32-char hex TraceID.
+// It mirrors trace.TraceIDFromHex on the server so an invalid value is never put on the
+// wire, where it would be silently dropped anyway.
+func isValidTraceIDHex(s string) bool {
+	if len(s) != traceIDHexLen {
+		return false
+	}
+	nonZero := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+		case ch >= 'a' && ch <= 'f':
+		default:
+			return false
+		}
+		if ch != '0' {
+			nonZero = true
+		}
+	}
+	return nonZero
+}
+
+// newClientRequestID returns a random 32-char hex TraceID, or "" if the system entropy
+// source fails (in which case the header is simply omitted).
+func newClientRequestID() string {
+	var buf [traceIDHexLen / 2]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return ""
+	}
+	id := hex.EncodeToString(buf[:])
+	if !isValidTraceIDHex(id) {
+		// All-zero read: not a valid TraceID for the server.
+		return ""
+	}
+	return id
+}
 
 func (c *Client) MetadataUnaryInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -75,7 +156,21 @@ func (c *Client) state(ctx context.Context) context.Context {
 
 func (c *Client) extraInfo(ctx context.Context) context.Context {
 	ctx = metadata.AppendToOutgoingContext(ctx, ClientRequestMsecKey, strconv.FormatInt(time.Now().UnixMilli(), 10))
+	if requestID := clientRequestIDFromContext(ctx); requestID != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, ClientRequestIDKey, requestID)
+	}
 	return ctx
+}
+
+// clientRequestIDFromContext returns the caller-supplied request ID, or "" when none was
+// set or it is malformed. Nothing is generated here: sending an ID the caller did not ask
+// for would opt every request out of server-side trace sampling (see WithClientRequestID).
+func clientRequestIDFromContext(ctx context.Context) string {
+	id, ok := ctx.Value(clientRequestIDKeyType{}).(string)
+	if !ok || !isValidTraceIDHex(id) {
+		return ""
+	}
+	return id
 }
 
 // ref: https://github.com/grpc-ecosystem/go-grpc-middleware
