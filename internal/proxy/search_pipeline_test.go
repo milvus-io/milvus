@@ -5001,6 +5001,33 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	s.Len(result, 1)
 	s.Equal("metadata", result[0].FieldName)
 	s.Equal("/user/age", result[0].JSONPath)
+
+	// A comma inside a quoted JSON key must not split the spec into two fields
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["city,state"]:asc,score:desc`}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 2)
+	s.Equal("metadata", result[0].FieldName)
+	s.Equal("/city,state", result[0].JSONPath)
+	s.True(result[0].Ascending)
+	s.Equal("score", result[1].FieldName)
+	s.False(result[1].Ascending)
+
+	// A colon inside a quoted JSON key must not be taken as an option separator
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["a:b"]:desc`}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Equal("/a:b", result[0].JSONPath)
+	s.False(result[0].Ascending)
+
+	// A bracket inside a quoted JSON key must not corrupt bracket-depth tracking
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["a]b"]:asc`}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Equal("/a]b", result[0].JSONPath)
+	s.True(result[0].Ascending)
 }
 
 // Test parseOrderByFields with dynamic fields

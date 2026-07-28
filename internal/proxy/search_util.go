@@ -177,7 +177,7 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 	}
 
 	var orderByFields []OrderByField
-	pairs := strings.Split(orderByStr, ",")
+	pairs := splitTopLevel(orderByStr, ',', -1)
 	for _, pair := range pairs {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
@@ -236,34 +236,62 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 	return orderByFields, nil
 }
 
-// splitOrderByFieldOptions splits "fieldSpec[:direction[:nullOrdering]]" handling brackets in fieldSpec.
-func splitOrderByFieldOptions(pair string) (fieldSpec, direction, nullOrdering string, err error) {
+// splitTopLevel splits s on sep occurrences outside brackets and quoted strings,
+// so separators inside JSON-path keys (e.g. metadata["city,state"]) never break
+// a field spec apart. n caps the part count like strings.SplitN — the final part
+// keeps the unscanned remainder — bounding allocation for separator-flood input;
+// n < 0 means no cap.
+func splitTopLevel(s string, sep rune, n int) []string {
+	var parts []string
 	bracketDepth := 0
-	colonIdxs := make([]int, 0, 2)
-	for i, ch := range pair {
-		switch ch {
-		case '[':
+	var quote rune // opening quote of the current string literal, 0 when outside
+	escaped := false
+	start := 0
+	for i, ch := range s {
+		switch {
+		case quote != 0:
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == quote:
+				quote = 0
+			}
+		case ch == '"' || ch == '\'':
+			quote = ch
+		case ch == '[':
 			bracketDepth++
-		case ']':
-			bracketDepth--
-		case ':':
-			if bracketDepth == 0 {
-				colonIdxs = append(colonIdxs, i)
-				if len(colonIdxs) > 2 {
-					return "", "", "", merr.WrapErrParameterInvalidMsg("too many order_by field options in '%s'", pair)
-				}
+		case ch == ']':
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
+		case ch == sep && bracketDepth == 0:
+			parts = append(parts, s[start:i])
+			start = i + 1
+			if n > 0 && len(parts) == n-1 {
+				return append(parts, s[start:])
 			}
 		}
 	}
+	return append(parts, s[start:])
+}
 
-	switch len(colonIdxs) {
-	case 0:
-		return strings.TrimSpace(pair), "", "", nil
-	case 1:
-		return strings.TrimSpace(pair[:colonIdxs[0]]), strings.TrimSpace(pair[colonIdxs[0]+1:]), "", nil
-	default:
-		return strings.TrimSpace(pair[:colonIdxs[0]]), strings.TrimSpace(pair[colonIdxs[0]+1 : colonIdxs[1]]), strings.TrimSpace(pair[colonIdxs[1]+1:]), nil
+// splitOrderByFieldOptions splits "fieldSpec[:direction[:nullOrdering]]" handling
+// brackets and quotes in fieldSpec.
+func splitOrderByFieldOptions(pair string) (fieldSpec, direction, nullOrdering string, err error) {
+	parts := splitTopLevel(pair, ':', 4)
+	if len(parts) > 3 {
+		return "", "", "", merr.WrapErrParameterInvalidMsg("too many order_by field options in '%s'", pair)
 	}
+	fieldSpec = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		direction = strings.TrimSpace(parts[1])
+	}
+	if len(parts) > 2 {
+		nullOrdering = strings.TrimSpace(parts[2])
+	}
+	return fieldSpec, direction, nullOrdering, nil
 }
 
 // parseOrderByFieldSpec parses a field specification and returns field name, ID, JSON path, and requery info
