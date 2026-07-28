@@ -1810,7 +1810,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			IsDynamic: field.IsDynamic,
 		}
 	}
-	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
+	if len(typeutil.GetVectorFieldSchemas(sch)) == 0 && len(sch.Functions) == 0 && !partialUpdate {
 		return nil, merr.WrapErrParameterInvalidMsg("collection: %s has no vector field or functions", sch.Name)
 	}
 
