@@ -116,6 +116,12 @@ SealedIndexTranslator::SealedIndexTranslator(
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
                     std::move(memory_group), PolicyBytes(max_task_overhead)},
+                // FIXME: Bind scalar V3 file overhead to the executor-backed
+                // file group after every file-backed load path writes through
+                // positioned tasks on the HIGH/LOW load executors. Some paths
+                // still use FileWriter or its independent worker pool, so
+                // binding them now would under-reserve concurrent disk
+                // overhead.
                 std::nullopt};
     }
 }
@@ -158,6 +164,9 @@ std::pair<milvus::cachinglayer::ResourceUsage,
 SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     // this is an estimation, error could be up to 20%.
+    // Preserve the historical 2x disk safety margin for temporary file growth
+    // during writes. final_disk_cost is already counted as loaded resource, so
+    // the file overhead is the remainder of 2 * max_disk_cost.
     return {milvus::cachinglayer::ResourceUsage(
                 load_resource_request_.final_memory_cost,
                 load_resource_request_.final_disk_cost),
