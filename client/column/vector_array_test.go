@@ -436,6 +436,33 @@ func (s *VectorArraySuite) TestParseVectorArrayDataFallbackDim() {
 	s.Equal(4, fv.Dim())
 }
 
+func (s *VectorArraySuite) TestParseAllNullVectorArrayUsesOuterDim() {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: "emb",
+		ValidData: []bool{false, false},
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						ElementType: schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		},
+	}
+
+	parsed, err := FieldDataColumn(fd, 0, -1)
+	s.Require().NoError(err)
+	vectorArray, ok := parsed.(*ColumnFloatVectorArray)
+	s.Require().True(ok)
+	s.Equal(2, vectorArray.Dim())
+	s.Equal(2, vectorArray.Len())
+	s.Zero(vectorArray.ValidCount())
+	s.Require().NoError(vectorArray.ValidateNullable())
+}
+
 func (s *VectorArraySuite) TestSlice() {
 	dim := 2
 	rows := [][][]float32{
