@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"fmt"
 	"math/rand"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -561,6 +562,43 @@ func TestAny2TmplValue(t *testing.T) {
 
 		_, err = any2TmplValue(nil)
 		assert.EqualError(t, err, "unsupported template value type: <nil>")
+	})
+
+	t.Run("invalid array elements", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			value any
+		}{
+			{name: "inconsistent types", value: []any{int64(1), "two"}},
+			{name: "nil integer", value: []any{int64(1), nil}},
+			{name: "nil boolean", value: []any{true, nil}},
+			{name: "nil float", value: []any{float64(1), nil}},
+			{name: "nil string", value: []any{"one", nil}},
+			{name: "nil nested array", value: []any{[]int64{1}, nil}},
+			{name: "invalid nested array element", value: []any{[]any{int64(1)}, []any{nil}}},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := any2TmplValue(tc.value)
+				assert.Error(t, err)
+			})
+		}
+	})
+
+	t.Run("invalid array values", func(t *testing.T) {
+		_, err := slice2TmplArrayValue(reflect.ValueOf(int64(1)))
+		assert.EqualError(t, err, "unsupported template array value type: int64")
+
+		_, _, err = templateArrayElement(reflect.Value{})
+		assert.EqualError(t, err, "unsupported template type: invalid array element")
+
+		nilElement := reflect.ValueOf([]any{nil}).Index(0)
+		_, _, err = templateArrayElement(nilElement)
+		assert.EqualError(t, err, "unsupported template type: nil array element")
+
+		_, _, err = templateArrayElement(reflect.ValueOf(struct{}{}))
+		assert.EqualError(t, err, "unsupported template type: slice of struct")
 	})
 }
 
