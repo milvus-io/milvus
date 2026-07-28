@@ -194,6 +194,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
+	segment10 := newTestExternalRefreshSegment(10, 100, 7)
+	segment10.SchemaVersion = 1
+	segment20 := newTestExternalRefreshSegment(20, 100, 7)
+	segment20.SchemaVersion = 1
+
 	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
@@ -201,7 +206,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+		UpdatedSegments: []*datapb.SegmentInfo{segment10},
 	}))
 	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
@@ -210,7 +215,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
+		UpdatedSegments: []*datapb.SegmentInfo{segment20},
 	}))
 
 	segments := NewSegmentsInfo()
@@ -310,6 +315,9 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsSkipsNilUpdate
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
+	segment10 := newTestExternalRefreshSegment(10, 100, 7)
+	segment10.SchemaVersion = 1
+
 	mockTasks := mockey.Mock((*externalCollectionRefreshMeta).GetTasksByJobID).Return([]*datapb.ExternalCollectionRefreshTask{{
 		TaskId:       1001,
 		JobId:        1,
@@ -318,7 +326,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsSkipsNilUpdate
 		ResultReady:  true,
 		UpdatedSegments: []*datapb.SegmentInfo{
 			nil,
-			newTestExternalRefreshSegment(10, 100, 7),
+			segment10,
 		},
 	}}).Build()
 	defer mockTasks.UnPatch()
