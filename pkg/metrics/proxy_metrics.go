@@ -597,6 +597,14 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})
+	ProxyScannedRemoteMB.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyScannedTotalMB.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
 }
 
 func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
@@ -747,6 +755,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	})
 	ProxyScannedRemoteMB.Delete(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  CountLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName:  UpsertLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
@@ -766,6 +780,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	ProxyScannedTotalMB.Delete(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName:  QueryLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedTotalMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  CountLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})

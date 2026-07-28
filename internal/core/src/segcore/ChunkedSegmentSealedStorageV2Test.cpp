@@ -84,6 +84,7 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
+#include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -2479,17 +2480,13 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
 
     SetDefaultEnableParquetStatsSkipIndex(true);
 
-    // Retrieve's limit is a byte budget over the output fields, and the
-    // unpruned probe deliberately matches every row; cap it out of the way so
-    // the test measures traffic rather than tripping the output limit.
-    constexpr int64_t kNoOutputLimit = std::numeric_limits<int64_t>::max();
-
-    // The series the retrieve path publishes under. Reading it by label is
-    // itself the check that the collection name survives into the metric --
-    // it comes from the schema, which is all a segment keeps of its collection.
-    auto observed = [] {
+    // The series the async request boundary publishes under. Reading it by
+    // label is itself the check that the collection name survives into the
+    // metric -- it comes from the schema, which is all a segment keeps of its
+    // collection.
+    auto observed = [](const char* op) {
         auto metric = milvus::monitor::internal_core_query_scanned_bytes_total(
-                          kSkipMeasureDb, kSkipMeasureCollection, "query")
+                          kSkipMeasureDb, kSkipMeasureCollection, op)
                           .Collect();
         return std::make_pair(metric.histogram.sample_count,
                               metric.histogram.sample_sum);
@@ -2510,6 +2507,41 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
         return plan;
     };
 
+    auto parse_c_retrieve_result = [](CRetrieveResult* c_result) {
+        if (c_result == nullptr) {
+            return std::unique_ptr<proto::segcore::RetrieveResults>{};
+        }
+        auto result = std::make_unique<proto::segcore::RetrieveResults>();
+        EXPECT_TRUE(
+            result->ParseFromArray(c_result->proto_blob, c_result->proto_size));
+        DeleteRetrieveResult(c_result);
+        return result;
+    };
+    auto async_retrieve = [&](SegmentInterface* segment,
+                              query::RetrievePlan* plan) {
+        CRetrieveResult* c_result = nullptr;
+        auto status = CRetrieve(static_cast<CSegmentInterface>(segment),
+                                static_cast<CRetrievePlan>(plan),
+                                MAX_TIMESTAMP,
+                                &c_result);
+        EXPECT_EQ(status.error_code, 0);
+        return parse_c_retrieve_result(c_result);
+    };
+    auto async_retrieve_by_offsets = [&](SegmentInterface* segment,
+                                         query::RetrievePlan* plan,
+                                         int64_t* offsets,
+                                         int64_t len) {
+        CRetrieveResult* c_result = nullptr;
+        auto status =
+            CRetrieveByOffsets(static_cast<CSegmentInterface>(segment),
+                               static_cast<CRetrievePlan>(plan),
+                               offsets,
+                               len,
+                               &c_result);
+        EXPECT_EQ(status.error_code, 0);
+        return parse_c_retrieve_result(c_result);
+    };
+
     // val > N matches nothing, so every cell is prunable; val > -1 matches
     // everything and is the cost of not pruning.
     auto all_pruned_plan = retrieve_plan(N);
@@ -2521,22 +2553,39 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
         ASSERT_TRUE(segment->storage_usage_tracked())
             << "the flag was on before the load, so the segment's slots track";
 
-        const auto before_pruned = observed();
-        auto pruned_result = segment->Retrieve(nullptr,
-                                               all_pruned_plan.get(),
-                                               MAX_TIMESTAMP,
-                                               kNoOutputLimit,
-                                               false);
-        const auto after_pruned = observed();
+        const auto count_before_fast_path = observed("count");
+        EXPECT_EQ(segment->get_real_count(), N);
+        EXPECT_EQ(observed("count").first, count_before_fast_path.first)
+            << "the no-delete row-count fast path must not create a fake IO "
+               "sample";
+
+        const auto query_before_sync = observed("query");
+        (void)segment->Retrieve(nullptr,
+                                all_pruned_plan.get(),
+                                MAX_TIMESTAMP,
+                                DEFAULT_MAX_OUTPUT_SIZE,
+                                false);
+        EXPECT_EQ(observed("query").first, query_before_sync.first)
+            << "the synchronous primitive must not publish a user-request "
+               "sample";
+
+        const auto before_pruned = observed("query");
+        const auto count_before_pruned = observed("count");
+        auto pruned_result =
+            async_retrieve(segment.get(), all_pruned_plan.get());
+        ASSERT_NE(pruned_result, nullptr);
+        const auto after_pruned = observed("query");
         EXPECT_EQ(after_pruned.first, before_pruned.first + 1)
             << "a fully pruned query published nothing: the operation was "
                "measured, and dropping it is exactly how the best-pruned "
                "samples disappear from the histogram";
+        EXPECT_EQ(observed("count").first, count_before_pruned.first)
+            << "a normal retrieve was attributed to count";
 
-        const auto before_full = observed();
-        auto full_result = segment->Retrieve(
-            nullptr, full_plan.get(), MAX_TIMESTAMP, kNoOutputLimit, false);
-        const auto after_full = observed();
+        const auto before_full = observed("query");
+        auto full_result = async_retrieve(segment.get(), full_plan.get());
+        ASSERT_NE(full_result, nullptr);
+        const auto after_full = observed("query");
         ASSERT_EQ(after_full.first, before_full.first + 1);
 
         const double pruned_bytes = after_pruned.second - before_pruned.second;
@@ -2566,6 +2615,46 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
             << " bytes against " << full_bytes
             << " for the same segment: pruning is not reaching the metric";
 
+        int64_t offset = 0;
+        const auto before_offsets = observed("query");
+        const auto count_before_offsets = observed("count");
+        auto offsets_result = async_retrieve_by_offsets(
+            segment.get(), full_plan.get(), &offset, 1);
+        ASSERT_NE(offsets_result, nullptr);
+        const auto after_offsets = observed("query");
+        EXPECT_EQ(after_offsets.first, before_offsets.first + 1);
+        EXPECT_DOUBLE_EQ(
+            after_offsets.second - before_offsets.second,
+            static_cast<double>(offsets_result->scanned_total_bytes()));
+        EXPECT_EQ(observed("count").first, count_before_offsets.first)
+            << "RetrieveByOffsets was attributed to count";
+
+        auto count_plan = retrieve_plan(N);
+        count_plan->operation_ = query::RetrieveOperation::Count;
+        const auto before_count = observed("count");
+        const auto query_before_count = observed("query");
+        auto count_result = async_retrieve(segment.get(), count_plan.get());
+        ASSERT_NE(count_result, nullptr);
+        const auto after_count = observed("count");
+        EXPECT_EQ(after_count.first, before_count.first + 1);
+        EXPECT_DOUBLE_EQ(
+            after_count.second - before_count.second,
+            static_cast<double>(count_result->scanned_total_bytes()));
+        EXPECT_EQ(observed("query").first, query_before_count.first)
+            << "a count retrieve was attributed to query";
+
+        auto delete_ids = std::make_unique<IdArray>();
+        delete_ids->mutable_int_id()->mutable_data()->Add(0);
+        Timestamp delete_ts = MAX_TIMESTAMP;
+        ASSERT_TRUE(segment->Delete(1, delete_ids.get(), &delete_ts).ok());
+        const auto before_internal_count = observed("count");
+        const auto query_before_internal_count = observed("query");
+        EXPECT_EQ(segment->get_real_count(), N - 1);
+        EXPECT_EQ(observed("count").first, before_internal_count.first + 1)
+            << "get_real_count with deletes must be attributed to count";
+        EXPECT_EQ(observed("query").first, query_before_internal_count.first)
+            << "get_real_count polluted the user query histogram";
+
         auto observed_search = [] {
             auto metric =
                 milvus::monitor::internal_core_query_scanned_bytes_total(
@@ -2594,13 +2683,10 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
         auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
         ASSERT_FALSE(segment->storage_usage_tracked());
 
-        const auto before = observed();
-        (void)segment->Retrieve(nullptr,
-                                all_pruned_plan.get(),
-                                MAX_TIMESTAMP,
-                                kNoOutputLimit,
-                                false);
-        EXPECT_EQ(observed().first, before.first)
+        const auto before = observed("query");
+        ASSERT_NE(async_retrieve(segment.get(), all_pruned_plan.get()),
+                  nullptr);
+        EXPECT_EQ(observed("query").first, before.first)
             << "published a sample for a segment that never measured "
                "anything -- an unmeasured zero reads as 'the skip index "
                "removed all the IO'";

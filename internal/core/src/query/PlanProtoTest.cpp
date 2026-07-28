@@ -203,4 +203,19 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
     EXPECT_EQ(
         plan->access_entries_,
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Query);
+}
+
+TEST(PlanProto, RetrievePlanPreservesCountOperation) {
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    planpb::PlanNode plan_node;
+    plan_node.mutable_query()->set_is_count(true);
+    auto serialized = plan_node.SerializeAsString();
+
+    auto plan = milvus::query::CreateRetrievePlanByExpr(
+        schema, serialized.data(), serialized.size());
+
+    EXPECT_EQ(plan->operation_, milvus::query::RetrieveOperation::Count);
 }

@@ -34,8 +34,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -429,6 +431,9 @@ func TestQueryTask_all(t *testing.T) {
 			)
 			err := task.PreExecute(ctx)
 			assert.NoError(t, err, "count(*) with GROUP BY and limit should be allowed")
+			assert.False(t, task.plan.GetQuery().GetIsCount())
+			assert.False(t, task.GetIsCount())
+			assert.Equal(t, metrics.QueryLabel, task.getStorageMetricLabel())
 		}
 
 		// Case 2: count(*) + GROUP BY + no limit → should PASS
@@ -441,9 +446,59 @@ func TestQueryTask_all(t *testing.T) {
 			)
 			err := task.PreExecute(ctx)
 			assert.NoError(t, err, "count(*) with GROUP BY and no limit should be allowed")
+			assert.False(t, task.plan.GetQuery().GetIsCount())
+			assert.False(t, task.GetIsCount())
 		}
 
-		// Case 3: count(*) + no GROUP BY + limit → should FAIL
+		// Case 3: a single global count is the user-facing count operation.
+		{
+			task := makeTask(
+				expr,
+				[]string{"count(*)"},
+				0,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "count(*) without GROUP BY should be tagged as count")
+			assert.True(t, task.plan.GetQuery().GetIsCount())
+			assert.True(t, task.GetIsCount())
+			assert.Equal(t, metrics.CountLabel, task.getStorageMetricLabel())
+		}
+
+		// Case 4: count(field) is also a single global count operation.
+		{
+			task := makeTask(
+				expr,
+				[]string{fmt.Sprintf("count(%s)", testInt64Field)},
+				0,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "count(field) should be tagged as count")
+			assert.True(t, task.plan.GetQuery().GetIsCount())
+			assert.True(t, task.GetIsCount())
+			assert.Equal(t, metrics.CountLabel, task.getStorageMetricLabel())
+		}
+
+		// Case 5: mixed aggregates remain query operations.
+		{
+			task := makeTask(
+				expr,
+				[]string{
+					fmt.Sprintf("count(%s)", testInt64Field),
+					fmt.Sprintf("sum(%s)", testInt64Field),
+				},
+				0,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "mixed aggregates should remain query")
+			assert.False(t, task.plan.GetQuery().GetIsCount())
+			assert.False(t, task.GetIsCount())
+			assert.Equal(t, metrics.QueryLabel, task.getStorageMetricLabel())
+		}
+
+		// Case 6: count(*) + no GROUP BY + limit → should FAIL
 		{
 			task := makeTask(
 				expr,
@@ -456,7 +511,7 @@ func TestQueryTask_all(t *testing.T) {
 			assert.Contains(t, err.Error(), "count entities with pagination is not allowed")
 		}
 
-		// Case 4: aggregation + empty expr + no limit → should PASS
+		// Case 7: aggregation + empty expr + no limit → should PASS
 		{
 			task := makeTask(
 				"",
@@ -468,7 +523,7 @@ func TestQueryTask_all(t *testing.T) {
 			assert.NoError(t, err, "aggregation with empty expr and no limit should be allowed")
 		}
 
-		// Case 5: non-aggregation + empty expr + no limit → should FAIL
+		// Case 8: non-aggregation + empty expr + no limit → should FAIL
 		{
 			task := makeTask(
 				"",
@@ -1685,6 +1740,53 @@ func Test_createCntPlan(t *testing.T) {
 		assert.True(t, plan.GetQuery().GetIsCount())
 		assert.NotNil(t, plan.GetQuery().GetPredicates())
 	})
+}
+
+func TestQueryTaskStorageMetricLabel(t *testing.T) {
+	t.Run("defaults to query", func(t *testing.T) {
+		task := &queryTask{}
+		assert.Equal(t, metrics.QueryLabel, task.getStorageMetricLabel())
+	})
+
+	t.Run("preserves non-count query label", func(t *testing.T) {
+		task := &queryTask{
+			RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: metrics.ReQueryLabel},
+			plan: &planpb.PlanNode{Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{},
+			}},
+		}
+		assert.Equal(t, metrics.ReQueryLabel, task.getStorageMetricLabel())
+	})
+
+	t.Run("count overrides query label", func(t *testing.T) {
+		task := &queryTask{
+			RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: metrics.QueryLabel},
+			plan: &planpb.PlanNode{Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{IsCount: true},
+			}},
+		}
+		assert.Equal(t, metrics.CountLabel, task.getStorageMetricLabel())
+	})
+}
+
+func TestIsPureCountQuery(t *testing.T) {
+	count := &planpb.Aggregate{Op: planpb.AggregateOp_count}
+	sum := &planpb.Aggregate{Op: planpb.AggregateOp_sum}
+
+	assert.False(t, isPureCountQuery(nil))
+	assert.True(t, isPureCountQuery(&planpb.QueryPlanNode{
+		Aggregates: []*planpb.Aggregate{count},
+	}))
+	assert.False(t, isPureCountQuery(&planpb.QueryPlanNode{
+		Aggregates:      []*planpb.Aggregate{count},
+		GroupByFieldIds: []int64{100},
+	}))
+	assert.False(t, isPureCountQuery(&planpb.QueryPlanNode{
+		Aggregates: []*planpb.Aggregate{count, sum},
+	}))
+	assert.False(t, isPureCountQuery(&planpb.QueryPlanNode{
+		Aggregates: []*planpb.Aggregate{sum},
+	}))
 }
 
 func Test_queryTask_createPlan(t *testing.T) {

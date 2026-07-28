@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -28,6 +29,11 @@
 namespace milvus::query {
 
 using Json = nlohmann::json;
+
+enum class RetrieveOperation : uint8_t {
+    Query,
+    Count,
+};
 
 struct ExtractedPlanInfo {
  public:
@@ -126,6 +132,10 @@ struct RetrievePlan {
 
  public:
     SchemaPtr schema_;
+    // AsyncRetrieve reports completed user operations using the tag parsed
+    // from the serialized plan. The synchronous Retrieve primitive itself
+    // does not publish user-request metrics.
+    RetrieveOperation operation_{RetrieveOperation::Query};
     std::unique_ptr<RetrievePlanNode> plan_node_;
     // Requested output fields, kept in request order for retrieve results.
     // access_entries_ also includes them for external manifest checks.
