@@ -45,6 +45,32 @@ func (c *ColumnDynamic) Slice(start, end int) Column {
 	)
 }
 
+// SliceColumns slices columns while preserving shared dynamic JSON storage.
+func SliceColumns(columns []Column, start, end int) []Column {
+	sliced := make([]Column, len(columns))
+	dynamicJSONSlices := make(map[*ColumnJSONBytes]*ColumnJSONBytes)
+	sliceJSON := func(source *ColumnJSONBytes) *ColumnJSONBytes {
+		if result, ok := dynamicJSONSlices[source]; ok {
+			return result
+		}
+		result := source.Slice(start, end).(*ColumnJSONBytes)
+		dynamicJSONSlices[source] = result
+		return result
+	}
+
+	for idx, source := range columns {
+		switch source := source.(type) {
+		case *ColumnDynamic:
+			sliced[idx] = NewColumnDynamic(sliceJSON(source.ColumnJSONBytes), source.outputField)
+		case *ColumnJSONBytes:
+			sliced[idx] = sliceJSON(source)
+		default:
+			sliced[idx] = source.Slice(start, end)
+		}
+	}
+	return sliced
+}
+
 // Get returns element at idx as interface{}.
 // Overrides internal json column behavior, returns raw json data.
 func (c *ColumnDynamic) Get(idx int) (interface{}, error) {

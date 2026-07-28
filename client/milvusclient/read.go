@@ -155,21 +155,13 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 					entry.Err = fieldsErr
 					return
 				}
-				entry.Fields = sliceSearchResultColumns(fields, offset, offset+rc)
+				entry.Fields = column.SliceColumns(fields, offset, offset+rc)
 			} else {
 				entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
 			}
 		}()
 	}
 	return sr, nil
-}
-
-func sliceSearchResultColumns(columns []column.Column, start, end int) []column.Column {
-	sliced := make([]column.Column, len(columns))
-	for idx, field := range columns {
-		sliced[idx] = field.Slice(start, end)
-	}
-	return sliced
 }
 
 func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fieldDataList []*schemapb.FieldData, _, from, to int) ([]column.Column, error) {
