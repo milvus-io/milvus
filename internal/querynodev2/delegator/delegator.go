@@ -118,6 +118,19 @@ type ShardDelegator interface {
 
 var _ ShardDelegator = (*shardDelegator)(nil)
 
+// ShardDelegatorOption customizes shard delegator creation.
+type ShardDelegatorOption func(*shardDelegator)
+
+// WithLeaderViewUpdatedCallback registers a callback for leader view changes.
+func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegatorOption {
+	return func(sd *shardDelegator) {
+		sd.leaderViewUpdatedCallback = callback
+		if sd.distribution != nil {
+			sd.distribution.leaderViewUpdatedCallback = callback
+		}
+	}
+}
+
 // shardDelegator maintains the shard distribution and streaming part of the data.
 type shardDelegator struct {
 	// shard information attributes
@@ -179,6 +192,8 @@ type shardDelegator struct {
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
+
+	leaderViewUpdatedCallback func(channel string)
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -188,6 +203,12 @@ func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
 		zap.String("channel", sd.vchannelName),
 		zap.Int64("replicaID", sd.replicaID),
 	)
+}
+
+func (sd *shardDelegator) notifyLeaderViewUpdated() {
+	if sd.leaderViewUpdatedCallback != nil {
+		sd.leaderViewUpdatedCallback(sd.vchannelName)
+	}
 }
 
 func (sd *shardDelegator) NotStopped(state lifetime.State) error {
@@ -1152,6 +1173,7 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 				zap.Bool("caughtUp", caughtUp))
 			if caughtUp {
 				sd.catchingUpStreamingData.Store(false)
+				sd.notifyLeaderViewUpdated()
 			}
 		}
 	}
@@ -1316,6 +1338,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
+	opts ...ShardDelegatorOption,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -1371,6 +1394,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		postLoadConfigHandler:      postLoadConfigHandler,
 		catchingUpStreamingData:    atomic.NewBool(true),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+	}
+	for _, opt := range opts {
+		opt(sd)
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {
