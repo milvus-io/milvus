@@ -98,17 +98,9 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	if validData != nil {
 		logicalLen = len(validData)
 	}
-	if start < 0 {
-		start = 0
-	}
-	if start > logicalLen {
-		start = logicalLen
-	}
-	if end < 0 || end > logicalLen {
-		end = logicalLen
-	}
-	if start > end {
-		start = end
+	start, end, err := normalizeFieldDataRange(name, start, end, logicalLen)
+	if err != nil {
+		return nil, err
 	}
 
 	if validData != nil {
@@ -143,6 +135,21 @@ func parseScalarData[T any, COL Column, NCOL Column](
 
 	data = data[start:end]
 	return creator(name, data), nil
+}
+
+func normalizeFieldDataRange(fieldName string, start, end, logicalLen int) (int, int, error) {
+	if start < 0 || start > logicalLen {
+		return 0, 0, fmt.Errorf("field %q row range start %d is outside [0, %d]", fieldName, start, logicalLen)
+	}
+	if end == -1 {
+		end = logicalLen
+	} else if end < 0 || end > logicalLen {
+		return 0, 0, fmt.Errorf("field %q row range end %d is outside [0, %d]", fieldName, end, logicalLen)
+	}
+	if start > end {
+		return 0, 0, fmt.Errorf("field %q row range [%d, %d) has start after end", fieldName, start, end)
+	}
+	return start, end, nil
 }
 
 func parseArrayData(fieldName string, elementType schemapb.DataType, fieldDataList []*schemapb.ScalarField, validData []bool, begin, end int) (Column, error) {
@@ -251,17 +258,9 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, validData 
 				fieldName, len(rows), logicalLen, countValid(validData))
 		}
 	}
-	if begin < 0 {
-		begin = 0
-	}
-	if begin > logicalLen {
-		begin = logicalLen
-	}
-	if end < 0 || end > logicalLen {
-		end = logicalLen
-	}
-	if begin > end {
-		begin = end
+	begin, end, err := normalizeFieldDataRange(fieldName, begin, end, logicalLen)
+	if err != nil {
+		return nil, err
 	}
 	selectedValidData := validData
 	if nullable {

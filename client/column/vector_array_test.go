@@ -367,7 +367,7 @@ func (s *VectorArraySuite) TestParseVectorArrayDataUnsupportedElement() {
 	s.Error(err)
 }
 
-func (s *VectorArraySuite) TestParseVectorArrayDataBeginEndClamping() {
+func (s *VectorArraySuite) TestParseVectorArrayDataRangeValidation() {
 	dim := 2
 	row := &schemapb.VectorField{
 		Dim: int64(dim),
@@ -391,15 +391,18 @@ func (s *VectorArraySuite) TestParseVectorArrayDataBeginEndClamping() {
 			},
 		},
 	}
-	// negative begin gets clamped to 0; end > len clamped to len.
-	col, err := FieldDataColumn(fd, -5, 10)
+	col, err := FieldDataColumn(fd, 1, -1)
 	s.NoError(err)
-	s.Equal(3, col.Len())
+	s.Equal(2, col.Len())
 
-	// begin > end collapses to empty.
-	col2, err := FieldDataColumn(fd, 10, 1)
-	s.NoError(err)
-	s.Equal(0, col2.Len())
+	_, err = FieldDataColumn(fd, -1, 2)
+	s.Error(err)
+	_, err = FieldDataColumn(fd, 0, 4)
+	s.Error(err)
+	_, err = FieldDataColumn(fd, 0, -2)
+	s.Error(err)
+	_, err = FieldDataColumn(fd, 2, 1)
+	s.Error(err)
 }
 
 func (s *VectorArraySuite) TestParseVectorArrayDataFallbackDim() {
