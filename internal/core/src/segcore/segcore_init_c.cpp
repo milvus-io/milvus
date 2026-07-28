@@ -50,6 +50,13 @@ SegcoreSetEnableGeometryCache(const bool value) {
 }
 
 extern "C" void
+SegcoreSetEnableGISSplitFusion(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_enable_gis_split_fusion(value);
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
