@@ -62,9 +62,9 @@ import (
 const (
 	defaultAnalyzerName = "default"
 
-	reopenBM25LoadRetryAttempts = 3
-	reopenBM25LoadRetrySleep    = 200 * time.Millisecond
-	reopenBM25LoadRetryMaxSleep = time.Second
+	reopenBM25LoadRetryCount          = 5
+	reopenBM25LoadRetryInitialBackoff = 200 * time.Millisecond
+	reopenBM25LoadRetryMaxBackoff     = time.Minute
 )
 
 func normalizeAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
@@ -578,9 +578,9 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 				activateIfReadable = sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
 				return idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable)
 			},
-				retry.Attempts(reopenBM25LoadRetryAttempts),
-				retry.Sleep(reopenBM25LoadRetrySleep),
-				retry.MaxSleepTime(reopenBM25LoadRetryMaxSleep),
+				retry.Attempts(reopenBM25LoadRetryCount+1),
+				retry.Sleep(reopenBM25LoadRetryInitialBackoff),
+				retry.MaxSleepTime(reopenBM25LoadRetryMaxBackoff),
 				retry.RetryErr(merr.IsRetryableErr),
 			)
 			if err != nil {

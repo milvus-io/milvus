@@ -73,7 +73,7 @@ import (
 const (
 	updateSchemaWorkerRetryCount          = 5
 	updateSchemaWorkerRetryInitialBackoff = 500 * time.Millisecond
-	updateSchemaWorkerRetryMaxBackoff     = 5 * time.Second
+	updateSchemaWorkerRetryMaxBackoff     = time.Minute
 )
 
 // ShardDelegator is the interface definition.
