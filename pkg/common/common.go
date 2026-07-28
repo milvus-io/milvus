@@ -201,20 +201,29 @@ const (
 	// Layout: {rootPath}/snapshots/{collection_id}/{metadata|manifests}/...
 	SnapshotRootPath = "snapshots"
 
+	// WoodpeckerRootPath storage path const for the Woodpecker WAL, written
+	// under both minio.rootPath and localStorage.path.
+	WoodpeckerRootPath = "wp"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
-// InternalStorageRootSegments lists every top-level directory that Milvus
+// InternalStorageRootSegments lists the top-level directories that Milvus
 // creates directly under the storage root path (ChunkManager.RootPath()).
 //
-// It is the single registry of Milvus's own object-storage layout. Import path
-// validation in datacoord refuses ordinary imports that point into any of
-// these, so a directory missing from this list is a directory that bulk import
-// can read. When adding a new storage path constant above, add it here too --
-// TestInternalStorageRootSegmentsIsExhaustive fails otherwise.
+// Import path validation in datacoord refuses ordinary imports that point into
+// any of these, so a directory missing from this list is a directory that bulk
+// import can read. When adding a new storage path constant above, add it here
+// too -- TestInternalStorageRootSegmentsIsExhaustive fails otherwise.
 //
 // Constants that are NOT top-level directories (leaf file names, sub-paths)
 // must be listed in that test's nonTopLevelSegments instead.
+//
+// Scope limit, deliberately stated: the guard test enforces that every storage
+// path constant declared in THIS file is classified. It cannot see a writer in
+// another package that joins a bare string literal onto the storage root --
+// that is how the Woodpecker "wp" directory was missed (milvus#51894 review).
+// A new writer under the shared root must add its segment here by hand.
 var InternalStorageRootSegments = []string{
 	SegmentInsertLogPath,
 	SegmentDeltaLogPath,
@@ -228,6 +237,7 @@ var InternalStorageRootSegments = []string{
 	JSONIndexPath,
 	JSONStatsPath,
 	SnapshotRootPath,
+	WoodpeckerRootPath,
 }
 
 const (

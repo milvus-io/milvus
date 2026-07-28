@@ -13,6 +13,7 @@ import (
 	"github.com/zilliztech/woodpecker/woodpecker"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -173,7 +174,7 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	// Set RootPath based on configuration
 	if cfg.RootPath.GetValue() == "default" {
 		// Use LocalStorage.Path as prefix with "wp" subdirectory for default
-		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().LocalStorageCfg.Path.GetValue())
+		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/%s", paramtable.Get().LocalStorageCfg.Path.GetValue(), common.WoodpeckerRootPath)
 	} else {
 		// Use custom directory as-is
 		wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
@@ -181,7 +182,7 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()
-	wpConfig.Minio.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().MinioCfg.RootPath.GetValue())
+	wpConfig.Minio.RootPath = fmt.Sprintf("%s/%s", paramtable.Get().MinioCfg.RootPath.GetValue(), common.WoodpeckerRootPath)
 	wpConfig.Minio.UseSSL = paramtable.Get().MinioCfg.UseSSL.GetAsBool()
 	wpConfig.Minio.UseIAM = paramtable.Get().MinioCfg.UseIAM.GetAsBool()
 	addr := paramtable.Get().MinioCfg.Address.GetValue()
