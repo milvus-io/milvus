@@ -312,9 +312,9 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// A scalar/JSON target reaches the MatchExpr guard; an element ref
 		// ($[...]) is stopped earlier by the ARRAY field-type check.
 		expectError(t, `MATCH_ANY(struct_array, bloom_match(Int64Field, {bf}) && $[sub_int] > 0)`, bf,
-			"not supported inside MATCH_ANY")
+			"function calls are not supported inside MATCH predicate")
 		expectError(t, `MATCH_ALL(struct_array, bloom_match(JSONField["a"], {bf}) && $[sub_int] > 0)`, bf,
-			"not supported inside MATCH_ALL")
+			"function calls are not supported inside MATCH predicate")
 		expectError(t, `MATCH_ANY(struct_array, bloom_match($[sub_int], {bf}))`, bf,
 			"of type Array")
 	})
