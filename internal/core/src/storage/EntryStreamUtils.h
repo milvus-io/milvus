@@ -31,12 +31,16 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
 constexpr size_t kMinStreamSliceSize = 64 * 1024;
 constexpr size_t kStreamSliceAlignment = 4 * 1024;
 constexpr size_t kTailMergeGrace = 1 * 1024 * 1024;
+// Encrypted reads may simultaneously retain ciphertext, decrypted plaintext,
+// and the returned plaintext buffer.
+constexpr size_t kEncryptedStreamBufferMultiplier = 3;
 
 inline bool
 IsStreamSliceSizeAligned(size_t slice_size) {
@@ -59,7 +63,7 @@ ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
 /// A slice read from a V3 entry. `error` carries an exception captured in
 /// the producer task so the consumer can rethrow instead of hanging.
 struct StreamSliceResult {
-    size_t budget_bytes{0};
+    size_t slice_transient_bytes{0};
     std::vector<uint8_t> data;
     std::exception_ptr error = nullptr;
 };
@@ -204,16 +208,141 @@ class TransientMemoryBudget {
 };
 
 inline size_t
-EntryStreamMaxTransientBytes() {
+EntryStreamDataTransientBytes(size_t stream_bytes, bool encrypted) {
+    if (!encrypted) {
+        return stream_bytes;
+    }
+    if (stream_bytes >
+        std::numeric_limits<size_t>::max() / kEncryptedStreamBufferMultiplier) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return stream_bytes * kEncryptedStreamBufferMultiplier;
+}
+
+inline size_t
+PlainEntryFileStreamTransientBytes(size_t stream_bytes) {
+    constexpr size_t kFileStreamBufferMultiplier = 2;
+    if (stream_bytes >
+        std::numeric_limits<size_t>::max() / kFileStreamBufferMultiplier) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return stream_bytes * kFileStreamBufferMultiplier;
+}
+
+inline size_t
+EncryptedEntryStreamTaskTransientBytes() {
+    // Compatibility fallback for callers that cannot inspect a concrete V3
+    // directory. File-aware planning uses persisted ciphertext slice sizes.
+    return EntryStreamDataTransientBytes(
+        DefaultStreamSliceSize() + kTailMergeGrace, true);
+}
+
+inline size_t
+PlainEntryStreamTaskTransientBytes() {
+    return DefaultStreamSliceSize() + kTailMergeGrace;
+}
+
+inline size_t
+EntryStreamPoolBoundTransientBytesForTask(size_t task_bound,
+                                          size_t live_worker_count) {
+    auto configured_threads =
+        std::max(milvus::ComputeThreadPoolMaxThreads(
+                     milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()),
+                 milvus::ComputeThreadPoolMaxThreads(
+                     milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    auto max_tasks =
+        std::max(static_cast<size_t>(configured_threads), live_worker_count);
+    if (task_bound > std::numeric_limits<size_t>::max() / max_tasks) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return max_tasks * task_bound;
+}
+
+inline size_t
+EntryStreamPoolBoundTransientBytes(bool encrypted = false,
+                                   size_t live_worker_count = 0) {
+    auto task_bound = encrypted ? EncryptedEntryStreamTaskTransientBytes()
+                                : PlainEntryStreamTaskTransientBytes();
+    return EntryStreamPoolBoundTransientBytesForTask(task_bound,
+                                                     live_worker_count);
+}
+
+inline size_t
+PlainEntryFileStreamTaskTransientBytes() {
+    return PlainEntryFileStreamTransientBytes(
+        PlainEntryStreamTaskTransientBytes());
+}
+
+inline size_t
+PlainEntryFileStreamPoolBoundTransientBytes(size_t live_worker_count = 0) {
+    return EntryStreamPoolBoundTransientBytesForTask(
+        PlainEntryFileStreamTaskTransientBytes(), live_worker_count);
+}
+
+inline size_t
+EntryStreamMaxTransientBytes(bool encrypted = false) {
     auto capacity =
         TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto pool_bound = EntryStreamPoolBoundTransientBytes(
+        encrypted, std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()));
     if (capacity == 0) {
-        return std::numeric_limits<size_t>::max();
+        // The runtime reservation for encrypted streams includes the actual
+        // ciphertext length, which has no static upper bound in ICipherPlugin.
+        // Let the caller cap the estimate by its concrete index size instead.
+        return encrypted ? std::numeric_limits<size_t>::max() : pool_bound;
     }
-    if (capacity > std::numeric_limits<size_t>::max() - kTailMergeGrace) {
-        return std::numeric_limits<size_t>::max();
+    if (encrypted) {
+        return std::min(
+            std::max(capacity, EncryptedEntryStreamTaskTransientBytes()),
+            pool_bound);
     }
-    return capacity + kTailMergeGrace;
+
+    return std::min(std::max(capacity, PlainEntryStreamTaskTransientBytes()),
+                    pool_bound);
+}
+
+inline size_t
+EncryptedEntryStreamMaxTransientBytes(size_t total_transient_bytes,
+                                      size_t max_task_transient_bytes) {
+    if (total_transient_bytes == 0 || max_task_transient_bytes == 0) {
+        return 0;
+    }
+
+    auto capacity =
+        TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto pool_bound = EntryStreamPoolBoundTransientBytesForTask(
+        max_task_transient_bytes,
+        std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()));
+    auto budget_bound =
+        capacity == 0 ? pool_bound
+                      : std::min(std::max(capacity, max_task_transient_bytes),
+                                 pool_bound);
+    return std::min(total_transient_bytes, budget_bound);
+}
+
+inline size_t
+PlainEntryFileStreamMaxTransientBytes() {
+    auto capacity =
+        TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto pool_bound = PlainEntryFileStreamPoolBoundTransientBytes(
+        std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()));
+    auto task_bound = PlainEntryFileStreamTaskTransientBytes();
+    if (capacity == 0) {
+        return pool_bound;
+    }
+    return std::min(std::max(capacity, task_bound), pool_bound);
 }
 
 }  // namespace milvus::storage
