@@ -262,8 +262,15 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		zap.String("channelName", workload.Channel),
 	)
 	var lastErr error
+	var overloadErr error
+	var err error
+	var shardLeaders []NodeInfo
 	excludeNodes := typeutil.NewUniqueSet()
 	tryExecute := func() (bool, error) {
+		if overloadErr != nil && len(shardLeaders) > 0 && excludeNodes.Len() >= len(shardLeaders) {
+			return false, overloadErr
+		}
+
 		balancer := lb.getBalancer()
 		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
@@ -272,6 +279,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64s("excluded", excludeNodes.Collect()),
 				zap.Error(err),
 			)
+			if overloadErr != nil {
+				return false, overloadErr
+			}
 			if lastErr != nil {
 				return true, lastErr
 			}
@@ -304,6 +314,14 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			if merr.GetErrorType(err) == merr.InputError {
 				return false, err
 			}
+			// Queue saturation is a transient overload signal from a healthy
+			// QueryNode. Try each replica at most once, then return the overload
+			// to the caller instead of cycling through saturated replicas.
+			if errors.Is(err, merr.ErrServiceTooManyRequests) {
+				excludeNodes.Insert(targetNode.NodeID)
+				overloadErr = err
+				return true, err
+			}
 			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
 			return true, lastErr
@@ -312,7 +330,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		return true, nil
 	}
 
-	shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
+	shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
 		log.Warn("failed to get shard leaders", zap.Error(err))
 		return err

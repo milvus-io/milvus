@@ -696,6 +696,122 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorNotRetried() {
 	s.Equal(1, execCount)
 }
 
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsStopsAfterReplicaSweep() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 5
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.Equal(1, execCount)
+	status := merr.Status(err)
+	s.Equal(int32(4), status.GetCode())
+	s.True(status.GetRetriable())
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsFailsOverToAnotherReplica() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			return availableNodes[0], nil
+		})
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, len(nodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if len(executedNodes) == 1 {
+				return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+			}
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Len(executedNodes, 2)
+	s.NotEqual(executedNodes[0], executedNodes[1])
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsTriesEachReplicaOnce() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			return availableNodes[0], nil
+		})
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, len(nodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.Len(executedNodes, len(nodes))
+	s.ElementsMatch([]int64{1, 2}, executedNodes)
+	status := merr.Status(err)
+	s.Equal(int32(4), status.GetCode())
+	s.True(status.GetRetriable())
+}
+
 func (s *LBPolicySuite) TestExecuteOneChannel() {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
