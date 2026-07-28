@@ -242,10 +242,15 @@ func parseStructArrayData(fieldName string, structArray *schemapb.StructArrayFie
 
 // parseVectorArrayData converts schemapb.VectorArray (per-row list of vectors) into the
 // matching ColumnXxxVectorArray. Used for ArrayOfVector sub-fields of struct arrays.
-func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, validData []bool, begin, end int) (Column, error) {
+func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim int64, validData []bool, begin, end int) (Column, error) {
 	rows := va.GetData()
-	// VectorArray.Dim may be 0 in server search responses; fall back to inner VectorField.Dim.
+	// VectorArray.Dim may be 0 in server search responses. Prefer the outer
+	// VectorField dimension, which remains available when every row is null,
+	// then fall back to a non-empty inner row.
 	dim := int(va.GetDim())
+	if dim == 0 {
+		dim = int(outerDim)
+	}
 	if dim == 0 {
 		for _, vf := range rows {
 			if d := int(vf.GetDim()); d > 0 {
@@ -473,7 +478,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		if va == nil {
 			return nil, errFieldDataTypeNotMatch
 		}
-		return parseVectorArrayData(fd.GetFieldName(), va, validData, begin, end)
+		return parseVectorArrayData(fd.GetFieldName(), va, vectors.GetDim(), validData, begin, end)
 
 	case schemapb.DataType_JSON:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetJsonData().GetData(), begin, end, validData, NewColumnJSONBytes, NewNullableColumnJSONBytes)
