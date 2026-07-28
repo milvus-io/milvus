@@ -17,6 +17,8 @@
 package column
 
 import (
+	"slices"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
@@ -94,26 +96,56 @@ func (c *genericColumnBase[T]) Slice(start, end int) Column {
 	return c.slice(start, end)
 }
 
-// WARNING: this methods works only for sparse mode column
 func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	l := c.Len()
+	if start < 0 {
+		start = 0
+	}
 	if start > l {
 		start = l
 	}
 	if end == -1 || end > l {
 		end = l
 	}
+	if start > end {
+		start = end
+	}
+
+	valueStart, valueEnd := start, end
+	if c.nullable && !c.sparseMode {
+		valueStart, valueEnd = compactValueRange(c.indexMapping, start, end)
+	}
 	result := &genericColumnBase[T]{
 		name:       c.name,
 		fieldType:  c.fieldType,
-		values:     c.values[start:end],
+		values:     slices.Clone(c.values[valueStart:valueEnd]),
 		nullable:   c.nullable,
 		sparseMode: c.sparseMode,
 	}
 	if c.nullable {
-		result.validData = c.validData[start:end]
+		result.validData = slices.Clone(c.validData[start:end])
+		if !c.sparseMode {
+			_ = result.validateNullableCompact()
+		}
 	}
 	return result
+}
+
+func compactValueRange(indexMapping []int, start, end int) (int, int) {
+	valueStart := 0
+	valueEnd := 0
+	found := false
+	for _, valueIndex := range indexMapping[start:end] {
+		if valueIndex < 0 {
+			continue
+		}
+		if !found {
+			valueStart = valueIndex
+			found = true
+		}
+		valueEnd = valueIndex + 1
+	}
+	return valueStart, valueEnd
 }
 
 func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
@@ -207,7 +239,10 @@ func (c *genericColumnBase[T]) AppendNull() error {
 	}
 
 	c.validData = append(c.validData, false)
-	if !c.sparseMode {
+	if c.sparseMode {
+		var zero T
+		c.values = append(c.values, zero)
+	} else {
 		c.indexMapping = append(c.indexMapping, -1)
 	}
 	return nil
@@ -235,10 +270,14 @@ func (c *genericColumnBase[T]) SetNullable(nullable bool) {
 	if c.nullable && c.validData == nil {
 		// set valid flag for all exisiting values
 		c.validData = lo.RepeatBy(len(c.values), func(_ int) bool { return true })
+		if !c.sparseMode {
+			_ = c.validateNullableCompact()
+		}
 	}
 
 	if !c.nullable {
 		c.validData = nil
+		c.indexMapping = nil
 	}
 }
 
@@ -299,6 +338,7 @@ func (c *genericColumnBase[T]) CompactNullableValues() {
 		cnt++
 	}
 	c.values = c.values[0:cnt]
+	c.sparseMode = false
 }
 
 func (c *genericColumnBase[T]) ValidCount() int {
