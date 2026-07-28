@@ -5,6 +5,7 @@ go 1.24.9
 require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/bytedance/mockey v1.4.6
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0

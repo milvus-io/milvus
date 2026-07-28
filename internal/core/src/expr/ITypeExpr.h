@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/BloomFilterEnvelope.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
@@ -949,6 +950,42 @@ class MatchExpr : public ITypeFilterExpr {
     std::string struct_name_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
+};
+
+// BloomFilterExpr: approximate membership filter (`bloom_match`).
+// See docs/design-docs/design_docs/20260707-bloom-filter-expression.md.
+//
+// filter_blob_ owns the MBF1-enveloped parquet SBBF blob (copied once out of
+// the transient plan proto at parse time). Physical expressions compiled from
+// this node keep zero-copy views into filter_blob_; they hold this logical
+// expr via shared_ptr, so the blob outlives every per-segment physical expr
+// of the query and is never duplicated per segment.
+class BloomFilterExpr : public ITypeFilterExpr {
+ public:
+    BloomFilterExpr(const ColumnInfo& column, std::string filter_blob)
+        : column_(column), filter_blob_(std::move(filter_blob)) {
+    }
+
+    std::string
+    ToString() const override {
+        // A predicate containing bloom_match is excluded from the FilterBitsNode
+        // result cache (PhyBloomFilterExpr::IsCacheable() returns false), so this
+        // string never has to serve as a collision-resistant cache key — it is
+        // only a debug-log / error summary. Keep it cheap and never dump or hash
+        // the (up to 128 MiB) blob: report the blob length and the declared
+        // element count from the MBF1 header instead.
+        const uint64_t n_declared =
+            milvus::bloom_envelope::DecodeNDeclared(filter_blob_);
+        return fmt::format(
+            "BloomFilterExpr:[Column: {}, BlobBytes: {}, DeclaredElements: {}]",
+            column_.ToString(),
+            filter_blob_.size(),
+            n_declared);
+    }
+
+ public:
+    const ColumnInfo column_;
+    const std::string filter_blob_;
 };
 
 }  // namespace expr

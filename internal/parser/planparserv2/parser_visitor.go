@@ -1451,6 +1451,11 @@ func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
+	if functionName == BloomMatchFunctionName {
+		// bloom_match is compiled on the proxy into a BloomFilterExpr carrying a
+		// pre-built bloom filter blob instead of a generic CallExpr.
+		return v.visitBloomMatch(ctx)
+	}
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
 	for _, param := range ctx.AllExpr() {
@@ -3009,6 +3014,14 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 		return merr.WrapErrParameterInvalidMsg("invalid element expression: %s", ctx.Expr().GetText())
 	}
 
+	// bloom_match is not supported inside an element_filter element expression:
+	// element_filter evaluates the sub-expression per element, while the
+	// physical membership filter consumes scalar-field row offsets.
+	if hasBloomFilterExpr(exprWithType.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"bloom_match is not supported inside element_filter element expressions")
+	}
+
 	// Build ElementFilterExpr proto
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -3099,6 +3112,14 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	predicateExpr := getExpr(predicate)
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+
+	// bloom_match is approximate and cannot safely participate in MATCH_*
+	// predicates whose upper-bound semantics could turn a false positive into a
+	// row-level false negative.
+	if hasBloomFilterExpr(predicateExpr.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"bloom_match is not supported inside %s element predicates", funcName)
 	}
 	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
 	if err != nil {
