@@ -34,6 +34,26 @@
 
 namespace milvus::storage {
 
+namespace {
+// Metadata strings stored inside the file (dim / elementType) are data: a
+// value that fails to parse is a corrupt or incompatible file, not an
+// internal bug. std::stoi throws std::invalid_argument / std::out_of_range,
+// which the ParquetException catch below does not cover, so parse strictly
+// and classify here.
+int
+ParseMetadataInt(const std::string& value, const char* what) {
+    try {
+        return std::stoi(value);
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "malformed {} in parquet field metadata: '{}' ({})",
+                  what,
+                  value,
+                  e.what());
+    }
+}
+}  // namespace
+
 PayloadReader::PayloadReader(const milvus::FieldDataPtr& fieldData)
     : column_type_(fieldData->get_data_type()),
       nullable_(fieldData->IsNullable()) {
@@ -117,7 +137,7 @@ PayloadReader::init(const uint8_t* data,
                         auto metadata = field->metadata();
                         if (metadata->Contains(DIM_KEY)) {
                             auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
-                            dim_ = std::stoi(dim_str);
+                            dim_ = ParseMetadataInt(dim_str, "dim");
                             AssertInfo(
                                 dim_ > 0,
                                 "nullable vector dim must be positive, got {}",
@@ -167,14 +187,15 @@ PayloadReader::init(const uint8_t* data,
                            "'elementType' field");
                 auto element_type_str =
                     metadata->Get(ELEMENT_TYPE_KEY_FOR_ARROW).ValueOrDie();
-                auto element_type_int = std::stoi(element_type_str);
+                auto element_type_int =
+                    ParseMetadataInt(element_type_str, "elementType");
                 element_type = static_cast<DataType>(element_type_int);
 
                 // Get dimension from metadata
                 AssertInfo(metadata->Contains(DIM_KEY),
                            "VectorArray metadata missing required 'dim' field");
                 auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
-                dim_ = std::stoi(dim_str);
+                dim_ = ParseMetadataInt(dim_str, "dim");
                 AssertInfo(
                     dim_ > 0, "VectorArray dim must be positive, got {}", dim_);
             }
