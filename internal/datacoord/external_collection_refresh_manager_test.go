@@ -518,6 +518,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
+	segment10 := newTestExternalRefreshSegment(10, 100, 7)
+	segment10.SchemaVersion = 1
+	segment20 := newTestExternalRefreshSegment(20, 100, 7)
+	segment20.SchemaVersion = 1
+
 	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
@@ -525,7 +530,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+		UpdatedSegments: []*datapb.SegmentInfo{segment10},
 	}, 1)
 	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
@@ -533,7 +538,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
+		UpdatedSegments: []*datapb.SegmentInfo{segment20},
 	}, 2)
 	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
