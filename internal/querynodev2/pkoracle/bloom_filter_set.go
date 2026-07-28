@@ -134,7 +134,7 @@ func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 			int64Value := pk.(*storage.Int64PrimaryKey).Value
 			common.Endian.PutUint64(buf, uint64(int64Value))
 			s.currentStat.PkFilter.Add(buf)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			stringValue := pk.(*storage.VarCharPrimaryKey).Value
 			s.currentStat.PkFilter.AddString(stringValue)
 		default:

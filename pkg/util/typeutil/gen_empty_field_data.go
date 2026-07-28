@@ -301,7 +301,7 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyDoubleFieldData(field), nil
 	case schemapb.DataType_Timestamptz:
 		return genEmptyLongFieldData(field), nil
-	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 		return genEmptyVarCharFieldData(field), nil
 	case schemapb.DataType_Array:
 		return genEmptyArrayFieldData(field), nil

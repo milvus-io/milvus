@@ -212,7 +212,7 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 	return nil
 }
 
-// unmarshalIDs decodes schemapb.IDs: oneof int_id (LongArray, 1) / str_id (StringArray, 2).
+// unmarshalIDs decodes schemapb.IDs: oneof int_id (LongArray, 1) / str_id (StringArray, 2) / uuid_id (UUIDArray, 3).
 func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 	full := b
 	var rest []byte
@@ -241,7 +241,7 @@ func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 			return errMalformed
 		}
 		b = b[vn:]
-		if num == 1 || num == 2 {
+		if num == 1 || num == 2 || num == 3 {
 			if oneofNum == num {
 				return fallbackUnmarshal(full, ids)
 			}
@@ -260,6 +260,12 @@ func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 				return err
 			}
 			ids.IdField = &schemapb.IDs_StrId{StrId: sa}
+		case 3:
+			ua := &schemapb.UUIDArray{}
+			if err := proto.Unmarshal(v, ua); err != nil {
+				return err
+			}
+			ids.IdField = &schemapb.IDs_UuidId{UuidId: ua}
 		default:
 			rest = append(rest, start[:tn+vn]...)
 		}

@@ -80,6 +80,16 @@ func IDColumns(schema *entity.Schema, ids *schemapb.IDs, begin, end int) (Column
 		} else {
 			idColumn = NewColumnVarChar(pkField.Name, data[begin:])
 		}
+	case entity.FieldTypeUUID:
+		data := ids.GetStrId().GetData()
+		if data == nil {
+			return NewColumnUUID(pkField.Name, nil), nil
+		}
+		if end >= 0 {
+			idColumn = NewColumnUUID(pkField.Name, data[begin:end])
+		} else {
+			idColumn = NewColumnUUID(pkField.Name, data[begin:])
+		}
 	default:
 		return nil, fmt.Errorf("unsupported id type %v", pkField.DataType)
 	}
@@ -348,6 +358,9 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 
 	case schemapb.DataType_VarChar:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
+
+	case schemapb.DataType_UUID:
+		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
 
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)

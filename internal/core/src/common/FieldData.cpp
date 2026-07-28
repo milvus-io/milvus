@@ -249,7 +249,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             AssertInfo(array->type()->id() == arrow::Type::type::STRING,
                        "inconsistent data type");
             auto string_array =
@@ -598,7 +599,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             FixedVector<std::string> values(element_count);
             if (default_value.has_value()) {
                 std::fill(
@@ -802,6 +804,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+        case DataType::UUID:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, cap_rows);
         case DataType::JSON:
@@ -837,6 +840,7 @@ InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+        case DataType::UUID:
         case DataType::GEOMETRY:
             return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
         case DataType::JSON:
@@ -898,7 +902,8 @@ ResizeScalarFieldData(const DataType& type,
         }
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             auto inner_field_data =
                 std::dynamic_pointer_cast<FieldData<std::string>>(field_data);
             AssertInfo(inner_field_data != nullptr,

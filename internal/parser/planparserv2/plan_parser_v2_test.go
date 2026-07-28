@@ -28,8 +28,13 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 
 	for name, value := range schemapb.DataType_value {
 		dataType := schemapb.DataType(value)
+		// Use an offset for types >= 30 to avoid colliding with hardcoded fields (130-135)
+		fid := int64(100 + value)
+		if value >= 30 {
+			fid += 100 // shift to 230+ range
+		}
 		newField := &schemapb.FieldSchema{
-			FieldID: int64(100 + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
+			FieldID: fid, Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
 		}
 		if dataType == schemapb.DataType_Array {
 			newField.ElementType = schemapb.DataType_Int64
@@ -47,6 +52,11 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		FieldID: 131, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_VarChar,
+	})
+
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 135, Name: "UUIDTestField", IsPrimaryKey: false, Description: "uuid field",
+		DataType: schemapb.DataType_UUID,
 	})
 
 	structArrayField := &schemapb.StructArrayFieldSchema{
@@ -119,6 +129,7 @@ func TestExpr_Term(t *testing.T) {
 		`DoubleField in [11.0, 12.0]`,
 		`StringField in ["str13", "str14"]`,
 		`VarCharField in ["str15", "str16"]`,
+		`UUIDTestField in ["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"]`,
 		`FloatField in [1373, 115]`,
 		`Int64Field in [17]`,
 		`Int64Field in []`,

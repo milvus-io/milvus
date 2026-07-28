@@ -661,6 +661,35 @@ func TestValidatePrimaryKey(t *testing.T) {
 	}))
 }
 
+func TestValidatePrimaryKey_AcceptsUUID(t *testing.T) {
+	uuidField := &schemapb.FieldSchema{
+		Name:         "uuidField",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_UUID,
+	}
+
+	assert.NoError(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:   "coll1",
+		Fields: []*schemapb.FieldSchema{uuidField},
+	}))
+}
+
+func TestValidateFieldAutoID_RejectsUUID(t *testing.T) {
+	uuidField := &schemapb.FieldSchema{
+		Name:         "uuidField",
+		IsPrimaryKey: true,
+		AutoID:       true,
+		DataType:     schemapb.DataType_UUID,
+	}
+
+	err := ValidateFieldAutoID(&schemapb.CollectionSchema{
+		Name:   "coll1",
+		Fields: []*schemapb.FieldSchema{uuidField},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "autoID is not supported for UUID")
+}
+
 func TestValidateFieldType(t *testing.T) {
 	type testCase struct {
 		dt       schemapb.DataType
