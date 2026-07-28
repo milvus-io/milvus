@@ -38,6 +38,7 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "storage/StatusToErrorCode.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/Schema.h"

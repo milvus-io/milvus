@@ -245,15 +245,23 @@ KnowhereStatusToErrorCode(knowhere::Status status) {
         case knowhere::Status::out_of_range_in_json:
         case knowhere::Status::type_conflict_in_json:
         case knowhere::Status::invalid_metric_type:
-        case knowhere::Status::empty_index:
-        case knowhere::Status::index_not_trained:
-        case knowhere::Status::index_already_trained:
         case knowhere::Status::invalid_value_in_json:
         case knowhere::Status::arithmetic_overflow:
-        case knowhere::Status::invalid_binary_set:
         case knowhere::Status::invalid_index_error:
         case knowhere::Status::invalid_cluster_error:
             return ErrorCode::InvalidParameter;
+        // Index lifecycle/state failures are server-side, not the caller's
+        // request: empty_index is "index not loaded" (e.g. DiskANN), and
+        // (not|already)_trained are internal build-state violations. Blaming
+        // the request would make lb_policy stop replica failover.
+        case knowhere::Status::empty_index:
+        case knowhere::Status::index_not_trained:
+        case knowhere::Status::index_already_trained:
+            return ErrorCode::KnowhereError;
+        // A binary set that fails to deserialize is a corrupt/incompatible
+        // persisted index, same bucket as invalid_serialized_index_type.
+        case knowhere::Status::invalid_binary_set:
+            return ErrorCode::DataFormatBroken;
         // Capability gaps (feature / CPU-feature not available): the request is
         // fine, so this is Unsupported, not malformed input.
         case knowhere::Status::not_implemented:
