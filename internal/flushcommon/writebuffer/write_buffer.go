@@ -1763,6 +1763,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	var deleteMemSize int64
 	var tsFrom, tsTo uint64
 
+	if buffer := wb.buffers[segmentID]; buffer != nil {
+		insertMemSize = buffer.insertBuffer.size
+		deleteMemSize = buffer.deltaBuffer.size
+	}
 	insert, bm25, delta, schema, timeRange, startPos := wb.yieldBuffer(segmentID)
 	if timeRange != nil {
 		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
@@ -1776,10 +1780,6 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 	for _, chunk := range insert {
 		batchSize += int64(chunk.GetRowNum())
-		insertMemSize += int64(chunk.GetMemorySize())
-	}
-	if delta != nil {
-		deleteMemSize += delta.Size()
 	}
 
 	actions = append(actions, metacache.StartSyncing(batchSize))

@@ -125,9 +125,9 @@ func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(
 	return _c
 }
 
-// DropChannel provides a mock function with given fields: channel
-func (_m *MockBufferManager) DropChannel(channel string) {
-	_m.Called(channel)
+// DropChannel provides a mock function with given fields: ctx, channel
+func (_m *MockBufferManager) DropChannel(ctx context.Context, channel string) {
+	_m.Called(ctx, channel)
 }
 
 // MockBufferManager_DropChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropChannel'
@@ -136,14 +136,15 @@ type MockBufferManager_DropChannel_Call struct {
 }
 
 // DropChannel is a helper method to define mock.On call
+//   - ctx context.Context
 //   - channel string
-func (_e *MockBufferManager_Expecter) DropChannel(channel interface{}) *MockBufferManager_DropChannel_Call {
-	return &MockBufferManager_DropChannel_Call{Call: _e.mock.On("DropChannel", channel)}
+func (_e *MockBufferManager_Expecter) DropChannel(ctx interface{}, channel interface{}) *MockBufferManager_DropChannel_Call {
+	return &MockBufferManager_DropChannel_Call{Call: _e.mock.On("DropChannel", ctx, channel)}
 }
 
-func (_c *MockBufferManager_DropChannel_Call) Run(run func(channel string)) *MockBufferManager_DropChannel_Call {
+func (_c *MockBufferManager_DropChannel_Call) Run(run func(ctx context.Context, channel string)) *MockBufferManager_DropChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -153,7 +154,7 @@ func (_c *MockBufferManager_DropChannel_Call) Return() *MockBufferManager_DropCh
 	return _c
 }
 
-func (_c *MockBufferManager_DropChannel_Call) RunAndReturn(run func(string)) *MockBufferManager_DropChannel_Call {
+func (_c *MockBufferManager_DropChannel_Call) RunAndReturn(run func(context.Context, string)) *MockBufferManager_DropChannel_Call {
 	_c.Run(run)
 	return _c
 }
@@ -705,7 +706,8 @@ func (_c *MockBufferManager_Stop_Call) RunAndReturn(run func()) *MockBufferManag
 func NewMockBufferManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockBufferManager {
+},
+) *MockBufferManager {
 	mock := &MockBufferManager{}
 	mock.Mock.Test(t)
 

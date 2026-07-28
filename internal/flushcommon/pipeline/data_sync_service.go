@@ -302,7 +302,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	nodeList = append(nodeList, ddNode)
 
 	// 2.writeNode
-	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
+	writeNode, err := newWriteNode(ds.ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}

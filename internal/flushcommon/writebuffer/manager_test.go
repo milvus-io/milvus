@@ -83,6 +83,27 @@ func (s *ManagerSuite) TestRegister() {
 	s.ErrorIs(err, merr.ErrChannelReduplicate)
 }
 
+func (s *ManagerSuite) TestDropChannelPropagatesBoundedContext() {
+	param := paramtable.Get()
+	param.Save(param.DataNodeCfg.GracefulStopTimeout.Key, "2")
+	defer param.Reset(param.DataNodeCfg.GracefulStopTimeout.Key)
+
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "caller")
+	wb := NewMockWriteBuffer(s.T())
+	wb.EXPECT().Close(mock.MatchedBy(func(dropCtx context.Context) bool {
+		deadline, ok := dropCtx.Deadline()
+		remaining := time.Until(deadline)
+		return ok && dropCtx.Value(contextKey{}) == "caller" && remaining > 0 && remaining <= 2*time.Second
+	}), true).Return().Once()
+	s.manager.buffers.Insert(s.channelName, wb)
+
+	s.manager.DropChannel(ctx, s.channelName)
+
+	_, loaded := s.manager.buffers.Get(s.channelName)
+	s.False(loaded)
+}
+
 func (s *ManagerSuite) TestFlushSegments() {
 	manager := s.manager
 	s.Run("channel_not_found", func() {

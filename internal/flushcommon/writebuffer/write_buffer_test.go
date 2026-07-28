@@ -2,6 +2,7 @@ package writebuffer
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -162,6 +163,48 @@ func (s *WriteBufferSuite) TestOrdinaryPayloadCountsTowardFlushCapacity() {
 		s.FailNow("payload release did not unblock flush capacity")
 	}
 	s.EqualValues(40, s.wb.MemorySize())
+}
+
+func (s *WriteBufferSuite) TestBM25StatsCountTowardOrdinaryPayload() {
+	segmentID := int64(1108)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1, 2: 1, 3: 1})
+	statsBuffer := newStatsBuffer()
+	statsSize := statsBuffer.Buffer(map[int64]*storage.BM25Stats{101: stats})
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID: segmentID,
+		insertBuffer: &InsertBuffer{
+			BufferBase:  BufferBase{size: statsSize},
+			collSchema:  s.collSchema,
+			statsBuffer: statsBuffer,
+		},
+		deltaBuffer: NewDeltaBuffer(),
+	}
+	s.wb.checkpoint = &msgpb.MsgPosition{Timestamp: 200}
+	bytesPerEntry := &paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry
+	paramtable.Get().Save(bytesPerEntry.Key, strconv.FormatInt(bytesPerEntry.GetAsInt64()+1, 10))
+	defer paramtable.Get().Reset(bytesPerEntry.Key)
+	s.NotEqual(statsSize, stats.MemSize())
+	s.Equal(statsSize, s.wb.MemorySize())
+
+	s.wb.mut.Lock()
+	task, err := s.wb.getSyncTask(context.Background(), segmentID)
+	s.wb.mut.Unlock()
+	s.Require().NoError(err)
+	ordinaryTask := task.(*syncmgr.SyncTask)
+
+	s.Equal(statsSize, ordinaryTask.InsertPayloadBytes())
+	s.Equal(statsSize, ordinaryTask.PayloadBytes())
+	s.Equal(statsSize, s.wb.MemorySize())
 }
 
 func (s *WriteBufferSuite) TestGrowingObserverPanicHappensAfterLifecycleCleanup() {

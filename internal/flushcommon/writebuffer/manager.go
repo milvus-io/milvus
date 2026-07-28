@@ -38,7 +38,7 @@ type BufferManager interface {
 	// RemoveChannel removes a write buffer from manager.
 	RemoveChannel(channel string)
 	// DropChannel remove write buffer and perform drop.
-	DropChannel(channel string)
+	DropChannel(ctx context.Context, channel string)
 	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
 	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error
@@ -343,14 +343,19 @@ func (m *bufferManager) RemoveChannel(channel string) {
 
 // DropChannel removes channel WriteBuffer and process `DropChannel`
 // this method will save all buffered data
-func (m *bufferManager) DropChannel(channel string) {
+func (m *bufferManager) DropChannel(ctx context.Context, channel string) {
 	buf, loaded := m.buffers.GetAndRemove(channel)
 	if !loaded {
 		mlog.Warn(context.TODO(), "failed to drop channel, channel not maintained in manager", mlog.String("channel", channel))
 		return
 	}
 
-	buf.Close(context.Background(), true)
+	dropCtx, cancel := context.WithTimeout(
+		ctx,
+		paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second),
+	)
+	defer cancel()
+	buf.Close(dropCtx, true)
 }
 
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {
