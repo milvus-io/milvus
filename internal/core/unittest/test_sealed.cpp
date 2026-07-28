@@ -27,9 +27,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -59,6 +60,7 @@
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/SkipIndex.h"
+#include "index/StringIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
@@ -177,8 +179,18 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
     }
 
     arrow::Result<std::vector<uint64_t>>
-    get_chunk_size() override {
+    get_chunk_estimated_size() override {
         return std::vector<uint64_t>{1};
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string&) override {
+        return std::vector<uint64_t>{1};
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return std::vector<std::vector<uint64_t>>{{1}};
     }
 
     arrow::Result<std::vector<uint64_t>>
@@ -332,6 +344,62 @@ class SealedTest : public ::testing::TestWithParam<Param> {
     SetUp() override {
     }
 };
+
+TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text_fid = schema->AddDebugVarcharField(FieldName("text"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/true,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+
+    std::vector<std::string> values = {
+        "alpha", "unused", "alpha", "beta", "unused", "gamma"};
+    std::array<bool, 6> valid = {true, false, true, true, false, true};
+
+    auto scalar_index = index::CreateStringIndexSort({});
+    scalar_index->Build(values.size(), values.data(), valid.data());
+
+    LoadIndexInfo load_info;
+    load_info.field_id = text_fid.get();
+    load_info.field_type = DataType::VARCHAR;
+    load_info.index_params = GenIndexParams(scalar_index.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("nullable-text", std::move(scalar_index));
+
+    auto dataset = DataGen(schema, values.size());
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 51599);
+    LoadGeneratedDataIntoSegment(
+        dataset, segment.get(), false, {text_fid.get()});
+    segment->LoadIndex(load_info);
+
+    ASSERT_NO_THROW(segment->CreateTextIndex(text_fid));
+    auto text_index = segment->GetTextIndex(nullptr, text_fid);
+
+    auto nulls = text_index.get()->IsNull();
+    ASSERT_EQ(nulls.size(), values.size());
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+    EXPECT_FALSE(nulls[3]);
+    EXPECT_TRUE(nulls[4]);
+    EXPECT_FALSE(nulls[5]);
+
+    auto alpha = text_index.get()->MatchQuery("alpha", 1);
+    ASSERT_EQ(alpha.size(), values.size());
+    EXPECT_TRUE(alpha[0]);
+    EXPECT_FALSE(alpha[1]);
+    EXPECT_TRUE(alpha[2]);
+    EXPECT_FALSE(alpha[3]);
+    EXPECT_FALSE(alpha[4]);
+    EXPECT_FALSE(alpha[5]);
+}
 
 TEST(Sealed, without_predicate) {
     auto schema = std::make_shared<Schema>();
@@ -1951,37 +2019,37 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                     {pk_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index = segment->GetSkipIndex();
     bool equal_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
     bool equal_12_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
     bool equal_10_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
     ASSERT_FALSE(equal_5_skip);
     ASSERT_TRUE(equal_12_skip);
     ASSERT_FALSE(equal_10_skip);
     bool less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
     bool less_than_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
     ASSERT_TRUE(less_than_1_skip);
     ASSERT_FALSE(less_than_5_skip);
     bool less_equal_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
     bool less_equal_than_15_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
     ASSERT_FALSE(less_equal_than_1_skip);
     ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, 10);
-    bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, 5);
     ASSERT_TRUE(greater_than_10_skip);
     ASSERT_FALSE(greater_than_5_skip);
-    bool greater_equal_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_equal_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterEqual, 10);
-    bool greater_equal_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_equal_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterEqual, 5);
     ASSERT_FALSE(greater_equal_than_10_skip);
     ASSERT_FALSE(greater_equal_than_5_skip);
@@ -1998,8 +2066,9 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int32_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
+    skip_index = segment->GetSkipIndex();
     less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
+        skip_index->CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
     ASSERT_TRUE(less_than_1_skip);
 
     //test for int16
@@ -2014,8 +2083,9 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int16_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    bool less_than_12_skip =
-        skip_index.CanSkipUnaryRange<int16_t>(i16_fid, 0, OpType::LessThan, 12);
+    skip_index = segment->GetSkipIndex();
+    bool less_than_12_skip = skip_index->CanSkipUnaryRange<int16_t>(
+        i16_fid, 0, OpType::LessThan, 12);
     ASSERT_FALSE(less_than_12_skip);
 
     //test for int8
@@ -2030,7 +2100,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int8_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
+    skip_index = segment->GetSkipIndex();
+    bool greater_than_12_skip = skip_index->CanSkipUnaryRange<int8_t>(
         i8_fid, 0, OpType::GreaterThan, 12);
     ASSERT_TRUE(greater_than_12_skip);
 
@@ -2047,7 +2118,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {float_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
+    skip_index = segment->GetSkipIndex();
+    greater_than_10_skip = skip_index->CanSkipUnaryRange<float>(
         float_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 
@@ -2064,7 +2136,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {double_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    greater_than_10_skip = skip_index.CanSkipUnaryRange<double>(
+    skip_index = segment->GetSkipIndex();
+    greater_than_10_skip = skip_index->CanSkipUnaryRange<double>(
         double_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 }
@@ -2094,7 +2167,8 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
                                                     {pk_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
     ASSERT_TRUE(
@@ -2137,7 +2211,8 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
                                                     {int64s_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     bool equal_5_skip =
         skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
     bool equal_4_skip =
@@ -2207,7 +2282,8 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
                                                     {int64s_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
     ASSERT_TRUE(
@@ -2249,7 +2325,8 @@ TEST(Sealed, SkipIndexSkipStringRange) {
                                                     {string_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
         string_fid, 0, OpType::Equal, "w"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
@@ -3863,6 +3940,115 @@ TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
     EXPECT_TRUE(segment->HasFieldData(pk_id));
 }
 
+TEST(SealedSegmentReopen, LazySchemaReopenFailsFastWhileReadLeaseActive) {
+    auto old_schema = std::make_shared<Schema>();
+    auto old_pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(old_pk_id);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_field = new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto read_lease = sealed->AcquireReadLease(folly::CancellationToken());
+    auto started = std::chrono::steady_clock::now();
+    bool rejected = false;
+    try {
+        sealed->LazyCheckSchema(new_schema, nullptr);
+    } catch (const SegcoreError& error) {
+        rejected = true;
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyOtherException);
+        EXPECT_NE(std::string(error.what()).find("segment read gate busy"),
+                  std::string::npos);
+    }
+    auto elapsed = std::chrono::steady_clock::now() - started;
+
+    EXPECT_TRUE(rejected);
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+    EXPECT_FALSE(sealed->TestReadGateWriterPending());
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 100);
+
+    // The failed lazy publisher must leave the gate open.
+    auto second_read_lease =
+        sealed->AcquireReadLease(folly::CancellationToken());
+    EXPECT_TRUE(second_read_lease->valid());
+    read_lease.reset();
+    second_read_lease.reset();
+
+    EXPECT_NO_THROW(sealed->LazyCheckSchema(new_schema, nullptr));
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 200);
+    EXPECT_TRUE(sealed->HasFieldData(new_field));
+}
+
+TEST(SealedSegmentReopen, LazySchemaReopenDoesNotWaitForReopenMutex) {
+    auto old_schema = std::make_shared<Schema>();
+    auto old_pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(old_pk_id);
+    old_schema->set_schema_version(100);
+
+    auto middle_schema = std::make_shared<Schema>();
+    auto middle_pk_id = middle_schema->AddDebugField("pk", DataType::INT64);
+    middle_schema->AddDebugField("middle_field", DataType::INT64);
+    middle_schema->set_primary_field_id(middle_pk_id);
+    middle_schema->set_schema_version(200);
+
+    auto newest_schema = std::make_shared<Schema>();
+    auto newest_pk_id = newest_schema->AddDebugField("pk", DataType::INT64);
+    newest_schema->AddDebugField("middle_field", DataType::INT64);
+    newest_schema->AddDebugField("newest_field", DataType::INT64);
+    newest_schema->set_primary_field_id(newest_pk_id);
+    newest_schema->set_schema_version(300);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto read_lease = sealed->AcquireReadLease(folly::CancellationToken());
+    std::thread explicit_reopen([&] { sealed->Reopen(middle_schema); });
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!sealed->TestReadGateWriterPending() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    bool writer_pending = sealed->TestReadGateWriterPending();
+
+    bool rejected = false;
+    auto started = std::chrono::steady_clock::now();
+    if (writer_pending) {
+        try {
+            sealed->LazyCheckSchema(newest_schema, nullptr);
+        } catch (const SegcoreError& error) {
+            rejected = true;
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyOtherException);
+            EXPECT_NE(std::string(error.what()).find("segment read gate busy"),
+                      std::string::npos);
+        }
+    }
+    auto elapsed = std::chrono::steady_clock::now() - started;
+
+    // Always release and join before asserting so a failure cannot leave a
+    // joinable thread behind.
+    read_lease.reset();
+    explicit_reopen.join();
+
+    ASSERT_TRUE(writer_pending);
+    EXPECT_TRUE(rejected);
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 200);
+
+    EXPECT_NO_THROW(sealed->LazyCheckSchema(newest_schema, nullptr));
+    EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 300);
+}
+
 TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->AddDebugField("pk", DataType::INT64);
@@ -3965,7 +4151,12 @@ TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     proto::segcore::SegmentLoadInfo stale_proto =
         sealed->TestGetSegmentLoadInfo()->GetProto();
     milvus::OpContext op_ctx;
-    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, stale_proto, stale_schema));
+    try {
+        sealed->Reopen(&op_ctx, stale_proto, stale_schema);
+        FAIL() << "stale reopen should fail";
+    } catch (SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), static_cast<ErrorCode>(2046));
+    }
 
     auto snapshot = sealed->TestGetLoadInfoSnapshot();
     EXPECT_TRUE(snapshot->HasFieldInSchema(new_field));
@@ -4174,6 +4365,101 @@ TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
 
     EXPECT_TRUE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+}
+
+TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto payload = schema->AddDebugVarcharField(FieldName("payload"),
+                                                DataType::VARCHAR,
+                                                1024,
+                                                /*nullable=*/false,
+                                                /*enable_match=*/false,
+                                                /*enable_analyzer=*/false,
+                                                analyzer_params,
+                                                std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 8;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_state->runtime, nullptr);
+    ASSERT_NE(old_state->runtime->skip_index, nullptr);
+    EXPECT_EQ(old_state->runtime->row_count, row_count);
+    EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
+    ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
+    auto old_avg_size =
+        old_state->runtime->variable_fields_avg_size.at(payload).second;
+
+    auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    ASSERT_NE(next_runtime->skip_index, old_state->runtime->skip_index);
+    next_runtime->row_count = row_count + 1;
+    next_runtime->mmap_field_ids.insert(payload);
+    next_runtime->variable_fields_avg_size[payload] = {row_count + 1, 123};
+    next_runtime->skip_index->Erase(payload);
+    sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
+
+    auto new_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_state->runtime, nullptr);
+    EXPECT_EQ(new_state->runtime->row_count, row_count + 1);
+    EXPECT_EQ(new_state->runtime->mmap_field_ids.count(payload), 1);
+    EXPECT_EQ(new_state->runtime->variable_fields_avg_size.at(payload).second,
+              123);
+
+    EXPECT_EQ(old_state->runtime->row_count, row_count);
+    EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
+    EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload).second,
+              old_avg_size);
+    EXPECT_NE(old_state->runtime->skip_index, new_state->runtime->skip_index);
+}
+
+TEST(SealedSegmentCowState,
+     DropFieldDataPreservesAvgSizeForSchemaRetainedField) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto payload = schema->AddDebugVarcharField(FieldName("payload"),
+                                                DataType::VARCHAR,
+                                                1024,
+                                                /*nullable=*/false,
+                                                /*enable_match=*/false,
+                                                /*enable_analyzer=*/false,
+                                                analyzer_params,
+                                                std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 8;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->set_field_avg_size(payload, 1, 128);
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_state->runtime, nullptr);
+    ASSERT_EQ(old_state->runtime->fields.count(payload), 1);
+    ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
+    auto old_avg_info =
+        old_state->runtime->variable_fields_avg_size.at(payload);
+    ASSERT_GT(old_avg_info.second, 0);
+
+    sealed->DropFieldData(payload);
+
+    auto new_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_state->runtime, nullptr);
+    EXPECT_EQ(new_state->runtime->fields.count(payload), 0);
+    ASSERT_EQ(new_state->runtime->variable_fields_avg_size.count(payload), 1);
+    EXPECT_EQ(new_state->runtime->variable_fields_avg_size.at(payload),
+              old_avg_info);
+
+    EXPECT_EQ(old_state->runtime->fields.count(payload), 1);
+    EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload),
+              old_avg_info);
 }
 
 TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
@@ -5061,14 +5347,6 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
     ASSERT_EQ(published->runtime->json_indices.size(), 1);
     EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
     EXPECT_TRUE(sealed->HasJsonIndex(json));
-
-    sealed->DropJSONIndex(json, "a");
-    auto after_drop = sealed->TestGetPublishedStateSnapshot();
-    EXPECT_TRUE(after_drop->runtime->json_indices.empty());
-    EXPECT_FALSE(sealed->HasJsonIndex(json));
-
-    ASSERT_EQ(published->runtime->json_indices.size(), 1);
-    EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
 }
 
 TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {

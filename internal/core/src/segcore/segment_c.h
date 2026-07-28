@@ -249,14 +249,6 @@ LoadDeletedRecord(CSegmentInterface c_segment,
 CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 
-CStatus
-DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
-
-CStatus
-DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
-                           int64_t field_id,
-                           const char* nested_path);
-
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
 ExistPk(CSegmentInterface c_segment,

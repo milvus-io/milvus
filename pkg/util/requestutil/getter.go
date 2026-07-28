@@ -168,16 +168,26 @@ type StatusGetter interface {
 	GetStatus() *commonpb.Status
 }
 
+type AlterStatusGetter interface {
+	GetAlterStatus() *commonpb.Status
+}
+
 func GetStatusFromResponse(resp interface{}) (*commonpb.Status, bool) {
 	status, ok := resp.(*commonpb.Status)
 	if ok {
-		return status, true
+		return status, status != nil
 	}
 	getter, ok := resp.(StatusGetter)
-	if !ok {
-		return nil, false
+	if ok {
+		status := getter.GetStatus()
+		return status, status != nil
 	}
-	return getter.GetStatus(), true
+	alterGetter, ok := resp.(AlterStatusGetter)
+	if ok {
+		status := alterGetter.GetAlterStatus()
+		return status, status != nil
+	}
+	return nil, false
 }
 
 type ConsistencyLevelGetter interface {
@@ -242,13 +252,7 @@ func ParseMetricLabel(resp any, err error) (status string, cause string) {
 	// reconstruct err = merr.Error(status) from that same response, which
 	// otherwise routes every processed REST failure into the rejected buckets
 	// and leaves the fail series blind to the entire REST surface.
-	var st *commonpb.Status
-	switch resp := resp.(type) {
-	case interface{ GetStatus() *commonpb.Status }:
-		st = resp.GetStatus()
-	case *commonpb.Status:
-		st = resp
-	}
+	st, _ := GetStatusFromResponse(resp)
 	if st != nil && !merr.Ok(st) {
 		// Client cancellation is neither party's failure, but it stays a "fail"
 		// like it was before the cause dimension existed; cause is what lets a

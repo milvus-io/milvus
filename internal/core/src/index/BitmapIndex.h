@@ -77,6 +77,13 @@ class BitmapIndex : public ScalarIndex<T> {
         return ScalarIndexType::BITMAP;
     }
 
+    // Reverse_Lookup is O(1) only when the offset cache is built; otherwise it
+    // linearly scans all distinct postings (O(cardinality)) per row.
+    bool
+    SupportFastReverseLookup() const override {
+        return use_offset_cache_;
+    }
+
     bool
     IsNestedIndex() const override {
         return is_nested_index_;

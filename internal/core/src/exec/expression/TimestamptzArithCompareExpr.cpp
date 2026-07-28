@@ -106,8 +106,17 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
+        if (data == nullptr) {
+            return;
+        }
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
+            if (valid_data != nullptr && !valid_data[i]) {
+                // NULL never matches, under either polarity (three-valued
+                // logic); do not evaluate the storage placeholder value.
+                res[i] = valid_res[i] = false;
+                continue;
+            }
             const int64_t current_ts_us = data[i];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
@@ -121,7 +130,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
             if (::gmtime_r(&epoch_sec, &tm_buf) == nullptr) {
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "gmtime_r failed for timestamp {} us",
                           current_ts_us);
             }
@@ -196,7 +205,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                     match = (final_us <= compare_us);
                     break;
                 default:  // Should not happen
-                    ThrowInfo(OpTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "Unsupported compare op for "
                               "timestamptz_arith_compare_expr");
             }

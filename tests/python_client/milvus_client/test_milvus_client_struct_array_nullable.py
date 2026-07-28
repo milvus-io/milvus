@@ -1096,6 +1096,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             schema=schema,
             index_params=index_params,
             consistency_level="Strong",
+            properties={"collection.autocompaction.enabled": "false"},
         )
 
         def profile(row_id, length, tag_prefix="keep"):

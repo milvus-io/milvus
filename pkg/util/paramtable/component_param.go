@@ -54,6 +54,12 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
+	// DefaultMaxBloomFilterPlanSize is the aggregate serialized size budget for
+	// bloom-bearing plans in one Search, HybridSearch, or Query request. It is
+	// deliberately below the default 256 MiB proxy gRPC client send limit so
+	// placeholders and the rest of the internal request retain ample headroom.
+	DefaultMaxBloomFilterPlanSize = 128 * 1024 * 1024
+
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
 	DefaultPQCodeBudgetGBRatio      = 0.125
@@ -1099,7 +1105,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.EnableGrowingSourceFlush = ParamItem{
 		Key:          "common.storage.enableGrowingSourceFlush",
 		Version:      "3.0.0",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Doc:          "enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path",
 		Export:       true,
 	}
@@ -2081,6 +2087,8 @@ type proxyConfig struct {
 	MaxFieldNum                       ParamItem `refreshable:"true"`
 	MaxVectorFieldNum                 ParamItem `refreshable:"true"`
 	MaxShardNum                       ParamItem `refreshable:"true"`
+	MaxBloomFilterSize                ParamItem `refreshable:"true"`
+	MaxBloomFilterPlanSize            ParamItem `refreshable:"true"`
 	MaxDimension                      ParamItem `refreshable:"true"`
 	GinLogging                        ParamItem `refreshable:"false"`
 	GinLogSkipPaths                   ParamItem `refreshable:"false"`
@@ -2254,6 +2262,45 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxShardNum.Init(base.mgr)
+
+	p.MaxBloomFilterSize = ParamItem{
+		Key: "proxy.maxBloomFilterSize",
+		// 32 MiB. Budgets the SBBF body; the fixed 32-byte MBF1 header is allowed
+		// on top (see validateBloomFilterBlob). The body is always a power of two,
+		// so a full 32 MiB body fits under this cap and admits ~24M int64 members
+		// at the default FPR — budgeting the whole blob at 32 MiB would instead
+		// reject a 32 MiB body and halve the ceiling to a 16 MiB body.
+		DefaultValue: "33554432",
+		Version:      "3.0.0",
+		Doc: "The maximum byte size of the SBBF body in a client pre-built bloom_match " +
+			"filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on " +
+			"top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
+			"so this bounds per-request memory/network amplification. Must not exceed the MBF1 " +
+			"format cap (128 MiB); the default admits ~24M int64 members at the default FPR " +
+			"while staying under the default gRPC receive limit.",
+		Export: true,
+	}
+	p.MaxBloomFilterSize.Init(base.mgr)
+
+	p.MaxBloomFilterPlanSize = ParamItem{
+		Key:          "proxy.maxBloomFilterPlanSize",
+		DefaultValue: strconv.Itoa(DefaultMaxBloomFilterPlanSize),
+		Version:      "3.0.0",
+		Doc: "The maximum aggregate serialized byte size of bloom-bearing expression plans " +
+			"in one Search, HybridSearch, or Query request. The proxy checks the assembled plans " +
+			"before proto.Marshal, so repeated references to one bloom_match template value and " +
+			"Bloom filters across hybrid sub-searches cannot amplify past the configured budget " +
+			"before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.",
+		Export:       true,
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			if n, err := strconv.Atoi(v); err != nil || n <= 0 {
+				return strconv.Itoa(DefaultMaxBloomFilterPlanSize)
+			}
+			return v
+		},
+	}
+	p.MaxBloomFilterPlanSize.Init(base.mgr)
 
 	p.MaxDimension = ParamItem{
 		Key:          "proxy.maxDimension",
@@ -2766,8 +2813,9 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 
-	DistributionRequestTimeout ParamItem `refreshable:"true"`
-	HeartBeatWarningLag        ParamItem `refreshable:"true"`
+	DistributionRequestTimeout  ParamItem `refreshable:"true"`
+	HeartBeatWarningLag         ParamItem `refreshable:"true"`
+	EnableDataDistributionDelta ParamItem `refreshable:"true"`
 
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
@@ -3334,6 +3382,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.HeartBeatWarningLag.Init(base.mgr)
 
+	p.EnableDataDistributionDelta = ParamItem{
+		Key:          "queryCoord.enableDataDistributionDelta",
+		Version:      "2.6.19",
+		DefaultValue: "true",
+		Doc:          "whether querycoord requests delta data distribution reports from querynodes",
+		Export:       true,
+	}
+	p.EnableDataDistributionDelta.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -3564,6 +3621,7 @@ type queryNodeConfig struct {
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache           ParamItem `refreshable:"false"`
+	EnableGISSplitFusion          ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -4268,6 +4326,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.EnableGeometryCache.Init(base.mgr)
+
+	p.EnableGISSplitFusion = ParamItem{
+		Key:          "queryNode.segcore.enableGISSplitFusion",
+		Version:      "2.6.6",
+		DefaultValue: "false",
+		Doc:          "Enable GIS filter coarse/refine split + same-column fusion optimization",
+		Export:       true,
+	}
+	p.EnableGISSplitFusion.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
@@ -5250,6 +5317,7 @@ type dataCoordConfig struct {
 
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
+	IndexStorePathVersion               ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -5970,6 +6038,17 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
+
+	p.IndexStorePathVersion = ParamItem{
+		Key:          "dataCoord.index.storePathVersion",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Object storage layout for newly built segment index files. 0: index_files/{buildID}/{indexVersion}/{partitionID}/{segmentID}, 1: index_v1/{collectionID}/{partitionID}/{segmentID}/{buildID}/{indexVersion}. Any other value falls back to 0.
+Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
+Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.`,
+		Export: true,
+	}
+	p.IndexStorePathVersion.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

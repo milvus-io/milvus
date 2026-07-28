@@ -4568,8 +4568,85 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldNormal() {
 			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Array", "elementDataType": "Int64", "nullable": true}}`),
 		},
 	}
-	s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+		addRequest := req.GetAction().GetAddRequest()
+		return req.GetDbName() == DefaultDbName &&
+			req.GetCollectionName() == "book" &&
+			len(addRequest.GetFieldInfos()) == 1 &&
+			addRequest.GetFieldInfos()[0].GetFieldSchema().GetName() == "new_field" &&
+			len(addRequest.GetFuncSchema()) == 0
+	})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Times(len(addFieldTestCases))
 	validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
+}
+
+func (s *AddCollectionFieldSuite) TestDropCollectionField() {
+	s.Run("field_name", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			dropRequest := req.GetAction().GetDropRequest()
+			return req.GetDbName() == "db" && req.GetCollectionName() == "book" && dropRequest.GetFieldName() == "old_field"
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldName":"old_field"}`),
+			},
+		}, false)
+	})
+
+	s.Run("field_id", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			dropRequest := req.GetAction().GetDropRequest()
+			return req.GetDbName() == "db" && req.GetCollectionName() == "book" && dropRequest.GetFieldId() == 101
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldId":101}`),
+			},
+		}, false)
+	})
+
+	s.Run("bad_request", func() {
+		dropFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book"}`),
+				errCode:     1100,
+				errMsg:      "exactly one of fieldName or fieldId is required: invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldName":"old_field","fieldId":101}`),
+				errCode:     1100,
+				errMsg:      "exactly one of fieldName or fieldId is required: invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, DropAction),
+				requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldId":0}`),
+				errCode:     1100,
+				errMsg:      "fieldId must be greater than 0: invalid parameter",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, dropFieldTestCases, false)
+	})
+}
+
+func (s *AddCollectionFieldSuite) TestDropCollectionFieldAlterStatusError() {
+	dropFieldTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionFieldCategory, DropAction),
+			requestBody: []byte(`{"dbName":"db","collectionName":"book","fieldName":"server_error"}`),
+			errCode:     5,
+			errMsg:      "service internal error: mock error",
+		},
+	}
+	s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+		return req.GetDbName() == "db" && req.GetCollectionName() == "book" && req.GetAction().GetDropRequest().GetFieldName() == "server_error"
+	})).Return(&milvuspb.AlterCollectionSchemaResponse{
+		AlterStatus: merr.Status(merr.WrapErrServiceInternal("mock error")),
+	}, nil).Once()
+
+	validateRequestBodyTestCases(s.T(), s.testEngine, dropFieldTestCases, false)
 }
 
 func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldNormal() {
@@ -4787,7 +4864,9 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 				errMsg:      "service internal error: mock error",
 			},
 		}
-		s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Status(merr.WrapErrServiceInternal("mock error")), nil).Maybe()
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(merr.WrapErrServiceInternal("mock error")),
+		}, nil).Once()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
 	})
@@ -4864,6 +4943,20 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionNormal() {
 	})
 }
 
+func (s *CollectionFunctionSuite) TestAddCollectionFunctionInvalidType() {
+	// no expectation on s.mp: an invalid function type must be rejected
+	// before any AddCollectionFunction RPC is issued
+	addFunctionTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, AddFunctionAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "test_function", "type": "InvalidType", "inputFieldNames": [], "OutputFieldNames": []}}`),
+			errCode:     1100,
+			errMsg:      "Unsupported function type: InvalidType: invalid parameter",
+		},
+	}
+	validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+}
+
 func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 	s.Run("success", func() {
 		alterFunctionTestCases := []requestBodyTestCase{
@@ -4896,6 +4989,20 @@ func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
 	})
+}
+
+func (s *CollectionFunctionSuite) TestAlterCollectionFunctionInvalidType() {
+	// no expectation on s.mp: an invalid function type must be rejected
+	// before any AlterCollectionFunction RPC is issued
+	alterFunctionTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, AlterFunctionAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "test_function", "function": {"name": "test_function", "type": "InvalidType", "inputFieldNames": [], "OutputFieldNames": []}}`),
+			errCode:     1100,
+			errMsg:      "Unsupported function type: InvalidType: invalid parameter",
+		},
+	}
+	validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
 }
 
 func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {

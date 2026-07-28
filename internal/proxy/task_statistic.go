@@ -287,14 +287,14 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 			mlog.Int64("nodeID", nodeID),
 			mlog.String("channel", channel),
 			mlog.Err(err))
-		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		mlog.Warn(ctx, "QueryNode is not shardLeader",
 			mlog.Int64("nodeID", nodeID),
 			mlog.String("channel", channel))
-		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {

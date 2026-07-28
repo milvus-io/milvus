@@ -362,7 +362,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	if len(insertLogs) == 0 {
+	if len(insertLogs) == 0 && st.manifestPath == "" {
 		mlog.Info(ctx,
 			"there is no insertBinlogs, skip creating text index")
 		return nil

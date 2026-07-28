@@ -409,6 +409,36 @@ CheckExternalFieldsInLoadedManifest(
     }
 }
 
+std::shared_ptr<milvus::segcore::SegmentReadLease>
+AcquireSegmentReadLease(milvus::segcore::SegmentInterface* segment,
+                        const folly::CancellationToken& cancel_token) {
+    if (segment->type() == SegmentType::Growing) {
+        return nullptr;
+    }
+
+    auto sealed =
+        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
+    AssertInfo(sealed != nullptr,
+               "sealed segment {} does not support request read leases",
+               segment->get_segment_id());
+    return sealed->AcquireReadLease(cancel_token);
+}
+
+void
+ValidateSegmentSchemaCompatibility(milvus::segcore::SegmentInterface* segment,
+                                   const milvus::SchemaPtr& plan_schema) {
+    if (segment->type() == SegmentType::Growing) {
+        return;
+    }
+
+    auto sealed =
+        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
+    AssertInfo(sealed != nullptr,
+               "sealed segment {} does not support schema validation",
+               segment->get_segment_id());
+    sealed->ValidateSchemaCompatibility(plan_schema);
+}
+
 //////////////////////////////    public C API wrappers    //////////////////////////////
 
 CFuture*  // Future<milvus::SearchResult*>
@@ -455,6 +485,8 @@ AsyncSearch(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
+            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
@@ -476,6 +508,7 @@ AsyncSearch(CTraceContext c_trace,
                 search_result->total_nq_ = num_queries;
                 search_result->unity_topK_ = 0;
                 search_result->total_data_cnt_ = 0;
+                search_result->segment_ = internal_segment;
             } else {
                 search_result = segment->Search(plan,
                                                 phg_ptr,
@@ -488,6 +521,7 @@ AsyncSearch(CTraceContext c_trace,
                                                 enable_expr_cache,
                                                 span);
             }
+            search_result->read_lease_ = std::move(read_lease);
             if (!filter_only &&
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
@@ -562,6 +596,8 @@ AsyncRetrieve(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
+            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
@@ -579,8 +615,10 @@ AsyncRetrieve(CTraceContext c_trace,
                                   collection_ttl,
                                   entity_ttl_physical_time_us);
 
-            return CreateLeakedCRetrieveResultFromProto(
+            auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
+            read_lease.reset();
+            return c_result;
         });
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
@@ -607,6 +645,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
+            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
@@ -616,8 +656,10 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
 
-            return CreateLeakedCRetrieveResultFromProto(
+            auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
+            read_lease.reset();
+            return c_result;
         });
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
@@ -799,42 +841,6 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropFieldData(milvus::FieldId(field_id));
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment =
-            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        segment->DropIndex(milvus::FieldId(field_id));
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
-                           int64_t field_id,
-                           const char* nested_path) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment =
-            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        segment->DropJSONIndex(milvus::FieldId(field_id), nested_path);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -1688,13 +1694,13 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
         }
         auto ids = growing_segment->get_insert_record().get_data_field_ids();
         std::unordered_set<int64_t> seen(ids.begin(), ids.end());
-        const auto& schema = growing_segment->get_schema();
-        for (const auto& field_id : schema.get_field_ids()) {
+        auto schema = growing_segment->get_schema_snapshot();
+        for (const auto& field_id : schema->get_field_ids()) {
             auto raw_field_id = field_id.get();
             if (seen.find(raw_field_id) != seen.end()) {
                 continue;
             }
-            const auto& field_meta = schema[field_id];
+            const auto& field_meta = (*schema)[field_id];
             if (milvus::IsVectorDataType(field_meta.get_data_type()) &&
                 growing_segment->CanReadRawVectorFromIndex(field_id)) {
                 ids.push_back(raw_field_id);
@@ -1984,6 +1990,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto flush_schema =
             ParseFlushSchema(config->schema_blob, config->schema_length);
         const auto& schema = *flush_schema;
+        auto runtime_schema = growing_segment->get_schema_snapshot();
         auto& insert_record = growing_segment->get_insert_record();
 
         int64_t total_rows = end_offset - start_offset;
@@ -2042,7 +2049,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                     // compaction). The Go layer normally trims such columns
                     // from the layout already — this is the defense for
                     // stale layouts.
-                    if (!growing_segment->get_schema().has_field(field_id)) {
+                    if (!runtime_schema->has_field(field_id)) {
                         LOG_INFO(
                             "skip dropped field {} when flushing growing "
                             "segment {}",

@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <any>
 #include <functional>
+#include <initializer_list>
 #include <istream>
 #include <limits>
 #include <map>
@@ -397,6 +398,20 @@ class JsonKeyStats : public ScalarIndex<std::string> {
             }
         }
         return "";
+    }
+
+    bool
+    HasAllShreddingFields(const std::string& pointer,
+                          std::initializer_list<JSONType> types) {
+        if (types.size() == 0) {
+            return false;
+        }
+        for (auto type : types) {
+            if (GetShreddingField(pointer, type).empty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     std::set<std::string>

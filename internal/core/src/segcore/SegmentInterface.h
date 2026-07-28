@@ -170,6 +170,11 @@ class SegmentInterface {
     virtual const Schema&
     get_schema() const = 0;
 
+    virtual SchemaPtr
+    get_schema_snapshot() const {
+        return std::make_shared<Schema>(get_schema());
+    }
+
     virtual int64_t
     get_deleted_count() const = 0;
 
@@ -563,19 +568,25 @@ class SegmentInternalInterface : public SegmentInterface {
     set_field_avg_size(FieldId field_id,
                        int64_t num_rows,
                        int64_t field_size) override;
+
+    void
+    set_field_avg_size(const FieldMeta& field_meta,
+                       int64_t num_rows,
+                       int64_t field_size);
+
     virtual bool
     is_chunked() const {
         return false;
     }
 
-    const SkipIndex&
+    std::shared_ptr<const SkipIndex>
     GetSkipIndex() const;
 
     void
     LoadSkipIndex(FieldId field_id,
                   DataType data_type,
                   std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
+        skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
     void
@@ -583,7 +594,7 @@ class SegmentInternalInterface : public SegmentInterface {
         FieldId field_id,
         DataType data_type,
         std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_.LoadSkipFromStatistics(
+        skip_index_->LoadSkipFromStatistics(
             get_segment_id(), field_id, data_type, statistics);
     }
 
@@ -850,7 +861,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 
@@ -858,7 +869,7 @@ class SegmentInternalInterface : public SegmentInterface {
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
-    SkipIndex skip_index_;
+    std::shared_ptr<SkipIndex> skip_index_ = std::make_shared<SkipIndex>();
 
     // text-indexes used to do match.
     std::unordered_map<

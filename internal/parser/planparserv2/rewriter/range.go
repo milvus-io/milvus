@@ -2,6 +2,7 @@ package rewriter
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -57,14 +58,15 @@ func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
 
 // resolveJSONEffectiveType returns the effective type for a JSON field based on the literal value.
 // Returns (type, ok) where ok is false if the value is not suitable for range optimization.
-// For numeric types (int and float), we normalize to Double to allow mixing, similar to scalar Float/Double columns.
+// Numeric literals share the Double comparison group so int and float bounds
+// can still be merged. cmpGeneric preserves their concrete literal kinds and
+// compares int64 against float64 without lossy promotion.
 func resolveJSONEffectiveType(v *planpb.GenericValue) (schemapb.DataType, bool) {
 	if v == nil || v.GetVal() == nil {
 		return schemapb.DataType_None, false
 	}
 	switch v.GetVal().(type) {
 	case *planpb.GenericValue_Int64Val:
-		// Normalize int to Double for JSON to allow mixing with float literals
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_FloatVal:
 		return schemapb.DataType_Double, true
@@ -206,7 +208,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
-			if isEmpty && !canFoldBoolDomainToConstant(g.col) {
+			if isEmpty && !canFoldPredicateToBoolConstant(g.col) {
 				continue
 			}
 
@@ -378,6 +380,43 @@ func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclus
 	}
 }
 
+// compareInt64ToFloat64 compares an int64 and float64 without converting the
+// integer to float64. The boundary checks also avoid an out-of-range float to
+// int conversion. This mirrors segcore's JSON numeric comparison semantics.
+func compareInt64ToFloat64(lhs int64, rhs float64) int {
+	if math.IsNaN(rhs) {
+		// Preserve cmpGeneric's existing deterministic handling for NaN.
+		return 0
+	}
+	const (
+		int64Lower = -0x1p63
+		int64Upper = 0x1p63
+	)
+	if rhs < int64Lower {
+		return 1
+	}
+	if rhs >= int64Upper {
+		return -1
+	}
+
+	rhsInteger := int64(rhs)
+	if lhs < rhsInteger {
+		return -1
+	}
+	if lhs > rhsInteger {
+		return 1
+	}
+
+	rhsIntegerAsFloat := float64(rhsInteger)
+	if rhs > rhsIntegerAsFloat {
+		return -1
+	}
+	if rhs < rhsIntegerAsFloat {
+		return 1
+	}
+	return 0
+}
+
 // -1 means a < b, 0 means a == b, 1 means a > b
 func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 	switch dt {
@@ -394,25 +433,37 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 		}
 		return 0
 	case schemapb.DataType_Float, schemapb.DataType_Double:
-		// Allow comparing int and float by promoting to float
-		toFloat := func(g *planpb.GenericValue) float64 {
-			switch g.GetVal().(type) {
-			case *planpb.GenericValue_FloatVal:
-				return g.GetFloatVal()
+		switch a.GetVal().(type) {
+		case *planpb.GenericValue_Int64Val:
+			switch b.GetVal().(type) {
 			case *planpb.GenericValue_Int64Val:
-				return float64(g.GetInt64Val())
-			default:
-				// Should not happen due to gate; treat as 0 deterministically
+				ai, bi := a.GetInt64Val(), b.GetInt64Val()
+				if ai < bi {
+					return -1
+				}
+				if ai > bi {
+					return 1
+				}
+				return 0
+			case *planpb.GenericValue_FloatVal:
+				return compareInt64ToFloat64(a.GetInt64Val(), b.GetFloatVal())
+			}
+		case *planpb.GenericValue_FloatVal:
+			switch b.GetVal().(type) {
+			case *planpb.GenericValue_Int64Val:
+				return -compareInt64ToFloat64(b.GetInt64Val(), a.GetFloatVal())
+			case *planpb.GenericValue_FloatVal:
+				af, bf := a.GetFloatVal(), b.GetFloatVal()
+				if af < bf {
+					return -1
+				}
+				if af > bf {
+					return 1
+				}
 				return 0
 			}
 		}
-		af, bf := toFloat(a), toFloat(b)
-		if af < bf {
-			return -1
-		}
-		if af > bf {
-			return 1
-		}
+		// Should not happen because callers gate supported literal kinds.
 		return 0
 	case schemapb.DataType_String,
 		schemapb.DataType_VarChar:
@@ -608,7 +659,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				}
 			}
 			if isEmpty {
-				if !canFoldBoolDomainToConstant(g.col) {
+				if !canFoldPredicateToBoolConstant(g.col) {
 					continue
 				}
 				// Empty intersection → constant false

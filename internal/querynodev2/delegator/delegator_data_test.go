@@ -27,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -301,59 +300,84 @@ func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
 }
 
 func (s *DelegatorDataSuite) TearDownTest() {
-	function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
-	function.ReleaseFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
+	function.GetManager().Release(s.collectionID, "WAL-"+s.vchannelName)
+	function.GetManager().Release(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
 }
 
 func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
-	s.Require().NoError(function.UpdateFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
+	s.Require().NoError(function.GetManager().Update(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
+	validInsertData := func() *InsertData {
+		return &InsertData{
+			RowIDs:        []int64{0, 1},
+			PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+			Timestamps:    []uint64{10, 10},
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{},
+			InsertRecord: &segcorepb.InsertRecord{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "id",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1, 2},
+									},
+								},
+							},
+						},
+						FieldId: 100,
+					},
+					{
+						Type:      schemapb.DataType_FloatVector,
+						FieldName: "vector",
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 128,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
+								},
+							},
+						},
+						FieldId: 101,
+					},
+				},
+				NumRows: 2,
+			},
+		}
+	}
+
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
-			100: {
-				RowIDs:        []int64{0, 1},
-				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-				Timestamps:    []uint64{10, 10},
-				PartitionID:   500,
-				StartPosition: &msgpb.MsgPosition{},
-				InsertRecord: &segcorepb.InsertRecord{
-					FieldsData: []*schemapb.FieldData{
-						{
-							Type:      schemapb.DataType_Int64,
-							FieldName: "id",
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: []int64{1, 2},
-										},
-									},
-								},
-							},
-							FieldId: 100,
-						},
-						{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: "vector",
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: 128,
-									Data: &schemapb.VectorField_FloatVector{
-										FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
-									},
-								},
-							},
-							FieldId: 101,
-						},
-					},
-					NumRows: 2,
-				},
-			},
+			100: validInsertData(),
 		})
 
 		s.NotNil(s.manager.Segment.GetGrowing(100))
+	})
+
+	s.Run("notify_new_growing_segment_once", func() {
+		var notifiedChannels []string
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil,
+			WithLeaderViewUpdatedCallback(func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			}))
+		s.Require().NoError(err)
+		sd := delegator.(*shardDelegator)
+
+		insert := func() {
+			sd.ProcessInsert(map[int64]*InsertData{
+				101: validInsertData(),
+			})
+		}
+
+		insert()
+		insert()
+
+		s.Equal([]string{s.vchannelName}, notifiedChannels)
 	})
 
 	s.Run("insert_bad_data", func() {
@@ -1220,6 +1244,29 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners() {
+	ctx := context.Background()
+	s.delegator.Start()
+	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
+	err := s.delegator.syncCollectionIndexMeta(ctx, &querypb.LoadSegmentsRequest{
+		CollectionID:  s.collectionID,
+		Schema:        schema,
+		LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: 1},
+		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
+	})
+	s.Require().NoError(err)
+
+	// The load path has already advanced the collection snapshot, so the DDL
+	// event is skipped as a no-op. The function runner key must still point at
+	// the schema installed by the load path.
+	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
+	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	s.Require().NoError(err)
+	s.True(ok)
+}
+
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	defer func() {
 		s.workerManager.ExpectedCalls = nil
@@ -1346,6 +1393,11 @@ func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 	s.genCollectionWithFunction()
+	schema := s.delegator.collection.Schema()
+	bm25Runner, err := function.BuildEmbeddingRunner(schema, schema.GetFunctions()[0])
+	s.Require().NoError(err)
+	s.Require().NotNil(bm25Runner)
+	defer bm25Runner.Close()
 
 	registerSealedStats := func(oracle *idfOracle, segID int64, start uint32, end uint32) {
 		stats := storage.NewBM25Stats()
@@ -1435,7 +1487,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			SerializedExprPlan: plan,
 			FieldId:            101,
 		}
-		avgdl, err := s.delegator.buildBM25IDF(context.Background(), req)
+		avgdl, err := s.delegator.buildBM25IDF(req, bm25Runner)
 		s.NoError(err)
 		s.Equal(float64(1), avgdl)
 
@@ -1465,7 +1517,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(context.Background(), req)
+		_, err = s.delegator.buildBM25IDF(req, bm25Runner)
 		s.Error(err)
 	})
 
@@ -1478,7 +1530,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			FieldId:          103, // invalid field id
 		}
 
-		_, err = s.delegator.buildBM25IDF(context.Background(), req)
+		_, err = s.delegator.buildBM25IDF(req, bm25Runner)
 		s.Error(err)
 	})
 
@@ -1495,16 +1547,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
-		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
-			return true, run(schemapb.FunctionType_BM25, mockRunner)
-		}).Build()
-		defer patch.UnPatch()
-
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(context.Background(), req)
+		_, err = s.delegator.buildBM25IDF(req, mockRunner)
 		s.Error(err)
 	})
 
@@ -1521,16 +1568,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
-		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
-			return true, run(schemapb.FunctionType_BM25, mockRunner)
-		}).Build()
-		defer patch.UnPatch()
-
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(context.Background(), req)
+		_, err = s.delegator.buildBM25IDF(req, mockRunner)
 		s.Error(err)
 	})
 
@@ -1547,16 +1589,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
-		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
-			return true, run(schemapb.FunctionType_BM25, mockRunner)
-		}).Build()
-		defer patch.UnPatch()
-
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          103, // invalid field
 		}
-		_, err = s.delegator.buildBM25IDF(context.Background(), req)
+		_, err = s.delegator.buildBM25IDF(req, mockRunner)
 		s.Error(err)
 		mlog.Info(context.TODO(), "test", mlog.Err(err))
 	})
@@ -1579,7 +1616,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(context.Background(), req)
+		_, err = s.delegator.buildBM25IDF(req, bm25Runner)
 		s.Error(err)
 	})
 }
@@ -1731,6 +1768,31 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
+	ctx := context.Background()
+	// the target worker is offline/unhealthy, GetWorker returns no worker
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).
+		Return(nil, merr.WrapErrNodeNotAvailable(1))
+
+	err := s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		NodeID:     1,
+		SegmentIDs: []int64{1000},
+		Scope:      querypb.DataScope_All,
+	}, false)
+	s.Error(err)
+	// pin the contract: GetWorker's error code must reach the caller unmasked
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
+
+	// growingSegmentLock must be released even when the remote release fails,
+	// otherwise the channel's insert pipeline blocks forever
+	locked := s.delegator.growingSegmentLock.TryLock()
+	s.True(locked, "growingSegmentLock should be released after failed release")
+	if locked {
+		s.delegator.growingSegmentLock.Unlock()
+	}
 }
 
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
@@ -2315,6 +2377,378 @@ func (s *DelegatorDataSuite) TestLoadSegmentsDoesNotBlockProcessDelete() {
 
 	wg.Wait()
 	s.False(processDeleteBlocked.Load(), "ProcessDelete was blocked for too long during LoadSegments — tsafe would freeze")
+}
+
+// TestLoadStreamDeletePhase3FlushStarvesProcessDelete is a minimal reproduction of issue
+// #49435 ("channel tsafe stalled" under concurrent Strong query + upsert).
+//
+// Root cause: loadStreamDelete Phase 3 holds deleteMut.RLock while doing the network
+// Flush() (worker.Delete). When that forward is slow — as happens under a post-compaction
+// load storm where the single worker is saturated — the live ProcessDelete, which needs
+// deleteMut.Lock (write) and is the ONLY thing that advances tsafe (deleteNode.Operate
+// calls ProcessDelete then UpdateTSafe on the same single-threaded flowgraph), is starved.
+// A frozen tsafe is exactly what makes Strong-consistency queries fail with
+// "channel tsafe stalled".
+//
+// This test makes the Phase-3 worker.Delete block (RLock held) and asserts ProcessDelete is
+// NOT starved. It FAILS on current code (Flush under RLock) and PASSES once the network Flush
+// is moved out of the RLock.
+func (s *DelegatorDataSuite) TestLoadStreamDeletePhase3FlushStarvesProcessDelete() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	// BF matches only {10,20,30}, so Phase 3 forwards just a few rows — well under the 4MB
+	// ForwardBatchSize, guaranteeing worker.Delete is called ONLY in Phase 3's Flush (under
+	// RLock), never via a lock-free Phase 2 auto-sync.
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+
+	// Block the Phase-3 Flush's worker.Delete, simulating a worker saturated by the load storm.
+	// Signal once we are inside it — at that point Phase 3 is holding deleteMut.RLock.
+	deleteEntered := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var once sync.Once
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			once.Do(func() { close(deleteEntered) })
+			<-releaseDelete
+			return nil
+		})
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	// Pre-populate the delete buffer so loadStreamDelete has historical deletes to replay.
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(int64(i))},
+			Timestamps:  []uint64{uint64(10 + i)},
+			RowCount:    1,
+		}}, uint64(10+i))
+	}
+
+	// Start the segment load; its Phase-3 Flush blocks in worker.Delete while holding RLock.
+	go func() {
+		_ = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     300,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			}},
+		})
+	}()
+
+	// Wait until Phase 3 is inside the blocked worker.Delete, i.e. holding deleteMut.RLock.
+	select {
+	case <-deleteEntered:
+	case <-time.After(5 * time.Second):
+		close(releaseDelete)
+		s.FailNow("loadStreamDelete never reached Phase-3 worker.Delete")
+	}
+
+	// A live delete now arrives on the flowgraph. ProcessDelete needs deleteMut.Lock (write);
+	// tsafe advancement depends on it completing. It must NOT be starved by the Phase-3 RLock.
+	processDone := make(chan struct{})
+	go func() {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(999)},
+			Timestamps:  []uint64{200},
+			RowCount:    1,
+		}}, 200)
+		close(processDone)
+	}()
+
+	starved := false
+	select {
+	case <-processDone:
+	case <-time.After(time.Second):
+		starved = true // still blocked while Phase 3 holds RLock during the slow Flush
+	}
+
+	close(releaseDelete) // let the load finish
+	<-processDone        // ProcessDelete returns once the RLock is released
+
+	s.False(starved, "ProcessDelete (and thus tsafe) was starved by loadStreamDelete Phase-3 RLock-during-Flush — issue #49435")
+}
+
+// TestLoadStreamDeleteCatchUpFlushDoesNotStarveProcessDelete covers the catch-up
+// path specifically (issue #49435 adversarial review): a delete that arrives
+// AFTER the Phase-1 snapshot is forwarded during catch-up. The catch-up
+// worker.Delete must run without deleteMut.RLock held, so a saturated worker
+// there must not starve the live ProcessDelete either. This FAILS if the final
+// catch-up forward is done under the lock, and PASSES once catch-up forwards
+// lock-free.
+func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpFlushDoesNotStarveProcessDelete() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	// BF matches {10,20,30}: small batches, so worker.Delete is reached only via
+	// explicit Flush, never a lock-free auto-sync over ForwardBatchSize.
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	// worker.Delete: the FIRST call is the bulk-snapshot flush (lock-free). Inside
+	// it, inject a NEW delete (pk 20, later ts) so the catch-up round has a record
+	// to forward. Every SUBSEQUENT call (the catch-up flush) blocks, simulating a
+	// worker still saturated by the load storm; signal once we're inside it.
+	deleteEntered := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var callNo atomic.Int32
+	var enterOnce sync.Once
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			if callNo.Add(1) == 1 {
+				// Bulk flush done lock-free; a live delete arrives now and lands
+				// after the Phase-1 snapshot, so it must be caught up.
+				s.delegator.ProcessDelete([]*DeleteData{{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(20)},
+					Timestamps:  []uint64{200},
+					RowCount:    1,
+				}}, 200)
+				return nil
+			}
+			enterOnce.Do(func() { close(deleteEntered) })
+			<-releaseDelete
+			return nil
+		})
+
+	// Pre-populate the delete buffer (the Phase-1 snapshot).
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(int64(i))},
+			Timestamps:  []uint64{uint64(10 + i)},
+			RowCount:    1,
+		}}, uint64(10+i))
+	}
+
+	go func() {
+		_ = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     301,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			}},
+		})
+	}()
+
+	// Wait until the catch-up flush is inside the blocked worker.Delete.
+	select {
+	case <-deleteEntered:
+	case <-time.After(5 * time.Second):
+		close(releaseDelete)
+		s.FailNow("loadStreamDelete never reached the catch-up worker.Delete")
+	}
+
+	// A live delete arrives; ProcessDelete needs deleteMut.Lock and must not be
+	// starved by the (now lock-free) catch-up flush.
+	processDone := make(chan struct{})
+	go func() {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(999)},
+			Timestamps:  []uint64{300},
+			RowCount:    1,
+		}}, 300)
+		close(processDone)
+	}()
+
+	starved := false
+	select {
+	case <-processDone:
+	case <-time.After(time.Second):
+		starved = true
+	}
+
+	close(releaseDelete)
+	<-processDone
+
+	s.False(starved, "ProcessDelete was starved by the catch-up worker.Delete holding deleteMut.RLock — issue #49435")
+}
+
+// TestLoadStreamDeleteCatchUpPastCapTerminatesWithFinalBarrier covers the
+// adversarial cap path: catch-up keeps seeing new delete records past the
+// lock-free rounds. loadStreamDelete must eventually stop waiting for a
+// globally quiet delete stream by applying one final locked tail and publishing
+// the segment before releasing deleteMut.
+func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpPastCapTerminatesWithFinalBarrier() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	finalBarrierEntered := make(chan struct{})
+	releaseFinalBarrier := make(chan struct{})
+	var releaseFinalOnce sync.Once
+	defer releaseFinalOnce.Do(func() { close(releaseFinalBarrier) })
+	var callNo atomic.Int32
+	var finalOnce sync.Once
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			call := callNo.Add(1)
+			if call <= 6 {
+				// Keep one matching delete arriving after every lock-free
+				// catch-up flush. Call 1 is the bulk snapshot flush; calls
+				// 2-6 are catch-up rounds 0-4, so the next round reaches the
+				// maxLockFreeCatchUpRounds cap with remaining > 0.
+				ts := uint64(199 + call)
+				s.delegator.ProcessDelete([]*DeleteData{{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{
+						storage.NewInt64PrimaryKey(20),
+					},
+					Timestamps: []uint64{ts},
+					RowCount:   1,
+				}}, ts)
+				return nil
+			}
+			finalOnce.Do(func() { close(finalBarrierEntered) })
+			<-releaseFinalBarrier
+			return nil
+		})
+
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(int64(i)),
+			},
+			Timestamps: []uint64{uint64(10 + i)},
+			RowCount:   1,
+		}}, uint64(10+i))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	loadDone := make(chan error, 1)
+	go func() {
+		loadDone <- s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     302,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			}},
+		})
+	}()
+
+	select {
+	case <-finalBarrierEntered:
+	case <-time.After(5 * time.Second):
+		releaseFinalOnce.Do(func() { close(releaseFinalBarrier) })
+		s.FailNow("loadStreamDelete never reached the final locked catch-up barrier")
+	}
+
+	// A live delete attempts to arrive while the final barrier holds RLock. It is
+	// allowed to wait briefly here; the point of the barrier is that loadStreamDelete
+	// now terminates instead of chasing new arrivals forever.
+	processDone := make(chan struct{})
+	go func() {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(999),
+			},
+			Timestamps: []uint64{300},
+			RowCount:   1,
+		}}, 300)
+		close(processDone)
+	}()
+
+	releaseFinalOnce.Do(func() { close(releaseFinalBarrier) })
+
+	select {
+	case err := <-loadDone:
+		s.NoError(err)
+	case <-time.After(2 * time.Second):
+		s.FailNow("loadStreamDelete did not terminate after the final locked catch-up barrier")
+	}
+
+	select {
+	case <-processDone:
+	case <-time.After(2 * time.Second):
+		s.FailNow("ProcessDelete did not resume after the final locked catch-up barrier")
+	}
+
+	s.GreaterOrEqual(callNo.Load(), int32(7), "loadStreamDelete should reach the post-cap final barrier")
 }
 
 func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {

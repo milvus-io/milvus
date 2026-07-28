@@ -211,9 +211,14 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // For regular array types (INT32, FLOAT, etc.)
-            auto* raw_data = static_cast<const ArrayView*>(data->Data());
+            // Regular nullable ARRAY FieldData is dense: invalid rows retain
+            // their physical Array slot but contribute no logical elements.
+            auto* raw_data = static_cast<const Array*>(data->Data());
             for (int64_t i = 0; i < num_rows; ++i) {
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = 0;
+                    continue;
+                }
                 array_lengths[offset + i] = raw_data[i].length();
             }
         }
@@ -346,11 +351,12 @@ SchemaHasTextField(const Schema& schema) {
 void
 SegmentGrowingImpl::InitializeArrayOffsets() {
     std::unique_lock lock(array_offsets_map_mutex_);
+    auto schema = get_schema_snapshot();
 
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
         auto struct_name = GetStructNameForArrayField(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
@@ -396,8 +402,14 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
+    auto schema = get_schema_snapshot();
+    try_remove_chunks(fieldId, *schema);
+}
+
+void
+SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     //remove the chunk data to reduce memory consumption
-    auto& field_meta = schema_->operator[](fieldId);
+    auto& field_meta = schema.operator[](fieldId);
     auto data_type = field_meta.get_data_type();
     if (IsVectorDataType(data_type)) {
         if (indexing_record_.HasRawData(fieldId)) {
@@ -413,6 +425,12 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
 
 ResourceUsage
 SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
+    auto schema = get_schema_snapshot();
+    return EstimateSegmentResourceUsage(*schema);
+}
+
+ResourceUsage
+SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
     int64_t num_rows = get_row_count();
     if (num_rows == 0) {
         return ResourceUsage{0, 0};
@@ -445,7 +463,13 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
         segcore_config_.get_dense_vector_intermin_index_type() ==
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
 
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    auto get_variable_field_avg_size = [this](FieldId field_id) {
+        std::shared_lock lck(mutex_);
+        auto it = variable_fields_avg_size_.find(field_id);
+        return it == variable_fields_avg_size_.end() ? 0 : it->second.second;
+    };
+
+    for (const auto& [field_id, field_meta] : schema.get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
@@ -457,9 +481,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
             // Calculate raw vector size
             // Note: get_dim() cannot be called on sparse vectors, so handle that case separately
             if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
-                field_bytes =
-                    num_rows *
-                    SegmentInternalInterface::get_field_avg_size(field_id);
+                field_bytes = num_rows * get_variable_field_avg_size(field_id);
             } else {
                 int64_t dim = field_meta.get_dim();
                 switch (data_type) {
@@ -546,20 +568,17 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
                 case DataType::VARCHAR:
                 case DataType::TEXT:
                 case DataType::GEOMETRY: {
-                    auto avg_size =
-                        SegmentInternalInterface::get_field_avg_size(field_id);
+                    auto avg_size = get_variable_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
                     break;
                 }
                 case DataType::JSON: {
-                    auto avg_size =
-                        SegmentInternalInterface::get_field_avg_size(field_id);
+                    auto avg_size = get_variable_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
                     break;
                 }
                 case DataType::ARRAY: {
-                    auto avg_size =
-                        SegmentInternalInterface::get_field_avg_size(field_id);
+                    auto avg_size = get_variable_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
                     break;
                 }
@@ -607,7 +626,13 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
 
 void
 SegmentGrowingImpl::UpdateResourceTracking() {
-    auto new_resource = EstimateSegmentResourceUsage();
+    auto schema = get_schema_snapshot();
+    UpdateResourceTracking(*schema);
+}
+
+void
+SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
+    auto new_resource = EstimateSegmentResourceUsage(schema);
 
     // Lock to ensure refund-then-charge is atomic
     std::lock_guard<std::mutex> lock(resource_tracking_mutex_);
@@ -639,6 +664,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // schema change cannot happends during insertion,
     // otherwise, there might be some data not following new schema
     std::shared_lock lck(sch_mutex_);
+    auto schema = get_schema_snapshot();
 
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
@@ -656,14 +682,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // segment have latest schema while insert used old one
     // need to fill insert data with field_meta
-    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
         if (field_id_to_offset.count(field_id) > 0) {
             continue;
         }
-        if (schema_->is_function_output(field_id)) {
+        if (schema->is_function_output(field_id)) {
             LOG_INFO(
                 "schema newer than insert data found for segment {}, skip "
                 "bulk fill for function output field {}",
@@ -695,12 +721,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
     stats_.mem_size += num_rows * sizeof(int64_t);
 
-    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
         if (field_id_to_offset.count(field_id) == 0) {
-            AssertInfo(schema_->is_function_output(field_id),
+            AssertInfo(schema->is_function_output(field_id),
                        "field {} missing from insert without bulk fill",
                        field_id.get());
             continue;
@@ -812,7 +838,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             num_rows);
         if (IsVariableDataType(field_meta.get_data_type())) {
             SegmentInternalInterface::set_field_avg_size(
-                field_id, num_rows, field_data_size);
+                field_meta, num_rows, field_data_size);
         }
 
         // Build geometry cache for GEOMETRY fields
@@ -826,11 +852,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
         stats_.mem_size += field_data_size;
 
-        try_remove_chunks(field_id);
+        try_remove_chunks(field_id, *schema);
     }
 
     // step 4: set pks to offset
-    auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
     std::vector<PkType> pks(num_rows);
     ParsePksFromFieldData(pks,
@@ -841,7 +867,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     }
 
     // step 5: update the resource usage
-    UpdateResourceTracking();
+    UpdateResourceTracking(*schema);
 
     // step 6: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
@@ -871,8 +897,9 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
     AssertInfo(
         infos.field_infos.find(RowFieldID.get()) != infos.field_infos.end(),
         "rowID field data should be included");
+    auto schema = get_schema_snapshot();
     auto primary_field_id =
-        schema_->get_primary_field_id().value_or(FieldId(-1));
+        schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
     AssertInfo(infos.field_infos.find(primary_field_id.get()) !=
                    infos.field_infos.end(),
@@ -885,7 +912,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 
         // Skip fields that have been dropped from schema (except system fields)
         if (!SystemProperty::Instance().IsSystem(field_id) &&
-            !schema_->has_field(field_id)) {
+            !schema->has_field(field_id)) {
             LOG_INFO("growing segment skips dropped field {} during load",
                      field_id.get());
             continue;
@@ -905,7 +932,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (total != info.row_count) {
             AssertInfo(total <= info.row_count,
                        "binlog number should less than or equal row_count");
-            auto field_meta = get_schema()[field_id];
+            auto field_meta = (*schema)[field_id];
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
@@ -964,14 +991,15 @@ SegmentGrowingImpl::load_field_data_common(
     }
 
     // Skip if field has been dropped from schema
-    if (!schema_->has_field(field_id)) {
+    auto schema = get_schema_snapshot();
+    if (!schema->has_field(field_id)) {
         LOG_INFO(
             "growing segment skips dropped field {} in load_field_data_common",
             field_id.get());
         return;
     }
 
-    auto field_meta = (*schema_)[field_id];
+    auto field_meta = (*schema)[field_id];
 
     // Growing-source flush reads raw data from insert_record_. Keep it
     // populated even when an interim index can provide raw vector data.
@@ -989,7 +1017,7 @@ SegmentGrowingImpl::load_field_data_common(
             offset += row_count;
         }
     }
-    try_remove_chunks(field_id);
+    try_remove_chunks(field_id, *schema);
 
     if (field_id == primary_field_id) {
         insert_record_.insert_pks(field_data);
@@ -998,7 +1026,7 @@ SegmentGrowingImpl::load_field_data_common(
     // update average row data size
     if (IsVariableDataType(field_meta.get_data_type())) {
         SegmentInternalInterface::set_field_avg_size(
-            field_id, num_rows, storage::GetByteSizeOfFieldDatas(field_data));
+            field_meta, num_rows, storage::GetByteSizeOfFieldDatas(field_data));
     }
 
     // build text match index
@@ -1051,19 +1079,20 @@ SegmentGrowingImpl::load_field_data_common(
 void
 SegmentGrowingImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& infos) {
-    AssertInfo(!SchemaHasTextField(*schema_),
+    auto schema = get_schema_snapshot();
+    AssertInfo(!SchemaHasTextField(*schema),
                "TEXT growing segment cannot be loaded from StorageV2 column "
                "groups; StorageV3 manifest is required");
 
     auto primary_field_id =
-        schema_->get_primary_field_id().value_or(FieldId(-1));
+        schema->get_primary_field_id().value_or(FieldId(-1));
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
     text_loaded_row_count_ = num_rows;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
+    ArrowSchemaPtr arrow_schema = schema->ConvertToArrowSchema();
 
     for (auto& [id, info] : infos.field_infos) {
         auto column_group_id = FieldId(id);
@@ -1170,7 +1199,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                        ->data());
 
                     // Skip if field has been dropped from schema
-                    if (!schema_->has_field(FieldId(field_id))) {
+                    if (!schema->has_field(FieldId(field_id))) {
                         LOG_INFO(
                             "growing segment skips dropped field {} in column "
                             "group",
@@ -1178,7 +1207,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         continue;
                     }
 
-                    for (auto& field : schema_->get_fields()) {
+                    for (auto& field : schema->get_fields()) {
                         if (field.second.get_id().get() != field_id) {
                             continue;
                         }
@@ -1209,7 +1238,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                    primary_field_id,
                                    num_rows);
             // Build geometry cache for GEOMETRY fields
-            if (schema_->operator[](field_id).get_data_type() ==
+            if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
@@ -1226,9 +1255,10 @@ SegcoreError
 SegmentGrowingImpl::Delete(int64_t size,
                            const IdArray* ids,
                            const Timestamp* timestamps_raw) {
-    auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    auto schema = get_schema_snapshot();
+    auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
-    auto& field_meta = schema_->operator[](field_id);
+    auto& field_meta = schema->operator[](field_id);
     std::vector<PkType> pks(size);
     ParsePksFromIDs(pks, field_meta.get_data_type(), *ids);
 
@@ -1275,11 +1305,12 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     AssertInfo(info.primary_keys, "Deleted primary keys is null");
     AssertInfo(info.timestamps, "Deleted timestamps is null");
     // step 1: get pks and timestamps
+    auto schema = get_schema_snapshot();
     auto field_id =
-        schema_->get_primary_field_id().value_or(FieldId(INVALID_FIELD_ID));
+        schema->get_primary_field_id().value_or(FieldId(INVALID_FIELD_ID));
     AssertInfo(field_id.get() != INVALID_FIELD_ID,
                "Primary key has invalid field id");
-    auto& field_meta = schema_->operator[](field_id);
+    auto& field_meta = schema->operator[](field_id);
     int64_t size = info.row_count;
     std::vector<PkType> pks(size);
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
@@ -1308,7 +1339,8 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
     if (size == 0) {
         return;
     }
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     if (!field_meta.is_nullable()) {
         return;
     }
@@ -1335,7 +1367,8 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     if (count == 0) {
         return;
     }
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     if (!field_meta.is_nullable()) {
         return;
     }
@@ -1376,7 +1409,8 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     (void)op_ctx;
 
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     AssertInfo(field_meta.get_data_type() == DataType::VECTOR_ARRAY,
                "chunk_vector_array_view_impl only supports VECTOR_ARRAY field");
 
@@ -1489,7 +1523,8 @@ SegmentGrowingImpl::num_chunk(FieldId field_id) const {
 
 DataType
 SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     return field_meta.get_data_type();
 }
 
@@ -1610,7 +1645,8 @@ SegmentGrowingImpl::bulk_subscript(
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
@@ -1637,7 +1673,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
         int64_t valid_count = count;
@@ -2133,7 +2170,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    TargetBitmap& valid_map,
                                    bool small_int_raw_type) const {
     auto vec_ptr = insert_record_.get_data_base(field_id);
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     valid_map.set();
     if (field_meta.is_nullable()) {
         auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
@@ -2264,9 +2302,10 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 void
 SegmentGrowingImpl::search_ids(BitsetType& bitset,
                                const IdArray& id_array) const {
-    auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    auto schema = get_schema_snapshot();
+    auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
-    auto& field_meta = schema_->operator[](field_id);
+    auto& field_meta = schema->operator[](field_id);
     auto data_type = field_meta.get_data_type();
     auto ids_size = GetSizeOfIdArray(id_array);
     std::vector<PkType> pks(ids_size);
@@ -2406,7 +2445,8 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     CheckCancellation(
         op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
-    auto index = BuildTextIndexForMeta(schema_->operator[](field_id));
+    auto schema = get_schema_snapshot();
+    auto index = BuildTextIndexForMeta(schema->operator[](field_id));
     std::unique_lock lock(mutex_);
     text_indexes_[field_id] = std::move(index);
 }
@@ -2434,7 +2474,8 @@ SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
 
 void
 SegmentGrowingImpl::CreateTextIndexes() {
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    auto schema = get_schema_snapshot();
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
         if (IsStringDataType(field_meta.get_data_type()) &&
             field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
@@ -2452,7 +2493,8 @@ SegmentGrowingImpl::InitializeTextLobSpillovers() {
     AssertInfo(!base_path.empty(), "Mmap path is empty");
 
     // create spillover for each TEXT field
-    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+    auto schema = get_schema_snapshot();
+    for (auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_meta.get_data_type() == DataType::TEXT) {
             text_lob_spillovers_[field_id] =
                 std::make_unique<TextLobSpillover>(id_, field_id, base_path);
@@ -2467,7 +2509,8 @@ SegmentGrowingImpl::InitializeTextLobSpillovers() {
 void
 SegmentGrowingImpl::InitTextLobPaths(const std::string& manifest_path) {
     std::vector<FieldId> text_field_ids;
-    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+    auto schema = get_schema_snapshot();
+    for (auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_meta.get_data_type() == DataType::TEXT) {
             text_field_ids.push_back(field_id);
         }
@@ -2539,7 +2582,8 @@ SegmentGrowingImpl::BulkGetJsonData(
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Json>*>(
         insert_record_.get_data_base(field_id));
     auto& src = *vec_ptr;
-    auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
         for (int64_t i = 0; i < count; ++i) {
@@ -2557,13 +2601,14 @@ SegmentGrowingImpl::BulkGetJsonData(
 void
 SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) {
     (void)op_ctx;
-    if (sch->get_schema_version() > schema_->get_schema_version()) {
+    auto schema = get_schema_snapshot();
+    if (sch->get_schema_version() > schema->get_schema_version()) {
         LOG_INFO(
             "lazy check schema segment {} found newer schema version, "
             "current "
             "schema version {}, new schema version {}",
             id_,
-            schema_->get_schema_version(),
+            schema->get_schema_version(),
             sch->get_schema_version());
         Reopen(sch);
     }
@@ -2572,10 +2617,11 @@ SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) {
 void
 SegmentGrowingImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(sch_mutex_);
+    auto current_schema = get_schema_snapshot();
 
     // double check condition, avoid multiple assignment
-    if (sch->get_schema_version() > schema_->get_schema_version()) {
-        auto absent_fields = sch->AbsentFields(*schema_);
+    if (sch->get_schema_version() > current_schema->get_schema_version()) {
+        auto absent_fields = sch->AbsentFields(*current_schema);
 
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
@@ -2628,17 +2674,18 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             }
         }
 
-        schema_ = sch;
-
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
             }
-            EnsureArrayOffsetsForStructField(field_meta, row_count);
+            EnsureArrayOffsetsForStructField(field_meta, row_count, *sch);
         }
+        std::atomic_store_explicit(
+            &schema_, std::move(sch), std::memory_order_release);
     }
 
-    UpdateResourceTracking();
+    auto schema = get_schema_snapshot();
+    UpdateResourceTracking(*schema);
 }
 
 void
@@ -2726,11 +2773,12 @@ SegmentGrowingImpl::FillAbsentFields() {
     if (insert_record_.row_count() == 0) {
         return;
     }
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    auto schema = get_schema_snapshot();
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
-        if (schema_->is_function_output(field_id)) {
+        if (schema->is_function_output(field_id)) {
             continue;
         }
         if (IsVectorDataType(field_meta.get_data_type())) {
@@ -2741,10 +2789,10 @@ SegmentGrowingImpl::FillAbsentFields() {
             if (field_meta.is_nullable() &&
                 insert_record_.is_data_exist(field_id) &&
                 insert_record_.is_valid_data_exist(field_id) &&
-                insert_record_.get_valid_data(field_id)->get_data().empty()) {
+                insert_record_.get_valid_data(field_id)->empty()) {
                 fill_empty_field(field_meta);
-                EnsureArrayOffsetsForStructField(field_meta,
-                                                 insert_record_.row_count());
+                EnsureArrayOffsetsForStructField(
+                    field_meta, insert_record_.row_count(), *schema);
             }
             continue;
         }
@@ -2752,8 +2800,8 @@ SegmentGrowingImpl::FillAbsentFields() {
         // so we must check data empty here
         if (insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
-            EnsureArrayOffsetsForStructField(field_meta,
-                                             insert_record_.row_count());
+            EnsureArrayOffsetsForStructField(
+                field_meta, insert_record_.row_count(), *schema);
         }
     }
 }
@@ -2764,8 +2812,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         "Loading segment {} field data with manifest {}", id_, manifest_path);
     // size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto num_rows = load_info_.num_of_rows();
+    auto schema = get_schema_snapshot();
     auto primary_field_id =
-        schema_->get_primary_field_id().value_or(FieldId(-1));
+        schema->get_primary_field_id().value_or(FieldId(-1));
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
     auto loon_manifest = GetLoonManifest(manifest_path, properties);
@@ -2777,7 +2826,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     InitTextLobPaths(manifest_path);
 
     auto arrow_schema =
-        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+        schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
@@ -2786,7 +2835,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     // (ChunkReaderImpl::open rejects a group containing none of the needed
     // columns). Such a group is a legal leftover of drop semantics — skip it
     // and let compaction remove it from the manifest.
-    auto schema_snapshot = schema_;
+    auto schema_snapshot = schema;
     auto group_has_live_field = [&](int64_t group_index) {
         for (const auto& column : column_groups->at(group_index)->columns) {
             // An untranslatable column name is a broken manifest and throws
@@ -2874,7 +2923,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                                    primary_field_id,
                                    num_rows);
             // Build geometry cache for GEOMETRY fields
-            if (schema_->operator[](field_id).get_data_type() ==
+            if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
@@ -2906,6 +2955,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                chunk_reader_result.status().ToString());
 
     auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
+    auto schema = get_schema_snapshot();
 
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
@@ -2978,7 +3028,7 @@ SegmentGrowingImpl::LoadColumnGroup(
 
                 auto field_id = FieldId(std::stoll(column));
 
-                auto field = schema_->operator[](field_id);
+                auto field = schema->operator[](field_id);
                 auto data_type = field.get_data_type();
 
                 auto field_data = storage::CreateFieldData(
@@ -3038,6 +3088,13 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
 void
 SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
     const FieldMeta& field_meta, int64_t row_count) {
+    auto schema = get_schema_snapshot();
+    EnsureArrayOffsetsForStructField(field_meta, row_count, *schema);
+}
+
+void
+SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+    const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
         return;
@@ -3047,8 +3104,8 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 
     std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
     for (const auto& [field_id, offsets] : array_offsets_map_) {
-        auto field_it = schema_->get_fields().find(field_id);
-        if (field_it == schema_->get_fields().end()) {
+        auto field_it = schema.get_fields().find(field_id);
+        if (field_it == schema.get_fields().end()) {
             continue;
         }
 
@@ -3203,9 +3260,15 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            auto valid_data_vec = vec_base->get_valid_data();
+            // Avoid vec_base->get_valid_data(): it materializes a flat copy of
+            // the WHOLE validity bitmap (O(segment rows)) while this path only
+            // needs `count` offsets (and, on the mapping-storage branch, only
+            // an emptiness check).
+            auto valid_data_ptr = insert_record_.is_valid_data_exist(field_id)
+                                      ? insert_record_.get_valid_data(field_id)
+                                      : nullptr;
             bool is_mapping_storage = vec_base->is_mapping_storage();
-            if (!valid_data_vec.empty()) {
+            if (valid_data_ptr != nullptr && !valid_data_ptr->empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);
 
                 if (is_mapping_storage) {
@@ -3216,14 +3279,8 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                         result.valid_offsets);
                 } else {
                     result.valid_offsets.reserve(count);
-                    for (int64_t i = 0; i < count; ++i) {
-                        auto offset = seg_offsets[i];
-                        bool is_valid = offset >= 0 &&
-                                        offset < static_cast<int64_t>(
-                                                     valid_data_vec.size()) &&
-                                        valid_data_vec[offset];
-                        result.valid_data[i] = is_valid;
-                    }
+                    valid_data_ptr->bulk_is_valid(
+                        seg_offsets, count, result.valid_data.get());
                 }
                 result.valid_count = result.valid_offsets.size();
             }

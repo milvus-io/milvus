@@ -1223,6 +1223,154 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	})
 }
 
+func TestMetaTable_AddCollectionDoesNotBlockReadersDuringCatalogCreate(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	catalog := mocks.NewRootCoordCatalog(t)
+	enteredCatalog := make(chan struct{})
+	unblockCatalog := make(chan struct{})
+	catalog.EXPECT().
+		CreateCollection(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, *model.Collection, uint64) error {
+			close(enteredCatalog)
+			<-unblockCatalog
+			return nil
+		}).
+		Once()
+
+	existingColl := &model.Collection{
+		CollectionID: 100,
+		DBID:         util.DefaultDBID,
+		DBName:       util.DefaultDBName,
+		Name:         "existing",
+		State:        pb.CollectionState_CollectionCreated,
+		Partitions: []*model.Partition{
+			{PartitionID: 10, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+		},
+	}
+	meta := &MetaTable{
+		catalog: catalog,
+		dbName2Meta: map[string]*model.Database{
+			util.DefaultDBName: model.NewDefaultDatabase(nil),
+		},
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			existingColl.CollectionID: existingColl,
+		},
+		partitionName2ID:   map[int64]map[string]int64{},
+		names:              newNameDb(),
+		aliases:            newNameDb(),
+		fileResourceRefCnt: map[int64]int{},
+	}
+	meta.names.insert(util.DefaultDBName, existingColl.Name, existingColl.CollectionID)
+
+	addErr := make(chan error, 1)
+	go func() {
+		addErr <- meta.AddCollection(context.Background(), &model.Collection{
+			CollectionID: 101,
+			DBID:         util.DefaultDBID,
+			DBName:       util.DefaultDBName,
+			Name:         "creating",
+			State:        pb.CollectionState_CollectionCreated,
+			ShardsNum:    1,
+			Partitions: []*model.Partition{
+				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+			},
+		})
+	}()
+
+	select {
+	case <-enteredCatalog:
+	case <-time.After(time.Second):
+		require.FailNow(t, "AddCollection did not enter catalog CreateCollection")
+	}
+
+	type readResponse struct {
+		collection *model.Collection
+		err        error
+	}
+	readResult := make(chan readResponse, 1)
+	go func() {
+		coll, err := meta.GetCollectionByName(context.Background(), util.DefaultDBName, existingColl.Name, typeutil.MaxTimestamp, false)
+		readResult <- readResponse{collection: coll, err: err}
+	}()
+
+	select {
+	case result := <-readResult:
+		require.NoError(t, result.err)
+		require.Equal(t, existingColl.CollectionID, result.collection.CollectionID)
+	case <-time.After(time.Second):
+		close(unblockCatalog)
+		require.NoError(t, <-addErr)
+		require.FailNow(t, "GetCollectionByName blocked while catalog CreateCollection was in progress")
+	}
+
+	close(unblockCatalog)
+	require.NoError(t, <-addErr)
+}
+
+func TestMetaTable_AddCollectionRechecksAfterCatalogCreate(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	catalog := mocks.NewRootCoordCatalog(t)
+	enteredCatalog := make(chan struct{})
+	unblockCatalog := make(chan struct{})
+	catalog.EXPECT().
+		CreateCollection(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, *model.Collection, uint64) error {
+			close(enteredCatalog)
+			<-unblockCatalog
+			return nil
+		}).
+		Once()
+
+	coll := &model.Collection{
+		CollectionID: 101,
+		DBID:         util.DefaultDBID,
+		DBName:       util.DefaultDBName,
+		Name:         "creating",
+		State:        pb.CollectionState_CollectionCreated,
+		ShardsNum:    1,
+		Partitions: []*model.Partition{
+			{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+		},
+	}
+	meta := &MetaTable{
+		catalog:              catalog,
+		collID2Meta:          map[typeutil.UniqueID]*model.Collection{},
+		partitionName2ID:     map[int64]map[string]int64{},
+		names:                newNameDb(),
+		aliases:              newNameDb(),
+		fileResourceRefCnt:   map[int64]int{},
+		fileResourceRefHolds: map[int64]map[int64]int{},
+		generalCnt:           7,
+	}
+
+	addErr := make(chan error, 1)
+	go func() {
+		addErr <- meta.AddCollection(context.Background(), coll)
+	}()
+
+	select {
+	case <-enteredCatalog:
+	case <-time.After(time.Second):
+		require.FailNow(t, "AddCollection did not enter catalog CreateCollection")
+	}
+
+	meta.ddLock.Lock()
+	meta.collID2Meta[coll.CollectionID] = coll.Clone()
+	meta.names.insert(coll.DBName, coll.Name, coll.CollectionID)
+	meta.ddLock.Unlock()
+	close(unblockCatalog)
+
+	require.NoError(t, <-addErr)
+	require.Equal(t, 7, meta.generalCnt)
+	require.NotContains(t, meta.partitionName2ID, coll.CollectionID)
+}
+
 /*
 func TestMetaTable_AlterCollection(t *testing.T) {
 	t.Run("alter metastore fail", func(t *testing.T) {

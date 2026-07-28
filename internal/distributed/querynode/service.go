@@ -460,10 +460,6 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	return s.querynode.RunAnalyzer(ctx, req)
 }
 
-func (s *Server) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.querynode.DropIndex(ctx, req)
-}
-
 func (s *Server) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
 	return s.querynode.UpdateIndex(ctx, req)
 }

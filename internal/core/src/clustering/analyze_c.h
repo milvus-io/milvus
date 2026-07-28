@@ -30,7 +30,7 @@ DeleteAnalyze(CAnalyze analyze);
 
 CStatus
 GetAnalyzeResultMeta(CAnalyze analyze,
-                     char** centroid_path,
+                     const char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes);

@@ -183,10 +183,10 @@ func (t *SearchTask) Execute() error {
 		)
 	}
 	defer t.segmentManager.Segment.Unpin(searchedSegments)
+	defer segments.DeleteSearchResults(results)
 	if err != nil {
 		return err
 	}
-	defer segments.DeleteSearchResults(results)
 
 	// In filter-only mode, extract filter statistics and return early.
 	// This supports two-stage search: stage-1 collects per-segment valid

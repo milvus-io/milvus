@@ -353,7 +353,8 @@ func TestAllowGrowingSourceFlush(t *testing.T) {
 	assert.False(t, AllowGrowingSourceFlush(textSchema, false, true))
 	assert.False(t, AllowGrowingSourceFlush(ordinarySchema, true, false))
 	assert.True(t, AllowGrowingSourceFlush(ordinarySchema, true, true))
-	assert.True(t, AllowGrowingSourceFlush(textSchema, true, false))
+	assert.False(t, AllowGrowingSourceFlush(textSchema, true, false))
+	assert.True(t, AllowGrowingSourceFlush(textSchema, true, true))
 	assert.False(t, AllowGrowingSourceFlush(nil, true, false))
 	assert.True(t, AllowGrowingSourceFlush(nil, true, true))
 	assert.Equal(t,

@@ -228,6 +228,12 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			mlog.Info(t.ctx, "0 row was imported, the data may have been deleted", WrapLogFields(t)...)
 			continue
 		}
+		// the same check has been done in preimport task, double-check here since
+		// the actual import task re-reads the files
+		err = CheckStructArrayConsistency(t.GetSchema(), data)
+		if err != nil {
+			return err
+		}
 		err = AppendSystemFieldsData(t, data, rowNum)
 		if err != nil {
 			return err

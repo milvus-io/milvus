@@ -78,7 +78,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
+            ThrowInfo(UnexpectedError, "unsupported data type: {}", data_type);
     }
 }
 

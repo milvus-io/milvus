@@ -281,6 +281,12 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	nodeList := []flowgraph.Node{}
 
 	dmStreamNode := newDmInputNode(config, input)
+	inputNodeOwnedByFlowgraph := false
+	defer func() {
+		if !inputNodeOwnedByFlowgraph {
+			dmStreamNode.Free()
+		}
+	}()
 	nodeList = append(nodeList, dmStreamNode)
 
 	// 1.ddNode
@@ -328,6 +334,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		return nil, err
 	}
 
+	inputNodeOwnedByFlowgraph = true
 	return ds, nil
 }
 

@@ -245,8 +245,8 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		mlog.Warn(ctx, "CommitImport: job not found, skipping", mlog.FieldJobID(jobID))
-		return nil
+		mlog.Info(ctx, "CommitImport: job not found, retry later", mlog.FieldJobID(jobID))
+		return merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", jobID)
 	}
 	switch job.GetState() {
 	case internalpb.ImportJobState_Uncommitted:

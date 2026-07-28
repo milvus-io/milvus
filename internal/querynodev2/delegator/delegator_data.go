@@ -156,6 +156,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	method := "ProcessInsert"
 	tr := timerecord.NewTimeRecorder(method)
 	log := sd.getLogger(context.Background())
+	growingSegmentAdded := false
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
@@ -233,6 +234,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					TargetVersion: initialTargetVersion,
 					Candidate:     growing, // growing segment itself is the Candidate
 				})
+				growingSegmentAdded = true
 			}
 
 			sd.growingSegmentLock.Unlock()
@@ -245,6 +247,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			mlog.Int("rowCount", len(insertData.RowIDs)),
 			mlog.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
 		)
+	}
+	if growingSegmentAdded {
+		sd.notifyLeaderViewUpdated()
 	}
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -607,7 +612,7 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 		return err
 	}
 	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return nil
+	return function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -1028,7 +1033,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	sd.deleteMut.RUnlock()
 	// RLock released — WAL pipeline (ProcessDelete) is now unblocked
 
-	// Create one forwarder per segment, shared across Phase 2 and Phase 3, flushed once at the end.
+	// Create one forwarder per segment, shared across Phase 2 and Phase 3.
 	forwarders := make([]*BufferForwarder, len(infos))
 	for i, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
@@ -1061,50 +1066,135 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		)
 	}
 
-	// === Phase 3: Catch-up new entries + flush + add distribution under RLock (fast — milliseconds) ===
-	sd.deleteMut.RLock()
-	defer sd.deleteMut.RUnlock()
-
-	for i, info := range infos {
-		candidate := idCandidates[info.GetSegmentID()]
-
-		// Use timestamp-based catch-up: fetch records added after the snapshot's max timestamp.
-		// This is robust against delete buffer eviction (Put → evict discards old tail during Phase 2).
-		// Index-based approach (allRecords[snapshotLen:]) would panic or miss data if eviction occurs.
-		// Item.Ts comes from WAL TSO, monotonically increasing and unique per ProcessDelete call,
-		// so ListAfter(snapshotMaxTs + 1) precisely captures only new records.
-		catchUpTs := segmentEffectiveTs(info)
-		if snapshots[i].snapshotMaxTs > 0 {
-			catchUpTs = snapshots[i].snapshotMaxTs + 1
-		}
-		newRecords := sd.deleteBuffer.ListAfter(catchUpTs)
-		if len(newRecords) > 0 {
-			start := time.Now()
-			tsHit, bfHit, err := sd.processDeleteRecords(candidate, newRecords, forwarders[i])
-			if err != nil {
-				return err
-			}
-			log.Info(ctx, "forward delete to worker (phase 3: catch-up)...",
-				mlog.String("channel", info.InsertChannel),
-				mlog.FieldSegmentID(info.GetSegmentID()),
-				mlog.Int64("tsHitDeleteRowNum", tsHit),
-				mlog.Int64("bfHitDeleteRowNum", bfHit),
-				mlog.Int64("bfCost", time.Since(start).Milliseconds()),
-			)
-		}
-
-		// Flush once per segment after both phases are done
+	// === Phase 2.5: Flush the bulk snapshot payload WITHOUT the lock ===
+	// This is where the expensive worker.Delete → LoadDeltaData apply happens
+	// (potentially tens of seconds for huge replays, see issue #49435).
+	// Holding deleteMut across it would starve ProcessDelete — the single
+	// writer that also advances tsafe — and freeze the whole channel.
+	for i := range infos {
 		if err := forwarders[i].Flush(); err != nil {
 			return err
 		}
 	}
 
-	// Atomically add to distribution while still holding RLock.
-	// This guarantees no ProcessDelete can run between catch-up and distribution update,
-	// so there is no gap between "deletes applied" and "segment visible".
-	if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
-		return err
+	// Per-segment catch-up cursors. Timestamp-based catch-up is robust against
+	// delete buffer eviction (Put → evict discards old tail while we run
+	// lock-free). Item.Ts comes from WAL TSO, monotonically increasing, so
+	// ListAfter(lastTs + 1) precisely captures only newer records.
+	catchUpTs := make([]uint64, len(infos))
+	for i, info := range infos {
+		catchUpTs[i] = segmentEffectiveTs(info)
+		if snapshots[i].snapshotMaxTs > 0 {
+			catchUpTs[i] = snapshots[i].snapshotMaxTs + 1
+		}
 	}
+
+	// === Phase 3: catch-up the live delete stream, then publish. ===
+	// Normal catch-up forwards (worker.Delete, a cross-node RPC) are done WITHOUT
+	// the lock: deleteMut excludes ProcessDelete, the single writer that advances
+	// tsafe, so awaiting an RPC under it would refreeze the channel exactly when
+	// the worker is saturated by a load storm (issue #49435). The only exception
+	// is the bounded final barrier below, used after several lock-free attempts
+	// fail to find a quiet point.
+	//
+	// Each lock-free round forwards only the deletes that arrived during the
+	// previous round, so the remainder usually shrinks quickly. If arrivals keep
+	// the buffer non-empty past maxLockFreeCatchUpRounds, do one final catch-up
+	// while holding RLock and publish before unlocking. That bounded barrier is
+	// the termination escape hatch: ProcessDelete cannot interleave, so after
+	// this tail is applied, "all buffered deletes applied" and "segment visible"
+	// become atomic. New deletes after unlock see the segment in distribution
+	// and use the normal streaming forward path. The expensive bulk snapshot
+	// replay remains lock-free; only the small live tail falls back to the
+	// locked barrier.
+	const maxLockFreeCatchUpRounds = 5
+	pending := make([][]*deletebuffer.Item, len(infos))
+	for round := 0; ; round++ {
+		sd.deleteMut.RLock()
+		remaining := 0
+		for i := range infos {
+			pending[i] = sd.deleteBuffer.ListAfter(catchUpTs[i])
+			remaining += len(pending[i])
+		}
+
+		// Drained: publish while still holding RLock. No Flush is called here:
+		// the normal catch-up path keeps worker.Delete RPCs outside deleteMut,
+		// otherwise a saturated worker can starve ProcessDelete and freeze tsafe.
+		if remaining == 0 {
+			// Atomically add to distribution while still holding RLock, so no
+			// ProcessDelete can run between "deletes applied" and "segment
+			// visible".
+			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+				sd.deleteMut.RUnlock()
+				return err
+			}
+			sd.deleteMut.RUnlock()
+			break
+		}
+
+		if round >= maxLockFreeCatchUpRounds {
+			log.Info(ctx, "loadStreamDelete catch-up exceeded expected rounds; applying final locked barrier",
+				mlog.Int("round", round),
+				mlog.Int("remainingDeleteRecords", remaining))
+			for i, info := range infos {
+				if len(pending[i]) == 0 {
+					continue
+				}
+				candidate := idCandidates[info.GetSegmentID()]
+				start := time.Now()
+				tsHit, bfHit, err := sd.processDeleteRecords(candidate, pending[i], forwarders[i])
+				if err != nil {
+					sd.deleteMut.RUnlock()
+					return err
+				}
+				if err := forwarders[i].Flush(); err != nil {
+					sd.deleteMut.RUnlock()
+					return err
+				}
+				log.Info(ctx, "forward delete to worker (phase 3: final locked catch-up)...",
+					mlog.String("channel", info.InsertChannel),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Int("round", round),
+					mlog.Int64("tsHitDeleteRowNum", tsHit),
+					mlog.Int64("bfHitDeleteRowNum", bfHit),
+					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
+				)
+			}
+			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+				sd.deleteMut.RUnlock()
+				return err
+			}
+			sd.deleteMut.RUnlock()
+			break
+		}
+		sd.deleteMut.RUnlock()
+
+		// Forward this round's arrivals OUTSIDE the lock.
+		for i, info := range infos {
+			if len(pending[i]) == 0 {
+				continue
+			}
+			candidate := idCandidates[info.GetSegmentID()]
+			start := time.Now()
+			tsHit, bfHit, err := sd.processDeleteRecords(candidate, pending[i], forwarders[i])
+			if err != nil {
+				return err
+			}
+			if err := forwarders[i].Flush(); err != nil {
+				return err
+			}
+			catchUpTs[i] = pending[i][len(pending[i])-1].Ts + 1
+			log.Info(ctx, "forward delete to worker (phase 3: lock-free catch-up)...",
+				mlog.String("channel", info.InsertChannel),
+				mlog.FieldSegmentID(info.GetSegmentID()),
+				mlog.Int("round", round),
+				mlog.Int64("tsHitDeleteRowNum", tsHit),
+				mlog.Int64("bfHitDeleteRowNum", bfHit),
+				mlog.Int64("bfCost", time.Since(start).Milliseconds()),
+			)
+		}
+	}
+
 	log.Info(ctx, "load stream delete done")
 	return nil
 }
@@ -1180,12 +1270,12 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		if err != nil {
 			log.Warn(ctx, "delegator failed to find worker", mlog.Err(err))
 			releaseErr = err
-		}
-		req.Base.TargetID = targetNodeID
-		err = worker.ReleaseSegments(ctx, req)
-		if err != nil {
-			log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
-			releaseErr = err
+		} else {
+			req.Base.TargetID = targetNodeID
+			if err = worker.ReleaseSegments(ctx, req); err != nil {
+				log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
+				releaseErr = err
+			}
 		}
 	}
 	if len(growing) > 0 {
@@ -1258,7 +1348,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	}
 }
 
-func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest) (float64, error) {
+func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
 		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
@@ -1279,51 +1369,33 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	var tfArray *schemapb.SparseFloatArray
-	schemaVersion := sd.collection.Schema().GetVersion()
-	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
-		if functionType != schemapb.FunctionType_BM25 {
-			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+	datas := []any{texts}
+	if len(functionRunner.GetInputFields()) == 2 {
+		analyzerName := "default"
+		if name := req.GetAnalyzerName(); name != "" {
+			// use user provided analyzer name
+			analyzerName = name
 		}
 
-		datas := []any{texts}
-		if len(functionRunner.GetInputFields()) == 2 {
-			analyzerName := "default"
-			if name := req.GetAnalyzerName(); name != "" {
-				// use user provided analyzer name
-				analyzerName = name
-			}
+		analyzers := make([]string, len(texts))
+		for i := range texts {
+			analyzers[i] = analyzerName
+		}
+		datas = append(datas, analyzers)
+	}
 
-			analyzers := make([]string, len(texts))
-			for i := range texts {
-				analyzers[i] = analyzerName
-			}
-			datas = append(datas, analyzers)
-		}
-
-		// get search text term frequency
-		output, err := functionRunner.BatchRun(datas...)
-		if err != nil {
-			return err
-		}
-		if len(output) == 0 {
-			return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
-		}
-
-		var ok bool
-		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
-		if !ok {
-			return merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
-		}
-		return nil
-	})
+	// get search text term frequency
+	output, err := functionRunner.BatchRun(datas...)
 	if err != nil {
 		return 0, err
 	}
+	if len(output) == 0 {
+		return 0, merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
+	}
+
+	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		// internal invariant: runners are populated with the schema, never by
-		// the request — classified system, keeps cross-replica failover
-		return 0, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		return 0, merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 	}
 
 	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
@@ -1348,7 +1420,7 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 	return avgdl, nil
 }
 
-func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.SearchRequest) error {
+func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) error {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
 		return merr.WrapErrParameterInvalidMsg("failed to unmarshal MinHash placeholder group: %v", err)
@@ -1364,33 +1436,17 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	var fieldData *schemapb.FieldData
-	schemaVersion := sd.collection.Schema().GetVersion()
-	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
-		if functionType != schemapb.FunctionType_MinHash {
-			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
-		}
-
-		output, err := functionRunner.BatchRun(texts)
-		if err != nil {
-			return err
-		}
-		if len(output) == 0 {
-			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
-		}
-
-		var ok bool
-		fieldData, ok = output[0].(*schemapb.FieldData)
-		if !ok {
-			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
-		}
-		return nil
-	})
+	output, err := functionRunner.BatchRun(texts)
 	if err != nil {
 		return err
 	}
+	if len(output) == 0 {
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
+	}
+
+	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
 	}
 
 	vectorField := fieldData.GetVectors()
@@ -1406,16 +1462,6 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 	req.PlaceholderGroup, err = funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
-	workers := sd.workerManager.GetAllWorkers()
-	for _, worker := range workers {
-		if err := worker.DropIndex(ctx, req); err != nil {
-			return err
-		}
 	}
 	return nil
 }

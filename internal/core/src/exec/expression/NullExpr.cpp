@@ -120,7 +120,7 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -193,7 +193,7 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
             break;
         }
         default:
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported null expr type {}",
                       proto::plan::NullExpr_NullOp_Name(expr_->op_));
     }

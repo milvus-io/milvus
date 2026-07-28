@@ -710,35 +710,6 @@ func (s *LocalSegment) HasFieldData(fieldID int64) bool {
 	return s.csegment.HasFieldData(fieldID)
 }
 
-func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
-		field := typeutil.GetField(s.collection.Schema(), indexInfo.IndexInfo.FieldID)
-		if typeutil.IsJSONType(field.GetDataType()) {
-			nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
-			if err != nil {
-				return err
-			}
-			err = s.csegment.DropJSONIndex(ctx, indexInfo.IndexInfo.FieldID, nestedPath)
-			if err != nil {
-				return err
-			}
-		} else {
-			err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
-			if err != nil {
-				return err
-			}
-		}
-
-		s.fieldIndexes.Remove(indexID)
-	}
-	return nil
-}
-
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
@@ -844,7 +815,14 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 	log.Debug(ctx, "begin to retrieve")
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
-	result, err := s.csegment.Retrieve(ctx, plan)
+	result, err := retrySegmentReadGate(
+		ctx,
+		s.segmentType,
+		func() (*segcore.RetrieveResult, error) {
+			return s.csegment.Retrieve(ctx, plan)
+		},
+		waitSegmentReadGateRetry,
+	)
 	if err != nil {
 		log.Warn(ctx, "Retrieve failed")
 		return nil, err
@@ -890,7 +868,14 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 
 	log.Debug(ctx, "begin to retrieve by offsets")
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-	result, err := s.csegment.RetrieveByOffsets(ctx, plan)
+	result, err := retrySegmentReadGate(
+		ctx,
+		s.segmentType,
+		func() (*segcore.RetrieveResult, error) {
+			return s.csegment.RetrieveByOffsets(ctx, plan)
+		},
+		waitSegmentReadGateRetry,
+	)
 	if err != nil {
 		log.Warn(ctx, "RetrieveByOffsets failed")
 		return nil, err
@@ -1302,6 +1287,13 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
 	defer s.ptrLock.Unpin()
+
+	// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
+	// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
+	// the full-load path injects; otherwise segcore asserts on load. See #51249.
+	if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
+		return err
+	}
 
 	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{

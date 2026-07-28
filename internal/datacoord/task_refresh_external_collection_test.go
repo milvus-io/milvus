@@ -50,6 +50,16 @@ type stubCatalog struct {
 	tasks           []*datapb.ExternalCollectionRefreshTask
 	alterSegmentErr error
 	alteredSegments []*datapb.SegmentInfo
+
+	updateErr     error
+	updateActions [][]metastore.UpdateAction
+}
+
+// Update records the actions passed to it (so tests can assert on the
+// composite write a caller issued) and returns updateErr.
+func (s *stubCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	s.updateActions = append(s.updateActions, actions)
+	return s.updateErr
 }
 
 func (s *stubCatalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
@@ -65,14 +75,6 @@ func (s *stubCatalog) SaveExternalCollectionRefreshJob(ctx context.Context, job 
 }
 
 func (s *stubCatalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error {
-	return nil
-}
-
-func (s *stubCatalog) DropExternalCollectionRefreshJob(ctx context.Context, jobID typeutil.UniqueID) error {
-	return nil
-}
-
-func (s *stubCatalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error {
 	return nil
 }
 

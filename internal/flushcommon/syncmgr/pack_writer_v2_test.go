@@ -129,7 +129,7 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 	rows := 10
 
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -151,11 +151,104 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	gotInserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal(gotInserts[0].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/0/1")
 	s.Equal(gotInserts[101].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/101/2")
+}
+
+func (s *PackWriterV2Suite) TestWriteFeedsSegmentStatistics() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	rows := 10
+
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).
+		WithSegmentID(segmentID).WithChannelName(channelName).
+		WithInsertData(genInsertData(rows, s.schema)).
+		WithTimeRange(1, uint64(rows)).
+		WithBatchRows(int64(rows))
+
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+
+	_, _, _, _, _, _, published, err := bw.Write(context.Background(), pack)
+	s.NoError(err)
+
+	// Write returns this sync's cumulative Statistics; the metaCache collector
+	// is updated only by SyncTask.Run after the DataCoord ack, so assert on the
+	// returned value rather than the segment's collector.
+	s.NotNil(published)
+	s.Greater(published.GetInsertBinlogSize(), int64(0))
+	// pk field 100 is present in this sync's insert data; its presence (key)
+	// must be recorded in NullCounts even though it has zero nulls.
+	_, hasField := published.GetNullCounts()[100]
+	s.True(hasField)
+}
+
+func (s *PackWriterV2Suite) TestWritePublishesCumulativeStats() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	rows := 10
+
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	// Run the action so the segment's collector accumulates across both Writes.
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+
+	newPack := func() *SyncPack {
+		return new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).
+			WithSegmentID(segmentID).WithChannelName(channelName).
+			WithInsertData(genInsertData(rows, s.schema)).
+			WithTimeRange(1, uint64(rows)).
+			WithBatchRows(int64(rows))
+	}
+
+	// first sync
+	_, _, _, _, _, _, segStats1, err := bw.Write(context.Background(), newPack())
+	s.NoError(err)
+	s.NotNil(segStats1)
+	first := segStats1.GetInsertBinlogCount()
+	s.Greater(first, int64(0))
+
+	// SyncTask.Run installs the prepared stats on the metaCache after the
+	// DataCoord ack; simulate that here so the next sync accumulates on top.
+	metacache.SetStatistics(bw.PreparedStats())(seg)
+
+	// second sync of the SAME growing segment: the published stats are
+	// cumulative across both syncs, not just this one. The binlog count is
+	// deterministic (same schema → same column groups) so it doubles exactly;
+	// the byte size only has to grow, since genInsertData produces different
+	// random data (variable-length array field) each sync.
+	_, _, _, _, _, _, segStats2, err := bw.Write(context.Background(), newPack())
+	s.NoError(err)
+	s.NotNil(segStats2)
+	s.Equal(2*first, segStats2.GetInsertBinlogCount())
+	s.Greater(segStats2.GetInsertBinlogSize(), segStats1.GetInsertBinlogSize())
 }
 
 func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
@@ -164,13 +257,17 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	partitionID := int64(456)
 	segmentID := int64(789)
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 }
 
@@ -199,7 +296,7 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -216,7 +313,7 @@ func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
@@ -237,7 +334,7 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 

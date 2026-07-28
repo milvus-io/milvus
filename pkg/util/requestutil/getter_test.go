@@ -496,6 +496,48 @@ func TestGetStatusFromResponse(t *testing.T) {
 			want1: true,
 		},
 		{
+			name: "alter collection schema response",
+			args: args{
+				resp: &milvuspb.AlterCollectionSchemaResponse{
+					AlterStatus: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+				},
+			},
+			want: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			want1: true,
+		},
+		{
+			name: "nil common status",
+			args: args{
+				resp: (*commonpb.Status)(nil),
+			},
+			want1: false,
+		},
+		{
+			name: "response with nil status",
+			args: args{
+				resp: &milvuspb.DescribeCollectionResponse{},
+			},
+			want1: false,
+		},
+		{
+			name: "alter response with nil status",
+			args: args{
+				resp: &milvuspb.AlterCollectionSchemaResponse{},
+			},
+			want1: false,
+		},
+		{
+			name: "typed nil alter response",
+			args: args{
+				resp: (*milvuspb.AlterCollectionSchemaResponse)(nil),
+			},
+			want1: false,
+		},
+		{
 			name: "invalid response",
 			args: args{
 				resp: "foo",
@@ -546,6 +588,13 @@ func TestParseMetricLabel(t *testing.T) {
 	// response that itself implements GetStatus
 	assertLabels(metrics.FailLabel, metrics.CauseUser,
 		&milvuspb.BoolResponse{Status: merr.Status(inputErr)}, nil)
+
+	// AlterCollectionSchemaResponse reports the RPC status through AlterStatus.
+	assertLabels(metrics.FailLabel, metrics.CauseUser,
+		&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(inputErr)}, nil)
+	alterSys := merr.Status(merr.ErrSegcore)
+	assertLabels(metrics.FailLabel, metrics.CauseSystem,
+		&milvuspb.AlterCollectionSchemaResponse{AlterStatus: alterSys}, merr.Error(alterSys))
 
 	// merr input error through the err path (REST v2 handlers abort with merr
 	// directly; no GRPCStatus, so the gRPC switch alone would misbucket it as a

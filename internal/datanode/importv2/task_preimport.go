@@ -212,6 +212,10 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 		if err != nil {
 			return err
 		}
+		err = CheckStructArrayConsistency(t.GetSchema(), data)
+		if err != nil {
+			return err
+		}
 		rowsCount, err := GetRowsStats(t, data)
 		if err != nil {
 			return err

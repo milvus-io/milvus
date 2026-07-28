@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -385,6 +386,7 @@ type GrowingSourceSyncTask struct {
 
 	chunkManager  storage.ChunkManager
 	allocator     allocator.Interface
+	storageConfig *indexpb.StorageConfig
 	manifestPath  string
 	flushedSize   int64
 	insertBinlogs map[int64]*datapb.FieldBinlog
@@ -496,6 +498,11 @@ func (t *GrowingSourceSyncTask) WithCommittedPKStats(pkStats *storage.PrimaryKey
 
 func (t *GrowingSourceSyncTask) WithAllocator(allocator allocator.Interface) *GrowingSourceSyncTask {
 	t.allocator = allocator
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithStorageConfig(storageConfig *indexpb.StorageConfig) *GrowingSourceSyncTask {
+	t.storageConfig = storageConfig
 	return t
 }
 

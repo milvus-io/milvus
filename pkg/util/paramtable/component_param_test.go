@@ -247,6 +247,15 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum.GetAsInt64())
 
+		assert.Equal(t, int64(DefaultMaxBloomFilterPlanSize), Params.MaxBloomFilterPlanSize.GetAsInt64())
+		params.Save(Params.MaxBloomFilterPlanSize.Key, "1048576")
+		assert.Equal(t, int64(1048576), Params.MaxBloomFilterPlanSize.GetAsInt64())
+		for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+			params.Save(Params.MaxBloomFilterPlanSize.Key, invalid)
+			assert.Equal(t, int64(DefaultMaxBloomFilterPlanSize), Params.MaxBloomFilterPlanSize.GetAsInt64(), invalid)
+		}
+		params.Reset(Params.MaxBloomFilterPlanSize.Key)
+
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum.GetAsInt64())

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1613,6 +1614,21 @@ func TestExpr_BinaryArith(t *testing.T) {
 		// to int64 and treats non-numeric / missing values as non-matching).
 		`(JSONField["A"] & 4) == 4`,
 		`(JSONField["B"] | 2) != 0`,
+		// shift operators on integer / JSON / array-element fields
+		`(Int64Field << 2) == 8`,
+		`(Int64Field >> 1) >= 5`,
+		`(Int32Field << 3) != 0`,
+		`(JSONField["A"] << 1) == 4`,
+		`(ArrayField[0] >> 2) < 4`,
+		`Int64Field == (1 << 3)`,
+		`Int64Field == (256 >> 2)`,
+		// bitwise NOT: constant folds; over a field it is rewritten to (x ^ -1)
+		`Int64Field == ~5`,
+		`~5 == Int64Field`,
+		`~Int64Field == 0`,
+		`~Int32Field != 0`,
+		`~JSONField["A"] == 0`,
+		`~ArrayField[0] >= 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1644,6 +1660,31 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`(Int64Field & Int32Field) == 4`,
 		`(Int64Field | Int32Field) != 0`,
 		`(Int64Field ^ Int32Field) == 0`,
+		// shifts on non-integer fields are invalid
+		`(FloatField << 1) == 0`,
+		`(DoubleField >> 1) == 0`,
+		// a negative or too-large shift amount is rejected at plan time
+		`(Int64Field << 64) == 0`,
+		`(Int64Field << -1) == 0`,
+		`(Int64Field >> 64) == 0`,
+		`Int64Field == (1 << 64)`,
+		`Int64Field == (1 >> 64)`,
+		// folding a shift over non-integer literals is invalid (integer-only)
+		`Int64Field == (1.5 << 1)`,
+		`Int64Field == (1.5 >> 1)`,
+		// shift between two fields is unsupported (right operand must be a constant)
+		`(Int64Field << Int32Field) == 0`,
+		// bitwise NOT on non-integer fields is invalid
+		`~FloatField == 0`,
+		`~DoubleField == 0`,
+		`~BoolField == 0`,
+		`~VarCharField == 0`,
+		// folding ~ over a non-integer literal is invalid (integer-only)
+		`Int64Field == ~1.5`,
+		// nested arithmetic (two arith ops before the comparison) is unsupported,
+		// consistent with the other arithmetic / bitwise operators
+		`(Int64Field >> 2) * 2 == 4`,
+		`(~Int64Field) + 1 == 0`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -1679,6 +1720,13 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		// reverse form (constant on the left) for the symmetric == / != ops
 		{`4 == (Int64Field & 4)`, planpb.ArithOpType_BitAnd, planpb.OpType_Equal, 4, 4},
 		{`0 != (Int32Field | 2)`, planpb.ArithOpType_BitOr, planpb.OpType_NotEqual, 2, 0},
+		// shift operators fuse the same way, carrying the shift amount as the operand
+		{`(Int64Field << 2) == 8`, planpb.ArithOpType_Shl, planpb.OpType_Equal, 2, 8},
+		{`(Int64Field >> 1) >= 5`, planpb.ArithOpType_Shr, planpb.OpType_GreaterEqual, 1, 5},
+		{`(Int32Field << 3) != 0`, planpb.ArithOpType_Shl, planpb.OpType_NotEqual, 3, 0},
+		// ~field is rewritten to (field ^ -1); it fuses as BitXor with operand -1
+		{`~Int64Field == 0`, planpb.ArithOpType_BitXor, planpb.OpType_Equal, -1, 0},
+		{`~Int32Field != 5`, planpb.ArithOpType_BitXor, planpb.OpType_NotEqual, -1, 5},
 	}
 	for _, c := range cases {
 		expr, err := ParseExpr(helper, c.expr, nil)
@@ -1701,9 +1749,12 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		expected int64
 	}
 	foldCases := []foldCase{
-		{`Int64Field == (7 & 3)`, 3}, // 7 & 3 = 3
-		{`Int64Field == (5 | 2)`, 7}, // 5 | 2 = 7
-		{`Int64Field == (6 ^ 3)`, 5}, // 6 ^ 3 = 5
+		{`Int64Field == (7 & 3)`, 3},     // 7 & 3 = 3
+		{`Int64Field == (5 | 2)`, 7},     // 5 | 2 = 7
+		{`Int64Field == (6 ^ 3)`, 5},     // 6 ^ 3 = 5
+		{`Int64Field == (1 << 3)`, 8},    // 1 << 3 = 8
+		{`Int64Field == (256 >> 2)`, 64}, // 256 >> 2 = 64
+		{`Int64Field == ~5`, -6},         // ~5 = -6
 	}
 	for _, c := range foldCases {
 		expr, err := ParseExpr(helper, c.expr, nil)
@@ -2650,6 +2701,8 @@ func Test_ArrayExpr(t *testing.T) {
 
 	exprs := []string{
 		`ArrayField == [1,2,3,4]`,
+		`ArrayField != [1,2,3,4]`,
+		`[1,2,3,4] == ArrayField`,
 		`ArrayField[0] == 1`,
 		`ArrayField[0] > 1`,
 		`1 < ArrayField[0] < 3`,
@@ -2688,6 +2741,25 @@ func Test_ArrayExpr(t *testing.T) {
 			RoundDecimal: 0,
 		}, nil, nil)
 		assert.NoError(t, err, expr)
+	}
+
+	unsupportedFieldComparisons := []string{
+		`ArrayField == ArrayField`,
+		`ArrayField != ArrayField`,
+		`ArrayField == Int64Field`,
+		`Int64Field != ArrayField`,
+		`ArrayField[0] == Int64Field`,
+		`ArrayField[0] < Int64Field`,
+	}
+	for _, expr = range unsupportedFieldComparisons {
+		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+		assert.Contains(t, err.Error(), "field-to-field comparison involving ARRAY fields is not supported", expr)
 	}
 
 	invalidExprs := []string{
@@ -3644,6 +3716,26 @@ func TestExpr_Match(t *testing.T) {
 		// Nested match expressions not allowed
 		`MATCH_ALL(struct_array, MATCH_ANY(struct_array, $[sub_int] > 1))`,
 		`MATCH_ANY(struct_array, $[sub_int] > 1 && MATCH_ALL(struct_array, $[sub_str] == "1"))`,
+
+		// MATCH predicates must be evaluated at element level
+		`MATCH_ALL(struct_array, Int64Field > 0)`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1 && Int64Field > 0)`,
+		`MATCH_LEAST(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_MOST(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_EXACT(struct_array, Int64Field > 0, threshold=1)`,
+		`MATCH_ALL(struct_array, $[sub_int] > Int64Field)`,
+		`MATCH_ALL(struct_array, true)`,
+		`MATCH_ANY(struct_array, ($[sub_int] == 2) && (true || $[sub_int] == 1))`,
+		`MATCH_ANY(struct_array, $[sub_int] == $[sub_int])`,
+
+		// Raw element columns and function calls are not supported by C++ MATCH execution
+		`MATCH_ANY(struct_array, $[sub_int])`,
+		`MATCH_ANY(struct_array, empty($[sub_str]))`,
+
+		// Contains executors still produce row-level bitmaps
+		`MATCH_ANY(struct_array, array_contains($[sub_int], 1))`,
+		`MATCH_ANY(struct_array, array_contains_any($[sub_int], [1, 2]))`,
+		`MATCH_ANY(struct_array, array_contains_all($[sub_int], [1, 2]))`,
 
 		// $[field] syntax outside match context
 		`$[sub_int] > 1`,

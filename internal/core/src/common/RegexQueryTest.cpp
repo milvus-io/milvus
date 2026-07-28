@@ -468,9 +468,8 @@ TEST_F(SealedSegmentRegexQueryTest, InnerMatchOnInvertedIndexStringField) {
     ASSERT_TRUE(final[4]);
 }
 
-TEST_F(SealedSegmentRegexQueryTest,
-       MatchQueryFallsBackToRawDataWithInvertedIndex) {
-    std::string operand = "a%b%";
+TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnInvertedIndexStringField) {
+    std::string operand = "a%";
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
@@ -492,8 +491,8 @@ TEST_F(SealedSegmentRegexQueryTest,
     BitsetType final;
     final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
-    ASSERT_FALSE(final[1]);
-    ASSERT_FALSE(final[2]);
+    ASSERT_TRUE(final[1]);
+    ASSERT_TRUE(final[2]);
     ASSERT_TRUE(final[3]);
     ASSERT_TRUE(final[4]);
 }

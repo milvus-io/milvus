@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -492,8 +493,8 @@ func TestExternalCollectionRefreshMeta_AddTaskIDToJob(t *testing.T) {
 func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("drop_task_failed", func(t *testing.T) {
-		catalog := &stubCatalog{}
+	t.Run("catalog_update_failed", func(t *testing.T) {
+		catalog := &stubCatalog{updateErr: errors.New("update error")}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100},
 		}
@@ -508,38 +509,13 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
-		mockDropTask := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(errors.New("drop task error")).Build()
-		defer mockDropTask.UnPatch()
-
 		err = meta.DropJob(ctx, 1)
 		assert.Error(t, err)
 
-		// Job should still exist
+		// A failed composite write must not desync memory from disk: job and
+		// task are still present.
 		assert.NotNil(t, meta.GetJob(1))
-	})
-
-	t.Run("drop_job_catalog_failed", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100},
-		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
-		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
-		defer mockListTasks.UnPatch()
-
-		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		// Mock drop job to fail
-		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(errors.New("drop job error")).Build()
-		defer mockDropJob.UnPatch()
-
-		err = meta.DropJob(ctx, 1)
-		assert.Error(t, err)
-
-		// Job should still exist
-		assert.NotNil(t, meta.GetJob(1))
+		assert.NotNil(t, meta.GetTask(1001))
 	})
 
 	t.Run("success_with_tasks", func(t *testing.T) {
@@ -550,15 +526,39 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 			{TaskId: 1001, JobId: 1, CollectionId: 100},
 			{TaskId: 1002, JobId: 1, CollectionId: 100},
 		}
-		meta := createMetaTestRefreshMeta(t, jobs, tasks)
+		catalog := &stubCatalog{jobs: jobs, tasks: tasks}
+		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+		assert.NoError(t, err)
 
-		err := meta.DropJob(ctx, 1)
+		err = meta.DropJob(ctx, 1)
 		assert.NoError(t, err)
 
 		// Verify job and tasks removed
 		assert.Nil(t, meta.GetJob(1))
 		assert.Nil(t, meta.GetTask(1001))
 		assert.Nil(t, meta.GetTask(1002))
+
+		// One composite catalog.Update call: a DropRefreshTask action per
+		// task, followed by a single DropRefreshJob action landing last (the
+		// job is the failover anchor).
+		assert.Len(t, catalog.updateActions, 1)
+		actions := catalog.updateActions[0]
+		assert.Len(t, actions, 3)
+
+		taskIDs := make(map[int64]bool)
+		for _, action := range actions[:2] {
+			assert.Equal(t, metastore.ActionDelete, action.Type)
+			entry, ok := action.Entry.(metastore.RefreshTaskEntry)
+			assert.True(t, ok)
+			taskIDs[entry.TaskID] = true
+		}
+		assert.Equal(t, map[int64]bool{1001: true, 1002: true}, taskIDs)
+
+		lastAction := actions[2]
+		assert.Equal(t, metastore.ActionDelete, lastAction.Type)
+		jobEntry, ok := lastAction.Entry.(metastore.RefreshJobEntry)
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), jobEntry.JobID)
 	})
 
 	t.Run("job_not_exists", func(t *testing.T) {
@@ -962,54 +962,6 @@ func TestExternalCollectionRefreshMeta_UpdateTaskVersion(t *testing.T) {
 
 		err := meta.UpdateTaskVersion(9999, 10)
 		assert.Error(t, err)
-	})
-}
-
-func TestExternalCollectionRefreshMeta_DropTask(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("drop_failed", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		tasks := []*datapb.ExternalCollectionRefreshTask{
-			{TaskId: 1001, JobId: 1},
-		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
-		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
-		defer mockListTasks.UnPatch()
-
-		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		assert.NoError(t, err)
-
-		mockDrop := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(errors.New("drop error")).Build()
-		defer mockDrop.UnPatch()
-
-		err = meta.DropTask(ctx, 1001)
-		assert.Error(t, err)
-
-		// Task should still exist
-		assert.NotNil(t, meta.GetTask(1001))
-	})
-
-	t.Run("success", func(t *testing.T) {
-		tasks := []*datapb.ExternalCollectionRefreshTask{
-			{TaskId: 1001, JobId: 1},
-		}
-		meta := createMetaTestRefreshMeta(t, nil, tasks)
-
-		err := meta.DropTask(ctx, 1001)
-		assert.NoError(t, err)
-
-		// Verify task removed
-		assert.Nil(t, meta.GetTask(1001))
-	})
-
-	t.Run("task_not_exists", func(t *testing.T) {
-		meta := createMetaTestRefreshMeta(t, nil, nil)
-
-		// Should not error if task doesn't exist
-		err := meta.DropTask(ctx, 9999)
-		assert.NoError(t, err)
 	})
 }
 

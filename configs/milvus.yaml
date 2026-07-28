@@ -189,11 +189,13 @@ mq:
 woodpecker:
   meta:
     type: etcd # The Type of the metadata provider. currently only support etcd.
-    prefix: woodpecker # The Prefix of the metadata provider. default is woodpecker.
+    prefix: woodpecker # The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.
   client:
     segmentAppend:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
+      maxBatchEntries: 1000 # Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.
+      maxBatchBytes: 2000000 # Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
@@ -240,6 +242,7 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
+      maxIntervalForService: 10ms # Maximum interval between two sync operations for woodpecker service-storage mode (woodpecker.storage.type=service), default is 10 milliseconds. Only takes effect on standalone woodpecker log-store servers (staged-storage writer); it is not consumed by milvus embedded mode. A larger interval coalesces more entries per flush to raise QPS under small-batch high-concurrency writes, at the cost of up to that much extra durability latency. Note this raises the interval from woodpecker's built-in 1ms default, changing the sync cadence for existing service-mode deployments.
       maxBytes: 256M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
@@ -360,6 +363,8 @@ proxy:
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
+  maxBloomFilterSize: 33554432 # The maximum byte size of the SBBF body in a client pre-built bloom_match filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-request memory/network amplification. Must not exceed the MBF1 format cap (128 MiB); the default admits ~24M int64 members at the default FPR while staying under the default gRPC receive limit.
+  maxBloomFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of bloom-bearing expression plans in one Search, HybridSearch, or Query request. The proxy checks the assembled plans before proto.Marshal, so repeated references to one bloom_match template value and Bloom filters across hybrid sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -483,6 +488,7 @@ queryCoord:
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
+  enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
   checkHandoffInterval: 5000
   enableActiveStandby: false
   checkInterval: 1000
@@ -538,6 +544,7 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
+    enableGISSplitFusion: false # Enable GIS filter coarse/refine split + same-column fusion optimization
     tieredStorage:
       warmup:
         # options: sync, async, disable.
@@ -797,6 +804,10 @@ dataCoord:
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   index:
     memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
+    # Object storage layout for newly built segment index files. 0: index_files/{buildID}/{indexVersion}/{partitionID}/{segmentID}, 1: index_v1/{collectionID}/{partitionID}/{segmentID}/{buildID}/{indexVersion}. Any other value falls back to 0.
+    # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
+    # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
+    storePathVersion: 0
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
@@ -1054,7 +1065,7 @@ common:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
-    enableGrowingSourceFlush: true # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

@@ -9,7 +9,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -839,7 +838,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
-	t.SerializedExprPlan, err = proto.Marshal(t.plan)
+	t.SerializedExprPlan, _, err = marshalPlanWithBloomFilterSizeLimit(t.plan, 0)
 	if err != nil {
 		return err
 	}
@@ -1126,12 +1125,12 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn(ctx, "QueryNode is not shardLeader")
-		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {

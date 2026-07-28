@@ -141,6 +141,9 @@ SearchOnSealedIndex(const Schema& schema,
         search_result,
         offset_mapping,
         use_iterator ? nullptr : search_info.array_offsets_.get());
+    if (use_iterator) {
+        search_result.resource_pins_.emplace_back(std::move(accessor));
+    }
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
 }

@@ -79,7 +79,7 @@ struct CompareElementFunc {
                     res[i] = left[offset] <= right[offset];
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
                             op));
@@ -107,7 +107,7 @@ struct CompareElementFunc {
                     res[i] = left[i] <= right[i];
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
                             op));
@@ -135,7 +135,7 @@ struct CompareElementFunc {
             res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
                 left, right, size);
         } else {
-            ThrowInfo(OpTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       fmt::format(
                           "unsupported op_type:{} for CompareElementFunc", op));
         }
@@ -158,9 +158,9 @@ class PhyCompareFilterExpr : public Expr {
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        auto& schema = segment->get_schema();
-        auto& left_field_meta = schema[left_field_];
-        auto& right_field_meta = schema[right_field_];
+        auto schema = segment->get_schema_snapshot();
+        auto& left_field_meta = (*schema)[left_field_];
+        auto& right_field_meta = (*schema)[right_field_];
         pinned_index_left_ = PinIndex(op_ctx_, segment, left_field_meta);
         pinned_index_right_ = PinIndex(op_ctx_, segment, right_field_meta);
         is_left_indexed_ = pinned_index_left_.size() > 0;
@@ -335,49 +335,72 @@ class PhyCompareFilterExpr : public Expr {
         int64_t processed_size = 0;
         if (segment_chunk_reader_.segment_->is_chunked() ||
             segment_chunk_reader_.segment_->type() == SegmentType::Growing) {
+            auto get_chunk_id_and_offset =
+                [&](const FieldId field,
+                    int64_t offset) -> std::pair<int64_t, int64_t> {
+                if (segment_chunk_reader_.segment_->type() ==
+                    SegmentType::Growing) {
+                    auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
+                    return {offset / size_per_chunk, offset % size_per_chunk};
+                } else {
+                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                        field, offset);
+                }
+            };
+
+            // Consecutive offsets frequently fall in the same left/right chunk;
+            // keep both pinned chunks across iterations and only re-pin/resolve
+            // when a chunk id changes, avoiding a per-row GroupChunk pin +
+            // shared_ptr lookup for each of the two columns. Safe on both
+            // sealed and growing (data and the chunked validity storage have
+            // stable per-chunk buffers).
+            int64_t cached_left_chunk_id = -1;
+            int64_t cached_right_chunk_id = -1;
+            std::optional<PinWrapper<Span<T>>> pw_left;
+            std::optional<PinWrapper<Span<U>>> pw_right;
+            const T* left_base = nullptr;
+            const bool* left_valid_base = nullptr;
+            const U* right_base = nullptr;
+            const bool* right_valid_base = nullptr;
             for (auto i = 0; i < size; ++i) {
                 auto offset = (*input)[i];
-                auto get_chunk_id_and_offset =
-                    [&](const FieldId field) -> std::pair<int64_t, int64_t> {
-                    if (segment_chunk_reader_.segment_->type() ==
-                        SegmentType::Growing) {
-                        auto size_per_chunk =
-                            segment_chunk_reader_.SizePerChunk();
-                        return {offset / size_per_chunk,
-                                offset % size_per_chunk};
-                    } else {
-                        return segment_chunk_reader_.segment_
-                            ->get_chunk_by_offset(field, offset);
-                    }
-                };
-
                 auto [left_chunk_id, left_chunk_offset] =
-                    get_chunk_id_and_offset(left_field_);
+                    get_chunk_id_and_offset(left_field_, offset);
                 auto [right_chunk_id, right_chunk_offset] =
-                    get_chunk_id_and_offset(right_field_);
+                    get_chunk_id_and_offset(right_field_, offset);
 
-                auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-                    op_ctx_, left_field_, left_chunk_id);
-                auto left_chunk = pw_left.get();
-                auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-                    op_ctx_, right_field_, right_chunk_id);
-                auto right_chunk = pw_right.get();
-                const bool* left_valid_data = left_chunk.valid_data();
-                const bool* right_valid_data = right_chunk.valid_data();
-                if (left_valid_data && !left_valid_data[left_chunk_offset]) {
+                if (left_chunk_id != cached_left_chunk_id) {
+                    pw_left.emplace(
+                        segment_chunk_reader_.segment_->chunk_data<T>(
+                            op_ctx_, left_field_, left_chunk_id));
+                    auto left_chunk = pw_left->get();
+                    left_base = left_chunk.data();
+                    left_valid_base = left_chunk.valid_data();
+                    cached_left_chunk_id = left_chunk_id;
+                }
+                if (right_chunk_id != cached_right_chunk_id) {
+                    pw_right.emplace(
+                        segment_chunk_reader_.segment_->chunk_data<U>(
+                            op_ctx_, right_field_, right_chunk_id));
+                    auto right_chunk = pw_right->get();
+                    right_base = right_chunk.data();
+                    right_valid_base = right_chunk.valid_data();
+                    cached_right_chunk_id = right_chunk_id;
+                }
+                if (left_valid_base && !left_valid_base[left_chunk_offset]) {
                     res[processed_size] = false;
                     valid_res[processed_size] = false;
                     processed_size++;
                     continue;
                 }
-                if (right_valid_data && !right_valid_data[right_chunk_offset]) {
+                if (right_valid_base && !right_valid_base[right_chunk_offset]) {
                     res[processed_size] = false;
                     valid_res[processed_size] = false;
                     processed_size++;
                     continue;
                 }
-                const T* left_data = left_chunk.data() + left_chunk_offset;
-                const U* right_data = right_chunk.data() + right_chunk_offset;
+                const T* left_data = left_base + left_chunk_offset;
+                const U* right_data = right_base + right_chunk_offset;
                 func.template operator()<FilterType::random>(
                     left_data,
                     right_data,

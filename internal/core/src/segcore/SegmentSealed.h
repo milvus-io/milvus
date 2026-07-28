@@ -37,10 +37,6 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void
-    DropIndex(const FieldId field_id) = 0;
-    virtual void
-    DropJSONIndex(const FieldId field_id, const std::string& nested_path) = 0;
-    virtual void
     DropFieldData(const FieldId field_id) = 0;
 
     virtual void

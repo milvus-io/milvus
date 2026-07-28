@@ -13,11 +13,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -55,6 +58,70 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 	l, err := opener.Open(context.Background(), &wal.OpenOption{})
 	assert.ErrorIs(t, err, errExpected)
 	assert.Nil(t, l)
+}
+
+func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testing.T) {
+	channel := types.PChannelInfo{
+		Name:       "replicate-recovery-failure-cleanup",
+		Term:       1,
+		AccessMode: types.AccessModeRW,
+	}
+	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, channel.Name).Return(
+		&streamingpb.WALCheckpoint{MessageId: &commonpb.MessageID{
+			Id:      "0",
+			WALName: commonpb.WALName_Test,
+		}}, nil)
+	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, channel.Name).Return(nil, nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+
+	walImpls := &firstTimeTickWALImpls{
+		channel: channel,
+		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return rmq.NewRmqID(1), nil
+		},
+	}
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().Close().Return().Once()
+	snapshot := &recovery.RecoverySnapshot{
+		VChannels:          map[string]*streamingpb.VChannelMeta{},
+		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
+		Checkpoint: &recovery.WALCheckpoint{
+			MessageID: rmq.NewRmqID(1),
+			TimeTick:  1,
+		},
+		TxnBuffer: utility.NewTxnBuffer(
+			mlog.With(),
+			metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
+		),
+	}
+	mockRecoverStorage := mockey.Mock(recovery.RecoverRecoveryStorage).
+		Return(rs, snapshot, nil).
+		Build()
+	defer mockRecoverStorage.UnPatch()
+
+	errExpected := errors.New("replicate recovery failed")
+	mockRecoverReplicateManager := mockey.Mock(replicates.RecoverReplicateManager).
+		Return(nil, errExpected).
+		Build()
+	defer mockRecoverReplicateManager.UnPatch()
+
+	opener := &openerAdaptorImpl{
+		idAllocator:  typeutil.NewIDAllocator(),
+		walInstances: typeutil.NewConcurrentMap[int64, wal.WAL](),
+	}
+	l, err := opener.openRWWAL(context.Background(), walImpls, &wal.OpenOption{Channel: channel, DisableFlusher: true})
+	require.ErrorIs(t, err, errExpected)
+	assert.Nil(t, l)
+
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().Channel().Return(channel).Maybe()
+	registered := assert.NotPanics(t, func() {
+		resource.Resource().SegmentStatsManager().RegisterSealOperator(sealOperator, nil, nil)
+	})
+	if registered {
+		resource.Resource().SegmentStatsManager().UnregisterSealOperator(sealOperator)
+	}
 }
 
 func TestDetermineLastConfirmedMessageID(t *testing.T) {
@@ -158,17 +225,28 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 		Build()
 	defer mockRecoverFlusher.UnPatch()
 
-	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).Return().Build()
+	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).
+		To(func(*flusherimpl.WALFlusherImpl) {
+			rs.Close()
+		}).
+		Build()
 	defer mockFlusherClose.UnPatch()
+	param := &interceptors.InterceptorBuildParam{}
+	resources := &walOpenResources{
+		roWAL:           roWAL,
+		param:           param,
+		recoveryStorage: rs,
+	}
 
 	err := (&openerAdaptorImpl{}).handleAlterWALFlushingStage(
 		context.Background(),
 		&wal.OpenOption{Channel: channel},
 		roWAL,
-		&interceptors.InterceptorBuildParam{},
 		rs,
+		resources,
 		snapshot,
 	)
+	resources.Close()
 
 	require.NoError(t, err)
 	require.NotNil(t, capturedParam)

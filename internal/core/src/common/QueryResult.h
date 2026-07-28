@@ -38,6 +38,10 @@
 
 namespace milvus {
 
+namespace segcore {
+class SegmentReadLease;
+}
+
 // scan cost in each search/query
 struct StorageCost {
     int64_t scanned_remote_bytes = 0;
@@ -310,10 +314,18 @@ struct SearchResult {
     }
 
  public:
-    int64_t total_nq_;
-    int64_t unity_topK_;
-    int64_t total_data_cnt_;
-    void* segment_;
+    int64_t total_nq_{0};
+    int64_t unity_topK_{0};
+    int64_t total_data_cnt_{0};
+    void* segment_{nullptr};
+
+    // Sealed search requests keep publication blocked until the result is
+    // deleted. Growing search results leave this empty.
+    std::shared_ptr<segcore::SegmentReadLease> read_lease_;
+
+    // Pins resources whose iterators or offset mappings may outlive the
+    // original search call independently from segment snapshot publication.
+    std::vector<std::shared_ptr<void>> resource_pins_;
 
     // first fill data during search, and then update data after reducing search results
     std::vector<float> distances_;

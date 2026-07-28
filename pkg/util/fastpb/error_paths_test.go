@@ -136,14 +136,16 @@ func TestMalformedWirePerField(t *testing.T) {
 		{"Scalar/bytes-truncated-inner-tag", wfield(7, truncTag), newScalarField, decScalarField},
 		{"Scalar/bytes-truncated-len-prefix", wfield(7, cat(wtag(1, protowire.BytesType), truncTag)), newScalarField, decScalarField},
 		{"Scalar/json-truncated-inner-tag", wfield(9, truncTag), newScalarField, decScalarField},
-		// cold oneof variants (decodeScalarFallback 8/10/11/12/13/14): malformed
-		// submessage bytes must surface the official codec's decode error
+		// cold oneof variants (decodeScalarFallback 8/10/11/12/13/14/15/16):
+		// malformed submessage bytes must surface the official codec's decode error
 		{"Scalar/array-data-malformed", wfield(8, truncTag), newScalarField, decScalarField},
 		{"Scalar/geometry-data-malformed", wfield(10, truncTag), newScalarField, decScalarField},
 		{"Scalar/timestamptz-data-malformed", wfield(11, truncTag), newScalarField, decScalarField},
 		{"Scalar/geometry-wkt-data-malformed", wfield(12, truncTag), newScalarField, decScalarField},
 		{"Scalar/mol-data-malformed", wfield(13, truncTag), newScalarField, decScalarField},
 		{"Scalar/mol-smiles-data-malformed", wfield(14, truncTag), newScalarField, decScalarField},
+		{"Scalar/date-data-malformed", wfield(15, truncTag), newScalarField, decScalarField},
+		{"Scalar/time-data-malformed", wfield(16, truncTag), newScalarField, decScalarField},
 
 		// --- VectorField: one malformed case per field ---
 		{"Vector/truncated-tag", truncTag, newVectorField, decVectorField},

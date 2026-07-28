@@ -138,7 +138,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<std::string>(context);
                     break;
                 default:
-                    ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
+                    ThrowInfo(UnexpectedError, "unknown data type: {}", type);
             }
             break;
         }
@@ -162,12 +162,12 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateArray<std::string>(context);
                     break;
                 default:
-                    ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
+                    ThrowInfo(UnexpectedError, "unknown data type: {}", type);
             }
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -176,7 +176,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 bool
 PhyTermFilterExpr::CanSkipSegment() {
-    const auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
     T min, max;
     for (auto i = 0; i < expr_->vals_.size(); i++) {
         auto val = GetValueFromProto<T>(expr_->vals_[i]);
@@ -186,7 +186,7 @@ PhyTermFilterExpr::CanSkipSegment() {
     auto can_skip = [&]() -> bool {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
-            if (!skip_index.CanSkipBinaryRange<T>(
+            if (!skip_index->CanSkipBinaryRange<T>(
                     op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
@@ -230,7 +230,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         default: {
-            ThrowInfo(DataTypeInvalid, "unsupported data type {}", pk_type_);
+            ThrowInfo(UnexpectedError, "unsupported data type {}", pk_type_);
         }
     }
 
@@ -745,7 +745,23 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             }
         };
 
-        {
+        bool skip_shared_data = false;
+        if constexpr (std::is_same_v<GetType, bool>) {
+            skip_shared_data = index->HasAllShreddingFields(
+                pointer, {milvus::index::JSONType::BOOL});
+        } else if constexpr (std::is_same_v<GetType, int64_t> ||
+                             std::is_same_v<GetType, double>) {
+            skip_shared_data =
+                index->HasAllShreddingFields(pointer,
+                                             {milvus::index::JSONType::INT64,
+                                              milvus::index::JSONType::DOUBLE});
+        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                             std::is_same_v<GetType, std::string>) {
+            skip_shared_data = index->HasAllShreddingFields(
+                pointer, {milvus::index::JSONType::STRING});
+        }
+
+        if (!skip_shared_data) {
             milvus::ScopedTimer timer(
                 "term_json_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -1230,6 +1246,23 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
 void
 PhyTermFilterExpr::DetermineExecPath() {
+    // Validate before execution-path selection or asynchronous prefetch can
+    // consume values using the type selected from vals_[0].
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        expr_->vals_.size() > 1) {
+        const auto expected_type = expr_->vals_[0].val_case();
+        for (size_t i = 1; i < expr_->vals_.size(); ++i) {
+            if (expr_->vals_[i].val_case() != expected_type) {
+                ThrowInfo(DataTypeInvalid,
+                          "TermExpr values must have the same type, value 0 "
+                          "has type {} but value {} has type {}",
+                          static_cast<int>(expected_type),
+                          i,
+                          static_cast<int>(expr_->vals_[i].val_case()));
+            }
+        }
+    }
+
     // PkIndex
     if (is_pk_field_) {
         exec_path_ = ExprExecPath::PkIndex;
@@ -1312,7 +1345,7 @@ PhyTermFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyTermFilterExpr::PrefetchRawData() {
-    auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
 
     std::vector<T> elements;
     elements.reserve(expr_->vals_.size());
@@ -1323,7 +1356,7 @@ PhyTermFilterExpr::PrefetchRawData() {
 
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index.CanSkipInQuery(field_id_, i, elements);
+        auto skip = skip_index->CanSkipInQuery(field_id_, i, elements);
         if (!skip) {
             chunks_may_hit.push_back(i);
         }

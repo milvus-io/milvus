@@ -129,18 +129,17 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       proto::plan::GenericValue::ValCase::kFloatVal) &&
                  (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
                   upper_type == proto::plan::GenericValue::ValCase::kFloatVal));
+            const auto has_unsafe_int_bound =
+                is_numeric &&
+                ((lower_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                  !IsInt64SafeForJsonDoubleIndex(
+                      expr_->lower_val_.int64_val())) ||
+                 (upper_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                  !IsInt64SafeForJsonDoubleIndex(
+                      expr_->upper_val_.int64_val())));
 
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 if (is_numeric) {
-                    const auto has_unsafe_int_bound =
-                        (lower_type ==
-                             proto::plan::GenericValue::ValCase::kInt64Val &&
-                         !IsInt64SafeForJsonDoubleIndex(
-                             expr_->lower_val_.int64_val())) ||
-                        (upper_type ==
-                             proto::plan::GenericValue::ValCase::kInt64Val &&
-                         !IsInt64SafeForJsonDoubleIndex(
-                             expr_->upper_val_.int64_val()));
                     if (has_unsafe_int_bound) {
                         result =
                             ExecRangeVisitorImplForJsonPreciseNumeric(context);
@@ -177,12 +176,16 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecRangeVisitorImplForJson<std::string>(context);
                 } else {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     lower_type));
                 }
             } else {
-                if (is_numeric && use_double) {
+                if (has_unsafe_int_bound &&
+                    (has_offset_input_ ||
+                     exec_path_ != ExprExecPath::JsonStats)) {
+                    result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
+                } else if (is_numeric && use_double) {
                     // Use double when either bound is float
                     result = ExecRangeVisitorImplForJson<double>(context);
                 } else if (lower_type ==
@@ -196,7 +199,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecRangeVisitorImplForJson<std::string>(context);
                 } else {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     lower_type));
                 }
@@ -220,7 +223,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
                 default: {
                     ThrowInfo(
-                        DataTypeInvalid,
+                        UnexpectedError,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
                 }
@@ -228,7 +231,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -367,20 +370,26 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
         [this](OffsetVector* input) -> ColumnVectorPtr {
-        int64_t batch_size;
-        if (input != nullptr) {
-            batch_size = input->size();
+        TargetBitmap valid_res;
+        if (expr_->column_.element_level_) {
+            // Element batches are derived from the row cursor so
+            // MoveCursor()-based short-circuiting stays aligned.
+            // Individual elements cannot be null; their containing row's
+            // validity is applied by the element consumer.
+            auto batch_size =
+                GetNextRealBatchSize(input, /*element_level=*/true);
+            valid_res = TargetBitmap(batch_size, true);
+            if (input == nullptr) {
+                MoveCursor();
+            }
+        } else if (input != nullptr) {
+            valid_res =
+                ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input);
         } else {
-            batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                             ? active_count_ - overflow_check_pos_
-                             : batch_size_;
-            overflow_check_pos_ += batch_size;
+            valid_res = ProcessChunksForValid<T>(UseIndexCursor());
         }
-        auto valid_res =
-            (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
-                : ProcessChunksForValid<T>(UseIndexCursor());
 
+        auto batch_size = valid_res.size();
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
         return res_vec;
@@ -937,7 +946,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 }
             }
         };
-        {
+        bool skip_shared_data = false;
+        if constexpr (std::is_same_v<GetType, int64_t> ||
+                      std::is_same_v<GetType, double>) {
+            skip_shared_data =
+                index->HasAllShreddingFields(pointer,
+                                             {milvus::index::JSONType::INT64,
+                                              milvus::index::JSONType::DOUBLE});
+        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                             std::is_same_v<GetType, std::string>) {
+            skip_shared_data = index->HasAllShreddingFields(
+                pointer, {milvus::index::JSONType::STRING});
+        }
+
+        if (!skip_shared_data) {
             milvus::ScopedTimer timer(
                 "binary_range_json_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -1231,16 +1253,16 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
                            U>;
     H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
     H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
-    auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
 
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index.CanSkipBinaryRange(field_id_,
-                                                  i,
-                                                  lower_val,
-                                                  upper_val,
-                                                  expr_->lower_inclusive_,
-                                                  expr_->upper_inclusive_);
+        auto skip = skip_index->CanSkipBinaryRange(field_id_,
+                                                   i,
+                                                   lower_val,
+                                                   upper_val,
+                                                   expr_->lower_inclusive_,
+                                                   expr_->upper_inclusive_);
         if (!skip) {
             chunks_may_hit.push_back(i);
         }

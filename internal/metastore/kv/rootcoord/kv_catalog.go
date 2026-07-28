@@ -178,13 +178,41 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
-	k1 := BuildCollectionKey(coll.DBID, coll.CollectionID)
-	collInfo := model.MarshalCollectionModel(coll)
-	v1, err := proto.Marshal(collInfo)
-	if err != nil {
-		return merr.WrapErrSerializationFailed(err, "marshal collection info")
-	}
+	// Delegate to the composite Update, which owns the atomic-or-ordered
+	// commit. When the child kvs plus the collection key fit one etcd txn,
+	// everything lands atomically; otherwise Update falls back to flushing
+	// the children first and the collection key (the CommitSave visibility
+	// marker) last. That ordering preserves the crash-safety contract the
+	// inline code used to hand-roll: if we crash before the collection key
+	// lands, the collection is not loaded on restart (no collection key = not
+	// in collID2Meta), so the DDL ack callback retries and completes the
+	// write, overwriting any orphan child keys. metastore.CreateCollection
+	// carries no precondition, so a retry after a fully-committed write is an
+	// idempotent overwrite, not a failure.
+	return kc.Update(ctx, ts, metastore.CreateCollection(coll))
+}
 
+// buildCollectionKV computes the collection key and marshaled collection
+// value. Factored out so both Catalog.CreateCollection (which now delegates
+// to the composite Update) and Catalog.Update's CollectionEntry/ActionAdd
+// type-switch case (accumulated into a single txn.Builder) apply the exact
+// same kv encoding.
+func buildCollectionKV(coll *model.Collection) (string, string, error) {
+	k := BuildCollectionKey(coll.DBID, coll.CollectionID)
+	collInfo := model.MarshalCollectionModel(coll)
+	v, err := proto.Marshal(collInfo)
+	if err != nil {
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal collection info")
+	}
+	return k, string(v), nil
+}
+
+// buildCreateCollectionChildKvs computes the child metadata kvs (partitions,
+// fields, struct array fields, functions) persisted when creating a
+// collection. Factored out so both Catalog.CreateCollection and
+// Catalog.Update's CollectionEntry/ActionAdd type-switch case apply the exact
+// same kv encoding.
+func buildCreateCollectionChildKvs(coll *model.Collection) (map[string]string, error) {
 	kvs := map[string]string{}
 
 	// save partition info to new path.
@@ -193,7 +221,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		partitionInfo := model.MarshalPartitionModel(partition)
 		v, err := proto.Marshal(partitionInfo)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		kvs[k] = string(v)
 	}
@@ -205,7 +233,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		fieldInfo := model.MarshalFieldModel(field)
 		v, err := proto.Marshal(fieldInfo)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		kvs[k] = string(v)
 	}
@@ -216,7 +244,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		structArrayFieldInfo := model.MarshalStructArrayFieldModel(structArrayField)
 		v, err := proto.Marshal(structArrayFieldInfo)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		kvs[k] = string(v)
 	}
@@ -227,28 +255,12 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		functionInfo := model.MarshalFunctionModel(function)
 		v, err := proto.Marshal(functionInfo)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		kvs[k] = string(v)
 	}
 
-	// Due to the limit of etcd txn number, we must split these kvs into several batches.
-	// Save fields/partitions/functions first, then save the collection key last.
-	// If we crash after saving fields but before the collection key, the collection won't be
-	// loaded on restart (no collection key = not in collID2Meta), so the DDL ack callback will
-	// retry and complete the full write. The orphan field keys will be overwritten on retry.
-	// If we crash after saving the collection key, all data is persisted — no issue.
-	// This ordering avoids the case where the collection key exists without fields, which would
-	// cause the idempotency check in AddCollection to short-circuit and skip saving fields.
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	if err := etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-		return kc.Txn.MultiSave(ctx, partialKvs)
-	}); err != nil {
-		return err
-	}
-
-	// Save the collection key last — this is the "commit point" that makes the collection visible.
-	return kc.Txn.Save(ctx, k1, string(v1))
+	return kvs, nil
 }
 
 func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
@@ -683,7 +695,24 @@ func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 }
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
-	collectionKeys := []string{BuildCollectionKey(collectionInfo.DBID, collectionInfo.CollectionID)}
+	// Delegate to the composite Update, which owns the atomic-or-ordered
+	// commit. When the child metadata keys plus the collection key fit one
+	// etcd txn, they are removed atomically; otherwise Update flushes the
+	// child removals first and the collection key (the CommitRemove
+	// visibility marker) last. If RootCoord crashes mid-flush, the collection
+	// stays in Dropping state and the tombstone sweeper retries on next
+	// startup.
+	return kc.Update(ctx, ts, metastore.DropCollection(collectionInfo))
+}
+
+// buildDropCollectionKeys computes the collection key and the child
+// metadata keys (aliases, partitions, fields, struct array fields,
+// functions) removed when dropping a collection. Factored out so both
+// Catalog.DropCollection (which now delegates to the composite Update) and
+// Catalog.Update's CollectionEntry/ActionDelete type-switch case
+// (accumulated into a single txn.Builder) apply the exact same key set.
+func buildDropCollectionKeys(collectionInfo *model.Collection) (string, []string) {
+	collectionKey := BuildCollectionKey(collectionInfo.DBID, collectionInfo.CollectionID)
 
 	var delMetakeysSnap []string
 	for _, alias := range collectionInfo.Aliases {
@@ -711,16 +740,7 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
 	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
 
-	// Remove related metadata first, then the collection key itself.
-	// If RootCoord crashes in between, the collection stays in Dropping state
-	// and the tombstone sweeper will retry on next startup.
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	if err := batchMultiSaveAndRemove(ctx, kc.Txn, maxTxnNum, nil, delMetakeysSnap); err != nil {
-		return err
-	}
-
-	// if we found collection dropping, we should try removing related resources.
-	return kc.Txn.MultiSaveAndRemove(ctx, nil, collectionKeys)
+	return collectionKey, delMetakeysSnap
 }
 
 func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool) error {
