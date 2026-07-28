@@ -84,13 +84,13 @@ internal_core_skipindex_prune_ratio_expr(const std::string& db,
 // the cells that actually had to be loaded (i.e. real IO). Reading both is what
 // tells you whether pruning translated into IO saved, or only into skipped CPU.
 //
-// Labelled by collection and by operation class ("search", "query", or
-// "count"), because the three have different traffic shapes -- a search always
-// reads the vector column while a filtered query or count may read nothing at
-// all -- and mixing them into one histogram makes none readable. Samples are
-// physical segment operations, not Proxy request samples; aggregate sums are
-// comparable after grouping by db_name/collection_name, but their histogram
-// distributions have different cardinality.
+// Labelled by collection and by operation class ("search", "query", "count",
+// or "agg"), because they have different traffic shapes -- a search always
+// reads the vector column while a filtered query, count, or aggregate may read
+// nothing at all -- and mixing them into one histogram makes none readable.
+// Samples are physical segment operations, not Proxy request samples;
+// aggregate sums are comparable after grouping by db_name/collection_name, but
+// their histogram distributions have different cardinality.
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_query_scanned_bytes);
 
 prometheus::Histogram&

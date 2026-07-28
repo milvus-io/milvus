@@ -741,64 +741,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+	storageLabels := prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  CountLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  CountLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
+	}
+	ProxyScannedRemoteMB.DeletePartialMatch(storageLabels)
+	ProxyScannedTotalMB.DeletePartialMatch(storageLabels)
 }

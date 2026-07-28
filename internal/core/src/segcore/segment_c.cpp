@@ -104,6 +104,8 @@ RetrieveOperationLabel(milvus::query::RetrieveOperation operation) {
             return "query";
         case milvus::query::RetrieveOperation::Count:
             return "count";
+        case milvus::query::RetrieveOperation::Aggregate:
+            return "agg";
     }
     ThrowInfo(milvus::UnexpectedError, "unknown retrieve operation");
 }

@@ -33,6 +33,7 @@ using Json = nlohmann::json;
 enum class RetrieveOperation : uint8_t {
     Query,
     Count,
+    Aggregate,
 };
 
 struct ExtractedPlanInfo {

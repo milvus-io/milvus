@@ -144,7 +144,7 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	assert.Greater(t, numEntitiesAfter, 0)
 }
 
-func TestCleanupProxyCollectionMetricsCountStorageSeries(t *testing.T) {
+func TestCleanupProxyCollectionMetricsStorageSeries(t *testing.T) {
 	const (
 		nodeID          = int64(987654321)
 		dbName          = "count_metric_cleanup_db"
@@ -153,29 +153,33 @@ func TestCleanupProxyCollectionMetricsCountStorageSeries(t *testing.T) {
 	)
 	nodeIDStr := "987654321"
 
-	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, CountLabel, dbName, collection).Add(1)
-	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, dbName, collection).Add(2)
-	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, CountLabel, dbName, otherCollection).Add(3)
-	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, dbName, otherCollection).Add(4)
+	for _, op := range []string{CountLabel, AggLabel, HybridSearchLabel} {
+		ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, op, dbName, collection).Add(1)
+		ProxyScannedTotalMB.WithLabelValues(nodeIDStr, op, dbName, collection).Add(2)
+		ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, op, dbName, otherCollection).Add(3)
+		ProxyScannedTotalMB.WithLabelValues(nodeIDStr, op, dbName, otherCollection).Add(4)
+	}
 
 	CleanupProxyCollectionMetrics(nodeID, dbName, collection)
 
-	targetLabels := prometheus.Labels{
-		nodeIDLabelName:   nodeIDStr,
-		msgTypeLabelName:  CountLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
+	for _, op := range []string{CountLabel, AggLabel, HybridSearchLabel} {
+		targetLabels := prometheus.Labels{
+			nodeIDLabelName:   nodeIDStr,
+			msgTypeLabelName:  op,
+			databaseLabelName: dbName,
+			collectionName:    collection,
+		}
+		otherLabels := prometheus.Labels{
+			nodeIDLabelName:   nodeIDStr,
+			msgTypeLabelName:  op,
+			databaseLabelName: dbName,
+			collectionName:    otherCollection,
+		}
+		assert.False(t, ProxyScannedRemoteMB.Delete(targetLabels))
+		assert.False(t, ProxyScannedTotalMB.Delete(targetLabels))
+		assert.True(t, ProxyScannedRemoteMB.Delete(otherLabels))
+		assert.True(t, ProxyScannedTotalMB.Delete(otherLabels))
 	}
-	otherLabels := prometheus.Labels{
-		nodeIDLabelName:   nodeIDStr,
-		msgTypeLabelName:  CountLabel,
-		databaseLabelName: dbName,
-		collectionName:    otherCollection,
-	}
-	assert.False(t, ProxyScannedRemoteMB.Delete(targetLabels))
-	assert.False(t, ProxyScannedTotalMB.Delete(targetLabels))
-	assert.True(t, ProxyScannedRemoteMB.Delete(otherLabels))
-	assert.True(t, ProxyScannedTotalMB.Delete(otherLabels))
 }
 
 func TestCleanupProxyDBMetricsStorageSeries(t *testing.T) {
@@ -188,9 +192,9 @@ func TestCleanupProxyDBMetricsStorageSeries(t *testing.T) {
 	nodeIDStr := "987654322"
 
 	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, QueryLabel, dbName, collection).Add(1)
-	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, dbName, collection).Add(2)
+	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, AggLabel, dbName, collection).Add(2)
 	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, QueryLabel, otherDBName, collection).Add(3)
-	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, otherDBName, collection).Add(4)
+	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, AggLabel, otherDBName, collection).Add(4)
 
 	CleanupProxyDBMetrics(nodeID, dbName)
 
@@ -202,7 +206,7 @@ func TestCleanupProxyDBMetricsStorageSeries(t *testing.T) {
 	}
 	targetTotalLabels := prometheus.Labels{
 		nodeIDLabelName:   nodeIDStr,
-		msgTypeLabelName:  CountLabel,
+		msgTypeLabelName:  AggLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	}
@@ -214,7 +218,7 @@ func TestCleanupProxyDBMetricsStorageSeries(t *testing.T) {
 	}
 	otherTotalLabels := prometheus.Labels{
 		nodeIDLabelName:   nodeIDStr,
-		msgTypeLabelName:  CountLabel,
+		msgTypeLabelName:  AggLabel,
 		databaseLabelName: otherDBName,
 		collectionName:    collection,
 	}

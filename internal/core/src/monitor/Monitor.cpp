@@ -294,7 +294,7 @@ cleanup_core_collection_metrics(const std::string& db_name,
         ratioBuckets);
     internal_core_skipindex_prune_ratio_family.Remove(&prune_ratio);
 
-    for (const auto* op : {"query", "search", "count"}) {
+    for (const auto* op : {"query", "search", "count", "agg"}) {
         for (const auto* kind : {"total", "cold"}) {
             auto& metric = internal_core_query_scanned_bytes_family.Add(
                 {{"query_scanned", kind},

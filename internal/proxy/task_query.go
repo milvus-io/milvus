@@ -98,10 +98,25 @@ func (t *queryTask) getQueryLabel() string {
 }
 
 func (t *queryTask) getStorageMetricLabel() string {
-	if t.plan != nil && t.plan.GetQuery().GetIsCount() {
+	if t.plan == nil {
+		return metrics.QueryLabel
+	}
+	query := t.plan.GetQuery()
+	if isPureCountQuery(query) {
 		return metrics.CountLabel
 	}
-	return t.getQueryLabel()
+	if isAggregateQuery(query) {
+		return metrics.AggLabel
+	}
+	if query.GetIsCount() {
+		return metrics.CountLabel
+	}
+	return metrics.QueryLabel
+}
+
+func isAggregateQuery(query *planpb.QueryPlanNode) bool {
+	return query != nil &&
+		(len(query.GetGroupByFieldIds()) > 0 || len(query.GetAggregates()) > 0)
 }
 
 func isPureCountQuery(query *planpb.QueryPlanNode) bool {

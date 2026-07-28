@@ -141,7 +141,7 @@ TEST(CApiTest, CleanupCoreCollectionMetricsTest) {
         milvus::monitor::internal_core_skipindex_prune_ratio_expr(db,
                                                                   collection)
             .Observe(0.4);
-        for (const auto* op : {"query", "search", "count"}) {
+        for (const auto* op : {"query", "search", "count", "agg"}) {
             milvus::monitor::internal_core_query_scanned_bytes_total(
                 db, collection, op)
                 .Observe(1024);
@@ -173,26 +173,28 @@ TEST(CApiTest, CleanupCoreCollectionMetricsTest) {
                          kOtherDB, kOtherCollection)
                          .Value(),
                      4.0);
-    EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_total(
-                  kTargetDB, kTargetCollection, "count")
-                  .Collect()
-                  .histogram.sample_count,
-              0);
-    EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_cold(
-                  kTargetDB, kTargetCollection, "count")
-                  .Collect()
-                  .histogram.sample_count,
-              0);
-    EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_total(
-                  kOtherDB, kOtherCollection, "count")
-                  .Collect()
-                  .histogram.sample_count,
-              1);
-    EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_cold(
-                  kOtherDB, kOtherCollection, "count")
-                  .Collect()
-                  .histogram.sample_count,
-              1);
+    for (const auto* op : {"count", "agg"}) {
+        EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_total(
+                      kTargetDB, kTargetCollection, op)
+                      .Collect()
+                      .histogram.sample_count,
+                  0);
+        EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_cold(
+                      kTargetDB, kTargetCollection, op)
+                      .Collect()
+                      .histogram.sample_count,
+                  0);
+        EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_total(
+                      kOtherDB, kOtherCollection, op)
+                      .Collect()
+                      .histogram.sample_count,
+                  1);
+        EXPECT_EQ(milvus::monitor::internal_core_query_scanned_bytes_cold(
+                      kOtherDB, kOtherCollection, op)
+                      .Collect()
+                      .histogram.sample_count,
+                  1);
+    }
 
     // Cleaning an already-recreated label set is idempotent, and the same
     // labels remain reusable from a fresh zero value.
