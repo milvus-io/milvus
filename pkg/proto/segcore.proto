@@ -62,6 +62,9 @@ message RetrieveResults {
   // Element indices per document (aligned with offset array)
   // element_indices[i] contains all matching element indices for offset[i]
   repeated ElementIndices element_indices = 9;
+  // True when every storage-bearing segment participating in this result
+  // accounted its scanned bytes. Growing segments are valid zero-cost inputs.
+  bool storage_cost_valid = 10;
 }
 
 message LoadFieldMeta {

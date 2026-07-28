@@ -987,7 +987,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	toReduceResults := make([]*internalpb.RetrieveResults, 0)
 	t.allQueryCnt = 0
 	t.totalRelatedDataSize = 0
-	t.storageCost = segcore.StorageCost{}
+	t.storageCost = segcore.StorageCost{Valid: true}
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn(ctx, "proxy", mlog.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
@@ -997,8 +997,11 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
 			toReduceResults = append(toReduceResults, res)
 			t.allQueryCnt += res.GetAllRetrieveCount()
-			t.storageCost.ScannedRemoteBytes += res.GetScannedRemoteBytes()
-			t.storageCost.ScannedTotalBytes += res.GetScannedTotalBytes()
+			t.storageCost.Add(segcore.StorageCost{
+				ScannedRemoteBytes: res.GetScannedRemoteBytes(),
+				ScannedTotalBytes:  res.GetScannedTotalBytes(),
+				Valid:              res.GetStorageCostValid(),
+			})
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 			log.Debug(ctx, "proxy receives one query result", mlog.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true

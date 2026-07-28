@@ -127,6 +127,8 @@ Schema::Schema(const Schema& other)
       load_fields_(other.load_fields_),
       bm25_function_output_fields_(other.bm25_function_output_fields_),
       schema_version_(other.schema_version_),
+      collection_name_(other.collection_name_),
+      db_name_(other.db_name_),
       has_mmap_setting_(other.has_mmap_setting_),
       mmap_enabled_(other.mmap_enabled_),
       mmap_fields_(other.mmap_fields_),
@@ -162,6 +164,8 @@ Schema::operator=(const Schema& other) {
     std::swap(bm25_function_output_fields_,
               copied.bm25_function_output_fields_);
     std::swap(schema_version_, copied.schema_version_);
+    std::swap(collection_name_, copied.collection_name_);
+    std::swap(db_name_, copied.db_name_);
     std::swap(has_mmap_setting_, copied.has_mmap_setting_);
     std::swap(mmap_enabled_, copied.mmap_enabled_);
     std::swap(mmap_fields_, copied.mmap_fields_);

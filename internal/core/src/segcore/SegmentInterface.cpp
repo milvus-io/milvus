@@ -245,6 +245,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         retrieve_results.retrieve_storage_cost_.scanned_remote_bytes);
     results->set_scanned_total_bytes(
         retrieve_results.retrieve_storage_cost_.scanned_total_bytes);
+    results->set_storage_cost_valid(storage_cost_valid());
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
@@ -654,6 +655,7 @@ SegmentInternalInterface::Retrieve(
     fte_op_ctx.cancellation_token = cancel_token;
     FillTargetEntry(
         trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
+    results->set_storage_cost_valid(storage_cost_valid());
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(

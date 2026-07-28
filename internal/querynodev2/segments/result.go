@@ -48,11 +48,14 @@ func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchRe
 }
 
 func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
-	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
+	allResults := lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
+		return result != nil
+	})
+	results = lo.Filter(allResults, func(result *internalpb.SearchResults, _ int) bool {
 		return result != nil && (result.GetSlicedBlob() != nil || result.GetResultData() != nil)
 	})
 
-	if len(results) == 1 {
+	if len(allResults) == 1 && len(results) == 1 {
 		mlog.Debug(ctx, "Shortcut return ReduceSearchResults", mlog.Any("result info", info))
 		return results[0], nil
 	}
@@ -63,7 +66,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	channelsMvcc := make(map[string]uint64)
 	isTopkReduce := false
 	isRecallEvaluation := false
-	for _, r := range results {
+	for _, r := range allResults {
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
@@ -107,7 +110,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return nil, err
 	}
 
-	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
+	requestCosts := lo.FilterMap(allResults, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		// delegator node won't be used to load sealed segment if stream node is enabled
 		// and if growing segment doesn't exists, delegator won't produce any cost metrics
 		// so we deprecate the EnableWorkerSQCostMetrics param
@@ -117,20 +120,24 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	if searchResults.CostAggregation == nil {
 		searchResults.CostAggregation = &internalpb.CostAggregation{}
 	}
-	relatedDataSize := lo.Reduce(results, func(acc int64, result *internalpb.SearchResults, _ int) int64 {
+	relatedDataSize := lo.Reduce(allResults, func(acc int64, result *internalpb.SearchResults, _ int) int64 {
 		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
 	}, 0)
-	storageCost := lo.Reduce(results, func(acc segcore.StorageCost, result *internalpb.SearchResults, _ int) segcore.StorageCost {
-		acc.ScannedRemoteBytes += result.GetScannedRemoteBytes()
-		acc.ScannedTotalBytes += result.GetScannedTotalBytes()
+	storageCost := lo.Reduce(allResults, func(acc segcore.StorageCost, result *internalpb.SearchResults, _ int) segcore.StorageCost {
+		acc.Add(segcore.StorageCost{
+			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  result.GetScannedTotalBytes(),
+			Valid:              result.GetStorageCostValid(),
+		})
 		return acc
-	}, segcore.StorageCost{})
+	}, segcore.StorageCost{Valid: true})
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
 	searchResults.IsTopkReduce = isTopkReduce
 	searchResults.IsRecallEvaluation = isRecallEvaluation
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	searchResults.StorageCostValid = storageCost.Valid
 	return searchResults, nil
 }
 
@@ -144,14 +151,17 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	searchResults := &internalpb.SearchResults{
 		IsAdvanced: true,
 	}
-	storageCost := segcore.StorageCost{}
+	storageCost := segcore.StorageCost{Valid: true}
 	for index, result := range results {
 		if result.GetIsTopkReduce() {
 			isTopkReduce = true
 		}
 		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
-		storageCost.ScannedRemoteBytes += result.GetScannedRemoteBytes()
-		storageCost.ScannedTotalBytes += result.GetScannedTotalBytes()
+		storageCost.Add(segcore.StorageCost{
+			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  result.GetScannedTotalBytes(),
+			Valid:              result.GetStorageCostValid(),
+		})
 		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
@@ -185,6 +195,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	searchResults.IsTopkReduce = isTopkReduce
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	searchResults.StorageCostValid = storageCost.Valid
 	return searchResults, nil
 }
 

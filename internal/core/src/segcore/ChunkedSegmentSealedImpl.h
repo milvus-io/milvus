@@ -194,6 +194,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return storage_usage_tracked_;
     }
 
+    bool
+    storage_cost_valid() const override {
+        return storage_usage_tracked_;
+    }
+
     std::shared_ptr<SegmentReadLease>
     AcquireReadLease(const folly::CancellationToken& cancel_token) const {
         return operation_gate_.AcquireRead(cancel_token, id_);

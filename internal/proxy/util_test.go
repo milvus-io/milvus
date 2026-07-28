@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -5515,6 +5516,50 @@ func TestGetStorageCost(t *testing.T) {
 		assert.InDelta(t, 0.27, ratio, 1e-9)
 		assert.True(t, ok)
 	})
+}
+
+func TestSetStorageCostUsesExplicitValidity(t *testing.T) {
+	t.Run("invalid cost is not published", func(t *testing.T) {
+		status := merr.Success()
+		SetStorageCost(status, segcore.StorageCost{
+			ScannedRemoteBytes: 10,
+			ScannedTotalBytes:  20,
+		})
+		assert.Nil(t, status.GetExtraInfo())
+	})
+
+	t.Run("valid measured zero is not exposed as an undefined hit ratio", func(t *testing.T) {
+		status := merr.Success()
+		SetStorageCost(status, segcore.StorageCost{Valid: true})
+		assert.Nil(t, status.GetExtraInfo())
+	})
+
+	t.Run("live proxy config does not override query node validity", func(t *testing.T) {
+		key := Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key
+		original := Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetValue()
+		require.NoError(t, paramtable.Get().Save(key, "false"))
+		defer paramtable.Get().Save(key, original)
+
+		status := merr.Success()
+		SetStorageCost(status, segcore.StorageCost{
+			ScannedRemoteBytes: 10,
+			ScannedTotalBytes:  20,
+			Valid:              true,
+		})
+		remote, total, ratio, ok := GetStorageCost(status)
+		assert.True(t, ok)
+		assert.Equal(t, int64(10), remote)
+		assert.Equal(t, int64(20), total)
+		assert.Equal(t, 0.5, ratio)
+	})
+}
+
+func TestMetricCollectionName(t *testing.T) {
+	assert.Equal(t, "requested", metricCollectionName(nil, "requested"))
+	assert.Equal(t, "requested", metricCollectionName(&schemaInfo{}, "requested"))
+	assert.Equal(t, "canonical", metricCollectionName(&schemaInfo{
+		CollectionSchema: &schemapb.CollectionSchema{Name: "canonical"},
+	}, "alias"))
 }
 
 func TestMinHashFunction(t *testing.T) {

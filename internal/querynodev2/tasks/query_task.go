@@ -167,6 +167,7 @@ func (t *QueryTask) Execute() error {
 		HasMoreResult:      reducedResult.HasMoreResult,
 		ScannedRemoteBytes: reducedResult.GetScannedRemoteBytes(),
 		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
+		StorageCostValid:   reducedResult.GetStorageCostValid(),
 		ElementLevel:       reducedResult.GetElementLevel(),
 		ElementIndices:     convertSegcoreElementIndicesToInternal(reducedResult.GetElementIndices()),
 	}

@@ -287,6 +287,8 @@ type deleteRunner struct {
 
 	scannedRemoteBytes atomic.Int64
 	scannedTotalBytes  atomic.Int64
+	storageCostSeen    atomic.Bool
+	storageCostValid   atomic.Bool
 }
 
 func (dr *deleteRunner) Init(ctx context.Context) error {
@@ -509,6 +511,8 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 		var allQueryCnt int64
 		var scannedRemoteBytes int64
 		var scannedTotalBytes int64
+		storageCostValid := true
+		storageCostSeen := false
 		// wait all task finish
 		var sessionTS uint64
 		for task := range taskCh {
@@ -520,6 +524,8 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 			allQueryCnt += task.allQueryCnt
 			scannedRemoteBytes += task.storageCost.ScannedRemoteBytes
 			scannedTotalBytes += task.storageCost.ScannedTotalBytes
+			storageCostValid = storageCostValid && task.storageCost.Valid
+			storageCostSeen = true
 			if sessionTS < task.sessionTS {
 				sessionTS = task.sessionTS
 			}
@@ -533,6 +539,12 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 		dr.sessionTS.Store(sessionTS)
 		dr.scannedRemoteBytes.Add(scannedRemoteBytes)
 		dr.scannedTotalBytes.Add(scannedTotalBytes)
+		if storageCostSeen {
+			dr.storageCostSeen.Store(true)
+			if !storageCostValid {
+				dr.storageCostValid.Store(false)
+			}
+		}
 		return nil
 	}
 }
@@ -562,6 +574,22 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			return err
 		}
 
+		storageCost := segcore.StorageCost{
+			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  result.GetScannedTotalBytes(),
+			Valid:              result.GetStorageCostValid(),
+		}
+		if typeutil.GetSizeOfIDs(result.GetIds()) == 0 {
+			dr.allQueryCnt.Add(result.GetAllRetrieveCount())
+			dr.scannedRemoteBytes.Add(storageCost.ScannedRemoteBytes)
+			dr.scannedTotalBytes.Add(storageCost.ScannedTotalBytes)
+			dr.storageCostSeen.Store(true)
+			if !storageCost.Valid {
+				dr.storageCostValid.Store(false)
+			}
+			continue
+		}
+
 		if dr.limiter != nil {
 			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: dr.partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
 			if err != nil {
@@ -576,16 +604,14 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			return err
 		}
 		task.allQueryCnt = result.GetAllRetrieveCount()
-		task.storageCost = segcore.StorageCost{
-			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
-			ScannedTotalBytes:  result.GetScannedTotalBytes(),
-		}
+		task.storageCost = storageCost
 
 		taskCh <- task
 	}
 }
 
 func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
+	dr.storageCostValid.Store(true)
 	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
 	var err error
 

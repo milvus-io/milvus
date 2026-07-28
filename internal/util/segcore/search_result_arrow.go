@@ -52,7 +52,8 @@ GetSearchResultMetadata(CSearchResult c_search_result,
                         bool* has_group_by,
                         int64_t* group_size,
                         int64_t* scanned_remote_bytes,
-                        int64_t* scanned_total_bytes);
+                        int64_t* scanned_total_bytes,
+                        bool* storage_cost_valid);
 */
 import "C"
 

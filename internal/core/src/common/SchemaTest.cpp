@@ -39,6 +39,37 @@ class SchemaTest : public ::testing::Test {
     std::shared_ptr<Schema> schema_;
 };
 
+TEST_F(SchemaTest, CopyPreservesCollectionIdentity) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_name("canonical_collection");
+    schema_proto.set_dbname("tenant_db");
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+
+    auto parsed = Schema::ParseFrom(schema_proto);
+
+    Schema copied(*parsed);
+    EXPECT_EQ(copied.collection_name(), "canonical_collection");
+    EXPECT_EQ(copied.db_name(), "tenant_db");
+    EXPECT_EQ(copied.ToProto().name(), "canonical_collection");
+    EXPECT_EQ(copied.ToProto().dbname(), "tenant_db");
+
+    Schema assigned;
+    assigned = *parsed;
+    EXPECT_EQ(assigned.collection_name(), "canonical_collection");
+    EXPECT_EQ(assigned.db_name(), "tenant_db");
+    EXPECT_EQ(assigned.ToProto().name(), "canonical_collection");
+    EXPECT_EQ(assigned.ToProto().dbname(), "tenant_db");
+
+    assigned = assigned;
+    EXPECT_EQ(assigned.collection_name(), "canonical_collection");
+    EXPECT_EQ(assigned.db_name(), "tenant_db");
+}
+
 TEST_F(SchemaTest, MmapEnabledNoSetting) {
     // Add a field without any mmap setting
     auto field_id = schema_->AddDebugField("test_field", DataType::INT64);

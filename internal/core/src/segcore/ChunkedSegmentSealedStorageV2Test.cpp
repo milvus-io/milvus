@@ -2134,8 +2134,7 @@ TEST(SkipIndexPr51441, ArithmeticPredicatesNeverUseSkipIndex) {
     auto run_sequential = [&](bool driver_prefetch) {
         DriverPrefetchGuard guard(driver_prefetch);
         const auto before = snapshot();
-        auto no_match =
-            RunWithStorageUsage(no_match_plan, segment.get(), N);
+        auto no_match = RunWithStorageUsage(no_match_plan, segment.get(), N);
         const auto after_no_match = snapshot();
         expect_unchanged(before, after_no_match);
 
@@ -2153,9 +2152,8 @@ TEST(SkipIndexPr51441, ArithmeticPredicatesNeverUseSkipIndex) {
     run_sequential(false);
     run_sequential(true);
 
-    milvus::exec::OffsetVector offsets{0,
-                                       static_cast<int32_t>(N / 2),
-                                       static_cast<int32_t>(N - 1)};
+    milvus::exec::OffsetVector offsets{
+        0, static_cast<int32_t>(N / 2), static_cast<int32_t>(N - 1)};
     const auto before_offsets = snapshot();
     auto offset_result = RunByOffsetsWithStorageUsage(
         no_match_plan, segment.get(), N, offsets, 2);
@@ -2527,6 +2525,7 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
                                                MAX_TIMESTAMP,
                                                kNoOutputLimit,
                                                false);
+        EXPECT_TRUE(pruned_result->storage_cost_valid());
         const auto after_pruned = observed();
         EXPECT_EQ(after_pruned.first, before_pruned.first + 1)
             << "a fully pruned query published nothing: the operation was "
@@ -2536,6 +2535,7 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
         const auto before_full = observed();
         auto full_result = segment->Retrieve(
             nullptr, full_plan.get(), MAX_TIMESTAMP, kNoOutputLimit, false);
+        EXPECT_TRUE(full_result->storage_cost_valid());
         const auto after_full = observed();
         ASSERT_EQ(after_full.first, before_full.first + 1);
 
@@ -2585,6 +2585,20 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
             << "explicit finalization must observe each SearchResult once";
         EXPECT_DOUBLE_EQ(after_search.second - before_search.second, 456.0)
             << "search metric must use the final accumulated StorageCost";
+        bool has_group_by = false;
+        bool search_cost_valid = false;
+        int64_t group_size = 0;
+        int64_t search_remote_bytes = 0;
+        int64_t search_total_bytes = 0;
+        GetSearchResultMetadata(&finalized_search,
+                                &has_group_by,
+                                &group_size,
+                                &search_remote_bytes,
+                                &search_total_bytes,
+                                &search_cost_valid);
+        EXPECT_TRUE(search_cost_valid);
+        EXPECT_EQ(search_remote_bytes, 123);
+        EXPECT_EQ(search_total_bytes, 456);
     }
 
     {
@@ -2595,11 +2609,26 @@ TEST(SkipIndexPr51441, ScannedBytesPublishedOnlyForMeasuredSegments) {
         ASSERT_FALSE(segment->storage_usage_tracked());
 
         const auto before = observed();
-        (void)segment->Retrieve(nullptr,
-                                all_pruned_plan.get(),
-                                MAX_TIMESTAMP,
-                                kNoOutputLimit,
-                                false);
+        auto untracked_result = segment->Retrieve(nullptr,
+                                                  all_pruned_plan.get(),
+                                                  MAX_TIMESTAMP,
+                                                  kNoOutputLimit,
+                                                  false);
+        EXPECT_FALSE(untracked_result->storage_cost_valid());
+        milvus::SearchResult untracked_search;
+        untracked_search.segment_ = segment.get();
+        bool has_group_by = false;
+        bool search_cost_valid = true;
+        int64_t group_size = 0;
+        int64_t search_remote_bytes = 0;
+        int64_t search_total_bytes = 0;
+        GetSearchResultMetadata(&untracked_search,
+                                &has_group_by,
+                                &group_size,
+                                &search_remote_bytes,
+                                &search_total_bytes,
+                                &search_cost_valid);
+        EXPECT_FALSE(search_cost_valid);
         EXPECT_EQ(observed().first, before.first)
             << "published a sample for a segment that never measured "
                "anything -- an unmeasured zero reads as 'the skip index "

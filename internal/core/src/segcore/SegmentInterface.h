@@ -210,6 +210,15 @@ class SegmentInterface {
         return false;
     }
 
+    // Whether this segment can contribute an exact storage cost. Growing
+    // segments never touch tiered storage, so their exact contribution is
+    // zero even though they do not have tracking cache slots. Sealed segments
+    // are valid only when their slots were created with tracking enabled.
+    virtual bool
+    storage_cost_valid() const {
+        return true;
+    }
+
     virtual SegmentType
     type() const = 0;
 

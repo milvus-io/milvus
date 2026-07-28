@@ -2964,10 +2964,7 @@ func SetReportValue(status *commonpb.Status, value int) {
 }
 
 func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
-	if !Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		return
-	}
-	if storageCost.ScannedTotalBytes <= 0 {
+	if !storageCost.Valid || storageCost.ScannedTotalBytes <= 0 {
 		return
 	}
 	if !merr.Ok(status) {
@@ -2984,6 +2981,16 @@ func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
 	status.ExtraInfo["scanned_total_bytes"] = strconv.FormatInt(storageCost.ScannedTotalBytes, 10)
 	cacheHitRatio := float64(storageCost.ScannedTotalBytes-storageCost.ScannedRemoteBytes) / float64(storageCost.ScannedTotalBytes)
 	status.ExtraInfo["cache_hit_ratio"] = strconv.FormatFloat(cacheHitRatio, 'f', -1, 64)
+}
+
+// metricCollectionName returns the canonical schema name for storage metrics
+// while preserving the request name (which may be an alias) for business
+// behavior and public responses.
+func metricCollectionName(schema *schemaInfo, requested string) string {
+	if schema != nil && schema.CollectionSchema != nil && schema.CollectionSchema.GetName() != "" {
+		return schema.CollectionSchema.GetName()
+	}
+	return requested
 }
 
 func GetCostValue(status *commonpb.Status) int {

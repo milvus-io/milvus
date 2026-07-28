@@ -216,6 +216,9 @@ message SearchResults {
   // Per-segment filter valid counts for two-stage search (filter-only mode).
   // Index corresponds to sealed_segmentIDs_searched.
   repeated int64 filter_valid_counts = 23;
+  // AND-reduced across every worker/segment that contributed to this result.
+  // Absent on old nodes, and therefore false, for rolling-upgrade safety.
+  bool storage_cost_valid = 24;
 }
 
 message CostAggregation {
@@ -281,9 +284,12 @@ message RetrieveResults {
   int64 scanned_remote_bytes = 16;
   int64 scanned_total_bytes = 17;
 
-   // Element-level query support
+  // Element-level query support
   bool element_level = 18;
   repeated ElementIndices element_indices = 19;
+  // AND-reduced across every worker/segment that contributed to this result.
+  // Absent on old nodes, and therefore false, for rolling-upgrade safety.
+  bool storage_cost_valid = 20;
 }
 
 message LoadIndex {

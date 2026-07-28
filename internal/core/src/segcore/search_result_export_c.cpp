@@ -1116,7 +1116,8 @@ GetSearchResultMetadata(CSearchResult c_search_result,
                         bool* has_group_by,
                         int64_t* group_size,
                         int64_t* scanned_remote_bytes,
-                        int64_t* scanned_total_bytes) {
+                        int64_t* scanned_total_bytes,
+                        bool* storage_cost_valid) {
     auto search_result = static_cast<SearchResult*>(c_search_result);
     *has_group_by = search_result->composite_group_by_values_.has_value();
     *group_size = search_result->group_size_.value_or(0);
@@ -1124,6 +1125,12 @@ GetSearchResultMetadata(CSearchResult c_search_result,
         search_result->search_storage_cost_.scanned_remote_bytes;
     *scanned_total_bytes =
         search_result->search_storage_cost_.scanned_total_bytes;
+    *storage_cost_valid = false;
+    if (search_result->segment_ != nullptr) {
+        auto segment = static_cast<milvus::segcore::SegmentInternalInterface*>(
+            search_result->segment_);
+        *storage_cost_valid = segment->storage_cost_valid();
+    }
 }
 
 CStatus

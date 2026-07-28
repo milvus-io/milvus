@@ -99,12 +99,15 @@ PrepareSearchResultsForExport(CTraceContext c_trace,
 //     the segment search itself, by ExportSearchResultAsArrowRecordBatch when
 //     reading extra fields, and by FillOutputFieldsOrdered during late
 //     materialization. Caller should invoke this after all those phases.
+//   - storage_cost_valid: true when this segment's storage contribution is
+//     exact; growing segments are exact zero-cost inputs.
 void
 GetSearchResultMetadata(CSearchResult c_search_result,
                         bool* has_group_by,
                         int64_t* group_size,
                         int64_t* scanned_remote_bytes,
-                        int64_t* scanned_total_bytes);
+                        int64_t* scanned_total_bytes,
+                        bool* storage_cost_valid);
 
 #ifdef __cplusplus
 }

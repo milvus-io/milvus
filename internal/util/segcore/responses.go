@@ -46,15 +46,16 @@ type SearchResultMetadata struct {
 // when reading extra fields, and by FillOutputFieldsOrdered during late
 // materialization — call this after all those phases complete.
 func (r *SearchResult) GetMetadata() SearchResultMetadata {
-	var has C.bool
+	var has, valid C.bool
 	var gs, remote, total C.int64_t
-	C.GetSearchResultMetadata(r.cSearchResult, &has, &gs, &remote, &total)
+	C.GetSearchResultMetadata(r.cSearchResult, &has, &gs, &remote, &total, &valid)
 	return SearchResultMetadata{
 		HasGroupBy: bool(has),
 		GroupSize:  int64(gs),
 		StorageCost: StorageCost{
 			ScannedRemoteBytes: int64(remote),
 			ScannedTotalBytes:  int64(total),
+			Valid:              bool(valid),
 		},
 	}
 }

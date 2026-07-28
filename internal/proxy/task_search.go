@@ -1371,7 +1371,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.relatedDataSize = 0
 	isTopkReduce := false
 	isRecallEvaluation := false
-	storageCost := segcore.StorageCost{}
+	storageCost := segcore.StorageCost{Valid: true}
 	for _, r := range toReduceResults {
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
@@ -1383,8 +1383,11 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		for ch, ts := range r.GetChannelsMvcc() {
 			t.queryChannelsTs[ch] = ts
 		}
-		storageCost.ScannedRemoteBytes += r.GetScannedRemoteBytes()
-		storageCost.ScannedTotalBytes += r.GetScannedTotalBytes()
+		storageCost.Add(segcore.StorageCost{
+			ScannedRemoteBytes: r.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  r.GetScannedTotalBytes(),
+			Valid:              r.GetStorageCostValid(),
+		})
 	}
 
 	t.isTopkReduce = isTopkReduce

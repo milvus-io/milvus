@@ -211,29 +211,43 @@ func TestExtractSegcoreResult(t *testing.T) {
 	req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{OutputFieldsId: []int64{100}}}
 	schema := testQueryPipelineSchema()
 	segStats := []*segcorepb.RetrieveResults{
-		{AllRetrieveCount: 2, HasMoreResult: true, ScannedRemoteBytes: 10, ScannedTotalBytes: 20},
-		{AllRetrieveCount: 3, HasMoreResult: false, ScannedRemoteBytes: 20, ScannedTotalBytes: 30},
+		{AllRetrieveCount: 2, HasMoreResult: true, ScannedRemoteBytes: 10, ScannedTotalBytes: 20, StorageCostValid: true},
+		{AllRetrieveCount: 3, HasMoreResult: false, ScannedRemoteBytes: 20, ScannedTotalBytes: 30, StorageCostValid: true},
 	}
 
 	t.Run("segcore output", func(t *testing.T) {
 		msg := queryutil.OpMsg{queryutil.PipelineOutput: &segcorepb.RetrieveResults{Ids: makeInternalIntIDs([]int64{1, 2})}}
-		out, err := extractSegcoreResult(msg, segStats, req, schema)
+		out, err := extractSegcoreResult(msg, segStats, req, schema, false)
 		require.NoError(t, err)
 		assert.Equal(t, []int64{1, 2}, out.GetIds().GetIntId().GetData())
 		assert.Equal(t, int64(5), out.GetAllRetrieveCount())
 		assert.True(t, out.GetHasMoreResult())
+		assert.Equal(t, int64(30), out.GetScannedRemoteBytes())
+		assert.Equal(t, int64(50), out.GetScannedTotalBytes())
+		assert.True(t, out.GetStorageCostValid())
+	})
+
+	t.Run("old or untracked input invalidates aggregate", func(t *testing.T) {
+		mixed := []*segcorepb.RetrieveResults{segStats[0], {
+			ScannedRemoteBytes: 20,
+			ScannedTotalBytes:  30,
+		}}
+		msg := queryutil.OpMsg{queryutil.PipelineOutput: &segcorepb.RetrieveResults{Ids: makeInternalIntIDs([]int64{1})}}
+		out, err := extractSegcoreResult(msg, mixed, req, schema, false)
+		require.NoError(t, err)
+		assert.False(t, out.GetStorageCostValid())
 	})
 
 	t.Run("internal output", func(t *testing.T) {
 		msg := queryutil.OpMsg{queryutil.PipelineOutput: &internalpb.RetrieveResults{Ids: makeInternalIntIDs([]int64{3, 4})}}
-		out, err := extractSegcoreResult(msg, segStats, req, schema)
+		out, err := extractSegcoreResult(msg, segStats, req, schema, false)
 		require.NoError(t, err)
 		assert.Equal(t, []int64{3, 4}, out.GetIds().GetIntId().GetData())
 	})
 
 	t.Run("unexpected type", func(t *testing.T) {
 		msg := queryutil.OpMsg{queryutil.PipelineOutput: "bad_output"}
-		_, err := extractSegcoreResult(msg, segStats, req, schema)
+		_, err := extractSegcoreResult(msg, segStats, req, schema, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected pipeline output type")
 	})
@@ -283,6 +297,9 @@ func TestRunQNQueryPipeline(t *testing.T) {
 			RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
 				assert.Equal(t, []int64{10}, plan.Offsets)
 				return &segcorepb.RetrieveResults{
+					ScannedRemoteBytes: 7,
+					ScannedTotalBytes:  11,
+					StorageCostValid:   true,
 					FieldsData: []*schemapb.FieldData{
 						makeInt64Field(101, "age", []int64{100}),
 					},
@@ -292,6 +309,9 @@ func TestRunQNQueryPipeline(t *testing.T) {
 			RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
 				assert.Equal(t, []int64{20}, plan.Offsets)
 				return &segcorepb.RetrieveResults{
+					ScannedRemoteBytes: 13,
+					ScannedTotalBytes:  17,
+					StorageCostValid:   true,
 					FieldsData: []*schemapb.FieldData{
 						makeInt64Field(101, "age", []int64{200}),
 					},
@@ -300,16 +320,22 @@ func TestRunQNQueryPipeline(t *testing.T) {
 
 		segcoreResults := []*segcorepb.RetrieveResults{
 			{
-				Ids:              makeInternalIntIDs([]int64{1}),
-				Offset:           []int64{10},
-				FieldsData:       []*schemapb.FieldData{makeSegcoreTsField([]int64{100})},
-				AllRetrieveCount: 2,
+				Ids:                makeInternalIntIDs([]int64{1}),
+				Offset:             []int64{10},
+				FieldsData:         []*schemapb.FieldData{makeSegcoreTsField([]int64{100})},
+				AllRetrieveCount:   2,
+				ScannedRemoteBytes: 3,
+				ScannedTotalBytes:  5,
+				StorageCostValid:   true,
 			},
 			{
-				Ids:              makeInternalIntIDs([]int64{2}),
-				Offset:           []int64{20},
-				FieldsData:       []*schemapb.FieldData{makeSegcoreTsField([]int64{200})},
-				AllRetrieveCount: 3,
+				Ids:                makeInternalIntIDs([]int64{2}),
+				Offset:             []int64{20},
+				FieldsData:         []*schemapb.FieldData{makeSegcoreTsField([]int64{200})},
+				AllRetrieveCount:   3,
+				ScannedRemoteBytes: 19,
+				ScannedTotalBytes:  23,
+				StorageCostValid:   true,
 			},
 		}
 
@@ -318,6 +344,24 @@ func TestRunQNQueryPipeline(t *testing.T) {
 		assert.Equal(t, []int64{1, 2}, out.GetIds().GetIntId().GetData())
 		assert.Equal(t, []int64{100, 200}, out.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 		assert.Equal(t, int64(5), out.GetAllRetrieveCount())
+		assert.Equal(t, int64(42), out.GetScannedRemoteBytes())
+		assert.Equal(t, int64(56), out.GetScannedTotalBytes())
+		assert.True(t, out.GetStorageCostValid())
+	})
+
+	t.Run("all empty results preserve measured storage cost", func(t *testing.T) {
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Limit: 2, OutputFieldsId: []int64{100}}}
+		rp := &segcore.RetrievePlan{}
+		inputs := []*segcorepb.RetrieveResults{
+			{Ids: &schemapb.IDs{}, ScannedRemoteBytes: 5, ScannedTotalBytes: 8, StorageCostValid: true},
+			{Ids: &schemapb.IDs{}, ScannedRemoteBytes: 13, ScannedTotalBytes: 21, StorageCostValid: true},
+		}
+
+		out, err := RunQNQueryPipeline(ctx, req, schema, plan, inputs, nil, nil, rp)
+		require.NoError(t, err)
+		assert.Equal(t, int64(18), out.GetScannedRemoteBytes())
+		assert.Equal(t, int64(29), out.GetScannedTotalBytes())
+		assert.True(t, out.GetStorageCostValid())
 	})
 
 	t.Run("all empty segcore results", func(t *testing.T) {
