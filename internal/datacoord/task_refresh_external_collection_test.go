@@ -53,16 +53,6 @@ type stubCatalog struct {
 	alteredSegments []*datapb.SegmentInfo
 	alterSegments   []*datapb.SegmentInfo
 	alterBinlogs    []metastore.BinlogsIncrement
-
-	updateErr     error
-	updateActions [][]metastore.UpdateAction
-}
-
-// Update records the actions passed to it (so tests can assert on the
-// composite write a caller issued) and returns updateErr.
-func (s *stubCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
-	s.updateActions = append(s.updateActions, actions)
-	return s.updateErr
 }
 
 func (s *stubCatalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
@@ -164,7 +154,7 @@ func newTestExternalRefreshSegment(segmentID, collectionID, numRows int64) *data
 		NumOfRows:      numRows,
 		StorageVersion: 3,
 		ManifestPath:   `{"base_path":"new","ver":1}`,
-		SchemaVersion:  1,
+		SchemaVersion:  0,
 		Binlogs: []*datapb.FieldBinlog{{
 			FieldID: 0,
 			Binlogs: []*datapb.Binlog{{
@@ -638,13 +628,14 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		protoTask := &datapb.ExternalCollectionRefreshTask{
-			TaskId:         1001,
-			JobId:          1,
-			CollectionId:   100,
-			State:          indexpb.JobState_JobStateInit,
-			SchemaVersion:  3,
-			ExternalSource: "s3://bucket/path",
-			ExternalSpec:   "iceberg",
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInit,
+			SchemaVersion:        3,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+			ExternalSource:       "s3://bucket/path",
+			ExternalSpec:         "iceberg",
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
@@ -1433,6 +1424,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 		segments:    NewSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
+	mt.GetCollection(collectionID).Schema.Version = 4
 	oldSeg := &datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1486,7 +1478,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 		mt,
 		collectionID,
 		[]int64{segmentID},
-		0,
+		4,
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1504,7 +1496,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 	assert.Equal(t, patched.GetBm25Statslogs(), got.GetBm25Statslogs())
 }
 
-func TestApplyExternalCollectionSegmentUpdate_KeepsKeptSegmentSchemaVersion(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_AdvancesKeptSegmentSchemaVersion(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1541,10 +1533,11 @@ func TestApplyExternalCollectionSegmentUpdate_KeepsKeptSegmentSchemaVersion(t *t
 		}},
 	}))
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{segmentID},
 		collection.Schema.GetVersion(),
 		[]int64{segmentID},
 		nil,
@@ -1553,12 +1546,51 @@ func TestApplyExternalCollectionSegmentUpdate_KeepsKeptSegmentSchemaVersion(t *t
 
 	got := mt.segments.GetSegment(segmentID)
 	require.NotNil(t, got)
-	assert.Equal(t, int32(3), got.GetSchemaVersion())
+	assert.Equal(t, int32(4), got.GetSchemaVersion())
+	require.Len(t, catalog.alterSegments, 1)
+	assert.Equal(t, segmentID, catalog.alterSegments[0].GetID())
+	assert.Equal(t, int32(4), catalog.alterSegments[0].GetSchemaVersion())
+	assert.Empty(t, catalog.alterBinlogs)
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectsKeptSegmentSchemaVersionAhead(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	segmentID := int64(10)
+	collections := newTestCollections(collectionID)
+	collection, ok := collections.Get(collectionID)
+	require.True(t, ok)
+	collection.Schema = &schemapb.CollectionSchema{Version: 4}
+	catalog := &stubCatalog{}
+	mt := &meta{
+		collections: collections,
+		segments:    NewSegmentsInfo(),
+		catalog:     catalog,
+	}
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		State:         commonpb.SegmentState_Flushed,
+		SchemaVersion: 5,
+	}))
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		[]int64{segmentID},
+		collection.Schema.GetVersion(),
+		[]int64{segmentID},
+		nil,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is newer than refresh schema version")
+	assert.Equal(t, int32(5), mt.segments.GetSegment(segmentID).GetSchemaVersion())
 	assert.Empty(t, catalog.alterSegments)
 	assert.Empty(t, catalog.alterBinlogs)
 }
 
-func TestApplyExternalCollectionSegmentUpdate_RejectsSchemaChange(t *testing.T) {
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectsSchemaChange(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1597,10 +1629,11 @@ func TestApplyExternalCollectionSegmentUpdate_RejectsSchemaChange(t *testing.T) 
 	updated := newTestExternalRefreshSegment(20, collectionID, 20)
 	updated.SchemaVersion = 0
 
-	err := applyExternalCollectionSegmentUpdate(
+	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
+		[]int64{segmentID},
 		0,
 		[]int64{segmentID},
 		[]*datapb.SegmentInfo{updated},
@@ -1632,6 +1665,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		mt,
 		collectionID,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{incoming},
 	)
@@ -1653,6 +1687,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		mt,
 		collectionID,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{incoming},
 	)
@@ -1670,6 +1705,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		mt,
 		collectionID,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{differentBaseReplay},
 	)
@@ -1683,6 +1719,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		mt,
 		collectionID,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{newerReplay},
 	)
@@ -1710,13 +1747,14 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	baseline := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	baseline.ManifestPath = packed.MarshalManifestPath(base, 1)
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(baseline))
+	mt.GetCollection(collectionID).Schema.Version = 2
 
 	patch := proto.Clone(baseline).(*datapb.SegmentInfo)
 	patch.ManifestPath = packed.MarshalManifestPath(base, 2)
 	patch.SchemaVersion = 2
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+		ctx, mt, collectionID, []int64{segmentID}, 2, nil, []*datapb.SegmentInfo{patch})
 	assert.NoError(t, err)
 	assert.Equal(t, packed.MarshalManifestPath(base, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
 
@@ -1729,7 +1767,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	catalog.alteredSegments = nil
 
 	err = applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+		ctx, mt, collectionID, []int64{segmentID}, 2, nil, []*datapb.SegmentInfo{patch})
 	assert.NoError(t, err)
 	assert.Nil(t, catalog.alteredSegments, "a replayed patch must not write at all")
 	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1),
@@ -1741,11 +1779,54 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	newer := proto.Clone(patch).(*datapb.SegmentInfo)
 	newer.ManifestPath = packed.MarshalManifestPath(base, 3)
 	err = applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer})
+		ctx, mt, collectionID, []int64{segmentID}, 2, nil, []*datapb.SegmentInfo{newer})
 	assert.NoError(t, err)
 	assert.Equal(t, packed.MarshalManifestPath(base, 3), mt.segments.GetSegment(segmentID).GetManifestPath())
 	assert.Empty(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(),
 		"a genuine patch still invalidates the stats it supersedes")
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectsUpdatedSegmentSchemaMismatch(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	expectedSchemaVersion := int32(4)
+
+	tests := []struct {
+		name                  string
+		incomingSchemaVersion int32
+	}{
+		{name: "older", incomingSchemaVersion: 3},
+		{name: "newer", incomingSchemaVersion: 5},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			catalog := &stubCatalog{}
+			mt := &meta{
+				collections: newTestCollections(collectionID),
+				segments:    NewSegmentsInfo(),
+				catalog:     catalog,
+			}
+			mt.GetCollection(collectionID).Schema.Version = expectedSchemaVersion
+			incoming := newTestExternalRefreshSegment(20, collectionID, 20)
+			incoming.SchemaVersion = test.incomingSchemaVersion
+
+			err := applyExternalCollectionSegmentUpdateForBaseline(
+				ctx,
+				mt,
+				collectionID,
+				nil,
+				expectedSchemaVersion,
+				nil,
+				[]*datapb.SegmentInfo{incoming},
+			)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "does not match expected schema version")
+			assert.Nil(t, mt.segments.GetSegment(incoming.GetID()))
+			assert.Empty(t, catalog.alterSegments)
+			assert.Empty(t, catalog.alterBinlogs)
+		})
+	}
 }
 
 func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
@@ -1815,6 +1896,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchRowCountChan
 		segments:    NewSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
+	mt.GetCollection(collectionID).Schema.Version = 3
 	oldSeg := &datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1846,7 +1928,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchRowCountChan
 		mt,
 		collectionID,
 		[]int64{segmentID},
-		0,
+		3,
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1863,6 +1945,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		segments:    NewSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
+	mt.GetCollection(collectionID).Schema.Version = 4
 	oldSeg := &datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1894,8 +1977,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		4,
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -1912,13 +1995,14 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentCollect
 		segments:    NewSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
+	mt.GetCollection(collectionID).Schema.Version = 1
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		1,
 		nil,
 		[]*datapb.SegmentInfo{{
 			ID:             10,
@@ -1958,13 +2042,38 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentEmptyMa
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty manifest path")
+	assert.Nil(t, mt.segments.GetSegment(10))
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentEmptyFakeBinlogs(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	mt := &meta{
+		collections: newTestCollections(collectionID),
+		segments:    NewSegmentsInfo(),
+		catalog:     &stubCatalog{},
+	}
+	seg := newTestExternalRefreshSegment(10, collectionID, 100)
+	seg.Binlogs = nil
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx,
+		mt,
+		collectionID,
+		nil,
+		0,
+		nil,
+		[]*datapb.SegmentInfo{seg},
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty fake binlogs")
 	assert.Nil(t, mt.segments.GetSegment(10))
 }
 
@@ -2003,8 +2112,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{incoming},
 	)
@@ -2117,8 +2226,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_NormalizeNewSegmentColl
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2183,8 +2292,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewBinlogRowCount
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2241,8 +2350,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewEmptyNestedBin
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)

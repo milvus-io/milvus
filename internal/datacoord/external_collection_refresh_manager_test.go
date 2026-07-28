@@ -1075,7 +1075,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSchemaV
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:        1001,
 		JobId:         1,
 		CollectionId:  100,
@@ -1096,7 +1096,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSchemaV
 				}},
 			}},
 		}},
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	mt := &meta{
 		catalog:     catalog,
@@ -1129,7 +1130,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSegment
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:        1001,
 		JobId:         1,
 		CollectionId:  100,
@@ -1142,7 +1143,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSegment
 			NumOfRows:     7,
 			SchemaVersion: 3,
 		}},
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	mt := &meta{
 		catalog:     catalog,
