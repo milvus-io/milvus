@@ -69,8 +69,8 @@ struct StreamSliceResult {
 ///
 /// Usage:
 ///   - Call Acquire(bytes) to block until budget is available.
-///   - Call AcquireUntil(bytes, stop_waiting) to block until budget is
-///     available or the caller's lifecycle ends.
+///   - Call AcquireUntil(bytes, cancellation_token) to block until budget is
+///     available or cancellation is requested.
 ///   - Call TryAcquire(bytes) for non-blocking replenish in refill loops.
 ///   - Call Release(bytes) after the transient data has been consumed.
 ///   - Oversized requests are allowed to run exclusively to guarantee progress.
@@ -96,23 +96,34 @@ class TransientMemoryBudget {
         inflight_bytes_ += bytes;
     }
 
-    /// Block until enough budget is available, or stop_waiting returns true.
-    /// The callback must be cheap and non-blocking. Returning false means no
-    /// budget was acquired and the caller should stop its work.
-    template <typename StopWaiting>
+    /// Block until enough budget is available, or cancellation is requested.
+    /// Returning false means no budget was acquired and the caller should stop
+    /// its work.
     bool
-    AcquireUntil(size_t bytes, StopWaiting stop_waiting) {
-        std::unique_lock<std::mutex> lock(mu_);
-        while (true) {
-            if (stop_waiting()) {
-                return false;
-            }
-            if (CanAcquireLocked(bytes)) {
+    AcquireUntil(size_t bytes,
+                 const folly::CancellationToken& cancellation_token) {
+        folly::CancellationCallback cancel_callback(
+            cancellation_token, [this]() noexcept {
+                // Pair with wait(lock, predicate) to avoid losing a cancel
+                // notification between predicate check and wait.
+                std::lock_guard<std::mutex> lock(mu_);
+                cv_.notify_all();
+            });
+
+        bool acquired = false;
+        {
+            std::unique_lock<std::mutex> lock(mu_);
+            cv_.wait(lock, [this, bytes, &cancellation_token] {
+                return cancellation_token.isCancellationRequested() ||
+                       CanAcquireLocked(bytes);
+            });
+            if (!cancellation_token.isCancellationRequested()) {
                 inflight_bytes_ += bytes;
-                return true;
+                acquired = true;
             }
-            cv_.wait_for(lock, std::chrono::milliseconds(10));
         }
+
+        return acquired;
     }
 
     /// Try to claim budget. Returns true if under budget.
