@@ -91,6 +91,14 @@ func (it *importTask) OnEnqueue() error {
 func (it *importTask) PreExecute(ctx context.Context) error {
 	req := it.req
 	node := it.node
+
+	// Before any option is read, including the isBackup/isL0Import decision that
+	// selects the privilege gate below. Datacoord re-checks this; refusing here
+	// too keeps the rejection at the API boundary where the caller can see it.
+	if err := importutilv2.ValidateNoDuplicateKeys(req.GetOptions()); err != nil {
+		return err
+	}
+
 	collectionID, err := it.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
