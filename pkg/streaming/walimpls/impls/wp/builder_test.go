@@ -110,4 +110,26 @@ func TestSetCustomWpConfigDirectReadParams(t *testing.T) {
 		assert.Equal(t, config.NewByteSize(32*1024*1024), wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize)
 		assert.Equal(t, 8, wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads)
 	})
+
+	for _, tc := range []struct {
+		name         string
+		batchSize    string
+		fetchThreads string
+	}{
+		{name: "MalformedValues", batchSize: "bad-size", fetchThreads: "bad-threads"},
+		{name: "ZeroValues", batchSize: "0", fetchThreads: "0"},
+		{name: "NegativeValues", batchSize: "-1M", fetchThreads: "-1"},
+	} {
+		t.Run(tc.name+"KeepValidatedValues", func(t *testing.T) {
+			wpConfig := setup(t, "true", tc.batchSize, tc.fetchThreads)
+			// Seed non-default sentinels to prove invalid Milvus values do not
+			// overwrite the already-validated Woodpecker configuration.
+			wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize = config.NewByteSize(24 * 1024 * 1024)
+			wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads = 6
+			require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+			assert.True(t, wpConfig.Woodpecker.Client.DirectRead.Enabled)
+			assert.Equal(t, config.NewByteSize(24*1024*1024), wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize)
+			assert.Equal(t, 6, wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads)
+		})
+	}
 }
