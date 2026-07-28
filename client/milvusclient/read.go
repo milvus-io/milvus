@@ -76,7 +76,32 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 	offset := 0
 	fieldDataList := results.GetFieldsData()
 	gb := results.GetGroupByFieldValue()
-	for i := 0; i < int(results.GetNumQueries()); i++ {
+	queryCount := int(results.GetNumQueries())
+
+	parseWholeResult := queryCount > 0 && len(results.GetTopks()) >= queryCount
+	totalResultCount := 0
+	if parseWholeResult {
+		for _, topk := range results.GetTopks()[:queryCount] {
+			if topk < 0 {
+				parseWholeResult = false
+				break
+			}
+			totalResultCount += int(topk)
+		}
+	}
+
+	var fields []column.Column
+	var fieldsErr error
+	var groupBy column.Column
+	var groupByErr error
+	if parseWholeResult && (!isAggregationResult || totalResultCount > 0) {
+		fields, fieldsErr = c.parseSearchResult(schema, outputFields, fieldDataList, 0, 0, totalResultCount)
+		if gb != nil {
+			groupBy, groupByErr = column.FieldDataColumn(gb, 0, totalResultCount)
+		}
+	}
+
+	for i := 0; i < queryCount; i++ {
 		func() {
 			var rc int
 			entry := ResultSet{
@@ -112,15 +137,39 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 			}
 			// parse group-by values
 			if gb != nil {
-				entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
+				if parseWholeResult {
+					if groupByErr != nil {
+						entry.Err = groupByErr
+						return
+					}
+					entry.GroupByValue = groupBy.Slice(offset, offset+rc)
+				} else {
+					entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
+				}
 				if entry.Err != nil {
 					return
 				}
 			}
-			entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
+			if parseWholeResult {
+				if fieldsErr != nil {
+					entry.Err = fieldsErr
+					return
+				}
+				entry.Fields = sliceSearchResultColumns(fields, offset, offset+rc)
+			} else {
+				entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
+			}
 		}()
 	}
 	return sr, nil
+}
+
+func sliceSearchResultColumns(columns []column.Column, start, end int) []column.Column {
+	sliced := make([]column.Column, len(columns))
+	for idx, field := range columns {
+		sliced[idx] = field.Slice(start, end)
+	}
+	return sliced
 }
 
 func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fieldDataList []*schemapb.FieldData, _, from, to int) ([]column.Column, error) {

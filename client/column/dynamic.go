@@ -38,6 +38,13 @@ func (c *ColumnDynamic) Name() string {
 	return c.outputField
 }
 
+func (c *ColumnDynamic) Slice(start, end int) Column {
+	return NewColumnDynamic(
+		c.ColumnJSONBytes.Slice(start, end).(*ColumnJSONBytes),
+		c.outputField,
+	)
+}
+
 // Get returns element at idx as interface{}.
 // Overrides internal json column behavior, returns raw json data.
 func (c *ColumnDynamic) Get(idx int) (interface{}, error) {

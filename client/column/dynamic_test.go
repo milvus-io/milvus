@@ -26,6 +26,21 @@ type ColumnDynamicSuite struct {
 	suite.Suite
 }
 
+func (s *ColumnDynamicSuite) TestSlicePreservesDynamicColumn() {
+	column := NewColumnDynamic(NewColumnJSONBytes("", [][]byte{
+		[]byte(`{"field": 1}`),
+		[]byte(`{"field": 2}`),
+	}), "field")
+
+	sliced := column.Slice(1, -1)
+	dynamic, ok := sliced.(*ColumnDynamic)
+	s.Require().True(ok)
+	s.Equal("field", dynamic.Name())
+	value, err := dynamic.GetAsInt64(0)
+	s.Require().NoError(err)
+	s.EqualValues(2, value)
+}
+
 func (s *ColumnDynamicSuite) TestGetInt() {
 	cases := []struct {
 		input       string

@@ -104,23 +104,21 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	}
 
 	if validData != nil {
-		validCount := countValid(validData)
-		sparseMode := false
-		switch len(data) {
-		case logicalLen:
-			sparseMode = true
-		case validCount:
-		default:
-			return nil, fmt.Errorf("scalar field %q payload row count %d does not match logical row count %d or valid count %d",
-				name, len(data), logicalLen, validCount)
+		sparseMode := len(data) == logicalLen
+		valueStart, valueEnd := start, end
+		if !sparseMode {
+			var validCount int
+			valueStart, valueEnd, validCount = countValidBounds(validData, start, end)
+			if len(data) != validCount {
+				return nil, fmt.Errorf("scalar field %q payload row count %d does not match logical row count %d or valid count %d",
+					name, len(data), logicalLen, validCount)
+			}
 		}
 
 		selectedValidData := validData[start:end]
 		if sparseMode {
 			data = data[start:end]
 		} else {
-			valueStart := countValid(validData[:start])
-			valueEnd := valueStart + countValid(selectedValidData)
 			data = data[valueStart:valueEnd]
 		}
 		ncol, err := nullableCreator(name, data, selectedValidData, WithSparseNullableMode[T](sparseMode))
@@ -135,6 +133,25 @@ func parseScalarData[T any, COL Column, NCOL Column](
 
 	data = data[start:end]
 	return creator(name, data), nil
+}
+
+func countValidBounds(validData []bool, start, end int) (int, int, int) {
+	valueStart := 0
+	valueEnd := 0
+	validCount := 0
+	for idx, valid := range validData {
+		if !valid {
+			continue
+		}
+		validCount++
+		if idx < start {
+			valueStart++
+		}
+		if idx < end {
+			valueEnd++
+		}
+	}
+	return valueStart, valueEnd, validCount
 }
 
 func normalizeFieldDataRange(fieldName string, start, end, logicalLen int) (int, int, error) {
@@ -246,21 +263,24 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, validData 
 	logicalLen := len(rows)
 	if nullable {
 		logicalLen = len(validData)
-		switch len(rows) {
-		case logicalLen:
-			// Query results are row-dense and keep an empty placeholder for null rows.
-			sparseMode = true
-		case countValid(validData):
-			// Insert FieldData keeps only valid payload rows.
-			sparseMode = false
-		default:
-			return nil, fmt.Errorf("vector array %q payload row count %d does not match logical row count %d or valid count %d",
-				fieldName, len(rows), logicalLen, countValid(validData))
-		}
 	}
 	begin, end, err := normalizeFieldDataRange(fieldName, begin, end, logicalLen)
 	if err != nil {
 		return nil, err
+	}
+
+	valueBegin, valueEnd := begin, end
+	if nullable {
+		// Query results are row-dense and keep an empty placeholder for null rows.
+		sparseMode = len(rows) == logicalLen
+		if !sparseMode {
+			var validCount int
+			valueBegin, valueEnd, validCount = countValidBounds(validData, begin, end)
+			if len(rows) != validCount {
+				return nil, fmt.Errorf("vector array %q payload row count %d does not match logical row count %d or valid count %d",
+					fieldName, len(rows), logicalLen, validCount)
+			}
+		}
 	}
 	selectedValidData := validData
 	if nullable {
@@ -268,8 +288,6 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, validData 
 		if sparseMode {
 			rows = rows[begin:end]
 		} else {
-			valueBegin := countValid(validData[:begin])
-			valueEnd := valueBegin + countValid(selectedValidData)
 			rows = rows[valueBegin:valueEnd]
 		}
 	} else {
