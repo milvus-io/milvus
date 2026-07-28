@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -491,11 +492,13 @@ func TestServer_CreateIndex(t *testing.T) {
 	})
 }
 
-type createIndexBrokerMock struct{ broker.Broker }
+type (
+	createIndexBrokerMock       struct{ broker.Broker }
+	createIndexAllocatorMock    struct{ allocator.Allocator }
+	createIndexBroadcastAPIMock struct{ broadcaster.BroadcastAPI }
+)
 
-func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
-	initStreamingSystem(t)
-
+func TestCreateIndexExternalSchemaVersionGate(t *testing.T) {
 	const (
 		collID  = UniqueID(100)
 		fieldID = UniqueID(101)
@@ -517,8 +520,7 @@ func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
 		},
 	}
 
-	catalog := catalogmocks.NewDataCoordCatalog(t)
-	indexMeta := newSegmentIndexMeta(catalog)
+	indexMeta := newSegmentIndexMeta(nil)
 	fakeBroker := &createIndexBrokerMock{}
 	mockDescribeCollection := mockey.Mock((*createIndexBrokerMock).DescribeCollectionInternal).
 		To(func(_ *createIndexBrokerMock, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
@@ -533,6 +535,15 @@ func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
 			}, nil
 		}).Build()
 	defer mockDescribeCollection.UnPatch()
+	fakeAllocator := &createIndexAllocatorMock{}
+	mockAllocID := mockey.Mock((*createIndexAllocatorMock).AllocID).Return(int64(1), nil).Build()
+	defer mockAllocID.UnPatch()
+	fakeBroadcastAPI := &createIndexBroadcastAPIMock{}
+	mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).
+		Return(fakeBroadcastAPI, nil).Build()
+	defer mockStartBroadcast.UnPatch()
+	mockCloseBroadcast := mockey.Mock((*createIndexBroadcastAPIMock).Close).Return().Build()
+	defer mockCloseBroadcast.UnPatch()
 
 	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	collections.Insert(collID, &collectionInfo{
@@ -541,16 +552,14 @@ func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
 	})
 	server := &Server{
 		meta: &meta{
-			catalog:     catalog,
 			collections: collections,
 			segments:    NewSegmentsInfo(),
 			indexMeta:   indexMeta,
 		},
-		allocator:       newMockAllocator(t),
+		allocator:       fakeAllocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 		broker:          fakeBroker,
 	}
-	RegisterDDLCallbacks(server)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.meta.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            10,
@@ -561,28 +570,55 @@ func TestCreateIndexRejectsUnmaterializedExternalField(t *testing.T) {
 		SchemaVersion: 1,
 		Binlogs: []*datapb.FieldBinlog{{
 			FieldID:     0,
-			ChildFields: []int64{100},
+			ChildFields: []int64{100, fieldID},
 		}},
 	}))
 
-	status, err := server.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{
-		CollectionID: collID,
-		FieldID:      fieldID,
-		IndexName:    "_default_idx",
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: common.DimKey, Value: "128"},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
-		},
+	newRequest := func() *indexpb.CreateIndexRequest {
+		return &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    "_default_idx",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+			},
+		}
+	}
+
+	t.Run("reject new index while segment schema is stale", func(t *testing.T) {
+		status, err := server.CreateIndex(context.Background(), newRequest())
+		require.NoError(t, err)
+		statusErr := merr.Error(status)
+		require.ErrorIs(t, statusErr, merr.ErrCollectionSchemaVersionNotReady)
+		require.True(t, status.GetRetriable())
+		require.Contains(t, status.GetReason(), "schema version 1")
+		require.Contains(t, status.GetReason(), "collection schema version 2")
+		require.Contains(t, status.GetReason(), "RefreshExternalCollection")
 	})
-	require.NoError(t, err)
-	require.Error(t, merr.Error(status))
-	require.Contains(t, status.GetReason(), "not materialized")
-	require.Contains(t, status.GetReason(), "RefreshExternalCollection")
+
+	t.Run("allow idempotent existing index while segment schema is stale", func(t *testing.T) {
+		req := newRequest()
+		indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			10: {
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      10,
+				IndexName:    req.GetIndexName(),
+				TypeParams:   req.GetTypeParams(),
+				IndexParams:  req.GetIndexParams(),
+			},
+		}
+
+		status, err := server.CreateIndex(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+	})
 }
 
-func TestValidateExternalIndexFieldMaterialized_Branches(t *testing.T) {
+func TestValidateExternalIndexSchemaVersion_Branches(t *testing.T) {
 	const collID = UniqueID(100)
 
 	newServer := func() *Server {
@@ -595,21 +631,22 @@ func TestValidateExternalIndexFieldMaterialized_Branches(t *testing.T) {
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
 			},
 		}
-		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+		err := newServer().validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
 			CollectionID: collID,
 			FieldID:      100,
 		})
 		require.NoError(t, err)
 	})
-	t.Run("internal_field_in_external_collection", func(t *testing.T) {
+	t.Run("external_collection_without_flushed_segments", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
-			Name: "ext",
+			Name:    "ext",
+			Version: 2,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
 				{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
 			},
 		}
-		err := newServer().validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+		err := newServer().validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
 			CollectionID: collID,
 			FieldID:      101,
 		})
@@ -617,7 +654,7 @@ func TestValidateExternalIndexFieldMaterialized_Branches(t *testing.T) {
 	})
 }
 
-func TestValidateExternalIndexFieldMaterialized_UsesFieldCoverage(t *testing.T) {
+func TestValidateExternalIndexSchemaVersion_UsesExactVersion(t *testing.T) {
 	const (
 		collID  = UniqueID(100)
 		fieldID = UniqueID(101)
@@ -627,15 +664,8 @@ func TestValidateExternalIndexFieldMaterialized_UsesFieldCoverage(t *testing.T) 
 		Version: 7,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
-			{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
-			{FieldID: fieldID, Name: "bm25_sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{FieldID: fieldID, Name: "age", DataType: schemapb.DataType_Int64},
 		},
-		Functions: []*schemapb.FunctionSchema{{
-			Name:           "bm25_func",
-			Type:           schemapb.FunctionType_BM25,
-			InputFieldIds:  []int64{102},
-			OutputFieldIds: []int64{fieldID},
-		}},
 	}
 	server := &Server{meta: &meta{segments: NewSegmentsInfo()}}
 	segment := NewSegmentInfo(&datapb.SegmentInfo{
@@ -647,24 +677,35 @@ func TestValidateExternalIndexFieldMaterialized_UsesFieldCoverage(t *testing.T) 
 		SchemaVersion: 6,
 		Binlogs: []*datapb.FieldBinlog{{
 			FieldID:     0,
-			ChildFields: []int64{100, 102, fieldID},
+			ChildFields: []int64{100, fieldID},
 		}},
 	})
 	server.meta.segments.SetSegment(segment.GetID(), segment)
 
-	err := server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+	err := server.validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	require.True(t, merr.Status(err).GetRetriable())
+	require.Contains(t, err.Error(), "schema version 6")
+
+	segment.SchemaVersion = schema.GetVersion()
+	segment.Binlogs = nil
+	err = server.validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
 		CollectionID: collID,
 		FieldID:      fieldID,
 	})
 	require.NoError(t, err)
 
-	segment.Binlogs[0].ChildFields = []int64{100, 102}
-	err = server.validateExternalIndexFieldMaterialized(context.Background(), schema, &indexpb.CreateIndexRequest{
+	segment.SchemaVersion = schema.GetVersion() + 1
+	err = server.validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
 		CollectionID: collID,
 		FieldID:      fieldID,
 	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bm25_sparse")
+	require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	require.True(t, merr.Status(err).GetRetriable())
+	require.Contains(t, err.Error(), "schema version 8")
 	require.Contains(t, err.Error(), "RefreshExternalCollection")
 }
 
