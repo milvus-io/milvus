@@ -22,14 +22,16 @@ type idfOracle interface {
 }
 
 type globalOptimizer struct {
-	idf         idfOracle
-	dataVersion qviews.DataVersion
+	idf               idfOracle
+	dataVersion       qviews.DataVersion
+	functionRunnerKey string
 }
 
-func NewGlobalOptimizer(runtime *QueryRuntime, dataVersion qviews.DataVersion) optimizer.GlobalOptimizer {
+func NewGlobalOptimizer(runtime *QueryRuntime, dataVersion qviews.DataVersion, functionRunnerKey string) optimizer.GlobalOptimizer {
 	return globalOptimizer{
-		idf:         findIDFOracle(runtime),
-		dataVersion: dataVersion,
+		idf:               findIDFOracle(runtime),
+		dataVersion:       dataVersion,
+		functionRunnerKey: functionRunnerKey,
 	}
 }
 
@@ -69,7 +71,8 @@ func (globalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveReq
 func (o globalOptimizer) optimizeBM25(ctx context.Context, req *internalpb.SearchRequest) (bool, bool, error) {
 	optimized := false
 	skip := false
-	_, err := function.RunWithRunner(ctx, req.GetCollectionID(), function.LatestFunctionRunnerVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
+	_, err := function.GetManager().RunWithRunner(ctx, req.GetCollectionID(), o.functionRunnerKey, req.GetFieldId(), func(functionRunner function.FunctionRunner) error {
+		functionType := functionRunner.GetSchema().GetType()
 		if functionType != schemapb.FunctionType_BM25 {
 			return nil
 		}

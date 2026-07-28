@@ -10,12 +10,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func walFunctionRunnerKey(vchannel string) string {
+// WALFunctionRunnerKey returns the function-runner lifecycle key for a WAL vchannel.
+func WALFunctionRunnerKey(vchannel string) string {
 	return "WAL-" + vchannel
 }
 
 func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	if err := function.GetManager().Alloc(collectionID, key, schema); err != nil {
 		var schemaVersion int32
 		if schema != nil {
@@ -31,7 +32,7 @@ func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel 
 }
 
 func (impl *shardInterceptor) updateFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	if err := function.GetManager().Update(collectionID, key, schema); err != nil {
 		var schemaVersion int32
 		if schema != nil {
@@ -56,6 +57,6 @@ func (impl *shardInterceptor) materializeFunctionFields(
 	collectionID int64,
 	schemaVersion int32,
 ) error {
-	_, err := function.GetManager().Materialize(ctx, collectionID, walFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, insertMsg)
+	_, err := function.GetManager().Materialize(ctx, collectionID, WALFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, insertMsg)
 	return err
 }

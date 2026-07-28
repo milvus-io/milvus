@@ -24,14 +24,15 @@ func TestGlobalOptimizerBuildsBM25IDF(t *testing.T) {
 		collectionID  = int64(100)
 		inputFieldID  = int64(101)
 		outputFieldID = int64(102)
+		functionKey   = "query-optimizer-test"
 	)
-	require.NoError(t, function.AllocFunctionRunners(collectionID, "query-optimizer-test", testBM25Schema(inputFieldID, outputFieldID)))
-	defer function.ReleaseFunctionRunners(collectionID, "query-optimizer-test")
+	require.NoError(t, function.GetManager().Alloc(collectionID, functionKey, testBM25Schema(inputFieldID, outputFieldID)))
+	defer function.GetManager().Release(collectionID, functionKey)
 
 	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9})
-	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1})
+	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1}, functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
@@ -51,13 +52,14 @@ func TestGlobalOptimizerSkipsPreparedEmptyBM25Corpus(t *testing.T) {
 		collectionID  = int64(200)
 		inputFieldID  = int64(201)
 		outputFieldID = int64(202)
+		functionKey   = "query-optimizer-empty-test"
 	)
-	require.NoError(t, function.AllocFunctionRunners(collectionID, "query-optimizer-empty-test", testBM25Schema(inputFieldID, outputFieldID)))
-	defer function.ReleaseFunctionRunners(collectionID, "query-optimizer-empty-test")
+	require.NoError(t, function.GetManager().Alloc(collectionID, functionKey, testBM25Schema(inputFieldID, outputFieldID)))
+	defer function.GetManager().Release(collectionID, functionKey)
 
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{})
-	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1})
+	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1}, functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)

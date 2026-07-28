@@ -9,11 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
@@ -99,6 +102,11 @@ func newQueryPlanTestWALAdaptor(t *testing.T) *walAdaptorImpl {
 	t.Helper()
 
 	resource.InitForTest(t)
+	functionRunnerKey := shard.WALFunctionRunnerKey(queryPlanTestVChannel)
+	require.NoError(t, function.GetManager().Alloc(10, functionRunnerKey, &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 0}},
+	}))
+	t.Cleanup(func() { function.GetManager().Release(10, functionRunnerKey) })
 
 	resMgr := &queryPlanTestResourceManager{}
 	queryViewHandler := snview.RecoverPChannelSNQueryViewHandler(

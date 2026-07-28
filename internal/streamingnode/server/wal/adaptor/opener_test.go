@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -72,16 +73,20 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 			WALName: commonpb.WALName_Test,
 		}}, nil)
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, channel.Name).Return(nil, nil)
+	catalog.EXPECT().ListQueryViews(mock.Anything, channel.Name).Return(nil, nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
 
-	walImpls := &firstTimeTickWALImpls{
+	walImpls := &recoveryBarrierWALImpls{
 		channel: channel,
 		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
 			return rmq.NewRmqID(1), nil
 		},
 	}
+	resMgr, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{PChannel: channel.Name})
+	require.NoError(t, err)
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().Close().Return().Once()
+	rs.EXPECT().VChannelManager().Return(resMgr).Once()
 	snapshot := &recovery.RecoverySnapshot{
 		VChannels:          map[string]*streamingpb.VChannelMeta{},
 		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
@@ -109,7 +114,7 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 		idAllocator:  typeutil.NewIDAllocator(),
 		walInstances: typeutil.NewConcurrentMap[int64, wal.WAL](),
 	}
-	l, err := opener.openRWWAL(context.Background(), walImpls, &wal.OpenOption{Channel: channel, DisableFlusher: true})
+	l, err := opener.openRWWAL(context.Background(), walImpls, &wal.OpenOption{Channel: channel})
 	require.ErrorIs(t, err, errExpected)
 	assert.Nil(t, l)
 
