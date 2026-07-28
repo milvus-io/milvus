@@ -25,6 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -64,6 +67,83 @@ func TestSegmentTaskDoesNotInterpretCanceledContext(t *testing.T) {
 	assert.False(t, task.Done())
 }
 
+func TestStaleFinalCommitTaskSkipsAfterDataVersionAdvances(t *testing.T) {
+	ctx := context.Background()
+	recorder := &segmentTaskRecorder{
+		commitVersions: []*viewpb.DataVersion{
+			{StreamingVersion: 1},
+			{StreamingVersion: 2},
+			{StreamingVersion: 3},
+		},
+	}
+	first := newFinalCommitTestSegment(recorder, 100)
+	newer := newFinalCommitTestSegment(recorder, 200)
+
+	require.NoError(t, (&commitL1SegmentTask{
+		segmentTaskBase: segmentTaskBase{segment: first},
+		timetick:        30,
+	}).Execute(ctx))
+	require.NoError(t, (&commitL1SegmentTask{
+		segmentTaskBase: segmentTaskBase{segment: newer},
+		timetick:        40,
+	}).Execute(ctx))
+
+	stale := &commitL1SegmentTask{
+		segmentTaskBase: segmentTaskBase{segment: first},
+		timetick:        30,
+	}
+	require.NoError(t, stale.Execute(ctx))
+	assert.True(t, stale.Done())
+	assert.Equal(t, []int64{100, 200}, recorder.commitSegmentIDs)
+	assert.Equal(t, int64(1), first.AssignmentMeta().GetSealedAtDataVersion().GetStreamingVersion())
+}
+
+func TestRecoveredFinalCommitIsNotRepeated(t *testing.T) {
+	recorder := &segmentTaskRecorder{}
+	meta := newFinalCommitTestMeta(100)
+	meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	meta.CheckpointTimeTick = 30
+	meta.DataCheckpointTimeTick = 30
+	meta.SealedAtDataVersion = &viewpb.DataVersion{StreamingVersion: 10}
+	segment := NewSegmentViewFromMeta(
+		meta,
+		&schemapb.CollectionSchema{},
+		runtimeConfig{lifecycle: recorder, metaAndData: true},
+	)
+	task := &commitL1SegmentTask{
+		segmentTaskBase: segmentTaskBase{segment: segment},
+		timetick:        30,
+	}
+
+	require.NoError(t, task.Execute(context.Background()))
+	assert.True(t, task.Done())
+	assert.Empty(t, recorder.commitSegmentIDs)
+}
+
+func TestRecoveredDataCheckpointDoesNotProveFinalCommit(t *testing.T) {
+	recorder := &segmentTaskRecorder{}
+	meta := newFinalCommitTestMeta(100)
+	meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	meta.CheckpointTimeTick = 30
+	meta.DataCheckpointTimeTick = 30
+	segment := NewSegmentViewFromMeta(
+		meta,
+		&schemapb.CollectionSchema{},
+		runtimeConfig{lifecycle: recorder, metaAndData: true},
+	)
+	segment.mu.Lock()
+	task := segment.newRecoveredCommitL1SegmentTaskLocked(30)
+	segment.mu.Unlock()
+	recovered, ok := task.(*commitL1SegmentTask)
+	require.True(t, ok)
+	assert.Zero(t, recovered.flushTimeTick)
+
+	require.NoError(t, recovered.Execute(context.Background()))
+
+	assert.True(t, recovered.Done())
+	assert.Equal(t, []int64{100}, recorder.commitSegmentIDs)
+}
+
 type testSegmentTask struct {
 	segmentTaskBase
 	err   error
@@ -75,4 +155,44 @@ func (t *testSegmentTask) Execute(ctx context.Context) error {
 		t.calls.Add(1)
 		return t.err
 	})
+}
+
+type segmentTaskRecorder struct {
+	commitSegmentIDs []int64
+	commitVersions   []*viewpb.DataVersion
+}
+
+func (r *segmentTaskRecorder) EnsureGrowingSegment(context.Context, *streamingpb.SegmentAssignmentMeta) error {
+	return nil
+}
+
+func (r *segmentTaskRecorder) CommitL1Segment(_ context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	r.commitSegmentIDs = append(r.commitSegmentIDs, meta.GetSegmentId())
+	if len(r.commitVersions) == 0 {
+		return &viewpb.DataVersion{StreamingVersion: 1}, nil
+	}
+	version := r.commitVersions[0]
+	r.commitVersions = r.commitVersions[1:]
+	return version, nil
+}
+
+func newFinalCommitTestSegment(recorder *segmentTaskRecorder, segmentID int64) *SegmentView {
+	return NewSegmentViewFromMeta(
+		newFinalCommitTestMeta(segmentID),
+		&schemapb.CollectionSchema{},
+		runtimeConfig{lifecycle: recorder, metaAndData: true},
+	)
+}
+
+func newFinalCommitTestMeta(segmentID int64) *streamingpb.SegmentAssignmentMeta {
+	return &streamingpb.SegmentAssignmentMeta{
+		CollectionId:       1,
+		PartitionId:        10,
+		SegmentId:          segmentID,
+		Vchannel:           "v1",
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		CheckpointTimeTick: 10,
+		PersistedStorage:   &streamingpb.L1SegmentPersistedStorage{},
+		Stat:               &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 10},
+	}
 }

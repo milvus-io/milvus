@@ -72,7 +72,6 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 		return nil, merr.WrapErrServiceInternalMsg("pchannel recovery manager pchannel is empty")
 	}
 	segmentsByVChannel := groupSegmentsByVChannel(config.Segments)
-	config.Segments = nil
 	manager := &PChannelRecoveryManager{
 		pchannel:              config.PChannel,
 		modules:               typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
@@ -100,6 +99,7 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 		manager.refreshModuleFrontiers(module)
 		manager.syncTransformLogStream(module)
 	}
+	manager.releaseInitialState()
 	return manager, nil
 }
 
@@ -138,6 +138,14 @@ func groupSegmentsByVChannel(segments map[int64]*streamingpb.SegmentAssignmentMe
 		grouped[vchannel][id] = meta
 	}
 	return grouped
+}
+
+func (m *PChannelRecoveryManager) releaseInitialState() {
+	m.config.VChannelMetas = nil
+	m.config.Segments = nil
+	m.config.SegmentDataVersionSummary = nil
+	m.config.TransformLogMetas = nil
+	m.segmentsByVChannel = nil
 }
 
 func (m *PChannelRecoveryManager) Name() moduleapi.ModuleName {
