@@ -515,8 +515,11 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		}
 	}
 
+	// finishJob has several silent early returns (terminal-state guard, flush
+	// failure, catalog error, !applied), so it — not this call site — owns the
+	// success log. Logging "job finished" here would claim completion for a job
+	// that concurrently timed out or failed.
 	c.finishJob(job, totalRows)
-	log.Info(c.ctx, "all copy segment tasks completed, job finished")
 }
 
 // finishJob completes the job by updating segments to Flushed and marking job as Completed.
@@ -550,15 +553,22 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		}
 	}
 
-	// Step 2: Update segment states to Flushed (make them visible for query)
+	// Step 2: Publish the restore — flip every target segment to Flushed and
+	// clear IsImporting, in one batch.
+	//
+	// This is the ONLY point at which a restored segment becomes queryable.
+	// Individual tasks deliberately leave their targets Importing when they
+	// complete (see SyncCopySegmentTask), because a restore is all-or-nothing:
+	// publishing per task would expose a half-restored collection while later
+	// tasks are still running, and retract it again if one of them fails.
 	//
 	// `job` is the snapshot the checker round started with. Re-read it right
-	// before making anything visible: a concurrent path (tryTimeoutJob, or a
-	// sibling's markTaskAndJobFailed) may have finished the job since, and the
-	// guarded transition in Step 4 would then reject the Completed transition —
-	// but only after these flushes were already committed, leaving the segments
-	// of a failed restore queryable. Losing this race means the job is failed,
-	// so the inspector's job-scoped cleanup owns the segments from here.
+	// before publishing: a concurrent path (tryTimeoutJob, or a sibling's
+	// markTaskAndJobFailed) may have finished the job since, and the guarded
+	// transition in Step 4 would then reject the Completed transition — but only
+	// after these writes were already committed, leaving the segments of a
+	// failed restore queryable. Losing this race means the job is failed, so the
+	// inspector's job-scoped cleanup owns the segments from here.
 	if current := c.copyMeta.GetJob(c.ctx, job.GetJobId()); current == nil || isTerminalCopyJobState(current.GetState()) {
 		log.Info(c.ctx, "skip finishing copy segment job: already in terminal state, leaving segment cleanup to the inspector")
 		return
@@ -570,7 +580,8 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 			segment := c.meta.GetSegment(c.ctx, segID)
 			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
 				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
-				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
+				opImporting := UpdateIsImporting(segID, false)
+				if err := c.meta.UpdateSegmentsInfo(c.ctx, op, opImporting); err != nil {
 					log.Error(c.ctx, "failed to update segment state to Flushed",
 						mlog.FieldSegmentID(segID),
 						mlog.Err(err))
@@ -618,7 +629,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	// Step 4: Record metrics
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.CopySegmentJobLatency.Observe(float64(totalDuration.Milliseconds()))
-	log.Info(c.ctx, "copy segment job completed",
+	log.Info(c.ctx, "all copy segment tasks completed, copy segment job finished",
 		mlog.Int64("totalRows", totalRows),
 		mlog.Int("targetSegments", len(targetSegmentIDs)),
 		mlog.Duration("totalDuration", totalDuration))

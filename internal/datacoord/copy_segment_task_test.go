@@ -679,8 +679,11 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_CompletedSyncsTask() {
 
 	task.QueryTaskOnWorker(cluster)
 
+	// Binlogs and manifest are recorded, but the segment stays unpublished —
+	// finishJob makes the whole restore visible in one batch.
 	segment := m.GetSegment(context.Background(), 2001)
-	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+	s.True(segment.GetIsImporting())
 	s.Equal("manifest-path", segment.GetManifestPath())
 
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
@@ -713,7 +716,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	s.NoError(err)
 
 	segment := m.GetSegment(ctx, 2001)
-	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+	s.True(segment.GetIsImporting())
 	s.Equal("manifest-path", segment.GetManifestPath())
 	s.Equal(insertBinlogs, segment.GetBinlogs())
 
@@ -878,6 +882,7 @@ func newTestCopySegment(segmentID int64) *SegmentInfo {
 		CollectionID:  100,
 		PartitionID:   10,
 		State:         commonpb.SegmentState_Importing,
+		IsImporting:   true,
 		NumOfRows:     100,
 		InsertChannel: "ch1",
 	})
@@ -1114,7 +1119,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	s.Contains(syncErr.Error(), "catalog error")
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnCompletion() {
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_KeepsSegmentUnpublishedOnCompletion() {
 	collectionID := int64(1)
 	segmentID := int64(100)
 
@@ -1123,8 +1128,10 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 		s.Require().Len(segs, 1)
 		seg := segs[0]
 		assert.Equal(s.T(), segmentID, seg.GetID())
-		assert.Equal(s.T(), commonpb.SegmentState_Flushed, seg.GetState())
-		assert.False(s.T(), seg.GetIsImporting())
+		// Publishing is finishJob's job now: a completed task records binlogs
+		// but leaves the segment invisible until the whole restore succeeds.
+		assert.Equal(s.T(), commonpb.SegmentState_Importing, seg.GetState())
+		assert.True(s.T(), seg.GetIsImporting())
 		return nil
 	}).Once()
 	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
@@ -1160,11 +1167,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsImportingFlag() {
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestKeepsSegmentUnpublished() {
 	collectionID := int64(1)
 	segmentID := int64(101)
 
@@ -1205,12 +1212,12 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
 	s.Empty(updated.GetManifestPath())
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateKeepsSegmentUnpublished() {
 	collectionID := int64(1)
 	segmentID := int64(102)
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
@@ -1252,8 +1259,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
+	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
+	s.True(updated.GetIsImporting())
 	s.Equal(manifestPath, updated.GetManifestPath())
 }
 
@@ -1658,6 +1665,30 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossSkippedResolution
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
 	s.EqualValues(10, updatedTask.GetNodeId())
+}
+
+// TestCreateTaskOnWorker_SkipsDispatchWhenJobTerminal: the scheduler dispatches
+// on its own tick and only looks at the task state, so a task can still be
+// Pending here seconds after a sibling failed the job. Starting the copy then
+// burns worker slots and writes objects for a restore already reported Failed,
+// against a snapshot whose pin has been released.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_SkipsDispatchWhenJobTerminal() {
+	// No CreateCopySegment expectation: any RPC fails the test.
+	cluster := session.NewMockCluster(s.T())
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed)))
+	s.NoError(copyMeta.UpdateTask(context.Background(), 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	updated := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updated.GetState())
+	s.EqualValues(NullNodeID, updated.GetNodeId())
 }
 
 // TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterJobFailed is the

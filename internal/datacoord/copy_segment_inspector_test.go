@@ -508,6 +508,83 @@ func (s *CopySegmentInspectorSuite) TestInspect_FailedJobDropsCompletedSiblingSe
 	s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), 202).GetState())
 }
 
+// TestInspect_FailedJobDoesNotDispatchPendingTasks: checkFailedJob converges
+// Pending tasks to Failed, but it runs on the checker interval while the
+// scheduler ticks every 100ms — and after a datacoord restart the inspector is
+// the only enqueuer, since reloadFromMeta re-enqueues InProgress tasks only.
+// Dispatching a Pending task of a dead job would copy segments into object
+// storage for a restore already reported Failed, against an unpinned snapshot.
+func (s *CopySegmentInspectorSuite) TestInspect_FailedJobDoesNotDispatchPendingTasks() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+			Reason:       "sibling task failed",
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1010,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	// No Enqueue expectation: any dispatch fails the test.
+	s.inspector.inspect()
+}
+
+// TestInspect_ActiveJobDispatchesPendingTasks is the positive control for the
+// gate above — a Pending task under a live job must still be dispatched.
+func (s *CopySegmentInspectorSuite) TestInspect_ActiveJobDispatchesPendingTasks() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1011,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
+		copyTask, ok := t.(CopySegmentTask)
+		return ok && copyTask.GetTaskId() == 1011
+	})).Once()
+
+	s.inspector.inspect()
+}
+
 // TestInspect_CompletedTaskUnderActiveJobKeepsSegments: the drop keys off the
 // job outcome, so a completed task under a still-Executing job must keep its
 // segments — that is the restore succeeding, not failing.

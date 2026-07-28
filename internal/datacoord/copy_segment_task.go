@@ -317,6 +317,19 @@ func (t *copySegmentTask) GetTaskVersion() int64 {
 func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
 	job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
+	// Do not start work for a job that is already over. The scheduler dispatches
+	// on its own tick and only looks at the task's state, so a task can still be
+	// Pending here seconds after a sibling failed the job — copying segments for
+	// it would burn worker slots and write objects for a restore already
+	// reported Failed, against a snapshot whose pin has been released. The check
+	// is deliberately before the RPC: once the worker has accepted the task,
+	// letting the InProgress write through is what gives DropTaskOnWorker a
+	// NodeID to clean up with.
+	if job == nil || isTerminalCopyJobState(job.GetState()) {
+		mlog.Info(context.TODO(), "skip dispatching copy segment task: parent job is no longer active",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		return
+	}
 	req, err := AssembleCopySegmentRequest(t, job)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to assemble copy segment request",
@@ -793,16 +806,25 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	// Update task state based on response
 	switch resp.GetState() {
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
-		// Update binlog information for all segments
+		// Update binlog information for all segments.
+		//
+		// Visibility is deliberately NOT published here. A restore is
+		// all-or-nothing, but tasks finish one at a time: flipping a task's
+		// target segments to Flushed/IsImporting=false on task completion puts
+		// them straight into the flushed view (handler.go's
+		// GetCurrentSegmentsView excludes only Importing), so a collection
+		// loaded while the restore is still running would serve a half-restored
+		// snapshot for the whole remaining runtime — and if a later task fails,
+		// those rows are dropped again, so results appear and then vanish.
+		// finishJob publishes every target segment in one batch once the job
+		// itself has completed; see Step 2 there.
+		// For StorageV3+ segments, also update manifest_path.
 		for _, result := range resp.GetSegmentResults() {
-			// Update binlog info and segment state to Flushed
-			// For StorageV3+ segments, also update manifest_path
 			var err error
-			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
-				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
-			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			op3 := UpdateIsImporting(result.GetSegmentId(), false)
-			operators := []UpdateOperator{op1, op2, op3}
+			operators := []UpdateOperator{
+				UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
+					result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs()),
+			}
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}

@@ -44,9 +44,12 @@ import (
 //    reclaim them (checkGC skips any task that still carries a node assignment)
 //
 // TASK STATE TRANSITIONS:
-// Pending → InProgress (inspector enqueues to scheduler)
+// Pending → InProgress (inspector enqueues to scheduler, only while the job is active)
 // InProgress → Completed/Failed (datanode reports execution result)
-// Any state under a Failed job → target segments Dropped (inspector)
+// Terminal task under a Failed job → target segments Dropped (inspector)
+//
+// Pending/InProgress tasks of a Failed job are not dropped here — checkFailedJob
+// converges them to Failed first, and they are cleaned up on a later round.
 //
 // INSPECTION INTERVAL:
 // Configured by Params.DataCoordCfg.CopySegmentCheckInterval (default: 2 seconds)
@@ -233,12 +236,24 @@ func (s *copySegmentInspector) inspect() {
 		// target segment it produced must go, including those a sibling task
 		// completed successfully before the failure.
 		jobFailed := job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
+		jobActive := !isTerminalCopyJobState(job.GetState())
 
 		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.CopySegmentTaskState_CopySegmentTaskPending:
-				s.processPending(task)
+				// Never dispatch work for a job that is already over.
+				// checkFailedJob converges Pending tasks to Failed, but it runs
+				// on the checker's interval while the scheduler ticks every
+				// 100ms, so without this gate a sibling's failure is followed by
+				// full segment copies into object storage for a restore already
+				// reported Failed — against a snapshot whose pin has been
+				// released. It also matters after a datacoord restart, where the
+				// inspector is the only enqueuer (reloadFromMeta re-enqueues
+				// InProgress tasks only).
+				if jobActive {
+					s.processPending(task)
+				}
 			case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 				if jobFailed {
 					s.processFailed(task)
