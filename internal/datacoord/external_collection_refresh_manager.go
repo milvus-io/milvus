@@ -314,7 +314,7 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 // An owned baseline segment absent from both kept and updated results is treated
 // as removed, but a task may classify only the baseline segments it owns.
 func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
-	tasks, err := m.refreshMeta.GetCommittedTasksByJobID(job.GetJobId())
+	tasks, err := m.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())
 	if err != nil {
 		return err
 	}
@@ -327,11 +327,12 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	ownerBySegment := make(map[int64]int64)
 	baselineSegmentIDs := make([]int64, 0)
 	for _, task := range tasks {
-		if task.GetOwnershipPlanVersion() != externalRefreshOwnershipPlanVersion {
+		if !isSupportedExternalRefreshOwnershipPlanVersion(task.GetOwnershipPlanVersion()) {
 			return merr.WrapErrServiceInternalMsg(
-				"job %d contains legacy external refresh task %d without ownership metadata; retry refresh",
+				"job %d contains external refresh task %d with unsupported ownership plan version %d; retry refresh",
 				job.GetJobId(),
 				task.GetTaskId(),
+				task.GetOwnershipPlanVersion(),
 			)
 		}
 		for _, segmentID := range task.GetOwnedSegmentIds() {

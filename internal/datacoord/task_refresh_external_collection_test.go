@@ -934,13 +934,26 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
 	})
 
+	t.Run("version_one", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(
+			t,
+			externalRefreshOwnershipPlanVersionV1,
+			[]int64{1},
+		)
+		task.CreateTaskOnWorker(1, cluster)
+
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
+		assert.NotNil(t, cluster.refreshReq)
+	})
+
 	t.Run("legacy_task", func(t *testing.T) {
 		task, refreshMeta, cluster := newOwnershipTask(t, 0, nil)
 		task.CreateTaskOnWorker(1, cluster)
 
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "legacy external refresh task")
+		assert.Contains(t, metaTask.GetFailReason(), "unsupported ownership plan version 0")
 		assert.Nil(t, cluster.refreshReq)
 	})
 

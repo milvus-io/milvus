@@ -699,10 +699,11 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		err = merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker")
 		return
 	}
-	if t.GetOwnershipPlanVersion() != externalRefreshOwnershipPlanVersion {
+	if !isSupportedExternalRefreshOwnershipPlanVersion(t.GetOwnershipPlanVersion()) {
 		err = merr.WrapErrServiceInternalMsg(
-			"legacy external refresh task %d has no ownership metadata; retry refresh",
+			"external refresh task %d has unsupported ownership plan version %d; retry refresh",
 			t.GetTaskId(),
+			t.GetOwnershipPlanVersion(),
 		)
 		return
 	}
