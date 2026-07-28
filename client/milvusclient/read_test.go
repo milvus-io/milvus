@@ -239,6 +239,34 @@ func (s *ReadSuite) TestParseEmptyNullableStructArrayWithoutFieldData() {
 	s.Require().NoError(columns[0].ValidateNullable())
 }
 
+func (s *ReadSuite) TestParseEmptyDynamicFieldWithoutFieldData() {
+	schema := entity.NewSchema().
+		WithDynamicFieldEnabled(true).
+		WithField(entity.NewField().
+			WithName("$meta").
+			WithDataType(entity.FieldTypeJSON).
+			WithIsDynamic(true).
+			WithNullable(true))
+
+	for _, outputFields := range [][]string{{"$meta"}, {"*"}} {
+		columns, err := s.client.parseSearchResult(schema, outputFields, nil, 0, 0, 0)
+		s.Require().NoError(err)
+		s.Require().Len(columns, 1)
+		s.Equal("$meta", columns[0].Name())
+		s.Equal(entity.FieldTypeJSON, columns[0].Type())
+		s.True(columns[0].Nullable())
+		s.Zero(columns[0].Len())
+		s.True(columns[0].FieldData().GetIsDynamic())
+	}
+
+	columns, err := s.client.parseSearchResult(schema, []string{"color"}, nil, 0, 0, 0)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 1)
+	s.Equal("color", columns[0].Name())
+	s.True(columns[0].Nullable())
+	s.Zero(columns[0].Len())
+}
+
 func (s *ReadSuite) TestHandleSearchResultSlicesCompactNullableFields() {
 	schema := entity.NewSchema().
 		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
