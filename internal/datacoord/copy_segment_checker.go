@@ -569,6 +569,13 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	// after these writes were already committed, leaving the segments of a
 	// failed restore queryable. Losing this race means the job is failed, so the
 	// inspector's job-scoped cleanup owns the segments from here.
+	//
+	// Known residual window: the check and the flushes are not atomic, so a job
+	// that goes terminal *between* them still publishes before Step 4 rejects
+	// the Completed transition. It is bounded by one inspect interval (2s) and
+	// is hard to reach in practice — tryTimeoutJob runs sequentially after
+	// checkCopyingJob in the same goroutine, and the cross-goroutine paths need
+	// a worker to report Failed for an already-Completed task.
 	if current := c.copyMeta.GetJob(c.ctx, job.GetJobId()); current == nil || isTerminalCopyJobState(current.GetState()) {
 		log.Info(c.ctx, "skip finishing copy segment job: already in terminal state, leaving segment cleanup to the inspector")
 		return
@@ -769,7 +776,13 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 
 		for _, task := range tasks {
 			// If job failed and task has target segments in meta, don't remove yet
-			// (wait for segments to be cleaned up first)
+			// (wait for segments to be cleaned up first).
+			//
+			// GetSegment returns unhealthy segments too, so a Dropped segment
+			// still pins the job here: the inspector's processFailed only MARKS
+			// the targets Dropped, and it is the global segment GC that later
+			// removes them from meta. Reclaiming a failed copy job therefore
+			// trails the segment GC rather than being driven by this loop.
 			if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
 				hasSegments := false
 				for _, mapping := range task.GetIdMappings() {

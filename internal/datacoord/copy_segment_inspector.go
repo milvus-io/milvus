@@ -27,7 +27,15 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// copySegmentDropConcurrency bounds the worker-side drops the inspector may have
+// in flight at once. The drops are retried every round until they converge, so
+// this only needs to be wide enough that one unresponsive node cannot starve the
+// others.
+const copySegmentDropConcurrency = 8
 
 // Copy Segment Task Inspector
 //
@@ -82,6 +90,13 @@ type copySegmentInspector struct {
 	scheduler task.GlobalScheduler // Task scheduler for dispatching to DataNodes
 	cluster   session.Cluster      // DataNode cluster (for retrying the drop of terminal tasks)
 
+	// Worker-side drops run off the inspection loop: DropCopySegment blocks for
+	// up to DataCoordCfg.RequestTimeoutSeconds (default 600s), and inspect()
+	// walks every job and task in one goroutine, so a single black-holing
+	// DataNode would otherwise freeze dispatch and cleanup for everything else.
+	dropPool     *conc.Pool[struct{}]
+	droppingTask *typeutil.ConcurrentSet[int64] // taskIDs with a drop in flight
+
 	closeOnce sync.Once     // Ensures Close is idempotent
 	closeChan chan struct{} // Channel to signal inspector shutdown
 }
@@ -110,12 +125,14 @@ func NewCopySegmentInspector(
 	cluster session.Cluster,
 ) CopySegmentInspector {
 	return &copySegmentInspector{
-		ctx:       ctx,
-		meta:      meta,
-		copyMeta:  copyMeta,
-		scheduler: scheduler,
-		cluster:   cluster,
-		closeChan: make(chan struct{}),
+		ctx:          ctx,
+		meta:         meta,
+		copyMeta:     copyMeta,
+		scheduler:    scheduler,
+		cluster:      cluster,
+		dropPool:     conc.NewPool[struct{}](copySegmentDropConcurrency, conc.WithExpiryDuration(time.Minute)),
+		droppingTask: typeutil.NewConcurrentSet[int64](),
+		closeChan:    make(chan struct{}),
 	}
 }
 
@@ -166,6 +183,10 @@ func (s *copySegmentInspector) Start() {
 func (s *copySegmentInspector) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closeChan)
+		// Release the drop workers. Not joined: an in-flight DropCopySegment can
+		// still be parked on an unresponsive node for the whole request timeout,
+		// and the drop is retried after restart anyway.
+		s.dropPool.Release()
 	})
 }
 
@@ -307,10 +328,16 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 // Called for every task of a Failed job, not only for Failed tasks. A restore
 // is all-or-nothing: when a collection splits across several copy tasks
 // (MaxSegmentsPerCopyTask) and one of them fails, the siblings that already
-// Completed have flipped their target segments to Flushed — i.e. queryable —
-// so a restore reported as failed would otherwise leave partial data visible.
-// It also unblocks GC: checkGC refuses to reclaim a Failed job while any of its
-// tasks still has a target segment in meta.
+// Completed may have had their target segments published by finishJob, so a
+// restore reported as failed would otherwise leave partial data visible.
+//
+// Note this only marks the segments Dropped; it does not remove them from meta.
+// checkGC's hasSegments guard uses meta.GetSegment, which deliberately includes
+// unhealthy segments, so reclaiming a Failed copy job ultimately depends on the
+// GLOBAL segment garbage collector physically deleting the dropped segments
+// first. That coupling is intentional — the copy module must not delete segment
+// meta out from under the segment GC — but it means job reclamation is not
+// self-contained in this module.
 //
 // Error handling:
 // - Logs warnings if drop fails but continues processing other segments
@@ -355,11 +382,33 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 // so re-running it every inspection round costs nothing once cleanup lands. It
 // touches only NodeID — never state or reason — so retrying cannot disturb the
 // terminal outcome the task already reported.
+//
+// Concurrency:
+// The drop is dispatched to a bounded pool rather than run inline. DropCopySegment
+// blocks for up to DataCoordCfg.RequestTimeoutSeconds (default 600s) and inspect()
+// is a single goroutine walking every job, so an inline call would let one
+// unresponsive DataNode stall dispatch and cleanup for every other job. Only one
+// drop per task is in flight at a time, so the retry-every-round behaviour cannot
+// pile up goroutines against a node that never answers.
+//
+// Racing the scheduler's own drop is harmless: meta writes are serialized under
+// the meta lock, the DropTask RPC is idempotent, and clearing an already-cleared
+// NodeID is a no-op — so the inspector deliberately does not take the scheduler's
+// per-task lock.
 func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
 	if task.GetNodeId() == NullNodeID {
 		return
 	}
+	taskID := task.GetTaskId()
+	if !s.droppingTask.Insert(taskID) {
+		// A drop from an earlier round is still waiting on this node.
+		return
+	}
 	mlog.Info(s.ctx, "retrying worker-side drop of terminal copy segment task",
 		WrapCopySegmentTaskLog(task, mlog.FieldNodeID(task.GetNodeId()))...)
-	task.DropTaskOnWorker(s.cluster)
+	s.dropPool.Submit(func() (struct{}, error) {
+		defer s.droppingTask.Remove(taskID)
+		task.DropTaskOnWorker(s.cluster)
+		return struct{}{}, nil
+	})
 }

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -373,6 +374,60 @@ func (s *CopySegmentInspectorSuite) addTerminalTaskWithAssignment(
 	return task
 }
 
+// waitDropsSettled blocks until every worker-side drop the inspector dispatched
+// has finished. The drops run on a bounded pool off the inspection loop, so the
+// assertions that follow a processTerminal/inspect call need this barrier.
+func (s *CopySegmentInspectorSuite) waitDropsSettled() {
+	s.Eventually(func() bool {
+		return len(s.inspector.droppingTask.Collect()) == 0
+	}, 10*time.Second, 5*time.Millisecond)
+}
+
+// TestProcessTerminal_DropDoesNotBlockInspectLoop is the liveness regression
+// for the inspector loop: DropCopySegment blocks for up to
+// DataCoordCfg.RequestTimeoutSeconds (default 600s) and inspect() walks every
+// job and task in one goroutine, so an inline drop against a black-holing
+// DataNode would freeze dispatch and cleanup for every other job.
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_DropDoesNotBlockInspectLoop() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	s.cluster.EXPECT().DropCopySegment(int64(20), int64(1030)).RunAndReturn(
+		func(int64, int64) error {
+			close(entered)
+			<-release
+			return nil
+		}).Once()
+	defer close(release)
+
+	task := s.addTerminalTaskWithAssignment(1030, 20,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.inspector.processTerminal(task)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		s.Fail("processTerminal blocked on an unresponsive node")
+	}
+
+	// The drop really is running — it just isn't holding the loop.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		s.Fail("drop was never dispatched")
+	}
+
+	// A later round must not stack another call against the stuck node: the
+	// mock allows exactly one, so a second dispatch would fail the test.
+	s.inspector.processTerminal(task)
+}
+
 // TestProcessTerminal_RetriesDropUntilAssignmentCleared is the liveness
 // regression for the review finding: the scheduler calls DropTaskOnWorker
 // exactly once before removing the task from its running set, so an ambiguous
@@ -392,17 +447,20 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesDropUntilAssignme
 	s.cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).
 		Return(errors.New("rpc timeout")).Once()
 	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
 	s.EqualValues(10, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
 
 	// Round 2: the node is reachable again, the drop succeeds and the
 	// assignment is cleared, unblocking checkGC.
 	s.cluster.EXPECT().DropCopySegment(int64(10), int64(1001)).Return(nil).Once()
 	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
 
 	// Round 3: converged — no further RPC. The mock has no expectation left, so
 	// another call would fail the test.
 	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		s.copyMeta.GetTask(context.TODO(), 1001).GetState())
 }
@@ -420,11 +478,13 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesPersistFailure() 
 
 	s.cluster.EXPECT().DropCopySegment(int64(11), int64(1002)).Return(nil).Once()
 	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
 	s.EqualValues(11, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
 
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
 	s.cluster.EXPECT().DropCopySegment(int64(11), int64(1002)).Return(nil).Once()
 	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
 }
 
@@ -657,6 +717,7 @@ func (s *CopySegmentInspectorSuite) TestInspect_RetriesDropForTerminalTasks() {
 	s.cluster.EXPECT().DropCopySegment(int64(13), int64(1005)).Return(nil).Once()
 
 	s.inspector.inspect()
+	s.waitDropsSettled()
 
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1004).GetNodeId())
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1005).GetNodeId())

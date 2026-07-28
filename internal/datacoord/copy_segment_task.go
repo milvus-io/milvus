@@ -874,28 +874,33 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					mlog.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 		}
 
-		// Mark task as completed and record copying duration
+		// Mark task as completed. Guarded: the job can go terminal while the
+		// result is being applied, and a task must never be resurrected out of a
+		// terminal state.
 		completeTs := uint64(time.Now().UnixNano())
 		copyingDuration := task.GetTR().RecordSpan()
-		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Executing).Observe(float64(copyingDuration.Milliseconds()))
-		// Record total latency (from task creation to completion)
 		totalDuration := task.GetTR().ElapseSpan()
-		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Done).Observe(float64(totalDuration.Milliseconds()))
-		mlog.Info(context.TODO(), "copy segment task completed",
-			WrapCopySegmentTaskLog(task,
-				mlog.Duration("taskTimeCost/copying", copyingDuration),
-				mlog.Duration("taskTimeCost/total", totalDuration))...)
 
-		// Guarded: the job can go terminal while the result is being applied, and
-		// a task must never be resurrected out of a terminal state.
 		applied, err := copyMeta.CompleteTaskIfActive(ctx, task.GetTaskId(), completeTs)
 		if err != nil {
 			return err
 		}
 		if !applied {
+			// The task did NOT complete — it keeps the terminal state the winning
+			// path gave it, or stays InProgress for checkFailedJob to converge.
+			// Reporting Done latency here would count it as a success.
 			mlog.Info(context.TODO(), "copy segment task went terminal while its result was applied, skip marking it completed",
 				WrapCopySegmentTaskLog(task)...)
+			return nil
 		}
+
+		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Executing).Observe(float64(copyingDuration.Milliseconds()))
+		// Record total latency (from task creation to completion)
+		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Done).Observe(float64(totalDuration.Milliseconds()))
+		mlog.Info(context.TODO(), "copy segment task completed",
+			WrapCopySegmentTaskLog(task,
+				mlog.Duration("taskTimeCost/copying", copyingDuration),
+				mlog.Duration("taskTimeCost/total", totalDuration))...)
 		return nil
 
 	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
