@@ -157,6 +157,13 @@ class PhyConjunctFilterExpr : public Expr {
         return inputs_.size() - 1;
     }
 
+    // Replace the whole inputs list (used by the GIS split-fusion pre-pass that
+    // rewrites same-column geometry predicates into Coarse + Refine nodes).
+    void
+    RebuildInputs(std::vector<std::shared_ptr<Expr>>&& inputs) {
+        inputs_ = std::move(inputs);
+    }
+
     // Set the bitmap input for the next expression in the conjunction.
     // The bitmap indicates which rows still need to be evaluated.
     //
