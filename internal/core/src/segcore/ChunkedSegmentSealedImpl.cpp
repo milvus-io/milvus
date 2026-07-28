@@ -8218,6 +8218,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(
             schema_snapshot->get_storage_column_name(fid));
     }
+    const bool full_projection = *needed_columns == column_group->columns;
     auto reader =
         runtime != nullptr ? runtime->reader : CaptureReaderSnapshot();
     AssertInfo(
@@ -8262,6 +8263,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
+            *needed_columns,
+            full_projection,
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
@@ -8327,6 +8330,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                "load column group index out of range");
     AssertInfo(!milvus_field_ids.empty(),
                "load column group with empty field list");
+    auto column_group = column_groups->at(index);
 
     for (const auto& field_id : milvus_field_ids) {
         AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
@@ -8362,6 +8366,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(
             schema_snapshot->get_storage_column_name(fid));
     }
+    const bool full_projection = *needed_columns == column_group->columns;
 
     auto reader = committer.runtime()->reader;
     AssertInfo(
@@ -8400,6 +8405,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
+            *needed_columns,
+            full_projection,
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
