@@ -59,7 +59,13 @@ import (
 
 // delegator data related part
 
-const defaultAnalyzerName = "default"
+const (
+	defaultAnalyzerName = "default"
+
+	reopenBM25LoadRetryAttempts = 3
+	reopenBM25LoadRetrySleep    = 200 * time.Millisecond
+	reopenBM25LoadRetryMaxSleep = time.Second
+)
 
 func normalizeAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
 	if textNum == 0 {
@@ -568,7 +574,15 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
 			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
-			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable); err != nil {
+			err := retry.Do(ctx, func() error {
+				return idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable)
+			},
+				retry.Attempts(reopenBM25LoadRetryAttempts),
+				retry.Sleep(reopenBM25LoadRetrySleep),
+				retry.MaxSleepTime(reopenBM25LoadRetryMaxSleep),
+				retry.RetryErr(merr.IsRetryableErr),
+			)
+			if err != nil {
 				mlog.Warn(ctx, "failed to load reopened bm25 stats for segment",
 					mlog.FieldCollectionID(req.GetCollectionID()),
 					mlog.FieldSegmentID(info.GetSegmentID()),

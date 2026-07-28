@@ -832,6 +832,87 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
 	s.Empty(sealed)
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-retry/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(nil, merr.WrapErrIoTooManyRequests(remotePath, errors.New("storage throttled"))).Once()
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsDoesNotRetryPermanentFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-missing/segment_100/field_101/0"
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(nil, merr.WrapErrIoKeyNotFound(remotePath)).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrIoKeyNotFound)
+}
+
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegment() {
 	s.genCollectionWithFunction()
 	s.delegator.distribution.AddDistributions(SegmentEntry{
