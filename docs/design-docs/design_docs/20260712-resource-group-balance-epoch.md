@@ -36,11 +36,15 @@ Each Resource Group (RG) is an independent balance group and may have at most on
 
 Different RGs can run epochs concurrently. Stopping balance and failure recovery retain higher priority and stay on legacy paths in the MVP. The stopping path inside `BalanceChecker` prevents a new normal epoch in the same tick. Independent recovery checkers are coordinated conservatively through pending snapshots, scheduler deduplication, stale admission, and later reconciliation rather than a common preemption signal.
 
+Closing the loop is only half of the answer to [#51244](https://github.com/milvus-io/milvus/issues/51244). The other half is the acceptance rule. Legacy planning decides each move from a pairwise source-versus-target comparison guarded by local tolerance factors, and a sequence of individually reasonable pairwise moves can still oscillate, which is what segment ping-pong is. Every snapshot-backed policy here instead exposes one RG-level potential, the sum over eligible nodes of the squared deviation from that node's assigned fair share, and a plan or a wave is admitted only when it strictly decreases that potential. Because the potential is convex, over-correction raises it and is rejected without needing a separate reverse-unbalance gate, and a move and its reverse can never both decrease the same value. Oscillation stops being a case to defend against and becomes arithmetically unreachable. `Converged` is then simply the state where no legal wave within budget decreases the potential. See "Convergence criterion and wave-level benefit" for the full rule and for the local tolerance gates it deliberately replaces.
+
 This MEP changes the orchestration and correctness boundary of balancing. It does not define a new resource-aware scoring function, shard placement policy, or migration-cost model. Those policies can be implemented separately on top of the snapshot and epoch interfaces defined here.
 
 ## Implementation Status
 
-The MVP described by this MEP is implemented and reviewed on the Milvus feature branch. Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `e77f5fa584f941dd87e544f51457f56b34941b3b` contains 24 commits and changes 39 files, including 38 Go files. Its exact tree is `f0b4492eb07d9318d368c3b2b6d9fd553d62042a`. Active rollout remains disabled by default, and the implementation PR has not yet been opened because delivery follows the design-first sequence described below.
+The MVP described by this MEP is implemented and reviewed on the Milvus feature branch, and is open for review as [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431). Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `e77f5fa584f941dd87e544f51457f56b34941b3b` contains 24 commits and changes 39 files, including 38 Go files. Its exact tree is `f0b4492eb07d9318d368c3b2b6d9fd553d62042a`. Active rollout remains disabled by default.
+
+The commit references in this section track a live branch and are refreshed when it is rebased or extended; the last refresh followed the rebase onto the baseline above. A reader who finds them behind the branch should treat that as ordinary drift rather than an inconsistency, and should trust the baseline and the pull request link over any individual SHA. Nothing in the design depends on these identifiers; they exist so a reviewer can map each design layer onto the commit that implements it.
 
 | Layer | Status | Milvus commits | Main files |
 |---|---|---|---|
@@ -1313,6 +1317,15 @@ All ten keys are refreshable. An epoch-specific batch value overrides both fallb
 ## Compatibility, Deprecation, and Migration Plan
 
 The feature is internal and does not change collection, replica, or search APIs.
+
+### What the rollout flag does and does not gate
+
+`queryCoord.balanceEpoch.enabled` gates the epoch control loop, not the whole change, and reviewers should size risk accordingly. Everything under `balance/epoch_*.go` is unreachable while the flag is off, and `BalanceChecker` falls back to the legacy path after draining any RG that still holds an active generation. Two categories of change are live regardless of the flag:
+
+1. `taskScheduler.Add` is split into `validateAddLocked` plus `commitAddLocked`. Validation stays behaviourally identical to the previous `preAdd`, including the early return that skips move-specific checks when a higher-priority task replaces an existing one. What changes is that the replacement side effect no longer runs during validation, so a later validation failure can no longer leave the previous task already cancelled and removed. Replacement bookkeeping is ordered before the new registration because both share one index key.
+2. Node distribution is published atomically. Segment and channel managers share one publication lock, `distHandler` builds both halves of a response before publishing, and the delta route added for incremental distribution goes through the same lock. A snapshot can no longer observe one half of a response against the other half.
+
+Both categories are on the shared task and distribution paths used by load, release, and recovery work, not only by balancing. They are prerequisites for snapshot correctness rather than optional parts of the epoch feature, which is why they are not behind the flag. Reviewer attention is best spent there; the epoch state machine itself is protected by the flag, by shadow mode, and by hard wave budgets.
 
 The minimum deliverable is deliberately limited to the normal-balance closed loop:
 
