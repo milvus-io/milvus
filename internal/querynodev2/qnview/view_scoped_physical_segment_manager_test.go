@@ -163,14 +163,14 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	meta := buildHandlerTestMeta(1)
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
-		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001, 1002}}},
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	scheduler := &fakeNodeScheduler{}
 	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 
-	loadedCh := make(chan []TransformSegment, 2)
-	failedCh := make(chan int64, 1)
+	loadedCh := make(chan []TransformSegment, 3)
+	failedCh := make(chan int64, 2)
 	unrecoverableCh := make(chan struct{}, 1)
 	mgr.Acquire(AcquirePhysicalSegments{
 		Key: key, Meta: meta, View: view,
@@ -181,7 +181,7 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	})
 
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.tasks) == 3
 	}, time.Second, 10*time.Millisecond)
 	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
 	for _, task := range scheduler.tasks {
@@ -189,6 +189,9 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	}
 
 	taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+	taskBySegment[1001].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+	require.Contains(t, mgr.pendingLoadSegments, int64(1000))
+	require.Contains(t, mgr.pendingLoadSegments, int64(1001))
 	select {
 	case got := <-failedCh:
 		t.Fatalf("resource failure should pend while another segment is loading, got failed segment %d", got)
@@ -197,16 +200,22 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	case <-time.After(20 * time.Millisecond):
 	}
 
-	taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
+	taskBySegment[1002].OnLoaded(&fakeTransformSegment{id: 1002, partitionID: 10})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 3
+		return len(scheduler.tasks) == 5
 	}, time.Second, 10*time.Millisecond)
-	retry := scheduler.tasks[2]
-	require.Equal(t, int64(1000), retry.SegmentID)
-	retry.OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+	require.Empty(t, mgr.pendingLoadSegments)
+	retries := make(map[int64]*SegmentLoadTask, 2)
+	for _, task := range scheduler.tasks[3:] {
+		retries[task.SegmentID] = task
+	}
+	require.Contains(t, retries, int64(1000))
+	require.Contains(t, retries, int64(1001))
+	retries[1000].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+	retries[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
 
 	require.Eventually(t, func() bool {
-		return len(loadedCh) == 2
+		return len(loadedCh) == 3
 	}, time.Second, 10*time.Millisecond)
 	select {
 	case got := <-failedCh:
