@@ -79,6 +79,7 @@ type Server struct {
 	tikvCli             *txnkv.Client
 	address             string
 	session             sessionutil.SessionInterface
+	sessionOwned        bool
 	sessionWatcher      sessionutil.SessionWatcher
 	sessionWatcherMu    sync.Mutex
 	kv                  kv.MetaKv
@@ -155,6 +156,7 @@ func (s *Server) Register() error {
 
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
+	s.sessionOwned = false
 	if s.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
@@ -247,6 +249,7 @@ func (s *Server) initSession() error {
 	// Init QueryCoord session
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
+		s.sessionOwned = true
 		s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
@@ -587,12 +590,16 @@ func (s *Server) Stop() error {
 	s.cancel()
 	s.wg.Wait()
 
-	if s.session != nil {
-		s.session.Stop()
-	}
+	s.stopSession()
 
 	log.Info("QueryCoord stop successfully")
 	return nil
+}
+
+func (s *Server) stopSession() {
+	if s.sessionOwned && s.session != nil {
+		s.session.Stop()
+	}
 }
 
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
