@@ -344,6 +344,38 @@ func (s *ReadSuite) TestHandleSearchResultPreservesNullableGeometryRows() {
 	s.Equal("POINT (1 2)", value)
 }
 
+func (s *ReadSuite) TestHandleSearchResultSharesDynamicProjectionBase() {
+	resp := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{2},
+			Scores:     []float32{0.2, 0.1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+				},
+			},
+			FieldsData: []*schemapb.FieldData{
+				s.getJSONBytesFieldData("$meta", [][]byte{
+					[]byte(`{"color": "red", "price": 10}`),
+					[]byte(`{"color": "blue", "price": 20}`),
+				}, true),
+			},
+		},
+	}
+
+	results, err := s.client.handleSearchResult(s.schemaDyn, []string{"color", "price"}, 1, resp)
+	s.Require().NoError(err)
+	s.Require().Len(results, 1)
+	s.Require().NoError(results[0].Err)
+	s.Require().Len(results[0].Fields, 2)
+	color, ok := results[0].Fields[0].(*column.ColumnDynamic)
+	s.Require().True(ok)
+	price, ok := results[0].Fields[1].(*column.ColumnDynamic)
+	s.Require().True(ok)
+	s.Same(color.ColumnJSONBytes, price.ColumnJSONBytes)
+}
+
 func (s *ReadSuite) TestHandleSearchResultRejectsTruncatedFieldData() {
 	resp := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
