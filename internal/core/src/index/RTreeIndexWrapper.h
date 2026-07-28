@@ -125,7 +125,10 @@ class RTreeIndexWrapper {
      * @param maxX Output maximum X coordinate
      * @param maxY Output maximum Y coordinate
      */
-    void
+    // Returns false (leaving the outputs unspecified) when GEOS cannot compute
+    // an envelope, e.g. for an empty geometry. Callers must not use the box on
+    // a false return.
+    bool
     get_bounding_box(const GEOSGeometry* geom,
                      GEOSContextHandle_t ctx,
                      double& minX,
