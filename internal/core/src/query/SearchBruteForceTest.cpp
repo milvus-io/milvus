@@ -189,6 +189,60 @@ TEST_F(TestFloatSearchBruteForce, NotSupported) {
     Run(100, 10, 5, 128, "aaaaaaaaaaaa");
 }
 
+// CheckBruteForceSearchParam must mirror knowhere IvfConfig CFG_INT nprobe
+// validation (range [1, 65536], strict integer type) so the brute-force path
+// (growing segments / sealed segments without an IVF index) returns the same
+// errors as indexed IVF search. See issue #47729.
+TEST(CheckBruteForceSearchParam, NprobeValidation) {
+    constexpr int64_t dim = 128;
+    auto schema = std::make_shared<Schema>();
+    auto fvec = schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    const FieldMeta& field = (*schema)[fvec];
+
+    auto make_info = [](const std::string& json_str) {
+        SearchInfo info;
+        info.metric_type_ = knowhere::metric::L2;
+        info.search_params_ = knowhere::Json::parse(json_str);
+        return info;
+    };
+
+    // valid values pass
+    EXPECT_NO_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 1})")));
+    EXPECT_NO_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 8})")));
+    EXPECT_NO_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 65536})")));
+    // missing nprobe passes (not every search specifies it)
+    EXPECT_NO_THROW(CheckBruteForceSearchParam(field, make_info(R"({})")));
+
+    // out of range [1, 65536] — including the 0 case from issue #47729
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 0})")),
+        SegcoreError);
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": -1})")),
+        SegcoreError);
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 65537})")),
+        SegcoreError);
+
+    // type conflict — must NOT be coerced to 0 (the original proxy-layer bug)
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": null})")),
+        SegcoreError);
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": true})")),
+        SegcoreError);
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": 32.0})")),
+        SegcoreError);
+    EXPECT_THROW(
+        CheckBruteForceSearchParam(field, make_info(R"({"nprobe": "8"})")),
+        SegcoreError);
+}
+
 TEST(PrepareBFSearchParams, BM25ParamsFromIndexInfo) {
     SearchInfo search_info;
     search_info.metric_type_ = knowhere::metric::BM25;

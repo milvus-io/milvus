@@ -66,6 +66,27 @@ CheckBruteForceSearchParam(const FieldMeta& field,
         AssertInfo(IsVectorDataType(data_type),
                    "[BruteForceSearch] Unsupported vector data type");
     }
+
+    // Mirror knowhere IvfConfig CFG_INT nprobe validation (range [1, 65536]).
+    // Brute-force paths (growing segments and sealed segments without an IVF
+    // index) bypass knowhere Config::Load, so an invalid nprobe that indexed
+    // IVF search would reject is currently accepted here. Validate so both
+    // paths return identical errors. Type check is strict (not coercive) to
+    // preserve knowhere's "Type conflict" / "Out of range" contracts.
+    if (search_info.search_params_.contains("nprobe")) {
+        const auto& nprobe_val = search_info.search_params_["nprobe"];
+        if (!nprobe_val.is_number_integer()) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Type conflict in json: param 'nprobe' (" +
+                          nprobe_val.dump() + ") should be integer");
+        }
+        int64_t nprobe = nprobe_val.get<int64_t>();
+        if (nprobe < 1 || nprobe > 65536) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Out of range in json: param 'nprobe' (" +
+                          nprobe_val.dump() + ") should be in range [1, 65536]");
+        }
+    }
 }
 
 knowhere::Json
