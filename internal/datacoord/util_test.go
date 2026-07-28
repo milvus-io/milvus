@@ -184,15 +184,18 @@ func (suite *UtilSuite) TestCreateStorageConfig() {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
 		paramtable.Get().Save(Params.MinioCfg.SslTLSMinVersion.Key, "1.2")
 		paramtable.Get().Save(Params.MinioCfg.UseCRC32C.Key, "true")
+		paramtable.Get().Save(Params.MinioCfg.MaxConnections.Key, "237")
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.MinioCfg.SslTLSMinVersion.Key)
 		defer paramtable.Get().Reset(Params.MinioCfg.UseCRC32C.Key)
+		defer paramtable.Get().Reset(Params.MinioCfg.MaxConnections.Key)
 
 		config := createStorageConfig()
 		suite.Equal("minio", config.StorageType)
 		suite.Equal(Params.MinioCfg.Address.GetValue(), config.Address)
 		suite.Equal("1.2", config.SslTlsMinVersion)
 		suite.True(config.UseCrc32CChecksum)
+		suite.Equal(uint32(237), config.MaxConnections)
 	})
 }
 

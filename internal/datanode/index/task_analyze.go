@@ -111,6 +111,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		Region:            at.req.GetStorageConfig().GetRegion(),
 		CloudProvider:     at.req.GetStorageConfig().GetCloudProvider(),
 		RequestTimeoutMs:  at.req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:    at.req.GetStorageConfig().GetMaxConnections(),
 		SslCACert:         at.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: at.req.GetStorageConfig().GetGcpCredentialJSON(),
 		SslTlsMinVersion:  at.req.GetStorageConfig().GetSslTlsMinVersion(),

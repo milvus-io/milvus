@@ -9,7 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/array/builder_primitive.h>
 #include <arrow/scalar.h>
+#include <arrow/util/byte_size.h>
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <chrono>
@@ -41,6 +43,7 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "milvus-storage/thread_pool.h"
@@ -371,6 +374,43 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
 
     FreeFlushResult(&result);
     cleanup();
+}
+
+// milvus-storage splits a parquet row group into record-batch slices according
+// to reader.record_batch_max_rows. Those slices share backing buffers, so the
+// in-flight byte budget must charge each referenced range rather than the
+// entire row-group buffer once per slice.
+TEST_F(StorageTest, RecordBatchSizeAccountsForReferencedSlice) {
+    constexpr int64_t kSliceRows = 8192;
+    constexpr int64_t kTotalRows = kSliceRows * 2;
+
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Reserve(kTotalRows).ok());
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        ASSERT_TRUE(builder.Append(i).ok());
+    }
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+
+    auto batch = arrow::RecordBatch::Make(
+        arrow::schema({arrow::field("value", arrow::int64())}),
+        kTotalRows,
+        {values});
+    auto first = batch->Slice(0, kSliceRows);
+    auto second = batch->Slice(kSliceRows, kSliceRows);
+
+    // Demonstrate the regression condition: TotalBufferSize charges both
+    // slices for the full shared buffers, while the slice-aware estimates
+    // partition the backing bytes between the two equal, byte-aligned slices.
+    auto backing_bytes = arrow::util::TotalBufferSize(*batch);
+    EXPECT_EQ(arrow::util::TotalBufferSize(*first), backing_bytes);
+    EXPECT_EQ(arrow::util::TotalBufferSize(*second), backing_bytes);
+
+    auto first_bytes = EstimateRecordBatchBytes(*first);
+    auto second_bytes = EstimateRecordBatchBytes(*second);
+    EXPECT_LT(first_bytes, backing_bytes);
+    EXPECT_EQ(first_bytes, second_bytes);
+    EXPECT_EQ(first_bytes + second_bytes, backing_bytes);
 }
 
 // A growing segment born while a function output field was absent from the
