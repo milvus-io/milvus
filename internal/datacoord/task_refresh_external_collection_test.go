@@ -636,13 +636,14 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		protoTask := &datapb.ExternalCollectionRefreshTask{
-			TaskId:         1001,
-			JobId:          1,
-			CollectionId:   100,
-			State:          indexpb.JobState_JobStateInit,
-			SchemaVersion:  3,
-			ExternalSource: "s3://bucket/path",
-			ExternalSpec:   "iceberg",
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInit,
+			SchemaVersion:        3,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+			ExternalSource:       "s3://bucket/path",
+			ExternalSpec:         "iceberg",
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
@@ -1666,6 +1667,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	mt.GetCollection(collectionID).Schema.Version = 1
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	incoming.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 1)
+	incoming.SchemaVersion = 1
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
@@ -1834,6 +1836,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectsUpdatedSegmentSc
 		})
 	}
 }
+
 func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
 	oldManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 	newManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 2)
@@ -1982,8 +1985,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		ctx,
 		mt,
 		collectionID,
-		4,
 		nil,
+		4,
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -2006,8 +2009,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentCollect
 		ctx,
 		mt,
 		collectionID,
-		1,
 		nil,
+		1,
 		nil,
 		[]*datapb.SegmentInfo{{
 			ID:             10,
@@ -2047,8 +2050,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentEmptyMa
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2073,7 +2076,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentEmptyFa
 		mt,
 		collectionID,
 		nil,
-		1,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2091,6 +2094,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		segments:    NewSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
+	mt.GetCollection(collectionID).Schema.Version = 1
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID + 1,
@@ -2112,13 +2116,14 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		}},
 	}))
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	incoming.SchemaVersion = 1
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		1,
 		nil,
 		[]*datapb.SegmentInfo{incoming},
 	)
@@ -2225,14 +2230,16 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_NormalizeNewSegmentColl
 		segments:    NewSegmentsInfo(),
 		catalog:     &stubCatalog{},
 	}
+	mt.GetCollection(collectionID).Schema.Version = 1
 	seg := newTestExternalRefreshSegment(10, 0, 100)
+	seg.SchemaVersion = 1
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		1,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2273,7 +2280,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchBinlogRowCou
 		mt,
 		collectionID,
 		[]int64{segmentID},
-		1,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -2297,8 +2304,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewBinlogRowCount
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
@@ -2331,7 +2338,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchEmptyNestedB
 		mt,
 		collectionID,
 		[]int64{segmentID},
-		1,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{patched},
 	)
@@ -2355,8 +2362,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewEmptyNestedBin
 		ctx,
 		mt,
 		collectionID,
-		0,
 		nil,
+		0,
 		nil,
 		[]*datapb.SegmentInfo{seg},
 	)
