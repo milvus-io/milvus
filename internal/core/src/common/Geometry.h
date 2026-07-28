@@ -83,17 +83,41 @@ class Geometry {
         geometry_ = geom;
     }
 
-    // Copy assignment
+    // Copy assignment (deep clone). Releases any geometry this instance
+    // already owns before taking a clone of `other`, so the two instances
+    // never share a raw GEOSGeometry* (which would double-free on
+    // destruction).
+    //
+    // CONSTRAINT: copying drives GEOS through the SOURCE instance's context
+    // (GEOSGeom_clone_r(other.ctx_, ...)) and the copy keeps that context.
+    // Therefore a cache-owned Geometry must never be copied from a query
+    // thread: (1) the cache's shared context is not thread-safe, so the clone
+    // call itself is a data race, and (2) a copy that outlives the cache's
+    // shared_ptr holds a dangling context. Query threads must use Clone(ctx)
+    // with their own (thread-local) context instead. Implicit copies cannot
+    // simply be deleted: generic container code (FieldDataImpl's std::copy_n)
+    // copies Geometry values on the single-threaded ingest path, which is the
+    // legitimate use these operators exist for.
     Geometry&
     operator=(const Geometry& other) {
         if (this != &other) {
-            geometry_ = other.geometry_;
+            if (geometry_ != nullptr) {
+                GEOSGeom_destroy_r(ctx_, geometry_);
+                geometry_ = nullptr;
+            }
             ctx_ = other.ctx_;
+            if (other.IsValid()) {
+                GEOSGeometry* cloned =
+                    GEOSGeom_clone_r(other.ctx_, other.geometry_);
+                AssertInfo(cloned != nullptr, "Failed to clone geometry");
+                geometry_ = cloned;
+            }
         }
         return *this;
     }
 
-    // Copy constructor with context (for cloning)
+    // Copy constructor (deep clone). Same CONSTRAINT as copy assignment above:
+    // never copy a cache-owned Geometry from a query thread; use Clone(ctx).
     Geometry(const Geometry& other) : ctx_(other.ctx_) {
         if (other.IsValid()) {
             GEOSGeometry* cloned =
@@ -103,6 +127,45 @@ class Geometry {
         } else {
             geometry_ = nullptr;
         }
+    }
+
+    // Explicit deep clone into the CALLER's context. All GEOS work runs
+    // through `ctx`, never through this instance's context, and the returned
+    // Geometry is bound to `ctx` -- this is the only safe way to duplicate a
+    // cache-owned Geometry from a query thread (hold the cache read lock and
+    // pass GetThreadLocalGEOSContext()), and the clone stays valid after the
+    // cache is gone.
+    Geometry
+    Clone(GEOSContextHandle_t ctx) const {
+        Geometry cloned;
+        cloned.ctx_ = ctx;
+        if (IsValid()) {
+            GEOSGeometry* geom = GEOSGeom_clone_r(ctx, geometry_);
+            AssertInfo(geom != nullptr, "Failed to clone geometry");
+            cloned.geometry_ = geom;
+        }
+        return cloned;
+    }
+
+    // Move constructor (transfers ownership, no GEOS allocation). Being
+    // noexcept lets std::vector relocate by move instead of clone-then-destroy.
+    Geometry(Geometry&& other) noexcept
+        : geometry_(other.geometry_), ctx_(other.ctx_) {
+        other.geometry_ = nullptr;
+    }
+
+    // Move assignment (transfers ownership, releases any existing geometry).
+    Geometry&
+    operator=(Geometry&& other) noexcept {
+        if (this != &other) {
+            if (geometry_ != nullptr) {
+                GEOSGeom_destroy_r(ctx_, geometry_);
+            }
+            geometry_ = other.geometry_;
+            ctx_ = other.ctx_;
+            other.geometry_ = nullptr;
+        }
+        return *this;
     }
 
     bool
@@ -121,80 +184,130 @@ class Geometry {
         return geometry_;
     }
 
-    // Spatial relation operations using GEOS API
+    // Spatial relation operations using GEOS API.
+    //
+    // Each predicate has an overload that takes an explicit GEOS context. GEOS
+    // context handles are NOT thread-safe, and cache-owned Geometry instances
+    // share one context across concurrent queries, so callers on a shared
+    // (read-locked) cached geometry MUST pass their own per-thread context
+    // (see GetThreadLocalGEOSContext) instead of relying on the stored ctx_.
+    // The no-context overloads keep using the instance's own context and are
+    // only safe when this instance is not shared across threads.
     bool
     equals(const Geometry& other) const {
+        return equals(other, ctx_);
+    }
+
+    bool
+    equals(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSEquals_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSEquals_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     touches(const Geometry& other) const {
+        return touches(other, ctx_);
+    }
+
+    bool
+    touches(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSTouches_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSTouches_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     overlaps(const Geometry& other) const {
+        return overlaps(other, ctx_);
+    }
+
+    bool
+    overlaps(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSOverlaps_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSOverlaps_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     crosses(const Geometry& other) const {
+        return crosses(other, ctx_);
+    }
+
+    bool
+    crosses(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSCrosses_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSCrosses_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     contains(const Geometry& other) const {
+        return contains(other, ctx_);
+    }
+
+    bool
+    contains(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSContains_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSContains_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     intersects(const Geometry& other) const {
+        return intersects(other, ctx_);
+    }
+
+    bool
+    intersects(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSIntersects_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSIntersects_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     bool
     within(const Geometry& other) const {
+        return within(other, ctx_);
+    }
+
+    bool
+    within(const Geometry& other, GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
-        char result = GEOSWithin_r(ctx_, geometry_, other.geometry_);
+        char result = GEOSWithin_r(ctx, geometry_, other.geometry_);
         return result == 1;
     }
 
     // Distance within check using GEOS distance calculation
     bool
     dwithin(const Geometry& other, double distance) const {
+        return dwithin(other, distance, ctx_);
+    }
+
+    bool
+    dwithin(const Geometry& other,
+            double distance,
+            GEOSContextHandle_t ctx) const {
         if (!IsValid() || !other.IsValid()) {
             return false;
         }
 
         // Get geometry types
-        int thisType = GEOSGeomTypeId_r(ctx_, geometry_);
-        int otherType = GEOSGeomTypeId_r(ctx_, other.geometry_);
+        int thisType = GEOSGeomTypeId_r(ctx, geometry_);
+        int otherType = GEOSGeomTypeId_r(ctx, other.geometry_);
 
         // Ensure other geometry is a point
         AssertInfo(otherType == GEOS_POINT, "other geometry is not a point");
@@ -202,10 +315,10 @@ class Geometry {
         // For point-to-point, use Haversine formula for accuracy
         if (thisType == GEOS_POINT) {
             double thisX, thisY, otherX, otherY;
-            if (GEOSGeomGetX_r(ctx_, geometry_, &thisX) == 1 &&
-                GEOSGeomGetY_r(ctx_, geometry_, &thisY) == 1 &&
-                GEOSGeomGetX_r(ctx_, other.geometry_, &otherX) == 1 &&
-                GEOSGeomGetY_r(ctx_, other.geometry_, &otherY) == 1) {
+            if (GEOSGeomGetX_r(ctx, geometry_, &thisX) == 1 &&
+                GEOSGeomGetY_r(ctx, geometry_, &thisY) == 1 &&
+                GEOSGeomGetX_r(ctx, other.geometry_, &otherX) == 1 &&
+                GEOSGeomGetY_r(ctx, other.geometry_, &otherY) == 1) {
                 double actual_distance =
                     haversine_distance_meters(thisY, thisX, otherY, otherX);
                 return actual_distance <= distance;
@@ -214,12 +327,12 @@ class Geometry {
 
         // For other geometry types, use GEOS distance (in degrees)
         double geos_distance;
-        if (GEOSDistance_r(ctx_, geometry_, other.geometry_, &geos_distance) ==
+        if (GEOSDistance_r(ctx, geometry_, other.geometry_, &geos_distance) ==
             1) {
             // Get query point coordinates for conversion reference
             double query_lat, query_lon;
-            if (GEOSGeomGetX_r(ctx_, other.geometry_, &query_lon) == 1 &&
-                GEOSGeomGetY_r(ctx_, other.geometry_, &query_lat) == 1) {
+            if (GEOSGeomGetX_r(ctx, other.geometry_, &query_lon) == 1 &&
+                GEOSGeomGetY_r(ctx, other.geometry_, &query_lat) == 1) {
                 double distance_in_meters =
                     degrees_to_meters_at_location(geos_distance, query_lat);
                 return distance_in_meters <= distance;
@@ -227,6 +340,19 @@ class Geometry {
         }
 
         return false;
+    }
+
+    bool
+    is_valid() const {
+        return is_valid(ctx_);
+    }
+
+    bool
+    is_valid(GEOSContextHandle_t ctx) const {
+        if (!IsValid()) {
+            return false;
+        }
+        return GEOSisValid_r(ctx, geometry_) == 1;
     }
 
  private:

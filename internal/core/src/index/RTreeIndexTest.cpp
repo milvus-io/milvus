@@ -11,6 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
+#include <atomic>
+#include <functional>
+#include <thread>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -291,8 +294,13 @@ TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
     milvus::tracer::TraceContext trace_ctx;
     rtree_load.LoadUnified(cfg);
 
-    // Only 2 valid points should be present
-    ASSERT_EQ(rtree_load.Count(), 2);
+    // All 3 rows must be present: the row whose WKB fails to parse is indexed
+    // with a placeholder MBR rather than dropped. Dropping it would leave the
+    // index row count permanently short of the segment row count, which then
+    // trips the growing coarse-bitmap bounds check on every subsequent
+    // geometry query. The R-tree is only a coarse filter -- exact refinement
+    // still filters the placeholder row out of any result.
+    ASSERT_EQ(rtree_load.Count(), 3);
 }
 
 TEST_F(RTreeIndexTest, Build_VariousGeometries) {
@@ -861,4 +869,228 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
 
     // Clean up any remaining index files
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
+}
+
+// Exercises the growing-segment path where a single writer keeps inserting
+// geometries (RTreeIndex::AddGeometry) while reader threads concurrently call
+// Count() and QueryCandidates(). Before the locking fix these read total row
+// counts / null_offset_ / wrapper_ and the boost rtree size without holding
+// any lock, racing the incremental inserts. Run under ASAN/TSAN this asserts
+// the accesses are now properly synchronized; it must also not crash and must
+// converge to the expected final count.
+TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    // Seed one geometry so wrapper_ is published before readers start querying
+    // (QueryCandidates asserts a non-null wrapper).
+    rtree.AddGeometry(CreatePointWKB(0.0, 0.0), 0);
+
+    constexpr int kRows = 4000;
+    std::atomic<bool> stop{false};
+    std::atomic<int> reader_iters{0};
+
+    auto reader = [&]() {
+        auto ctx = GEOS_init_r();
+        // A box covering the inserted points [0, kRows] x [0, kRows].
+        milvus::Geometry query_geom(
+            ctx,
+            "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 -1))");
+        while (!stop.load(std::memory_order_relaxed)) {
+            volatile int64_t c = rtree.Count();
+            (void)c;
+            std::vector<int64_t> candidates;
+            rtree.QueryCandidates(
+                ::milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                query_geom,
+                candidates);
+            reader_iters.fetch_add(1, std::memory_order_relaxed);
+        }
+        GEOS_finish_r(ctx);
+    };
+
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 4; ++t) {
+        readers.emplace_back(reader);
+    }
+
+    // Single writer, mirroring the per-segment serialized insert pipeline.
+    for (int i = 1; i <= kRows; ++i) {
+        if (i % 7 == 0) {
+            // Interleave null geometries (exercises the null_offset_ path).
+            rtree.AddGeometry(std::string(), i);
+        } else {
+            rtree.AddGeometry(
+                CreatePointWKB(static_cast<double>(i), static_cast<double>(i)),
+                i);
+        }
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& th : readers) {
+        th.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+    // Final count = seeded row 0 plus kRows incremental rows.
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kRows + 1));
+}
+
+// Multiple concurrent writers building the same growing index. This exercises
+// IndexingRecord::AppendingIndex's documented "concurrent, reentrant" contract
+// as defense-in-depth: production currently serializes inserts per growing
+// segment (one flowgraph consumer per vchannel), so this shape is not driven
+// by production today -- the test pins the class-level contract so a future
+// caller change fails here instead of in release. Several threads race on the
+// first-time wrapper_ initialization and then keep inserting. Run under
+// ASAN/TSAN this asserts the lazy init is idempotent and
+// wrapper_/total_num_rows_/null_offset_ are never touched unsynchronized.
+TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriter) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int kWriters = 6;
+    constexpr int kPerWriter = 1000;
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            // Spin so every writer hits the first AddGeometry at ~the same time
+            // and they race on the lazy wrapper_ initialization.
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            for (int j = 0; j < kPerWriter; ++j) {
+                int64_t off = static_cast<int64_t>(w) * kPerWriter + j;
+                if (j % 5 == 0) {
+                    rtree.AddGeometry(std::string(), off);  // null geometry
+                } else {
+                    rtree.AddGeometry(CreatePointWKB(static_cast<double>(off),
+                                                     static_cast<double>(off)),
+                                      off);
+                }
+            }
+        });
+    }
+
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 2; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                volatile int64_t c = rtree.Count();  // safe before/after init
+                (void)c;
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    // Every row (null + non-null, disjoint offsets) must be accounted for once.
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kWriters * kPerWriter));
+}
+
+// Regression for the IsNull()/IsNotNull() heap out-of-bounds write on the
+// concurrent multi-writer growing index. Writers assign offsets round-robin so
+// null_offset_ is appended in NON-monotonic order (i.e. unsorted), and each
+// writer may publish a high offset while lower offsets are still in flight, so
+// null_offset_ transiently holds values >= Count(). Readers hammer IsNull()/
+// IsNotNull() throughout ingestion: with the old std::lower_bound shortcut over
+// unsorted data those offsets escaped the bound and wrote past the bitset (a
+// silent OOB in release builds; caught here under ASAN). The final bitsets must
+// also match the exact null / non-null partition.
+TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriterIsNullBounds) {
+    field_meta_.field_schema.set_nullable(true);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int kWriters = 6;
+    constexpr int kTotal = 6000;  // divisible by kWriters
+    // Row is null iff (offset % 3 == 0). Deterministic, independent of thread
+    // scheduling, so the final counts are exact.
+    auto is_null_row = [](int64_t off) { return off % 3 == 0; };
+
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+    std::atomic<int64_t> reader_iters{0};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            // Round-robin offsets: writer w owns w, w+kWriters, w+2*kWriters...
+            // so concurrent writers append null_offset_ out of order.
+            for (int64_t off = w; off < kTotal; off += kWriters) {
+                if (is_null_row(off)) {
+                    rtree.AddGeometry(std::string(), off);
+                } else {
+                    rtree.AddGeometry(CreatePointWKB(static_cast<double>(off),
+                                                     static_cast<double>(off)),
+                                      off);
+                }
+            }
+        });
+    }
+
+    // Readers concurrently drive the previously-unguarded null bitmap paths.
+    // The point is to run IsNull()/IsNotNull() against the growing index while
+    // null_offset_ is unsorted and mid-flight: under ASAN the old lower_bound
+    // shortcut faulted here. We intentionally do NOT cross-check the two
+    // results against each other, because IsNull() and IsNotNull() each take
+    // an independent Count() snapshot and a concurrent writer can grow the row
+    // count between the two calls (so their sizes legitimately differ by the
+    // rows added in between). Per-snapshot correctness is asserted after join.
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 3; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                auto is_null = rtree.IsNull();
+                auto is_not_null = rtree.IsNotNull();
+                // Each result is self-consistent: no set bit lies outside its
+                // own length (the invariant the OOB fix restores).
+                EXPECT_LE(is_null.count(), is_null.size());
+                EXPECT_LE(is_not_null.count(), is_not_null.size());
+                reader_iters.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kTotal));
+
+    int64_t expected_nulls = 0;
+    for (int64_t off = 0; off < kTotal; ++off) {
+        if (is_null_row(off)) {
+            ++expected_nulls;
+        }
+    }
+    auto final_null = rtree.IsNull();
+    auto final_not_null = rtree.IsNotNull();
+    EXPECT_EQ(final_null.count(), expected_nulls);
+    EXPECT_EQ(final_not_null.count(), kTotal - expected_nulls);
+    // Every offset must land in exactly one of the two bitsets.
+    for (int64_t off = 0; off < kTotal; ++off) {
+        EXPECT_EQ(final_null[off], is_null_row(off)) << "offset " << off;
+        EXPECT_EQ(final_not_null[off], !is_null_row(off)) << "offset " << off;
+    }
 }
