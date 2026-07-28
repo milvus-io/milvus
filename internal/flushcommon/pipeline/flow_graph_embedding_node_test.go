@@ -26,9 +26,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestEmbeddingNode_BM25_Operator(t *testing.T) {
@@ -111,6 +113,65 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 		msg, ok := output[0].(*FlowGraphMsg)
 		assert.True(t, ok)
 		assert.NotNil(t, msg.InsertData)
+	})
+
+	t.Run("precomputed BM25 output", func(t *testing.T) {
+		node, err := newEmbeddingNode("test-channel", metaCache)
+		assert.NoError(t, err)
+		defer node.Free()
+
+		rows := [][]byte{
+			typeutil.CreateSparseFloatRow([]uint32{7}, []float32{2}),
+			typeutil.CreateSparseFloatRow([]uint32{9}, []float32{3}),
+			typeutil.CreateSparseFloatRow([]uint32{11}, []float32{4}),
+		}
+		precomputed := &schemapb.SparseFloatArray{Contents: rows, Dim: 12}
+		output := node.Operate([]Msg{
+			&FlowGraphMsg{
+				BaseMsg: flowgraph.NewBaseMsg(false),
+				InsertMessages: []*msgstream.InsertMsg{{
+					BaseMsg: msgstream.BaseMsg{},
+					InsertRequest: &msgpb.InsertRequest{
+						SegmentID:  1,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+						Timestamps: []uint64{1, 1, 1},
+						FieldsData: []*schemapb.FieldData{
+							{
+								FieldId: 100,
+								Field: &schemapb.FieldData_Scalars{
+									Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+								},
+							}, {
+								FieldId: 101,
+								Field: &schemapb.FieldData_Scalars{
+									Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"different1", "different2", "different3"}}}},
+								},
+							}, {
+								FieldId: 102,
+								Field: &schemapb.FieldData_Vectors{
+									Vectors: &schemapb.VectorField{
+										Dim: 12,
+										Data: &schemapb.VectorField_SparseFloatVector{
+											SparseFloatVector: precomputed,
+										},
+									},
+								},
+							},
+						},
+					},
+				}},
+			},
+		})
+
+		msg := output[0].(*FlowGraphMsg)
+		actual := msg.InsertData[0].GetDatas()[0].Data[102].(*storage.SparseFloatVectorFieldData)
+		assert.Equal(t, precomputed, &actual.SparseFloatArray)
+
+		data := &storage.InsertData{Data: map[int64]storage.FieldData{102: actual}}
+		stats, err := node.embedding([]*storage.InsertData{data})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(3), stats[102].NumRow())
+		assert.Equal(t, int64(9), stats[102].NumToken())
 	})
 
 	t.Run("with close msg", func(t *testing.T) {

@@ -140,10 +140,27 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 }
 
 func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *msgstream.InsertMsg, stats map[int64]*storage.BM25Stats) error {
-	inputFields := runner.GetInputFields()
 	outputField := runner.GetOutputFields()[0]
 
 	outputFieldID := outputField.GetFieldID()
+	// Newer producers may have already materialized the output before WAL append.
+	for _, fieldData := range msg.GetFieldsData() {
+		if fieldData.GetFieldId() != outputFieldID {
+			continue
+		}
+
+		sparseArray := fieldData.GetVectors().GetSparseFloatVector()
+		if sparseArray == nil {
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d is not sparse vector data", outputFieldID)
+		}
+		if _, ok := stats[outputFieldID]; !ok {
+			stats[outputFieldID] = storage.NewBM25Stats()
+		}
+		stats[outputFieldID].AppendBytes(sparseArray.GetContents()...)
+		return nil
+	}
+
+	inputFields := runner.GetInputFields()
 	datas, err := getEmbeddingFieldDatas(msg.FieldsData, lo.Map(inputFields, func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
 	if err != nil {
 		return err
