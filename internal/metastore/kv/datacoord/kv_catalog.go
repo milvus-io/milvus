@@ -339,14 +339,14 @@ func (kc *Catalog) buildAlterSegmentsKvs(ctx context.Context, segments []*datapb
 		if segment.GetState() == commonpb.SegmentState_Dropped {
 			binlogs, err := kc.handleDroppedSegment(ctx, segment)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			maps.Copy(kvs, binlogs)
 		}
 
 		k, v, err := buildSegmentKv(cloned)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		kvs[k] = v
 	}
@@ -370,7 +370,7 @@ func (kc *Catalog) buildAlterSegmentsKvs(ctx context.Context, segments []*datapb
 			b.GetUpdateStatslogs(),
 			b.GetUpdateBm25Statslogs())
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 
 		maps.Copy(kvs, binlogKvs)

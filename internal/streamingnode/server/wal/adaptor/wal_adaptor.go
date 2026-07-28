@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -197,7 +198,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			QueryViewVersion: lease.Version,
 		})
 	}
-	optimizer := queryresource.NewGlobalOptimizer(runtime, lease.Version.DataVersion)
+	optimizer := queryresource.NewGlobalOptimizer(runtime, lease.Version.DataVersion, shard.WALFunctionRunnerKey(shardID.VChannel))
 	plan := &viewpb.QueryPlan{
 		Version: lease.Version.IntoProto(),
 		ShardId: shardID.IntoProto(),

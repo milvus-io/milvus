@@ -192,7 +192,7 @@ func writeGrowingBulkPack(ctx context.Context, req *growingBulkWriteRequest) (*g
 			req.currentSplit,
 			req.writeRetryOpts...,
 		)
-		inserts, _, stats, bm25Stats, manifest, _, err := writer.Write(ctx, req.syncPack)
+		inserts, _, stats, bm25Stats, manifest, _, _, err := writer.Write(ctx, req.syncPack)
 		return &growingBulkWriteResult{insertBinlogs: inserts, statsBinlogs: stats, bm25Binlogs: bm25Stats, manifestPath: manifest}, err
 	case storage.StorageV3:
 		writer := syncmgr.NewBulkPackWriterV3(
@@ -207,7 +207,7 @@ func writeGrowingBulkPack(ctx context.Context, req *growingBulkWriteRequest) (*g
 			req.manifestPath,
 			req.writeRetryOpts...,
 		)
-		inserts, _, stats, bm25Stats, manifest, _, err := writer.Write(ctx, req.syncPack)
+		inserts, _, stats, bm25Stats, manifest, _, _, err := writer.Write(ctx, req.syncPack)
 		return &growingBulkWriteResult{insertBinlogs: inserts, statsBinlogs: stats, bm25Binlogs: bm25Stats, manifestPath: manifest}, err
 	default:
 		writer, err := syncmgr.NewBulkPackWriter(req.metaCache, req.schema, req.chunkManager, req.allocator, req.writeRetryOpts...)
