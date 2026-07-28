@@ -173,3 +173,37 @@ func TestGetIntData(t *testing.T) {
 		})
 	}
 }
+
+func TestFieldDataColumnRejectsInvalidRange(t *testing.T) {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "age",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+				},
+			},
+		},
+	}
+
+	column, err := FieldDataColumn(fd, 1, -1)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, column.Len())
+
+	for _, tc := range []struct {
+		name       string
+		begin, end int
+	}{
+		{name: "negative begin", begin: -1, end: 1},
+		{name: "begin past rows", begin: 4, end: 4},
+		{name: "unsupported negative end", begin: 0, end: -2},
+		{name: "end past rows", begin: 0, end: 4},
+		{name: "begin after end", begin: 2, end: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := FieldDataColumn(fd, tc.begin, tc.end)
+			assert.Error(t, err)
+		})
+	}
+}

@@ -76,6 +76,126 @@ func (s *StructArraySuite) TestBasic() {
 	s.Equal([]int32{4, 5, 6}, m["int_field"])
 }
 
+func (s *StructArraySuite) TestNullableScalarRows() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnVarCharArray("tag", nil),
+	})
+	column.SetNullable(true)
+
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"age": []int64{10, 11},
+		"tag": []string{"a", "b"},
+	}))
+	s.Require().NoError(column.AppendNull())
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"age": []int64{},
+		"tag": []string{},
+	}))
+
+	s.True(column.Nullable())
+	s.Equal(3, column.Len())
+	s.Equal(2, column.ValidCount())
+
+	isNull, err := column.IsNull(1)
+	s.Require().NoError(err)
+	s.True(isNull)
+	value, err := column.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+
+	isNull, err = column.IsNull(2)
+	s.Require().NoError(err)
+	s.False(isNull, "an empty struct array is distinct from null")
+
+	for _, fieldData := range column.FieldData().GetStructArrays().GetFields() {
+		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+		s.Equal(2, len(fieldData.GetScalars().GetArrayData().GetData()))
+	}
+}
+
+func (s *StructArraySuite) TestAppendValueWithUntypedNil() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnVarCharArray("tag", nil),
+	})
+	column.SetNullable(true)
+
+	var value any
+	s.Require().NoError(column.AppendValue(value))
+	s.Equal(1, column.Len())
+	isNull, err := column.IsNull(0)
+	s.Require().NoError(err)
+	s.True(isNull)
+}
+
+func (s *StructArraySuite) TestAppendNullDoesNotPartiallyMutateMixedNullableFields() {
+	nullableField := NewColumnInt64Array("age", nil)
+	nullableField.SetNullable(true)
+	requiredField := NewColumnVarCharArray("tag", nil)
+	column := NewColumnStructArray("profile", []Column{nullableField, requiredField})
+
+	s.Require().Error(column.AppendNull())
+	s.Zero(nullableField.Len())
+	s.Zero(requiredField.Len())
+}
+
+func (s *StructArraySuite) TestNullableCompactSlice() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("id", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	column.SetNullable(true)
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{10},
+		"embedding": [][]float32{{0.1, 0.2}},
+	}))
+	s.Require().NoError(column.AppendNull())
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{},
+		"embedding": [][]float32{},
+	}))
+
+	var sliced Column
+	s.NotPanics(func() {
+		sliced = column.Slice(1, -1)
+	})
+	s.Require().NotNil(sliced)
+	s.True(sliced.Nullable())
+	s.Equal(2, sliced.Len())
+	s.Equal(1, sliced.ValidCount())
+	value, err := sliced.Get(0)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = sliced.Get(1)
+	s.Require().NoError(err)
+	s.NotNil(value)
+	for _, fieldData := range sliced.FieldData().GetStructArrays().GetFields() {
+		s.Equal([]bool{false, true}, fieldData.GetValidData())
+	}
+}
+
+func (s *StructArraySuite) TestSetNullableWithExistingRows() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("id", [][]int64{{10}, {20}}),
+		NewColumnVarCharArray("tag", [][]string{{"a"}, {"b"}}),
+	})
+	column.SetNullable(true)
+
+	var value any
+	var err error
+	s.NotPanics(func() {
+		value, err = column.Get(0)
+	})
+	s.Require().NoError(err)
+	s.Equal([]int64{10}, value.(map[string]any)["id"])
+	s.Require().NoError(column.AppendNull())
+	s.Equal(3, column.Len())
+	value, err = column.Get(2)
+	s.Require().NoError(err)
+	s.Nil(value)
+}
+
 func (s *StructArraySuite) TestVectorSubField() {
 	dim := 4
 	rows := [][][]float32{
@@ -120,6 +240,32 @@ func (s *StructArraySuite) TestSlice() {
 	m := val.(map[string]any)
 	s.Equal([]int64{20, 21}, m["id"])
 	s.Equal([]bool{false, true}, m["flag"])
+}
+
+func (s *StructArraySuite) TestNullableVectorRows() {
+	column := NewColumnStructArray("clips", []Column{
+		NewColumnInt64Array("id", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	column.SetNullable(true)
+
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{10},
+		"embedding": [][]float32{{0.1, 0.2}},
+	}))
+	s.Require().NoError(column.AppendNull())
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{},
+		"embedding": [][]float32{},
+	}))
+
+	fields := column.FieldData().GetStructArrays().GetFields()
+	s.Require().Len(fields, 2)
+	for _, fieldData := range fields {
+		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+	}
+	s.Len(fields[0].GetScalars().GetArrayData().GetData(), 2)
+	s.Len(fields[1].GetVectors().GetVectorArray().GetData(), 2)
 }
 
 func (s *StructArraySuite) TestAppendValue() {
@@ -235,6 +381,210 @@ func (s *StructArraySuite) TestParseTopLevelArrayOfStruct() {
 	s.Equal([]int32{1, 2}, val.(map[string]any)["x"])
 }
 
+func (s *StructArraySuite) TestParseNullableStructArray() {
+	validData := []bool{true, false, true}
+	intSub := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "id",
+		ValidData: validData,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_Int64,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+				},
+			}},
+		}},
+	}
+	strSub := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "tag",
+		ValidData: validData,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_VarChar,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}},
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+				},
+			}},
+		}},
+	}
+	top := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "clips",
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{intSub, strSub},
+		}},
+	}
+
+	col, err := FieldDataColumn(top, 0, -1)
+	s.Require().NoError(err)
+	s.True(col.Nullable())
+	s.Equal(3, col.Len())
+	value, err := col.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+
+	sliced := col.Slice(1, -1)
+	s.True(sliced.Nullable())
+	s.Equal(2, sliced.Len())
+	value, err = sliced.Get(0)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = sliced.Get(1)
+	s.Require().NoError(err)
+	s.NotNil(value)
+	isNull, err := sliced.IsNull(1)
+	s.Require().NoError(err)
+	s.False(isNull)
+}
+
+func (s *StructArraySuite) TestParseCompactNullableScalarStructArray() {
+	source := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnVarCharArray("tag", nil),
+	})
+	source.SetNullable(true)
+	s.Require().NoError(source.AppendValue(map[string]any{
+		"age": []int64{10},
+		"tag": []string{"first"},
+	}))
+	s.Require().NoError(source.AppendNull())
+	s.Require().NoError(source.AppendValue(map[string]any{
+		"age": []int64{30},
+		"tag": []string{"third"},
+	}))
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.Equal(3, parsed.Len())
+	value, err := parsed.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = parsed.Get(2)
+	s.Require().NoError(err)
+	s.Equal([]int64{30}, value.(map[string]any)["age"])
+	s.Equal([]string{"third"}, value.(map[string]any)["tag"])
+}
+
+func (s *StructArraySuite) TestParseNullableStructArrayEmptySlice() {
+	source := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	source.SetNullable(true)
+	s.Require().NoError(source.AppendValue(map[string]any{
+		"age":       []int64{10},
+		"embedding": [][]float32{{0.1, 0.2}},
+	}))
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, 0)
+	s.Require().NoError(err)
+	s.True(parsed.Nullable())
+	s.Zero(parsed.Len())
+	s.Require().NoError(parsed.ValidateNullable())
+	for _, fieldData := range parsed.FieldData().GetStructArrays().GetFields() {
+		s.NotNil(fieldData.ValidData)
+		s.Empty(fieldData.GetValidData())
+	}
+}
+
+func (s *StructArraySuite) TestParseNullableStructArrayEmptyRows() {
+	source := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	source.SetNullable(true)
+	for _, fieldData := range source.FieldData().GetStructArrays().GetFields() {
+		s.NotNil(fieldData.ValidData)
+		s.Empty(fieldData.GetValidData())
+	}
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.True(parsed.Nullable())
+	s.Zero(parsed.Len())
+	s.Require().NoError(parsed.ValidateNullable())
+}
+
+func (s *StructArraySuite) TestAppendToParsedSparseNullableScalarStructArray() {
+	validData := []bool{true, false, true}
+	age, err := NewNullableColumnInt64Array(
+		"age",
+		[][]int64{{10}, nil, {30}},
+		validData,
+		WithSparseNullableMode[[]int64](true),
+	)
+	s.Require().NoError(err)
+	tag, err := NewNullableColumnVarCharArray(
+		"tag",
+		[][]string{{"first"}, nil, {"third"}},
+		validData,
+		WithSparseNullableMode[[]string](true),
+	)
+	s.Require().NoError(err)
+
+	parsed, err := FieldDataColumn(NewColumnStructArray("profile", []Column{age, tag}).FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.Require().NoError(parsed.AppendNull())
+	s.Require().NoError(parsed.ValidateNullable())
+	s.Require().NoError(parsed.AppendValue(map[string]any{
+		"age": []int64{50},
+		"tag": []string{"fifth"},
+	}))
+	s.Require().NoError(parsed.ValidateNullable())
+	s.Equal(5, parsed.Len())
+	value, err := parsed.Get(3)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = parsed.Get(4)
+	s.Require().NoError(err)
+	s.Equal([]int64{50}, value.(map[string]any)["age"])
+	s.Equal([]string{"fifth"}, value.(map[string]any)["tag"])
+
+	parsed.CompactNullableValues()
+	s.Require().NoError(parsed.ValidateNullable())
+	value, err = parsed.Get(4)
+	s.Require().NoError(err)
+	s.Equal([]int64{50}, value.(map[string]any)["age"])
+}
+
+func (s *StructArraySuite) TestParseNullableStructArrayRejectsMismatchedMasks() {
+	newSubField := func(name string, validData []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: name,
+			ValidData: validData,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int64,
+					Data: []*schemapb.ScalarField{
+						{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}},
+						{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+					},
+				}},
+			}},
+		}
+	}
+	top := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "clips",
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{
+				newSubField("left", []bool{true, false}),
+				newSubField("right", []bool{false, true}),
+			},
+		}},
+	}
+
+	_, err := FieldDataColumn(top, 0, -1)
+	s.Error(err)
+}
+
 func (s *StructArraySuite) TestParseVectorArrayDataErrors() {
 	mkFD := func(elemType schemapb.DataType, dim int64, rows []*schemapb.VectorField) *schemapb.FieldData {
 		return &schemapb.FieldData{
@@ -303,6 +653,26 @@ func (s *StructArraySuite) TestAppendValueRollback() {
 	s.EqualValues(1, col.fields[0].Len(), "sub-field 'a' must be rolled back")
 	s.EqualValues(1, col.fields[1].Len(), "sub-field 'b' must not have been appended")
 	s.EqualValues(1, col.Len(), "struct array length stays consistent after rollback")
+}
+
+func (s *StructArraySuite) TestAppendValueRollbackPreservesVectorArrayAppendAPI() {
+	vectorCol := NewColumnFloatVectorArray("embedding", 2, nil)
+	strCol := NewColumnVarCharArray("tag", nil)
+	col := NewColumnStructArray("rows", []Column{vectorCol, strCol}).(*columnStructArray)
+
+	err := col.AppendValue(map[string]any{
+		"embedding": [][]float32{{1, 2}},
+		"tag":       42,
+	})
+	s.Require().Error(err)
+	s.IsType((*ColumnFloatVectorArray)(nil), col.fields[0])
+	s.Zero(col.Len())
+
+	s.Require().NoError(col.AppendValue(map[string]any{
+		"embedding": [][]float32{{3, 4}},
+		"tag":       []string{"valid"},
+	}))
+	s.Equal(1, col.Len())
 }
 
 func (s *StructArraySuite) TestLenMismatchPanics() {

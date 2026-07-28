@@ -212,3 +212,9 @@ func NewColumnVarCharArray(fieldName string, data [][]string) *ColumnVarCharArra
 		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeVarChar),
 	}
 }
+
+func (c *ColumnVarCharArray) Slice(start, end int) Column {
+	return &ColumnVarCharArray{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
