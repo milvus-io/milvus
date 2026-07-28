@@ -79,7 +79,7 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Down | Higher-version view confirms Up / ReleaseCollection | Persist Down to ETCD; push Down to SN |
-| Unrecoverable | Any node reports Unrecoverable, or a QueryNode is lost while a Preparing sync is pending | Persist Unrecoverable to ETCD |
+| Unrecoverable | Any node reports Unrecoverable | Persist Unrecoverable to ETCD |
 
 **Possible Peer States (and Coord's reaction):**
 - **SN**: Up / Unrecoverable
@@ -115,18 +115,24 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Dropping | SN confirms Down | None (no additional persistence) |
+| Unrecoverable | Any node reports Unrecoverable | Persist Unrecoverable to ETCD |
 
 **Possible Peer States (and Coord's reaction):**
-- **SN**: Up / Down
+- **SN**: Up / Down / Unrecoverable
   - Up (Down push not yet delivered) → Coord re-pushes Down.
   - Down → Coord transitions to Dropping.
-- **QN**: Ready
+  - Unrecoverable → Coord transitions to Unrecoverable.
+- **QN**: Ready / Unrecoverable
   - Ready → Coord does nothing.
+  - Unrecoverable → Coord transitions to Unrecoverable.
 
 ### 1.5 Unrecoverable
 
 **Entry Conditions:**
-- Any node reports Unrecoverable while Coord is in Preparing, Ready, or Up (automatic transition).
+- Any node reports Unrecoverable while Coord is in Preparing, Ready, Up, or
+  Down (automatic transition).
+- Manager calls `EnterUnrecoverable` from Preparing, Ready, or Up, for example
+  when preempting an in-flight view or handling RequestRelease.
 
 > Note: QueryNode loss is delivered to Coord only for active QN-targeted syncs via `OnQueryNodeLost`. In Preparing it makes the view Unrecoverable; in Dropping it counts that QN cleanup as complete. SN is bound to the vchannel and never experiences "node lost" from Coord's per-view perspective; SN unavailability is handled at the channel assignment level.
 
@@ -152,7 +158,8 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 **Entry Conditions:**
 - SN confirmed Down in the Down phase (automatic transition from Down).
-- Manager calls EnterDropping from Unrecoverable (which itself can be reached from Preparing, Ready, or Up).
+- Manager calls EnterDropping from Unrecoverable (which itself can be reached
+  from Preparing, Ready, Up, or Down).
 
 **Automatic Behavior:**
 1. Push Dropped to all nodes (SN + all QNs).
