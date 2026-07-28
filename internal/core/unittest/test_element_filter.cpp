@@ -4513,3 +4513,114 @@ TEST(ElementVectorSearch, SealedBruteForce_IteratorV2_MultiBatch) {
         << "multi-batch iterator should accumulate strictly more results "
         << "than a single batch";
 }
+
+// A filter that cannot consume offset input (text match, GIS) makes
+// PhyIterativeFilterNode fall back to evaluating the whole segment.
+// SearchResult::element_level_ is a property of the placeholder -- an
+// emb-list / struct-array vector field -- not of the filter expression, so
+// "element-level placeholder + non-native filter" is a legal plan that lands
+// in that fallback. It must return element-level results instead of tripping
+// an assertion.
+TEST(ElementFilterSealed, NonNativeFilterOnElementLevelSearch) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    const int dim = 16;
+    const size_t N = 200;
+    const int array_len = 3;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    // A doc-level VARCHAR with text match enabled: text_match() does not
+    // support offset input, which is what forces the non-native fallback.
+    std::map<std::string, std::string> match_params;
+    const FieldId text_fid(102);
+    {
+        FieldMeta f(FieldName("doc_text"),
+                    text_fid,
+                    DataType::VARCHAR,
+                    65536,
+                    false,
+                    true,
+                    true,
+                    match_params,
+                    std::nullopt);
+        schema->AddField(std::move(f));
+    }
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != text_fid.get()) {
+            continue;
+        }
+        auto* str_col = field_data->mutable_scalars()
+                            ->mutable_string_data()
+                            ->mutable_data();
+        for (size_t row = 0; row < N; row++) {
+            str_col->at(row) = (row % 2 == 0) ? "football match" : "swimming";
+        }
+        break;
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    segment->CreateTextIndex(text_fid);
+
+    const int topK = 5;
+    ScopedSchemaHandle handle(*schema);
+
+    auto run = [&](const std::string& search_params) {
+        auto plan_bytes = handle.ParseSearch("text_match(doc_text, 'football')",
+                                             "structA[array_vec]",
+                                             topK,
+                                             knowhere::metric::L2,
+                                             search_params,
+                                             3);
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        // CreatePlaceholderGroupForType is a member of the parameterized
+        // fixtures above; this is a plain TEST, and the vector field is
+        // VECTOR_FLOAT, so build the element-level group directly.
+        auto ph_group_raw = CreatePlaceholderGroup<milvus::FloatVector>(
+            1, dim, 1024, /*element_level=*/true);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    };
+
+    // Before the fix this threw SegcoreError from Assert(!element_level) in
+    // PhyIterativeFilterNode's non-native branch.
+    auto iterative = run(R"({"ef": 50, "hints": "iterative_filter"})");
+    ASSERT_NE(iterative, nullptr);
+    ASSERT_TRUE(iterative->element_level_);
+    ASSERT_FALSE(iterative->seg_offsets_.empty());
+    ASSERT_EQ(iterative->element_indices_.size(),
+              iterative->seg_offsets_.size());
+
+    // Every returned doc must actually satisfy the filter, and the element
+    // index must stay inside the array.
+    auto ids = raw_data.get_col<int64_t>(int64_fid);
+    for (size_t i = 0; i < iterative->seg_offsets_.size(); i++) {
+        auto doc = iterative->seg_offsets_[i];
+        if (doc == INVALID_SEG_OFFSET) {
+            continue;
+        }
+        EXPECT_EQ(doc % 2, 0) << "doc " << doc << " does not match 'football'";
+        EXPECT_GE(iterative->element_indices_[i], 0);
+        EXPECT_LT(iterative->element_indices_[i], array_len);
+    }
+
+    // The iterative-filter plan must agree with the ordinary plan.
+    auto ordinary = run(R"({"ef": 50})");
+    ASSERT_NE(ordinary, nullptr);
+    ASSERT_TRUE(ordinary->element_level_);
+    EXPECT_EQ(iterative->seg_offsets_, ordinary->seg_offsets_);
+    EXPECT_EQ(iterative->element_indices_, ordinary->element_indices_);
+}

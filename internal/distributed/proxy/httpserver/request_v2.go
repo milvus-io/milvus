@@ -36,6 +36,15 @@ type EmptyReq struct{}
 
 func (req *EmptyReq) GetDbName() string { return "" }
 
+type FileResourceReq struct {
+	Name string `json:"name" binding:"required"`
+	Path string `json:"path" binding:"required"`
+}
+
+type FileResourceNameReq struct {
+	Name string `json:"name" binding:"required"`
+}
+
 type DatabaseReq struct {
 	DbName string `json:"dbName"`
 }
@@ -238,6 +247,19 @@ type CollectionFieldReqWithParams struct {
 	CollectionName string                 `json:"collectionName" binding:"required"`
 	FieldName      string                 `json:"fieldName" binding:"required"`
 	FieldParams    map[string]interface{} `json:"fieldParams"`
+}
+
+type CollectionDropField struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	FieldName      string `json:"fieldName"`
+	FieldID        *int64 `json:"fieldId"`
+}
+
+func (req *CollectionDropField) GetDbName() string { return req.DbName }
+
+func (req *CollectionDropField) GetCollectionName() string {
+	return req.CollectionName
 }
 
 func (req *CollectionFieldReqWithParams) GetDbName() string { return req.DbName }

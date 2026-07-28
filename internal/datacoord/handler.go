@@ -751,7 +751,12 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	// get segment info
 	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
+		// A V3 segment persists its file paths in the LOON manifest, and after a
+		// DataCoord restart it reloads from etcd with empty Binlogs/Deltalogs
+		// arrays (AlterSegments skips the per-FieldBinlog KVs for V3). A non-empty
+		// ManifestPath therefore also means the segment has data; without this the
+		// snapshot silently drops restarted V3 segments and loses them on restore.
+		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0 || info.GetManifestPath() != ""
 		return segmentHasData && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
 	segments := make([]*SegmentInfo, 0, len(candidateSegments))

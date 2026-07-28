@@ -277,6 +277,21 @@ ChunkedSegmentSealedImpl::ReadTimestamp(
     if (timestamps != nullptr && !timestamps->empty()) {
         return (*timestamps)[offset];
     }
+    // Fallback: read one row straight from the timestamp column. On current
+    // master this is effectively unreachable in production — every load path
+    // that publishes the timestamp column also publishes a fully-pinned
+    // zero-copy TimestampData (init_storage_v2_timestamp_index /
+    // init_storage_v1_timestamp_index) in the same atomic runtime snapshot,
+    // so the short-circuit above always hits; only tests and degenerate
+    // states reach here.
+    //
+    // NOTE for anyone making this path live (e.g. an evictable timestamp
+    // column for tiered storage): this access pattern pins a cell and
+    // resolves the chunk PER CALL. Do not drive it from a per-row loop
+    // (mask_with_timestamps grey-zone scan, search_batch_pks) — introduce a
+    // batched ReadTimestamps(offsets, count) that pins all involved chunks
+    // once and dedups resolution per distinct chunk (see ForEachResolvedRow
+    // in mmap/ChunkedColumnGroup.h for the shape).
     auto column = get_column(runtime, TimestampFieldID);
     AssertInfo(column != nullptr, "timestamp data is not ready");
     const auto chunk_pos = column->GetChunkIDByOffset(offset);
@@ -4039,14 +4054,6 @@ ChunkedSegmentSealedImpl::DropFieldData(
 
 void
 ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
-                                    milvus::OpContext* op_ctx) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    auto snapshot = CapturePublishedState();
-    DropIndex(field_id, snapshot->schema, nullptr, op_ctx);
-}
-
-void
-ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
                                     const SchemaPtr& schema_snapshot,
                                     RuntimeResourceState* runtime,
                                     milvus::OpContext* op_ctx) {
@@ -4069,28 +4076,6 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
         next_runtime->vec_binlog_config.erase(field_id);
         PublishIndexDroppedLocked(
             field_id, ToConstRuntimeState(std::move(next_runtime)), op_ctx);
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::DropJSONIndex(const FieldId field_id,
-                                        const std::string& nested_path,
-                                        milvus::OpContext* op_ctx) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    auto next_runtime = CloneMutableRuntimeResourceState();
-    auto retired_indexings =
-        EraseJsonIndexesAtPath(*next_runtime, field_id, nested_path);
-    auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
-    MutatePublishedStateLocked(
-        [&](PublishedSegmentState& state) {
-            state.runtime = published_runtime;
-            SyncJsonNgramIndexState(state, *published_runtime, field_id);
-        },
-        op_ctx);
-    for (auto& indexing : retired_indexings) {
-        if (indexing != nullptr) {
-            indexing->CancelWarmup();
-        }
     }
 }
 
@@ -4213,8 +4198,49 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     auto effective_commit_ts =
         snapshot->commit_ts != 0 ? std::optional<Timestamp>{snapshot->commit_ts}
                                  : std::nullopt;
+    // Resolve matched-row timestamps by lazily pinning the timestamp column
+    // ONE chunk at a time and reusing that pin for all offsets that fall in
+    // it, instead of the per-row ReadTimestamp() path (a fresh cachinglayer
+    // pin per matched row). Under the delete-replay amplification of issue
+    // #49435 (tens of millions of matched rows per LoadDeletedRecord call)
+    // the per-row pin dominated the whole call. A single group chunk stays
+    // pinned at a time (same peak residency as the per-row path, not the
+    // whole column group), and nothing is pinned for zero-hit calls (empty
+    // pks, bloom-filter false positives) because the pin is created on first
+    // use inside read_ts. Pins are refcounts on the snapshot's cells, so
+    // reopen's atomic publication is not blocked, and per-call snapshot
+    // consistency is identical to the per-row variant.
+    auto runtime_ts_data = runtime != nullptr ? runtime->timestamps : nullptr;
+    bool ts_from_array =
+        runtime_ts_data != nullptr && !runtime_ts_data->empty();
+    std::shared_ptr<ChunkedColumnInterface> ts_column;
+    cachinglayer::PinWrapper<Chunk*> ts_chunk_pin{nullptr};
+    const Timestamp* ts_chunk_data = nullptr;
+    int64_t ts_chunk_base = 0;
+    int64_t ts_chunk_limit = -1;  // pinned chunk covers offsets [base, limit)
     auto read_ts = [&](int64_t offset) -> Timestamp {
-        return ReadTimestamp(offset, runtime, effective_commit_ts);
+        if (effective_commit_ts) {
+            return *effective_commit_ts;
+        }
+        if (ts_from_array) {
+            return (*runtime_ts_data)[offset];
+        }
+        if (offset < ts_chunk_base || offset >= ts_chunk_limit) {
+            if (!ts_column) {
+                ts_column = get_column(runtime, TimestampFieldID);
+                AssertInfo(ts_column != nullptr, "timestamp data is not ready");
+            }
+            auto [cid, off_in_chunk] = ts_column->GetChunkIDByOffset(offset);
+            ts_chunk_pin = ts_column->GetChunk(nullptr, cid);
+            // Data() (not RawData()) skips a nullable field's leading null
+            // bitmap; the timestamp system field is non-nullable today so the
+            // two coincide, but Data() is the layout-correct accessor.
+            ts_chunk_data =
+                reinterpret_cast<const Timestamp*>(ts_chunk_pin.get()->Data());
+            ts_chunk_base = offset - static_cast<int64_t>(off_in_chunk);
+            ts_chunk_limit = ts_chunk_base + ts_column->chunk_row_nums(cid);
+        }
+        return ts_chunk_data[offset - ts_chunk_base];
     };
 
     // Virtual PK offset maps can resolve pk -> offset directly by bit-extract.
@@ -4853,9 +4879,15 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                "field {} must be ready when doing bulk_subscript",
                field_id.get());
     if (column->IsNullable()) {
-        for (auto i = 0; i < count; i++) {
-            valid_map.set(i, column->IsValid(op_ctx, seg_offsets[i]));
-        }
+        // Batched validity: pin all involved chunks once and dedup chunk
+        // resolution, instead of column->IsValid() per row (which pins a cell
+        // and resolves a chunk on every call). BulkIsValid preserves row order,
+        // invoking the callback with the original row index.
+        column->BulkIsValid(
+            op_ctx,
+            [&valid_map](bool valid, size_t i) { valid_map.set(i, valid); },
+            seg_offsets,
+            count);
     } else {
         valid_map.set();
     }
@@ -8186,6 +8218,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(
             schema_snapshot->get_storage_column_name(fid));
     }
+    const bool full_projection = *needed_columns == column_group->columns;
     auto reader =
         runtime != nullptr ? runtime->reader : CaptureReaderSnapshot();
     AssertInfo(
@@ -8230,6 +8263,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
+            *needed_columns,
+            full_projection,
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
@@ -8295,6 +8330,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                "load column group index out of range");
     AssertInfo(!milvus_field_ids.empty(),
                "load column group with empty field list");
+    auto column_group = column_groups->at(index);
 
     for (const auto& field_id : milvus_field_ids) {
         AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
@@ -8330,6 +8366,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(
             schema_snapshot->get_storage_column_name(fid));
     }
+    const bool full_projection = *needed_columns == column_group->columns;
 
     auto reader = committer.runtime()->reader;
     AssertInfo(
@@ -8368,6 +8405,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
+            *needed_columns,
+            full_projection,
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,

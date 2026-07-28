@@ -1936,6 +1936,53 @@ class TestCollectionAddField(TestBase):
         assert rsp["code"] == 0
         assert len(rsp["data"]) > 0
 
+    def test_drop_field_by_name_and_id(self):
+        name = gen_collection_name("drop_collection_field")
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "dense", "dataType": "FloatVector", "elementTypeParams": {"dim": "4"}},
+                ],
+            },
+            "indexParams": [
+                {"fieldName": "dense", "indexName": "dense_idx", "indexType": "AUTOINDEX", "metricType": "L2"}
+            ],
+        }
+        rsp = client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+
+        rsp = client.add_field(
+            name,
+            {
+                "fieldName": "tag",
+                "dataType": "VarChar",
+                "nullable": True,
+                "elementTypeParams": {"max_length": "64"},
+            },
+        )
+        assert rsp["code"] == 0, rsp
+        rsp = client.collection_describe(name)
+        assert any(field["name"] == "tag" for field in rsp["data"]["fields"]), rsp
+
+        rsp = client.drop_field(name, field_name="tag")
+        assert rsp["code"] == 0, rsp
+        rsp = client.collection_describe(name)
+        assert not any(field["name"] == "tag" for field in rsp["data"]["fields"]), rsp
+
+        rsp = client.add_field(name, {"fieldName": "score", "dataType": "Int64", "nullable": True})
+        assert rsp["code"] == 0, rsp
+        rsp = client.collection_describe(name)
+        score_id = next(field["id"] for field in rsp["data"]["fields"] if field["name"] == "score")
+
+        rsp = client.drop_field(name, field_id=score_id)
+        assert rsp["code"] == 0, rsp
+        rsp = client.collection_describe(name)
+        assert not any(field["name"] == "score" for field in rsp["data"]["fields"]), rsp
+
     @pytest.mark.parametrize(
         "schema_variant,field_params",
         [

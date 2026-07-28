@@ -99,6 +99,19 @@ PhyFilterBitsNode::PhyFilterBitsNode(
 
     enable_expr_cache_ = query_context_->get_enable_expr_cache();
     if (enable_expr_cache_) {
+        // Only cache the predicate result when EVERY expression in it is
+        // cacheable. A bloom_match subtree is non-cacheable (its slim ToString
+        // cache key cannot distinguish distinct filter blobs), and that
+        // propagates up, so a predicate containing bloom_match is never cached
+        // and can never reuse another query's bitmap.
+        for (const auto& e : exprs_->exprs()) {
+            if (e && !e->IsCacheable()) {
+                enable_expr_cache_ = false;
+                break;
+            }
+        }
+    }
+    if (enable_expr_cache_) {
         expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
     }
 }
@@ -238,11 +251,11 @@ PhyFilterBitsNode::GetOutput() {
                 valid_bitset.append(valid_view);
                 num_processed_rows_ += col_vec_size;
             } else {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "PhyFilterBitsNode result should be bitmap");
             }
         } else {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }

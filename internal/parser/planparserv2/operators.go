@@ -18,6 +18,8 @@ var arithExprMap = map[int]planpb.ArithOpType{
 	parser.PlanParserBAND: planpb.ArithOpType_BitAnd,
 	parser.PlanParserBOR:  planpb.ArithOpType_BitOr,
 	parser.PlanParserBXOR: planpb.ArithOpType_BitXor,
+	parser.PlanParserSHL:  planpb.ArithOpType_Shl,
+	parser.PlanParserSHR:  planpb.ArithOpType_Shr,
 }
 
 var arithNameMap = map[int]string{
@@ -29,6 +31,8 @@ var arithNameMap = map[int]string{
 	parser.PlanParserBAND: "bitand",
 	parser.PlanParserBOR:  "bitor",
 	parser.PlanParserBXOR: "bitxor",
+	parser.PlanParserSHL:  "shiftleft",
+	parser.PlanParserSHR:  "shiftright",
 }
 
 var cmpOpMap = map[int]planpb.OpType{
@@ -340,12 +344,56 @@ func BitXor(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}, nil
 }
 
+// shiftBitWidth bounds the shift amount. Shifting a 64-bit value by a negative
+// amount or by >= 64 is undefined behavior in both Go and the C++ executor, so
+// the amount is validated here (and again for the field path in
+// combineBinaryArithExpr) to keep constant-folding and execution consistent.
+const shiftBitWidth = 64
+
+func validateShiftAmount(b *planpb.GenericValue) error {
+	amount := b.GetInt64Val()
+	if amount < 0 || amount >= shiftBitWidth {
+		return merr.WrapErrQueryPlanMsg("shift amount must be in range [0, %d), got %d", shiftBitWidth, amount)
+	}
+	return nil
+}
+
 func ShiftLeft(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, merr.WrapErrQueryPlanMsg("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("shiftleft can only apply on integer fields")
+	}
+	if err := validateShiftAmount(b); err != nil {
+		return nil, err
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() << b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func ShiftRight(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, merr.WrapErrQueryPlanMsg("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("shiftright can only apply on integer fields")
+	}
+	if err := validateShiftAmount(b); err != nil {
+		return nil, err
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() >> b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func And(a, b *planpb.GenericValue) (*ExprWithType, error) {
@@ -382,8 +430,23 @@ func Or(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}, nil
 }
 
+// BitNot constant-folds ~a for an integer literal. For a non-const (field)
+// operand, VisitUnary rewrites ~x into (x ^ -1) instead, which reuses the
+// BitXor execution path (in two's complement ~x == x ^ -1).
 func BitNot(a *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, merr.WrapErrQueryPlanMsg("todo: unsupported")
+	if !IsInteger(a) {
+		return nil, merr.WrapErrQueryPlanMsg("bitnot can only apply on integer fields")
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(^a.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func Negative(a *planpb.GenericValue) *ExprWithType {

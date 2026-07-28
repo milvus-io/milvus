@@ -25,4 +25,8 @@ type QueryCoordCatalog interface {
 	RemoveCollectionTarget(ctx context.Context, collectionID int64) error
 	RemoveCollectionTargets(ctx context.Context) error
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
+
+	// Update applies a composite set of UpdateActions as a single write. See
+	// internal/metastore/update_action.go for the Entry/ActionType model.
+	Update(ctx context.Context, actions ...UpdateAction) error
 }

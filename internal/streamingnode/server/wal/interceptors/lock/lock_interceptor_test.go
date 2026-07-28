@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
@@ -29,6 +30,30 @@ func newTestInterceptor() *lockAppendInterceptor {
 }
 
 func TestAcquireLockGuard(t *testing.T) {
+	t.Run("PChannelLevelOnControlChannel", func(t *testing.T) {
+		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
+		defer mocker.UnPatch()
+
+		interceptor := newTestInterceptor()
+		controlChannel := funcutil.GetControlChannel(testPChannelName)
+		broadcast := message.NewFlushAllMessageBuilderV2().
+			WithHeader(&message.FlushAllMessageHeader{}).
+			WithBody(&message.FlushAllMessageBody{}).
+			WithClusterLevelBroadcast(message.ClusterChannels{
+				Channels:       []string{testPChannelName},
+				ControlChannel: controlChannel,
+			}).
+			MustBuildBroadcast()
+		broadcast.WithBroadcastID(1)
+		msg := broadcast.SplitIntoMutableMessage()[0]
+
+		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		assert.False(t, interceptor.glock.TryRLock(), "pchannel-level message should hold the global write lock")
+		guard()
+		assert.True(t, interceptor.glock.TryRLock())
+		interceptor.glock.RUnlock()
+	})
+
 	// Test: Exclusive message with pchannel name as vchannel should acquire global write lock (existing behavior).
 	t.Run("ExclusiveWithPChannelName", func(t *testing.T) {
 		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
@@ -69,6 +94,30 @@ func TestAcquireLockGuard(t *testing.T) {
 		// Other vchannels should not be blocked.
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"), "other vchannels should not be blocked")
 		interceptor.vchannelLocker.Unlock("other-vchannel")
+		guard()
+	})
+
+	t.Run("ExclusiveOnControlChannel", func(t *testing.T) {
+		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
+		defer mocker.UnPatch()
+
+		interceptor := newTestInterceptor()
+		controlChannel := funcutil.GetControlChannel(testPChannelName)
+		msg := message.NewCreateCollectionMessageBuilderV1().
+			WithVChannel(controlChannel).
+			WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 1}).
+			WithBody(&msgpb.CreateCollectionRequest{}).
+			MustBuildMutable()
+
+		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		// A control-channel copy of collection DDL uses shared locks so another
+		// non-conflicting DDL can append concurrently.
+		assert.False(t, interceptor.glock.TryLock(), "global read lock should be held")
+		assert.True(t, interceptor.glock.TryRLock(), "another global read lock should succeed")
+		interceptor.glock.RUnlock()
+		assert.False(t, interceptor.vchannelLocker.TryLock(controlChannel), "control channel read lock should be held")
+		assert.True(t, interceptor.vchannelLocker.TryRLock(controlChannel), "another control channel read lock should succeed")
+		interceptor.vchannelLocker.RUnlock(controlChannel)
 		guard()
 	})
 

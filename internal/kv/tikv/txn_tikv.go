@@ -58,6 +58,12 @@ const (
 	// TiKV does not allow storing empty values for keys which is something we do in Milvus, so
 	// to get over this we are using the reserved keyword as placeholder.
 	EmptyValueString = "__milvus_reserved_empty_tikv_value_DO_NOT_USE"
+	// maxTiKVTxnOps bounds how many key ops we treat as one atomic TiKV txn.
+	// TiKV's own client-side limits are far higher (txn-entry-count-limit
+	// defaults to 300k, txn-total-size-limit to 100MB); 64Ki metadata-sized
+	// ops stay well within both while letting essentially every real metadata
+	// mutation commit atomically instead of falling back to a chunked write.
+	maxTiKVTxnOps = 1 << 16
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
@@ -151,6 +157,13 @@ type txnTiKV struct {
 	rootPath string
 
 	requestTimeout time.Duration
+}
+
+// MaxTxnOps returns the per-transaction op count TiKV applies atomically.
+// TiKV commits a whole MultiSaveAndRemove as one transaction, so this is far
+// larger than etcd's - see maxTiKVTxnOps.
+func (kv *txnTiKV) MaxTxnOps() int {
+	return maxTiKVTxnOps
 }
 
 // NewTiKV creates a new txnTiKV client.

@@ -700,6 +700,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
+		// The request ships the complete cumulative Statistics published
+		// from the growing-segment collector; the receiver stores it
+		// wholesale. Only nil-stats flushes (storage V1 / pre-Statistics
+		// datanodes during rolling upgrade) fall back to deriving from
+		// the binlog arrays. See UpdateSegmentStats for the full contract.
+		UpdateSegmentStats(req.GetSegmentID(), req.GetStats()),
 	)
 
 	// Update segment info in memory and meta. Stale updates (segment already
@@ -996,7 +1002,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 
 		segment2TextStatsLogs[id] = segment.GetTextStatsLogs()
 
-		if len(segment.GetDeltalogs()) > 0 {
+		if segment.EnsureStats().GetDeltaBinlogCount() > 0 {
 			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
 		}
 	}
@@ -1825,9 +1831,9 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
 
 		if err := s.garbageCollector.Pause(ctx, collectionID, ticket, time.Duration(pauseSeconds)*time.Second); err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
-			return status, nil
+			// merr.Status keeps Code/Retriable, so callers can tell a timeout or a
+			// transient "collector is closing" apart from a genuine failure.
+			return merr.Status(err), nil
 		}
 	case datapb.GcCommand_Resume:
 		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
@@ -1836,9 +1842,7 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 		}
 		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
 		if err := s.garbageCollector.Resume(ctx, collectionID, ticket); err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
-			return status, nil
+			return merr.Status(err), nil
 		}
 	default:
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError

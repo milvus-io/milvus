@@ -393,45 +393,6 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	return err
 }
 
-func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
-	future := cgo.Async(ctx,
-		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncDropSealedSegmentIndex(
-				s.ptr,
-				C.int64_t(fieldID),
-			))
-		},
-		cgo.WithName("segment-drop-index"),
-	)
-	defer future.Release()
-	_, err := future.BlockAndLeakyGet()
-	if err != nil {
-		return merr.Wrap(err, "failed to drop index")
-	}
-	return nil
-}
-
-func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
-	cNestedPath := C.CString(nestedPath)
-	defer C.free(unsafe.Pointer(cNestedPath))
-	future := cgo.Async(ctx,
-		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncDropSealedSegmentJSONIndex(
-				s.ptr,
-				C.int64_t(fieldID),
-				cNestedPath,
-			))
-		},
-		cgo.WithName("segment-drop-json-index"),
-	)
-	defer future.Release()
-	_, err := future.BlockAndLeakyGet()
-	if err != nil {
-		return merr.Wrap(err, "failed to drop json index")
-	}
-	return nil
-}
-
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)

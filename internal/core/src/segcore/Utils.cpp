@@ -1705,7 +1705,11 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
             break;
         }
         default: {
-            ThrowInfo(DataTypeInvalid,
+            // The only caller is ProjectNode. dataType comes from the
+            // internally constructed projection schema, so reaching an
+            // unsupported type here is an execution capability / plan
+            // contract failure, not invalid caller data.
+            ThrowInfo(UnexpectedError,
                       fmt::format("unsupported data type {}", dataType));
         }
     }

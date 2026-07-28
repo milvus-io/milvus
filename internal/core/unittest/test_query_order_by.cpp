@@ -21,6 +21,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "exec/QueryContext.h"
 #include "common/Consts.h"
+#include "common/Exception.h"
 #include "common/FieldData.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -580,6 +581,32 @@ TEST_P(QueryOrderByTest, OrderByWithDeferredFields) {
     auto& deferred_data = results->fields_data(2);
     auto count = deferred_data.scalars().double_data().data_size();
     EXPECT_GT(count, 0);
+}
+
+TEST_P(QueryOrderByTest, DenseVectorProjectionFailureIsSystemError) {
+    // Dense vectors are fixed-width, so BuildOrderByProjectNode currently puts
+    // them in the first ProjectNode rather than deferring them for late
+    // materialization. ProjectNode cannot materialize vector columns through
+    // bulk_script_field_data yet. This is an internal projection capability
+    // gap for an otherwise valid output field, not invalid caller data.
+    std::vector<FieldId> pipeline_ids;
+    auto top_node = buildOrderByPlan(int64_field,
+                                     {string_field, int64_field, vector_field},
+                                     true,
+                                     false,
+                                     10,
+                                     pipeline_ids);
+    auto plan = createOrderByPlan(top_node, 10, pipeline_ids);
+
+    try {
+        segment_->Retrieve(
+            nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+        FAIL() << "expected dense vector projection to fail";
+    } catch (const milvus::ExecOperatorException& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::UnexpectedError);
+        EXPECT_NE(std::string(e.what()).find("unsupported data type"),
+                  std::string::npos);
+    }
 }
 
 TEST_P(QueryOrderByTest, OrderByInt16Asc) {

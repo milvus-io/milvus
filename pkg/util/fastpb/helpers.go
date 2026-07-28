@@ -78,6 +78,18 @@ func decodeScalarFallback(num int, v []byte, sf *schemapb.ScalarField) (bool, er
 			return true, err
 		}
 		sf.Data = &schemapb.ScalarField_MolSmilesData{MolSmilesData: m}
+	case 15:
+		m := &schemapb.DateArray{}
+		if err := protoUnmarshal(v, m); err != nil {
+			return true, err
+		}
+		sf.Data = &schemapb.ScalarField_DateData{DateData: m}
+	case 16:
+		m := &schemapb.TimeArray{}
+		if err := protoUnmarshal(v, m); err != nil {
+			return true, err
+		}
+		sf.Data = &schemapb.ScalarField_TimeData{TimeData: m}
 	default:
 		return false, nil
 	}

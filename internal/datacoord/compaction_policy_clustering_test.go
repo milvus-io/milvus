@@ -23,7 +23,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -54,7 +53,6 @@ type ClusteringCompactionPolicySuite struct {
 
 func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().SavePartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -420,7 +418,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 		{"no partition stats and not enough new data", []*datapb.PartitionStatsInfo{}, emptyPartitionStatsVersion, []*SegmentInfo{}, false},
 		{"no partition stats and enough new data", []*datapb.PartitionStatsInfo{}, emptyPartitionStatsVersion, []*SegmentInfo{
 			{
-				size: *atomic.NewInt64(1024 * 1024 * 1024 * 10),
+				SegmentInfo: &datapb.SegmentInfo{Stats: &datapb.Statistics{InsertBinlogSize: 1024 * 1024 * 1024 * 10}},
 			},
 		}, true},
 		{
@@ -437,7 +435,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			100,
 			[]*SegmentInfo{
 				{
-					size: *atomic.NewInt64(1024 * 1024 * 1024 * 10),
+					SegmentInfo: &datapb.SegmentInfo{Stats: &datapb.Statistics{InsertBinlogSize: 1024 * 1024 * 1024 * 10}},
 				},
 			},
 			false,
@@ -456,7 +454,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			100,
 			[]*SegmentInfo{
 				{
-					size: *atomic.NewInt64(1024),
+					SegmentInfo: &datapb.SegmentInfo{Stats: &datapb.Statistics{InsertBinlogSize: 1024}},
 				},
 			},
 			true,
@@ -476,8 +474,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			100,
 			[]*SegmentInfo{
 				{
-					SegmentInfo: &datapb.SegmentInfo{ID: 9999},
-					size:        *atomic.NewInt64(1024 * 1024 * 1024 * 10),
+					SegmentInfo: &datapb.SegmentInfo{ID: 9999, Stats: &datapb.Statistics{InsertBinlogSize: 1024 * 1024 * 1024 * 10}},
 				},
 			},
 			true,
@@ -497,8 +494,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			100,
 			[]*SegmentInfo{
 				{
-					SegmentInfo: &datapb.SegmentInfo{ID: 9999},
-					size:        *atomic.NewInt64(1024),
+					SegmentInfo: &datapb.SegmentInfo{ID: 9999, Stats: &datapb.Statistics{InsertBinlogSize: 1024}},
 				},
 			},
 			false,
@@ -510,7 +506,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			partitionStatsMeta, err := newPartitionStatsMeta(ctx, s.catalog)
 			s.NoError(err)
 			for _, partitionStats := range test.partitionStats {
-				partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
+				seedPartitionStatsInfo(partitionStatsMeta, partitionStats)
 			}
 			if test.currentVersion != 0 {
 				partitionStatsMeta.partitionStatsInfos[channel][partitionID].currentVersion = test.currentVersion

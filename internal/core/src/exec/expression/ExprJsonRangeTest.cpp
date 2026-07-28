@@ -31,6 +31,7 @@
 #include "bitset/bitset.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
 #include "common/IndexMeta.h"
 #include "common/Json.h"
 #include "common/Schema.h"
@@ -53,6 +54,42 @@
 #include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
+
+TEST(ExprJsonTermTest, MixedValueTypesReturnError) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto raw_data = DataGen(schema, 1, 0);
+    seg->PreInsert(1);
+    seg->Insert(0,
+                1,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("1");
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"int"}),
+        std::vector<proto::plan::GenericValue>{int_value, string_value},
+        false);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+
+    try {
+        ExecuteQueryExpr(plan, seg.get(), 1, MAX_TIMESTAMP);
+        FAIL() << "mixed TermExpr values must be rejected";
+    } catch (const ExecOperatorException& error) {
+        EXPECT_NE(std::string_view(error.what())
+                      .find("TermExpr values must have the same type"),
+                  std::string_view::npos);
+    }
+}
 
 TEST_P(ExprTest, TestBinaryRangeJSON) {
     struct Testcase {

@@ -2408,6 +2408,26 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(0);
                  return (val ^ 15) < 5000;
              }},
+            // Shift / bitwise-NOT over an array integer element. ~ is rewritten
+            // to (x ^ -1), exercising the same BitXor array path.
+            {"(long_array[0] >> 1) < 5000",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (int64_t(val) >> 1) < 5000;
+             }},
+            {"(long_array[0] >> 2) >= 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (int64_t(val) >> 2) >= 0;
+             }},
+            {"~long_array[0] != 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (~int64_t(val)) != 0;
+             }},
             // float_array[1024] + 2.2 == 133.2
             {"float_array[1024] + 2.2 == 133.2",
              "float",

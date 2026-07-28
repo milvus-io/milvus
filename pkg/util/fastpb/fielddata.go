@@ -195,7 +195,8 @@ func (d dec) fieldData(b []byte, fd *schemapb.FieldData) error {
 
 // scalarField decodes a wire-format schemapb.ScalarField into sf.
 // Hot array types (bool/int/long/float/double/string/bytes/json) are hand-decoded;
-// rarer variants (array/geometry/timestamptz/mol/...) fall back to the official codec.
+// rarer variants (array/geometry/timestamptz/mol/date/time/...) decode in-pass
+// via the official codec (decodeScalarFallback) to preserve oneof ordering.
 func (d dec) scalarField(b []byte, sf *schemapb.ScalarField) error {
 	full := b
 	var rest []byte
@@ -224,7 +225,7 @@ func (d dec) scalarField(b []byte, sf *schemapb.ScalarField) error {
 			return errMalformed
 		}
 		b = b[vn:]
-		if num >= 1 && num <= 14 {
+		if num >= 1 && num <= 16 {
 			if oneofNum == num {
 				return fallbackUnmarshal(full, sf)
 			}

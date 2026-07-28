@@ -14,9 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -115,38 +113,6 @@ func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []s
 	return vchannelsWithSchemas, nil
 }
 
-// SaveVChannels save vchannel on current pchannel.
-func (c *catalog) SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error {
-	kvs := make(map[string]string, 2*len(vchannels))
-	removes := make([]string, 0, 2*len(vchannels))
-	for _, info := range vchannels {
-		r, kv, err := c.getRemovalAndSaveForVChannel(pchannelName, info)
-		if err != nil {
-			return err
-		}
-		removes = append(removes, r...)
-		for k, v := range kv {
-			kvs[k] = v
-		}
-	}
-
-	// TODO: We should perform a remove and save as a transaction but current the kv interface doesn't support it.
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
-			return c.metaKV.MultiRemove(ctx, partialRemoves)
-		}); err != nil {
-			return err
-		}
-	}
-	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-			return c.metaKV.MultiSave(ctx, partialKvs)
-		})
-	}
-	return nil
-}
-
 // getRemovalAndSaveForVChannel gets the removal and save for vchannel.
 func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *streamingpb.VChannelMeta) ([]string, map[string]string, error) {
 	removes := make([]string, 0, len(info.CollectionInfo.Schemas)+1)
@@ -209,42 +175,6 @@ func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string
 	return infos, nil
 }
 
-// SaveSegmentAssignments saves the segment assignment info to meta storage.
-func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName string, infos map[int64]*streamingpb.SegmentAssignmentMeta) error {
-	kvs := make(map[string]string, len(infos))
-	removes := make([]string, 0)
-	for _, info := range infos {
-		key := buildSegmentAssignmentKey(pChannelName, info.GetSegmentId())
-		if info.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-			// Flushed segment should be removed from meta
-			removes = append(removes, key)
-			continue
-		}
-
-		data, err := proto.Marshal(info)
-		if err != nil {
-			return errors.Wrapf(err, "marshal segment %d at pchannel %s failed", info.GetSegmentId(), pChannelName)
-		}
-		kvs[key] = string(data)
-	}
-
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
-			return c.metaKV.MultiRemove(ctx, partialRemoves)
-		}); err != nil {
-			return err
-		}
-	}
-
-	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-			return c.metaKV.MultiSave(ctx, partialKvs)
-		})
-	}
-	return nil
-}
-
 // GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string) (*streamingpb.WALCheckpoint, error) {
 	key := buildConsumeCheckpointKey(pchannelName)
@@ -265,17 +195,6 @@ func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string)
 // SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
 func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string, checkpoint *streamingpb.WALCheckpoint) error {
 	key := buildConsumeCheckpointKey(pchannelName)
-	value, err := proto.Marshal(checkpoint)
-	if err != nil {
-		return err
-	}
-	return c.metaKV.Save(ctx, key, string(value))
-}
-
-// SaveSalvageCheckpoint saves the salvage checkpoint, keyed by the source cluster ID.
-// Multiple salvage checkpoints can exist for a channel (one per source cluster).
-func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
-	key := buildSalvageCheckpointPath(pchannelName, checkpoint.GetClusterId())
 	value, err := proto.Marshal(checkpoint)
 	if err != nil {
 		return err

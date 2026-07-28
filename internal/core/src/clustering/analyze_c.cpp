@@ -163,7 +163,7 @@ DeleteAnalyze(CAnalyze analyze) {
 
 CStatus
 GetAnalyzeResultMeta(CAnalyze analyze,
-                     char** centroid_path,
+                     const char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes) {
@@ -176,11 +176,14 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                    "was null");
         auto real_analyze =
             reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
-        auto res = real_analyze->GetClusteringResultMeta();
+        // Bind by reference: the pointers handed out below point into this
+        // struct's std::string members, so they must reference the object owned
+        // by real_analyze rather than a local copy that dies on return.
+        const auto& res = real_analyze->GetClusteringResultMeta();
         *centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 
-        auto& map_ = res.id_mappings;
+        const auto& map_ = res.id_mappings;
         const char** id_mapping_paths_ = (const char**)id_mapping_paths;
         size_t i = 0;
         for (auto it = map_.begin(); it != map_.end(); ++it, i++) {

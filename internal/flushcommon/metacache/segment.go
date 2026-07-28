@@ -40,6 +40,7 @@ type SegmentInfo struct {
 	syncingRows      int64
 	bfs              pkoracle.PkStat
 	bm25stats        *SegmentBM25Stats
+	stats            *SegmentStats
 	level            datapb.SegmentLevel
 	syncingTasks     int32
 	storageVersion   int64
@@ -96,6 +97,10 @@ func (s *SegmentInfo) GetBloomFilterSet() pkoracle.PkStat {
 
 func (s *SegmentInfo) GetBM25Stats() *SegmentBM25Stats {
 	return s.bm25stats
+}
+
+func (s *SegmentInfo) Statistics() *SegmentStats {
+	return s.stats
 }
 
 func (s *SegmentInfo) Level() datapb.SegmentLevel {
@@ -160,6 +165,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		level:            s.level,
 		syncingTasks:     s.syncingTasks,
 		bm25stats:        s.bm25stats,
+		stats:            s.stats,
 		storageVersion:   s.storageVersion,
 		binlogs:          s.binlogs,
 		statslogs:        s.statslogs,
@@ -171,7 +177,10 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 	}
 }
 
-func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *SegmentBM25Stats) *SegmentInfo {
+func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *SegmentBM25Stats, stats *SegmentStats) *SegmentInfo {
+	if stats == nil {
+		stats = NewEmptySegmentStats()
+	}
 	level := info.GetLevel()
 	if level == datapb.SegmentLevel_Legacy {
 		level = datapb.SegmentLevel_L1
@@ -201,6 +210,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		level:            level,
 		bfs:              bfs,
 		bm25stats:        bm25Stats,
+		stats:            stats,
 		storageVersion:   info.GetStorageVersion(),
 		binlogs:          info.GetBinlogs(),
 		statslogs:        info.GetStatslogs(),

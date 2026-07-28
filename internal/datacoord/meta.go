@@ -1181,11 +1181,15 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
 		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-		if len(deltalogs) > 0 {
-			segment.deltaRowcount.Store(-1)
-		}
-
 		segment.Bm25Statslogs = mergeFieldBinlogs(segment.GetBm25Statslogs(), bm25logs)
+		// Stats is array-derived and the arrays just changed. SaveBinlogPaths
+		// always chains UpdateSegmentStats next to repopulate Stats from the
+		// new arrays under the same write lock — this nil-out marks the
+		// transient invalidated state. Any caller that bypasses that chain
+		// leaves Stats nil on the persisted record; EnsureStats falls back
+		// to a transient array-derived value for reads, but the persisted
+		// proto stays nil until a future write reaches UpdateSegmentStats.
+		segment.Stats = nil
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 			UpdateMask: metastore.BinlogsUpdateMask{
@@ -1204,8 +1208,47 @@ func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment 
 		return false
 	}
 
+	// Drop deltalogs already present on the segment before merging or
+	// accumulating. The same L0 compaction output can reach here twice — a retry
+	// after the meta_saved task-state write failed and saveSegmentMeta re-ran, or
+	// a restart between the etcd write and the task-state transition. The
+	// committedV3Manifests cache only makes the manifest re-commit idempotent; the
+	// delta Stats accumulation below is now durable for V3 (its per-field deltalog
+	// KVs are skipped), so a blind re-add would permanently over-count deletes and
+	// inflate hasTooManyDeletions / GetResidualSegmentSize. Dedup by (fieldID,
+	// logID) keeps both the Deltalogs array and the delta Stats idempotent.
+	deltalogs = filterDuplicateFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+	if len(deltalogs) == 0 {
+		return false
+	}
+
 	segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-	segment.deltaRowcount.Store(-1)
+	// Accumulate the incoming deltalogs onto the existing delta Stats instead
+	// of recomputing from segment.GetDeltalogs(). For V3 segments AlterSegments
+	// skips persisting per-FieldBinlog KVs, so after a DataCoord restart the
+	// in-memory Deltalogs array is empty and the cumulative deltas live only in
+	// the persisted Stats. A full recompute over the (post-restart empty array
+	// + new batch) would overwrite e.g. DeleteNumRows=1000 with just the new
+	// batch and permanently undercount deletes — feeding hasTooManyDeletions,
+	// GetResidualSegmentSize, view counts and getSegmentSize. Incremental
+	// addition is correct both within a process lifetime and across restart;
+	// the L0 compaction commit applies each batch exactly once.
+	if segment.Stats == nil {
+		segment.Stats = &datapb.Statistics{}
+	}
+	for _, fb := range deltalogs {
+		for _, l := range fb.GetBinlogs() {
+			segment.Stats.DeltaBinlogSize += l.GetMemorySize()
+			segment.Stats.DeleteNumRows += l.GetEntriesNum()
+			segment.Stats.DeltaBinlogCount++
+			if from := l.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
+				segment.Stats.DeltaTimestampFrom = from
+			}
+			if to := l.GetTimestampTo(); to > segment.Stats.DeltaTimestampTo {
+				segment.Stats.DeltaTimestampTo = to
+			}
+		}
+	}
 	modPack.increments[segmentID] = metastore.BinlogsIncrement{
 		Segment: segment.SegmentInfo,
 		UpdateMask: metastore.BinlogsUpdateMask{
@@ -1411,8 +1454,38 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
 		segment.Bm25Statslogs = bm25logs
+		// Refresh Stats so callers (import / copy-segment / sort) don't have
+		// to remember to chain UpdateSegmentStats. Stats-fields-from-arrays
+		// is the right semantic for these paths: they don't carry a
+		// writer-reported V3 stats override, and the segment is being
+		// (re)initialized with the supplied arrays.
+		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
+		}
+		return true
+	}
+}
+
+// UpdateSegmentStats stores the complete cumulative Statistics shipped by
+// the datanode's StatisticsCollector onto SegmentInfo.Stats wholesale —
+// one object, no per-field recompute.
+//
+// When requestStats is nil (storage V1 / pre-Statistics datanodes during
+// rolling upgrade), it falls back to deriving Statistics from the
+// cumulative binlog arrays via storage.BuildStatsFromFieldBinlogs.
+func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(context.TODO(), "meta update: update segment stats failed - segment not found",
+				mlog.Int64("segmentID", segmentID))
+			return false
+		}
+		if requestStats != nil {
+			segment.Stats = requestStats
+		} else {
+			segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs())
 		}
 		return true
 	}
@@ -1431,10 +1504,10 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 		segment.Binlogs = mergeFieldBinlogs(nil, binlogs)
 		segment.Statslogs = mergeFieldBinlogs(nil, statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(nil, deltalogs)
-		if len(deltalogs) > 0 {
-			segment.deltaRowcount.Store(-1)
-		}
 		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
+		// Stats invalidated; UpdateSegmentStats is chained next under the
+		// same write lock to repopulate from the replaced arrays.
+		segment.Stats = nil
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -1982,13 +2055,11 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 	return clonedSegment, metricMutation
 }
 
-// batchSaveDropSegments saves drop segments info with channel removal flag
-// since the channel unwatching operation is not atomic here
-// ** the removal flag is always with last batch
-// ** the last batch must contains at least one segment
-//  1. when failure occurs between batches, failover mechanism will continue with the earliest  checkpoint of this channel
-//     since the flag is not marked so DataNode can re-consume the drop collection msg
-//  2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
+// batchSaveDropSegments saves drop segments info together with the channel
+// removal flag as a single composite catalog.Update call, so the dropped
+// segments and the channel tombstone commit atomically (or, when the op
+// count exceeds the txn size limit, via the caller-ordered chunked
+// fallback - see kv/txn.Commit for the exact atomicity contract).
 func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSegments map[int64]*SegmentInfo) error {
 	var modSegIDs []int64
 	for k := range modSegments {
@@ -1996,16 +2067,19 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 	}
 	mlog.Info(ctx, "meta update: batch save drop segments",
 		mlog.Int64s("drop segments", modSegIDs))
-	segments := make([]*datapb.SegmentInfo, 0)
+	actions := make([]metastore.UpdateAction, 0, len(modSegments)+1)
 	for _, seg := range modSegments {
-		segments = append(segments, seg.SegmentInfo)
+		if seg.GetState() != commonpb.SegmentState_Dropped {
+			return merr.WrapErrServiceInternalMsg(
+				"batchSaveDropSegments: segment %d is not in Dropped state, got %s",
+				seg.GetID(), seg.GetState())
+		}
+		actions = append(actions, metastore.UpdateSegment(seg.SegmentInfo))
 	}
-	err := m.catalog.SaveDroppedSegmentsInBatch(ctx, segments)
-	if err != nil {
-		return err
-	}
-
-	if err = m.catalog.MarkChannelDeleted(ctx, channel); err != nil {
+	// The channel tombstone is the visibility marker; it commits last (see
+	// MarkChannelDropped -> CommitSave), after the dropped segments.
+	actions = append(actions, metastore.MarkChannelDropped(channel))
+	if err := m.catalog.Update(ctx, actions...); err != nil {
 		return err
 	}
 
@@ -2257,8 +2331,9 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 // Falls back to the provided fallback positions if binlog timestamps are unavailable
 // (e.g., legacy segments without TimestampFrom/TimestampTo populated).
 func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, fallbackStart, fallbackDml *msgpb.MsgPosition) (startPos, dmlPos *msgpb.MsgPosition) {
-	minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-	if minTs > 0 && minTs != math.MaxUint64 && maxTs > 0 {
+	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
+	minTs, maxTs := stats.GetTimestampFrom(), stats.GetTimestampTo()
+	if minTs > 0 && maxTs > 0 {
 		return &msgpb.MsgPosition{
 				ChannelName: channel,
 				Timestamp:   minTs,
@@ -2373,6 +2448,11 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			SchemaVersion:   t.GetSchema().GetVersion(),
 			CommitTimestamp: 0, // Normalized: row timestamps already rewritten
 		}
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment. V3 outputs whose stats live in the manifest
+		// are populated correctly there (the compactor sees the stats
+		// blob size); the receiver does not recompute.
+		segmentInfo.Stats = seg.GetStats()
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
@@ -2450,35 +2530,39 @@ func (m *meta) completeMixCompactionMutation(
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
-		compactToSegmentInfo := NewSegmentInfo(
-			&datapb.SegmentInfo{
-				ID:            compactToSegment.GetSegmentID(),
-				CollectionID:  compactFromSegInfos[0].CollectionID,
-				PartitionID:   compactFromSegInfos[0].PartitionID,
-				InsertChannel: t.GetChannel(),
-				NumOfRows:     compactToSegment.NumOfRows,
-				State:         commonpb.SegmentState_Flushed,
-				MaxRowNum:     compactFromSegInfos[0].MaxRowNum,
-				Binlogs:       compactToSegment.GetInsertLogs(),
-				Statslogs:     compactToSegment.GetField2StatslogPaths(),
-				Deltalogs:     compactToSegment.GetDeltalogs(),
-				Bm25Statslogs: compactToSegment.GetBm25Logs(),
-				TextStatsLogs: compactToSegment.GetTextStatsLogs(),
+		compactToProto := &datapb.SegmentInfo{
+			ID:            compactToSegment.GetSegmentID(),
+			CollectionID:  compactFromSegInfos[0].CollectionID,
+			PartitionID:   compactFromSegInfos[0].PartitionID,
+			InsertChannel: t.GetChannel(),
+			NumOfRows:     compactToSegment.NumOfRows,
+			State:         commonpb.SegmentState_Flushed,
+			MaxRowNum:     compactFromSegInfos[0].MaxRowNum,
+			Binlogs:       compactToSegment.GetInsertLogs(),
+			Statslogs:     compactToSegment.GetField2StatslogPaths(),
+			Deltalogs:     compactToSegment.GetDeltalogs(),
+			Bm25Statslogs: compactToSegment.GetBm25Logs(),
+			TextStatsLogs: compactToSegment.GetTextStatsLogs(),
 
-				CreatedByCompaction: true,
-				CompactionFrom:      compactFromSegIDs,
-				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
-				Level:               datapb.SegmentLevel_L1,
-				StorageVersion:      compactToSegment.GetStorageVersion(),
-				StartPosition:       startPos,
-				DmlPosition:         dmlPos,
-				IsSorted:            compactToSegment.GetIsSorted(),
-				ManifestPath:        compactToSegment.GetManifest(),
-				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
-				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
-				SchemaVersion:       outputSchemaVersion,
-				CommitTimestamp:     0, // Normalized: row timestamps already rewritten
-			})
+			CreatedByCompaction: true,
+			CompactionFrom:      compactFromSegIDs,
+			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
+			Level:               datapb.SegmentLevel_L1,
+			StorageVersion:      compactToSegment.GetStorageVersion(),
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
+			IsSorted:            compactToSegment.GetIsSorted(),
+			ManifestPath:        compactToSegment.GetManifest(),
+			IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
+			ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
+			SchemaVersion:       outputSchemaVersion,
+			CommitTimestamp:     0, // Normalized: row timestamps already rewritten
+		}
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment. V3 outputs whose stats live in the manifest
+		// are populated correctly there; the receiver does not recompute.
+		compactToProto.Stats = compactToSegment.GetStats()
+		compactToSegmentInfo := NewSegmentInfo(compactToProto)
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
 			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
@@ -2508,18 +2592,26 @@ func (m *meta) completeMixCompactionMutation(
 		return info.SegmentInfo
 	})
 
-	binlogs := make([]metastore.BinlogsIncrement, 0)
+	// Add the compactTo segments before marking the compactFrom segments
+	// dropped, so a crash on the ordered-fallback path always leaves the new
+	// segments published before the old ones are retired (no data loss).
+	actions := make([]metastore.UpdateAction, 0, len(compactToInfos)+len(compactFromInfos))
 	for _, seg := range compactToInfos {
-		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
+		actions = append(actions, metastore.AddSegment(seg))
 	}
-
-	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
-	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactTo segments", mlog.Err(err))
-		return nil, nil, err
+	for _, seg := range compactFromInfos {
+		// AlterSegment retires the input using the legacy AlterSegments
+		// encoding (not the record-only UpdateSegment), so it stays
+		// byte-identical to the pre-composite path - including the
+		// handleDroppedSegment GC-compat binlog write that fires for a dropped
+		// segment lacking binlog-prefix KVs (the pre-split inline-binlog
+		// format). A modern compacted input is prefix-persisted so that write
+		// is a no-op, but AlterSegment preserves it rather than assuming the
+		// invariant.
+		actions = append(actions, metastore.AlterSegment(seg))
 	}
-	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactFrom segments", mlog.Err(err))
+	if err := m.catalog.Update(m.ctx, actions...); err != nil {
+		mlog.Warn(m.ctx, "fail to update compaction segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -3136,22 +3228,54 @@ func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.Partiti
 		return err
 	}
 
-	// first clean analyze task
-	if err = m.analyzeMeta.DropAnalyzeTask(ctx, info.GetAnalyzeTaskID()); err != nil {
-		mlog.Warn(ctx, "remove analyze task failed", mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), mlog.Err(err))
+	// Persist the analyze task removal, the current-partition-stats-version
+	// rollback (if the dropped version is the current one), and the
+	// partition-stats info removal as a single composite catalog write, with
+	// the partition-stats info removal landing last as the commit marker.
+	//
+	// Both meta locks are held across the WHOLE compute -> catalog.Update ->
+	// in-memory apply sequence, mirroring the single critical section the
+	// legacy partitionStatsMeta.DropPartitionStatsInfo held around its own
+	// catalog write. This is what keeps the rollback correct: without it, a
+	// concurrent clustering-compaction completion (SaveCurrentPartitionStats
+	// Version for the same coll/part/vchannel) could bump the current version
+	// between the rollback compute and its application, and the apply would
+	// clobber that newer version back to the stale rollback target. In-memory
+	// bookkeeping is only applied after the write succeeds, so a failed write
+	// never desyncs memory from disk.
+	m.analyzeMeta.Lock()
+	defer m.analyzeMeta.Unlock()
+	m.partitionStatsMeta.Lock()
+	defer m.partitionStatsMeta.Unlock()
+
+	rollbackVersion := m.partitionStatsMeta.getRollbackVersionLocked(info)
+
+	actions := []metastore.UpdateAction{metastore.DropAnalyzeTask(info.GetAnalyzeTaskID())}
+	if rollbackVersion != nil {
+		actions = append(actions, metastore.SavePartitionStatsVersion(
+			info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), *rollbackVersion))
+	}
+	actions = append(actions, metastore.DropPartitionStats(info))
+
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		mlog.Warn(ctx, "clean partition stats info failed",
+			mlog.Int64("collectionID", info.GetCollectionID()),
+			mlog.Int64("partitionID", info.GetPartitionID()),
+			mlog.String("vChannel", info.GetVChannel()),
+			mlog.Int64("planID", info.GetVersion()),
+			mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()),
+			mlog.Err(err))
 		return err
 	}
 
-	// finally, clean up the partition stats info, and make sure the analysis task is cleaned up
-	err = m.partitionStatsMeta.DropPartitionStatsInfo(ctx, info)
+	m.analyzeMeta.dropTaskFromMemoryLocked(info.GetAnalyzeTaskID())
+	m.partitionStatsMeta.applyDropLocked(info, rollbackVersion)
+
 	mlog.Debug(ctx, "drop partition stats meta",
 		mlog.Int64("collectionID", info.GetCollectionID()),
 		mlog.Int64("partitionID", info.GetPartitionID()),
 		mlog.String("vChannel", info.GetVChannel()),
 		mlog.Int64("planID", info.GetVersion()))
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -3229,6 +3353,10 @@ func (m *meta) completeSortCompactionMutation(
 		SchemaVersion:             outputSchemaVersion,
 		CommitTimestamp:           0, // Normalized: row timestamps already rewritten
 	}
+	// Statistics is computed at the compactor and shipped on the
+	// CompactionSegment. V3 outputs whose stats live in the manifest are
+	// populated correctly there; the receiver does not recompute.
+	segmentInfo.Stats = resultSegment.GetStats()
 
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() > 0 {
@@ -3363,6 +3491,16 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
 	cloned.ManifestPath = resultManifest
+	// Statistics is computed at the compactor and shipped on the
+	// CompactionSegment. Materialization grows Binlogs and ships a freshly
+	// computed Stats, which must be adopted. The schema-bump-only path rewrites
+	// no data and deliberately ships Stats=nil to preserve oldSegment.Stats —
+	// overwriting with nil would zero the durable summary (V3 skips per-field
+	// KVs, so it cannot be rebuilt from arrays after a restart). Only adopt a
+	// non-nil result Stats.
+	if s := resultSegment.GetStats(); s != nil {
+		cloned.Stats = s
+	}
 	if !proto.Equal(oldSegment.SegmentInfo, cloned.SegmentInfo) {
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1
 	}
@@ -3435,6 +3573,9 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       oldSegment.GetIsSortedByNamespace(),
 		SchemaVersion:             schemaVersion,
+		// Statistics is computed at the compactor and shipped on the
+		// CompactionSegment; the receiver copies it verbatim.
+		Stats: resultSegment.GetStats(),
 	})
 	if newSegment.GetNumOfRows() > 0 {
 		metricMutation.addNewSeg(newSegment.GetState(), newSegment.GetLevel(), newSegment.GetIsSorted(), newSegment.GetStorageVersion(), segmentMetricFormatLabel(newSegment), newSegment.GetNumOfRows())
@@ -3471,7 +3612,7 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 				Channel:      s.InsertChannel,
 				NumOfRows:    s.NumOfRows,
 				State:        s.State.String(),
-				MemSize:      s.size.Load(),
+				MemSize:      s.getSegmentSize(),
 				Level:        s.Level.String(),
 				IsImporting:  s.IsImporting,
 				Compacted:    s.Compacted,

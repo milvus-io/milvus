@@ -30,6 +30,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -509,6 +510,79 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 	s.Equal("fake finished index success", it.FailReason)
 }
 
+func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds() {
+	const (
+		dim        = 128
+		enoughRows = int64(10000)
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+
+	mt := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				s.segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            s.segID,
+						CollectionID:  s.collID,
+						PartitionID:   s.partID,
+						InsertChannel: "ch1",
+						NumOfRows:     enoughRows,
+						State:         commonpb.SegmentState_Flushed,
+						MaxRowNum:     enoughRows,
+						Level:         datapb.SegmentLevel_L2,
+						SchemaVersion: 1,
+						// Recovered StorageV3 segment: empty in-memory Binlogs, but the
+						// manifest is authoritative and the worker build reads it.
+						StorageVersion: storage.StorageV3,
+						ManifestPath:   "files/manifest/1/1",
+					},
+				},
+			},
+		},
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "HNSW"},
+		{Key: common.MetricTypeKey, Value: "COSINE"},
+	}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+	segIndex.NumRows = enoughRows
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{
+			Version: 1,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "array_vector",
+					FieldID:     s.fieldID,
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			},
+		},
+		Partitions: []int64{s.partID},
+	}, nil)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("root").Maybe()
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+
+	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+	it.CreateTaskOnWorker(1, cluster)
+
+	// Must proceed to the manifest-aware worker build, not fail or fake-finish.
+	s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+}
+
 func (s *indexTaskSuite) TestEstimateVectorArrayElementCountErrors() {
 	field := &schemapb.FieldSchema{
 		FieldID:     s.fieldID,
@@ -547,6 +621,30 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountErrors() {
 	}, fieldWithUnsupportedElement)
 	s.Error(err)
 	s.Contains(err.Error(), "unsupported vector array element type")
+}
+
+func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_ManifestBacked() {
+	field := &schemapb.FieldSchema{
+		FieldID:     s.fieldID,
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	}
+	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{field}}
+	// A recovered StorageV3 segment reloads with empty in-memory Binlogs but an
+	// authoritative ManifestPath. The element count cannot be derived from the
+	// empty arrays, but the manifest-aware worker build reads it — so the
+	// pre-check must not fail the task; it returns a manifest-backed estimate.
+	segment := &datapb.SegmentInfo{
+		ManifestPath:  "files/manifest/1/1",
+		SchemaVersion: 1,
+	}
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(segment, schema, field)
+	s.NoError(err)
+	s.True(estimate.manifestBacked)
+	s.False(estimate.emptyOnStaleSchema)
 }
 
 func (s *indexTaskSuite) TestQueryTaskOnWorker() {
@@ -682,6 +780,106 @@ func (s *indexTaskSuite) TestDropTaskOnWorker() {
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 		it.DropTaskOnWorker(cluster)
 	})
+}
+
+func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
+	const numRows = int64(65535)
+	newHandler := func() *NMockHandler {
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+			ID: s.collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:     "field1",
+						FieldID:  s.fieldID,
+						DataType: schemapb.DataType_FloatVector,
+						Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: "dim", Value: "128"},
+						},
+					},
+				},
+			},
+			Partitions: []int64{s.partID},
+		}, nil)
+		return handler
+	}
+	newTask := func() *indexBuildTask {
+		t := &model.SegmentIndex{
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			SegmentID:    s.segID,
+			IndexID:      s.indexID,
+			BuildID:      s.taskID,
+			IndexState:   commonpb.IndexState_Unissued,
+			NumRows:      numRows,
+		}
+		s.mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Insert(s.taskID, t)
+		cm := mocks.NewChunkManager(s.T())
+		cm.EXPECT().RootPath().Return("root").Maybe()
+		return newIndexBuildTask(t, 1, s.mt, newHandler(), cm, newIndexEngineVersionManager())
+	}
+
+	s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+	defer func() { s.mt.segments.segments[s.segID].Stats = nil }()
+
+	cases := []struct {
+		name       string
+		nullCounts map[int64]int64
+		wantBuild  bool
+	}{
+		// Field key absent: added to schema after this segment was flushed.
+		// Every row is null for it — no data to index.
+		{
+			name:       "field absent from NullCounts skips build",
+			nullCounts: map[int64]int64{},
+			wantBuild:  false,
+		},
+		// Field present with zero nulls: all rows valid, full build.
+		{
+			name:       "field present zero nulls builds",
+			nullCounts: map[int64]int64{s.fieldID: 0},
+			wantBuild:  true,
+		},
+		// Field present, almost all null: effectiveRows below threshold.
+		{
+			name:       "field mostly null skips build",
+			nullCounts: map[int64]int64{s.fieldID: numRows - 100},
+			wantBuild:  false,
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			s.mt.segments.segments[s.segID].Stats = &datapb.Statistics{
+				NullCounts: tc.nullCounts,
+			}
+			catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
+			catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+			s.mt.indexMeta.catalog = catalogMock
+
+			cluster := session.NewMockCluster(s.T())
+			if tc.wantBuild {
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+			}
+			// No CreateIndex expectation for skip cases:
+			// mockery will fail the test if it is called unexpectedly.
+
+			it := newTask()
+			it.CreateTaskOnWorker(1, cluster)
+			if tc.wantBuild {
+				s.Equal(
+					indexpb.JobState_JobStateInProgress,
+					indexpb.JobState(it.IndexState),
+				)
+			} else {
+				s.Equal(
+					indexpb.JobState_JobStateFinished,
+					indexpb.JobState(it.IndexState),
+				)
+			}
+		})
+	}
 }
 
 func (s *indexTaskSuite) TestSetJobInfo() {

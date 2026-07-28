@@ -30,7 +30,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -98,27 +97,6 @@ type ServiceSuite struct {
 
 	// Mock
 	factory *dependency.MockFactory
-}
-
-func TestDropIndexPropagatesSegmentError(t *testing.T) {
-	segmentManager := segments.NewMockSegmentManager(t)
-	segment := segments.NewMockSegment(t)
-	dropErr := merr.SegcoreError(2038, "publication drain canceled")
-
-	segmentManager.EXPECT().GetAndPinBy(mock.Anything).
-		Return([]segments.Segment{segment}, nil).Once()
-	segmentManager.EXPECT().Unpin(mock.Anything).Once()
-	segment.EXPECT().DropIndex(mock.Anything, int64(10)).Return(dropErr).Once()
-
-	node := &QueryNode{
-		manager: &segments.Manager{Segment: segmentManager},
-	}
-	status, err := node.DropIndex(context.Background(), &querypb.DropIndexRequest{
-		SegmentID: 1,
-		IndexIDs:  []int64{10},
-	})
-	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(status), merr.ErrSegcoreFollyCancel)
 }
 
 func (suite *ServiceSuite) SetupSuite() {

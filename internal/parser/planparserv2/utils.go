@@ -78,6 +78,15 @@ func IsString(n *planpb.GenericValue) bool {
 	return false
 }
 
+func IsBytes(n *planpb.GenericValue) bool {
+	switch n.GetVal().(type) {
+	case *planpb.GenericValue_BytesVal:
+		return true
+	default:
+		return false
+	}
+}
+
 func IsArray(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_ArrayVal:
@@ -252,6 +261,15 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	// A raw-bytes value has exactly one consumer — the bloom_match filter blob,
+	// which FillBloomMatchExpressionValue validates and embeds without passing
+	// through castValue. Reject it in every typed/JSON comparison context here,
+	// at the proxy, instead of fanning out a GenericValue kBytesVal that
+	// segcore's plan parser cannot evaluate.
+	if IsBytes(value) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"a bytes template value can only be used as the bloom_match filter argument")
+	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
 	}
@@ -298,6 +316,16 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 	if arithOp == planpb.ArithOpType_Div || arithOp == planpb.ArithOpType_Mod {
 		if (IsInteger(operand) && operand.GetInt64Val() == 0) || (IsFloating(operand) && operand.GetFloatVal() == 0) {
 			return nil, merr.WrapErrQueryPlanMsg("division or modulus by zero")
+		}
+	}
+
+	// A negative or too-large shift amount is undefined behavior in the C++
+	// executor, so reject it at plan time (constant-const folding is guarded
+	// separately in ShiftLeft/ShiftRight). Templated operands are validated when
+	// the placeholder value is filled in.
+	if (arithOp == planpb.ArithOpType_Shl || arithOp == planpb.ArithOpType_Shr) && !isTemplateExpr(operandExpr) {
+		if !IsInteger(operand) || operand.GetInt64Val() < 0 || operand.GetInt64Val() >= 64 {
+			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", operand.String())
 		}
 	}
 
@@ -442,6 +470,13 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 
 	if leftColumnInfo == nil || rightColumnInfo == nil {
 		return nil, merr.WrapErrQueryPlanMsg("only comparison between two fields is supported")
+	}
+
+	// CompareExpr only carries field IDs and storage data types. It cannot
+	// represent an element path for an ARRAY-backed column, and the executor
+	// does not support ARRAY as an operand type.
+	if typeutil.IsArrayType(leftColumnInfo.GetDataType()) || typeutil.IsArrayType(rightColumnInfo.GetDataType()) {
+		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison involving ARRAY fields is not supported")
 	}
 
 	// Check if both left and right are non-JSON types
@@ -705,7 +740,8 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
 		}
-	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor:
+	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
 		}

@@ -1564,6 +1564,7 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithMetaWriter(wb.metaWriter).
 			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
 			WithAllocator(wb.allocator).
+			WithStorageConfig(packed.CreateStorageConfig()).
 			WithFailureCallback(wb.errHandler).
 			// Same as above: keep the critical write path retrying despite the
 			// retry.Do InputError short-circuit.

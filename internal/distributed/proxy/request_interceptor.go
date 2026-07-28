@@ -24,7 +24,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -84,13 +83,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 	// logged at Warn (actionable for SRE); input failures at Info (expected user
 	// mistakes — keeping them at Warn would spam the logs).
 	if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
-		var status *commonpb.Status
-		switch r := resp.(type) {
-		case interface{ GetStatus() *commonpb.Status }:
-			status = r.GetStatus()
-		case *commonpb.Status:
-			status = r
-		}
+		status, _ := requestutil.GetStatusFromResponse(resp)
 		errType := merr.SystemError
 		if cause == metrics.CauseUser {
 			errType = merr.InputError

@@ -106,7 +106,7 @@ UnaryCompare(const T& get_value,
                           "RegexMatch operation only supports string type");
             }
         default:
-            ThrowInfo(OpTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       fmt::format("unsupported op_type:{} for UnaryCompare",
                                   op_type));
     }
@@ -321,7 +321,7 @@ struct UnaryElementFunc {
                     res[i] = milvus::query::Match(src[i], val, op);
                 } else {
                     ThrowInfo(
-                        OpTypeInvalid,
+                        UnexpectedError,
                         fmt::format(
                             "unsupported op_type:{} for UnaryElementFunc", op));
                 }
@@ -349,7 +349,7 @@ struct UnaryElementFunc {
                 src, size, val);
         } else {
             ThrowInfo(
-                OpTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
         }
     }
@@ -396,7 +396,7 @@ struct UnaryElementFunc {
                                      op == proto::plan::OpType::InnerMatch) {
                     res[i] = milvus::query::Match(src[offset], val, op);
                 } else {
-                    ThrowInfo(OpTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               "unsupported op_type:{} for UnaryElementFunc",
                               op);
                 }
@@ -433,7 +433,7 @@ struct UnaryElementFunc {
                                              proto::plan::OpType::InnerMatch) {
                         res[i] = milvus::query::Match(src[i], val, op);
                     } else {
-                        ThrowInfo(OpTypeInvalid,
+                        ThrowInfo(UnexpectedError,
                                   "unsupported op_type:{} for UnaryElementFunc",
                                   op);
                     }
@@ -470,7 +470,7 @@ struct UnaryElementFunc {
             res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
                 src, size, val);
         } else {
-            ThrowInfo(OpTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported op_type:{} for UnaryElementFunc",
                       op);
         }
@@ -618,7 +618,7 @@ struct UnaryElementFuncForArray {
                               "RegexMatch operation only supports string type");
                 }
             } else {
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported op_type:{} for "
                           "UnaryElementFuncForArray",
                           op);
@@ -741,7 +741,7 @@ struct UnaryIndexFunc {
                       "RegexMatch is only supported on string types");
         } else {
             ThrowInfo(
-                OpTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported op_type:{} for UnaryIndexFunc", op));
         }
     }
@@ -858,7 +858,7 @@ BatchUnaryCompare(const T* src,
         }
         default: {
             ThrowInfo(
-                OpTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported op_type:{} for BatchUnaryCompare",
                             op_type));
         }
@@ -957,7 +957,7 @@ class ShreddingArrayBsonExecutor {
                     res[i] = !equal;
                     break;
                 default:
-                    ThrowInfo(OpTypeInvalid,
+                    ThrowInfo(UnexpectedError,
                               fmt::format("unsupported op_type:{} for ARRAY in "
                                           "ShreddingArrayBsonExecutor",
                                           op_type_));

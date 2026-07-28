@@ -9,7 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
+#include <cstdint>
+#include <limits>
 #include <string>
 
 #include "common/Utils.h"
@@ -31,6 +32,16 @@ TEST(Util_Common, GetCommonPrefix) {
     str2 = "";
     common_prefix = milvus::GetCommonPrefix(str1, str2);
     EXPECT_STREQ(common_prefix.c_str(), "");
+}
+
+TEST(Util_Common, CheckPlusOverflowKeepsSystemClassification) {
+    try {
+        (void)milvus::checkPlus<int64_t>(std::numeric_limits<int64_t>::max(),
+                                         1);
+        FAIL() << "expected integer overflow";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::UnexpectedError);
+    }
 }
 
 TEST(SimilarityCorelation, Naive) {

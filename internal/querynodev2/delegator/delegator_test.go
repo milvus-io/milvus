@@ -212,9 +212,14 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 
 		initStarted := make(chan struct{})
 		initDone := make(chan struct{})
+		var startedOnce, doneOnce sync.Once
+		// The patch replaces the global builder, so it can be entered more than
+		// once - a schema with several functions, or a re-init of the entry this
+		// mock keeps failing. Signal the first invocation only; closing these
+		// channels per invocation would panic with "close of closed channel".
 		patch := mockey.Mock(function.BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (function.FunctionRunner, error) {
-			defer close(initDone)
-			close(initStarted)
+			defer doneOnce.Do(func() { close(initDone) })
+			startedOnce.Do(func() { close(initStarted) })
 			return nil, errors.New("mock runner init failure")
 		}).Build()
 		defer patch.UnPatch()

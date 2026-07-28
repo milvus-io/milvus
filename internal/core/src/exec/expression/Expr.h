@@ -201,6 +201,23 @@ class Expr : public std::enable_shared_from_this<Expr> {
     MarkNullRejecting() {
     }
 
+    // Whether this expression's result may be cached by ExprResCacheManager.
+    // Cacheability PROPAGATES from children: a composite expression is cacheable
+    // only if every child is. An expression whose cache key (derived from
+    // ToString()) cannot safely and cheaply capture its identity overrides this
+    // to false — e.g. bloom_match, whose slim key cannot distinguish two distinct
+    // multi-MiB blobs — so any predicate that contains it is excluded from the
+    // FilterBitsNode result cache and can never reuse another query's bitmap.
+    virtual bool
+    IsCacheable() const {
+        for (const auto& input : inputs_) {
+            if (input && !input->IsCacheable()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     virtual bool
     CanUseNestedIndex() const {
         return false;
@@ -307,8 +324,12 @@ class SegmentExpr : public Expr {
         // (TextIndex/PkIndex/JsonStats) and the RawData path never pay for a
         // PinCells() cold fetch under tiered storage.
 
-        // if index not include raw data, also need load data
-        if (segment_->HasFieldData(field_id_)) {
+        // Snapshot field-data availability together with num_data_chunk_.
+        // Execution-path selection may happen later, after a concurrent
+        // reopen/load publishes a different segment state; both decisions must
+        // observe the same construction-time view.
+        has_field_data_at_init_ = segment_->HasFieldData(field_id_);
+        if (has_field_data_at_init_) {
             if (segment_->is_chunked()) {
                 num_data_chunk_ = segment_->num_chunk_data(field_id_);
             } else {
@@ -403,8 +424,9 @@ class SegmentExpr : public Expr {
 
     void
     MoveCursorForIndex() {
-        AssertInfo(segment_->type() == SegmentType::Sealed,
-                   "index mode only for sealed segment");
+        // The index cursor is a global row position. This holds for sealed
+        // segments and for growing segments with a segment-level scalar
+        // index (the geometry interim R-Tree, see issue #51237).
         auto size =
             std::min(active_count_ - current_index_chunk_pos_, batch_size_);
 
@@ -750,58 +772,123 @@ class SegmentExpr : public Expr {
             if constexpr (std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
                           std::is_same_v<T, ArrayView>) {
-                for (size_t i = 0; i < input->size(); ++i) {
-                    int64_t offset = (*input)[i];
-                    auto [chunk_id, chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, offset);
-                    auto pw = segment_->get_views_by_offsets<T>(
-                        op_ctx_, field_id_, chunk_id, {int32_t(chunk_offset)});
-                    auto [data_vec, valid_data] = pw.get();
-                    if (!skip_func ||
-                        !skip_func(*skip_index, field_id_, chunk_id)) {
-                        evaluate_batch.template operator()<FilterType::random>(
-                            data_vec.data(),
-                            valid_data.data(),
-                            nullptr,
-                            1,
-                            res + processed_size,
-                            valid_res + processed_size,
-                            values...);
-                    } else {
-                        // Chunk skipped by SkipIndex: apply valid mask, then still drive the
-                        // callback on a null batch so cursor-tracking callbacks (which index
-                        // bitmap_input by batch position via their processed_cursor) stay
-                        // aligned — mirrors the ProcessDataChunksForMultipleChunk skip branch.
-                        if (!valid_data.empty() && !valid_data[0]) {
-                            res[processed_size] = valid_res[processed_size] =
-                                false;
+                // Group runs of consecutive offsets that fall in the same
+                // chunk and fetch their views with one get_views_by_offsets
+                // call per run (same shape as ProcessElementLevelByOffsets)
+                // instead of a per-row call that pins the chunk and heap-
+                // allocates a one-element view vector every row. Row order
+                // and per-row callback invocation are unchanged.
+                FixedVector<int32_t> batch_offsets;
+                size_t i = 0;
+                // Resolve each offset's chunk exactly once. The lookahead that
+                // ends a run is the same offset the next run starts on, so its
+                // resolution is carried across the outer iteration instead of
+                // being recomputed — otherwise every run boundary (i.e. every
+                // row when score-ordered offsets scatter one per chunk) pays a
+                // second get_chunk_by_offset.
+                int64_t chunk_id = 0;
+                int64_t chunk_offset = 0;
+                if (!input->empty()) {
+                    auto resolved =
+                        segment_->get_chunk_by_offset(field_id_, (*input)[0]);
+                    chunk_id = resolved.first;
+                    chunk_offset = resolved.second;
+                }
+                while (i < input->size()) {
+                    const int64_t run_chunk_id = chunk_id;
+                    batch_offsets.clear();
+                    batch_offsets.push_back(int32_t(chunk_offset));
+                    ++i;
+                    while (i < input->size()) {
+                        auto resolved = segment_->get_chunk_by_offset(
+                            field_id_, (*input)[i]);
+                        chunk_id = resolved.first;
+                        chunk_offset = resolved.second;
+                        if (chunk_id != run_chunk_id) {
+                            break;
                         }
-                        evaluate_batch.template operator()<FilterType::random>(
-                            nullptr,
-                            nullptr,
-                            nullptr,
-                            1,
-                            res + processed_size,
-                            valid_res + processed_size,
-                            values...);
+                        batch_offsets.push_back(int32_t(chunk_offset));
+                        ++i;
                     }
-                    processed_size++;
+                    auto pw = segment_->get_views_by_offsets<T>(
+                        op_ctx_, field_id_, run_chunk_id, batch_offsets);
+                    // Bind by reference: get() returns the pinned pair by
+                    // reference; copying it would duplicate the whole run's
+                    // view vector + validity vector on every run.
+                    const auto& [data_vec, valid_data] = pw.get();
+                    const bool skip =
+                        skip_func &&
+                        skip_func(*skip_index, field_id_, run_chunk_id);
+                    for (size_t j = 0; j < batch_offsets.size(); ++j) {
+                        if (!skip) {
+                            const bool* valid_ptr = valid_data.empty()
+                                                        ? nullptr
+                                                        : valid_data.data() + j;
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    data_vec.data() + j,
+                                    valid_ptr,
+                                    nullptr,
+                                    1,
+                                    res + processed_size,
+                                    valid_res + processed_size,
+                                    values...);
+                        } else {
+                            // Chunk skipped by SkipIndex: apply valid mask,
+                            // then still drive the callback on a null batch so
+                            // cursor-tracking callbacks (which index
+                            // bitmap_input by batch position via their
+                            // processed_cursor) stay aligned — mirrors the
+                            // ProcessDataChunksForMultipleChunk skip branch.
+                            if (!valid_data.empty() && !valid_data[j]) {
+                                res[processed_size] =
+                                    valid_res[processed_size] = false;
+                            }
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1,
+                                    res + processed_size,
+                                    valid_res + processed_size,
+                                    values...);
+                        }
+                        processed_size++;
+                    }
                 }
                 return input->size();
             }
+            // Consecutive offsets frequently fall in the same chunk; keep the
+            // pinned chunk across iterations and only re-pin/resolve when the
+            // chunk id actually changes, avoiding a per-row GroupChunk pin +
+            // shared_ptr lookup on storage v2.
+            int64_t cached_chunk_id = -1;
+            std::optional<PinWrapper<Span<T>>> pw;
+            const T* chunk_base = nullptr;
+            const bool* chunk_valid_base = nullptr;
+            bool cached_skip = false;
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, offset);
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const T* data = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
+                if (chunk_id != cached_chunk_id) {
+                    pw.emplace(
+                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
+                    auto chunk = pw->get();
+                    chunk_base = chunk.data();
+                    chunk_valid_base = chunk.valid_data();
+                    // SkipIndex is keyed by chunk alone; evaluate it once per
+                    // chunk instead of once per row.
+                    cached_skip = skip_func &&
+                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_chunk_id = chunk_id;
                 }
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
+                const T* data = chunk_base + chunk_offset;
+                const bool* valid_data = chunk_valid_base != nullptr
+                                             ? chunk_valid_base + chunk_offset
+                                             : nullptr;
+                if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data,
                         valid_data,
@@ -832,20 +919,36 @@ class SegmentExpr : public Expr {
             }
             return input->size();
         } else {
-            // growing segment
+            // growing segment. Validity lives in chunked, append-only storage
+            // (ThreadSafeValidData) whose per-chunk buffers never move, so —
+            // like the sealed branch — keep the chunk base across iterations
+            // and re-resolve only when the chunk id changes.
+            int64_t cached_chunk_id = -1;
+            std::optional<PinWrapper<Span<T>>> pw;
+            const T* chunk_base = nullptr;
+            const bool* chunk_valid_base = nullptr;
+            bool cached_skip = false;
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const T* data = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
+                if (chunk_id != cached_chunk_id) {
+                    pw.emplace(
+                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
+                    auto chunk = pw->get();
+                    chunk_base = chunk.data();
+                    chunk_valid_base = chunk.valid_data();
+                    // SkipIndex is keyed by chunk alone; evaluate it once per
+                    // chunk instead of once per row.
+                    cached_skip = skip_func &&
+                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_chunk_id = chunk_id;
                 }
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
+                const T* data = chunk_base + chunk_offset;
+                const bool* valid_data = chunk_valid_base != nullptr
+                                             ? chunk_valid_base + chunk_offset
+                                             : nullptr;
+                if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data,
                         valid_data,
@@ -901,90 +1004,130 @@ class SegmentExpr : public Expr {
                           field_id_.get());
             }
 
-            // Batch process consecutive elements belonging to the same chunk
+            // The element ids arriving here come from
+            // RowOffsetsToElementOffsets, which emits each row's element ids
+            // CONSECUTIVELY ASCENDING. Exploit that: resolve (row, elem_idx)
+            // ONCE per run of consecutive ids inside one row, instead of one
+            // binary search + one chunk lookup + one ArrayView fetch per
+            // element. The run assumption is guarded per element (any id
+            // that is not the expected consecutive one simply starts a fresh
+            // run), so correctness never depends on the input being sorted.
             size_t processed_size = 0;
             size_t i = 0;
 
-            // Reuse these vectors to avoid repeated heap allocations
+            // Reuse these vectors to avoid repeated heap allocations.
+            // One entry per RUN (not per element): the run's row chunk
+            // offset, the run's first element index within the row, and the
+            // run length in elements.
             FixedVector<int32_t> offsets;
-            FixedVector<int32_t> elem_indices;
+            FixedVector<int32_t> first_elem_indices;
+            FixedVector<int32_t> run_lengths;
+
+            struct RunInfo {
+                int32_t row_id;
+                int32_t first_elem_idx;
+                int32_t length;
+            };
+            // Resolve the run starting at input position pos: one row
+            // resolution covers every consecutive element id of that row.
+            auto resolve_run = [&](size_t pos) -> RunInfo {
+                int32_t element_id = (*element_ids)[pos];
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
+                int64_t max_run =
+                    std::min<int64_t>(row.row_element_end - element_id,
+                                      element_ids->size() - pos);
+                int64_t run_len = 1;
+                while (run_len < max_run &&
+                       (*element_ids)[pos + run_len] == element_id + run_len) {
+                    ++run_len;
+                }
+                return {row.row_id,
+                        row.element_index,
+                        static_cast<int32_t>(run_len)};
+            };
 
             while (i < element_ids->size()) {
                 // Start of a new chunk batch
-                int64_t element_id = (*element_ids)[i];
-                auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
+                auto run = resolve_run(i);
                 auto [chunk_id, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, doc_id);
+                    segment_->get_chunk_by_offset(field_id_, run.row_id);
 
-                // Collect consecutive elements belonging to the same chunk
+                // Collect consecutive runs belonging to the same chunk
                 offsets.clear();
-                elem_indices.clear();
+                first_elem_indices.clear();
+                run_lengths.clear();
                 offsets.push_back(chunk_offset);
-                elem_indices.push_back(elem_idx);
+                first_elem_indices.push_back(run.first_elem_idx);
+                run_lengths.push_back(run.length);
 
                 size_t batch_start = i;
-                i++;
+                i += run.length;
 
-                // Look ahead for more elements in the same chunk
+                // Look ahead for more runs in the same chunk
                 while (i < element_ids->size()) {
-                    int64_t next_element_id = (*element_ids)[i];
-                    auto [next_doc_id, next_elem_idx] =
-                        array_offsets->ElementIDToRowID(next_element_id);
+                    auto next_run = resolve_run(i);
                     auto [next_chunk_id, next_chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, next_doc_id);
+                        segment_->get_chunk_by_offset(field_id_,
+                                                      next_run.row_id);
 
                     if (next_chunk_id != chunk_id) {
                         break;  // Different chunk, process current batch
                     }
 
                     offsets.push_back(next_chunk_offset);
-                    elem_indices.push_back(next_elem_idx);
-                    i++;
+                    first_elem_indices.push_back(next_run.first_elem_idx);
+                    run_lengths.push_back(next_run.length);
+                    i += next_run.length;
                 }
 
-                // Batch fetch all ArrayViews for this chunk
+                // Batch fetch ONE ArrayView per run (per row) in this chunk
                 auto pw = segment_->get_views_by_offsets<ArrayView>(
                     op_ctx_, field_id_, chunk_id, offsets);
 
                 auto [array_vec, valid_data] = pw.get();
 
-                // Process each element in this batch
+                const bool chunk_active =
+                    !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
+
+                // Process each run's elements in this batch
+                size_t result_idx = batch_start;
                 for (size_t j = 0; j < offsets.size(); j++) {
-                    size_t result_idx = batch_start + j;
+                    for (int32_t t = 0; t < run_lengths[j]; ++t, ++result_idx) {
+                        if (chunk_active) {
+                            // Extract element from ArrayView
+                            auto value =
+                                array_vec[j].template get_data<ElementType>(
+                                    first_elem_indices[j] + t);
+                            bool is_valid = !valid_data.data() || valid_data[j];
 
-                    if (!skip_func ||
-                        !skip_func(*skip_index, field_id_, chunk_id)) {
-                        // Extract element from ArrayView
-                        auto value =
-                            array_vec[j].template get_data<ElementType>(
-                                elem_indices[j]);
-                        bool is_valid = !valid_data.data() || valid_data[j];
-
-                        evaluate_batch.template operator()<FilterType::random>(
-                            &value,
-                            &is_valid,
-                            nullptr,
-                            1,
-                            res + result_idx,
-                            valid_res + result_idx,
-                            values...);
-                    } else {
-                        // Keep cursor-tracking evaluators aligned with offset input.
-                        if (valid_data.size() > j && !valid_data[j]) {
-                            res[result_idx] = valid_res[result_idx] = false;
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    &value,
+                                    &is_valid,
+                                    nullptr,
+                                    1,
+                                    res + result_idx,
+                                    valid_res + result_idx,
+                                    values...);
+                        } else {
+                            // Keep cursor-tracking evaluators aligned with
+                            // offset input.
+                            if (valid_data.size() > j && !valid_data[j]) {
+                                res[result_idx] = valid_res[result_idx] = false;
+                            }
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1,
+                                    res + result_idx,
+                                    valid_res + result_idx,
+                                    values...);
                         }
-                        evaluate_batch.template operator()<FilterType::random>(
-                            nullptr,
-                            nullptr,
-                            nullptr,
-                            1,
-                            res + result_idx,
-                            valid_res + result_idx,
-                            values...);
-                    }
 
-                    processed_size++;
+                        processed_size++;
+                    }
                 }
             }
             return processed_size;
@@ -998,16 +1141,30 @@ class SegmentExpr : public Expr {
 
             auto skip_index = segment_->GetSkipIndex();
             size_t processed_size = 0;
+            size_t i = 0;
 
-            for (size_t i = 0; i < element_ids->size(); i++) {
-                int64_t element_id = (*element_ids)[i];
+            // Same run exploitation as the sealed branch: element ids from
+            // RowOffsetsToElementOffsets list each row's elements
+            // consecutively ascending, so resolve the row and its range with
+            // one virtual call against a published offsets snapshot and pin
+            // the Array chunk ONCE per run instead of once per element. The
+            // consecutive-id guard below keeps this correct for arbitrary
+            // input orders.
+            while (i < element_ids->size()) {
+                int32_t element_id = (*element_ids)[i];
 
-                auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
+                const auto row = array_offsets->ElementIDToRowInfo(element_id);
+                int64_t max_run = std::min<int64_t>(
+                    row.row_element_end - element_id, element_ids->size() - i);
+                int64_t run_len = 1;
+                while (run_len < max_run &&
+                       (*element_ids)[i + run_len] == element_id + run_len) {
+                    ++run_len;
+                }
 
                 // Calculate chunk_id and chunk_offset for this doc
-                auto chunk_id = doc_id / size_per_chunk_;
-                auto chunk_offset = doc_id % size_per_chunk_;
+                auto chunk_id = row.row_id / size_per_chunk_;
+                auto chunk_offset = row.row_id % size_per_chunk_;
 
                 // Get the Array chunk (Growing segment stores Array, not ArrayView)
                 auto pw =
@@ -1019,36 +1176,44 @@ class SegmentExpr : public Expr {
                     valid_data += chunk_offset;
                 }
 
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
-                    // Extract element from Array
-                    auto value = array_ptr->get_data<ElementType>(elem_idx);
-                    bool is_valid = !valid_data || valid_data[0];
+                const bool chunk_active =
+                    !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
 
-                    evaluate_batch.template operator()<FilterType::random>(
-                        &value,
-                        &is_valid,
-                        nullptr,
-                        1,
-                        res + processed_size,
-                        valid_res + processed_size,
-                        values...);
-                } else {
-                    // Keep cursor-tracking evaluators aligned with offset input.
-                    if (valid_data && !valid_data[0]) {
-                        res[processed_size] = valid_res[processed_size] = false;
+                for (int64_t t = 0; t < run_len; ++t) {
+                    if (chunk_active) {
+                        // Extract element from Array
+                        auto value = array_ptr->get_data<ElementType>(
+                            row.element_index + t);
+                        bool is_valid = !valid_data || valid_data[0];
+
+                        evaluate_batch.template operator()<FilterType::random>(
+                            &value,
+                            &is_valid,
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
+                    } else {
+                        // Keep cursor-tracking evaluators aligned with offset
+                        // input.
+                        if (valid_data && !valid_data[0]) {
+                            res[processed_size] = valid_res[processed_size] =
+                                false;
+                        }
+                        evaluate_batch.template operator()<FilterType::random>(
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
                     }
-                    evaluate_batch.template operator()<FilterType::random>(
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        1,
-                        res + processed_size,
-                        valid_res + processed_size,
-                        values...);
-                }
 
-                processed_size++;
+                    processed_size++;
+                }
+                i += run_len;
             }
 
             return processed_size;
@@ -1884,18 +2049,61 @@ class SegmentExpr : public Expr {
                 *cached_index_chunk_valid_res_, elem_start, elem_count);
 
             current_index_chunk_pos_ = data_pos + batch_rows;
-        } else if (execute_all_at_once_) {
-            // Fast path: move cached bitmap directly, no copy
+        } else if (execute_all_at_once_ &&
+                   int64_t(cached_index_chunk_res_->size()) == active_count_ &&
+                   int64_t(cached_index_chunk_valid_res_->size()) ==
+                       active_count_) {
+            // Fast path: the cached bitmap lines up exactly with the rows
+            // this query emits, so move it out with no copy. The size guard
+            // keeps this branch under the same invariant as the slicing
+            // branch below: on a growing segment the interim index bitmap
+            // may run ahead of active_count_ under concurrent inserts (see
+            // issue #51237), and moving an oversized bitmap wholesale would
+            // hand downstream more rows than the batch. That case falls
+            // through to the slicing branch, which bounds by active_count_
+            // and asserts coverage.
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
             return std::make_shared<ColumnVector>(
                 std::move(*cached_index_chunk_res_),
                 std::move(*cached_index_chunk_valid_res_));
         } else {
-            // Normal index or row-level result: batch by rows directly
+            // Normal index or row-level result: batch by rows directly.
+            //
+            // Slice by active_count_ for the same reason as
+            // ProcessIndexChunksForValid(): the cached bitmap is
+            // segment-global (a scalar index always has exactly one chunk),
+            // while size_per_chunk_ is the raw-data chunk granularity
+            // (segcore.chunkRows) and is unrelated to it. On a sealed segment
+            // the two agree -- size_per_chunk() == get_row_count() -- which is
+            // why bounding by size_per_chunk_ has not broken yet; today only
+            // sealed segments reach here, because on growing segments
+            // HasIndex() is true only for vector/geometry fields and real
+            // geometry predicates take the dedicated branch in
+            // GISFunctionFilterExpr::EvalForIndexSegment(). The moment a
+            // scalar field gains an interim index on growing, or geometry is
+            // routed through ProcessIndexChunks, size_per_chunk_ would
+            // over-run the bitmap exactly as in issue #51237.
+            //
+            // The old third min term was also subtly wrong on its own: it
+            // clamped against the bitmap's FULL length rather than the length
+            // remaining after data_pos, so a bitmap shorter than the row count
+            // combined with data_pos > 0 made append() read past its end.
+            // Assert coverage instead, mirroring the sibling function.
             auto data_pos = current_index_chunk_pos_;
-            auto size =
-                std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                         int64_t(cached_index_chunk_res_->size()));
+            auto size = std::min(active_count_ - data_pos, batch_size_);
+            AssertInfo(
+                int64_t(cached_index_chunk_res_->size()) >= data_pos + size,
+                "index bitmap covers {} rows, batch needs rows [{}, {})",
+                cached_index_chunk_res_->size(),
+                data_pos,
+                data_pos + size);
+            AssertInfo(
+                int64_t(cached_index_chunk_valid_res_->size()) >=
+                    data_pos + size,
+                "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+                cached_index_chunk_valid_res_->size(),
+                data_pos,
+                data_pos + size);
 
             result.append(*cached_index_chunk_res_, data_pos, size);
             valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
@@ -1949,7 +2157,7 @@ class SegmentExpr : public Expr {
                             return ProcessIndexChunksForValid<std::string>();
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       "unsupported element type: {}",
                                       element_type);
                     }
@@ -2028,7 +2236,7 @@ class SegmentExpr : public Expr {
                                 use_index, input);
                         }
                         default:
-                            ThrowInfo(DataTypeInvalid,
+                            ThrowInfo(UnexpectedError,
                                       "unsupported element type: {}",
                                       element_type);
                     }
@@ -2143,13 +2351,28 @@ class SegmentExpr : public Expr {
             cached_index_chunk_id_ = 0;
         }
 
-        // Process current batch
+        // Process current batch.
+        //
+        // The cached bitmap is segment-global (a scalar index always has
+        // exactly one chunk), so slice it by the rows visible to this query
+        // (active_count_). Bounding by size_per_chunk_ would be wrong on a
+        // growing segment, where size_per_chunk_ is the raw-data chunk
+        // granularity (segcore.chunkRows) and unrelated to the index bitmap.
+        // A growing segment reaches this path through the geometry interim
+        // R-Tree index; its bitmap may also run ahead of active_count_ under
+        // concurrent inserts, so active_count_ -- not the bitmap size --
+        // decides how many rows to emit. See issue #51237.
         TargetBitmap valid_result;
         valid_result.set();
 
         auto data_pos = current_index_chunk_pos_;
-        auto size = std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                             int64_t(cached_index_chunk_valid_res_->size()));
+        auto size = std::min(active_count_ - data_pos, batch_size_);
+        AssertInfo(
+            int64_t(cached_index_chunk_valid_res_->size()) >= data_pos + size,
+            "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+            cached_index_chunk_valid_res_->size(),
+            data_pos,
+            data_pos + size);
 
         valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
 
@@ -2545,6 +2768,13 @@ class SegmentExpr : public Expr {
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
     bool pinned_index_initialized_{false};
 
+    // Snapshot of segment_->HasFieldData(field_id_) taken at construction, so
+    // that execution-path selection observes a stable view even if a concurrent
+    // reopen/load publishes a different segment state later. Consumed by
+    // expressions (e.g. bloom_match) that must fail closed when raw field data
+    // is unavailable and no cheap per-row index reverse lookup exists.
+    bool has_field_data_at_init_{false};
+
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
     int64_t num_index_chunk_{0};
@@ -2713,6 +2943,18 @@ class ExprSet {
 // Forward declaration for CreateTTLFieldFilterExpression
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context);
+
+// Evaluate expr_set batch by batch until the accumulated result covers
+// total_rows, then fold UNKNOWN (NULL) into FALSE (data &= valid) so a
+// consumer that reads only the data bits is null-rejecting by construction.
+// Shared by the whole-range consumers of expressions that cannot take offset
+// input: PhyIterativeFilterNode's non-native branch and boost scoring's
+// non-native filter fallback. `what` names the caller in error messages.
+TargetBitmap
+EvalExprSetOverAllBatches(ExprSet& expr_set,
+                          EvalCtx& eval_ctx,
+                          int64_t total_rows,
+                          const char* what);
 
 }  //namespace exec
 }  // namespace milvus

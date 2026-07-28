@@ -139,17 +139,15 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
+	// The shard leader cache is keyed by the cluster-unique collection id (issue #51533), so an
+	// alias/collection name is no longer a cache key. Evicting the affected collection id covers
+	// every name/alias that resolves to it; alias repoints and renames don't move a collection's
+	// shard leaders, so for those this is a harmless best-effort refresh. The names argument is
+	// kept only so the call sites (which still pass alias names for the meta-cache path) are
+	// untouched.
 	deprecateShardCaches := func(names ...string) {
-		seen := make(map[string]struct{}, len(names))
-		for _, name := range names {
-			if name == "" {
-				continue
-			}
-			if _, ok := seen[name]; ok {
-				continue
-			}
-			seen[name] = struct{}{}
-			node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+		if collectionID != UniqueID(0) {
+			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
 		}
 	}
 

@@ -24,6 +24,11 @@ type RootCoordCatalog interface {
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp, fieldModify bool) error
 	AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error
+	// Update applies a composite set of UpdateActions as a single atomic
+	// write (or, when the op count exceeds the txn size limit, via a
+	// caller-ordered chunked fallback). See kv/txn.Commit for the exact
+	// atomicity contract.
+	Update(ctx context.Context, ts typeutil.Timestamp, actions ...UpdateAction) error
 
 	CreatePartition(ctx context.Context, dbID int64, partition *model.Partition, ts typeutil.Timestamp) error
 	DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error

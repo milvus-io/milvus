@@ -216,11 +216,11 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
 
         auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
         if (!col_vec) {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "ElementFilterBitsNode result should be ColumnVector");
         }
         if (!col_vec->IsBitmap()) {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "ElementFilterBitsNode result should be bitmap");
         }
 
@@ -271,11 +271,11 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
             if (!col_vec) {
                 ThrowInfo(
-                    ExprInvalid,
+                    UnexpectedError,
                     "ElementFilterBitsNode result should be ColumnVector");
             }
             if (!col_vec->IsBitmap()) {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "ElementFilterBitsNode result should be bitmap");
             }
 

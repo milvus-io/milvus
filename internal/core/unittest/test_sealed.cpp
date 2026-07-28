@@ -179,8 +179,18 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
     }
 
     arrow::Result<std::vector<uint64_t>>
-    get_chunk_size() override {
+    get_chunk_estimated_size() override {
         return std::vector<uint64_t>{1};
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string&) override {
+        return std::vector<uint64_t>{1};
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return std::vector<std::vector<uint64_t>>{{1}};
     }
 
     arrow::Result<std::vector<uint64_t>>
@@ -5337,14 +5347,6 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
     ASSERT_EQ(published->runtime->json_indices.size(), 1);
     EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
     EXPECT_TRUE(sealed->HasJsonIndex(json));
-
-    sealed->DropJSONIndex(json, "a");
-    auto after_drop = sealed->TestGetPublishedStateSnapshot();
-    EXPECT_TRUE(after_drop->runtime->json_indices.empty());
-    EXPECT_FALSE(sealed->HasJsonIndex(json));
-
-    ASSERT_EQ(published->runtime->json_indices.size(), 1);
-    EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
 }
 
 TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
