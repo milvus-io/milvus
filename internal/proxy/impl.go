@@ -3802,17 +3802,18 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	storageMetricCollectionName := metricCollectionName(qt.schema, request.CollectionName)
 	if qt.storageCost.Valid {
+		storageMetricLabel := qt.getStorageMetricLabel()
 		metrics.TrackProxyCollectionMetricLabels(qt.GetCollectionID(), request.DbName, storageMetricCollectionName)
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			storageMetricLabel,
 			request.DbName,
 			storageMetricCollectionName,
 		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			storageMetricLabel,
 			request.DbName,
 			storageMetricCollectionName,
 		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)

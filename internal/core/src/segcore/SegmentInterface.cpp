@@ -48,25 +48,6 @@
 #include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
-namespace {
-
-void
-ObserveCompletedQueryStorageCost(
-    const SegmentInternalInterface& segment,
-    const proto::segcore::RetrieveResults& results) {
-    if (!segment.storage_usage_tracked()) {
-        return;
-    }
-    const auto& schema = segment.get_schema();
-    milvus::monitor::observe_core_query_scanned_bytes(
-        schema.db_name(),
-        schema.collection_name(),
-        "query",
-        results.scanned_total_bytes(),
-        results.scanned_remote_bytes());
-}
-
-}  // namespace
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
@@ -311,7 +292,6 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         get_entry_cost / 1000);
 
     milvus::futures::throwIfCancelled(cancel_token);
-    ObserveCompletedQueryStorageCost(*this, *results);
     return results;
 }
 
@@ -664,7 +644,6 @@ SegmentInternalInterface::Retrieve(
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
     milvus::futures::throwIfCancelled(cancel_token);
-    ObserveCompletedQueryStorageCost(*this, *results);
     return results;
 }
 
@@ -734,6 +713,15 @@ SegmentInternalInterface::get_real_count() const {
                "count result should match long data");
     AssertInfo(res->fields_data()[0].scalars().long_data().data_size() == 1,
                "count result should only have one row");
+    if (storage_usage_tracked()) {
+        const auto& schema = get_schema();
+        milvus::monitor::observe_core_query_scanned_bytes(
+            schema.db_name(),
+            schema.collection_name(),
+            "count",
+            res->scanned_total_bytes(),
+            res->scanned_remote_bytes());
+    }
     return res->fields_data()[0].scalars().long_data().data(0);
 }
 

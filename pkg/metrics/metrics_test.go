@@ -173,6 +173,86 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	assert.Greater(t, numEntitiesAfter, 0)
 }
 
+func TestCleanupProxyCollectionMetricsCountStorageSeries(t *testing.T) {
+	const (
+		nodeID          = int64(987654321)
+		dbName          = "count_metric_cleanup_db"
+		collection      = "count_metric_cleanup_collection"
+		otherCollection = "count_metric_cleanup_other_collection"
+	)
+	nodeIDStr := "987654321"
+
+	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, CountLabel, dbName, collection).Add(1)
+	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, dbName, collection).Add(2)
+	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, CountLabel, dbName, otherCollection).Add(3)
+	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, dbName, otherCollection).Add(4)
+
+	CleanupProxyCollectionMetrics(nodeID, dbName, collection)
+
+	targetLabels := prometheus.Labels{
+		nodeIDLabelName:   nodeIDStr,
+		msgTypeLabelName:  CountLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	}
+	otherLabels := prometheus.Labels{
+		nodeIDLabelName:   nodeIDStr,
+		msgTypeLabelName:  CountLabel,
+		databaseLabelName: dbName,
+		collectionName:    otherCollection,
+	}
+	assert.False(t, ProxyScannedRemoteMB.Delete(targetLabels))
+	assert.False(t, ProxyScannedTotalMB.Delete(targetLabels))
+	assert.True(t, ProxyScannedRemoteMB.Delete(otherLabels))
+	assert.True(t, ProxyScannedTotalMB.Delete(otherLabels))
+}
+
+func TestCleanupProxyDBMetricsStorageSeries(t *testing.T) {
+	const (
+		nodeID      = int64(987654322)
+		dbName      = "storage_metric_cleanup_db"
+		otherDBName = "storage_metric_cleanup_other_db"
+		collection  = "storage_metric_cleanup_collection"
+	)
+	nodeIDStr := "987654322"
+
+	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, QueryLabel, dbName, collection).Add(1)
+	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, dbName, collection).Add(2)
+	ProxyScannedRemoteMB.WithLabelValues(nodeIDStr, QueryLabel, otherDBName, collection).Add(3)
+	ProxyScannedTotalMB.WithLabelValues(nodeIDStr, CountLabel, otherDBName, collection).Add(4)
+
+	CleanupProxyDBMetrics(nodeID, dbName)
+
+	targetRemoteLabels := prometheus.Labels{
+		nodeIDLabelName:   nodeIDStr,
+		msgTypeLabelName:  QueryLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	}
+	targetTotalLabels := prometheus.Labels{
+		nodeIDLabelName:   nodeIDStr,
+		msgTypeLabelName:  CountLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	}
+	otherRemoteLabels := prometheus.Labels{
+		nodeIDLabelName:   nodeIDStr,
+		msgTypeLabelName:  QueryLabel,
+		databaseLabelName: otherDBName,
+		collectionName:    collection,
+	}
+	otherTotalLabels := prometheus.Labels{
+		nodeIDLabelName:   nodeIDStr,
+		msgTypeLabelName:  CountLabel,
+		databaseLabelName: otherDBName,
+		collectionName:    collection,
+	}
+	assert.False(t, ProxyScannedRemoteMB.Delete(targetRemoteLabels))
+	assert.False(t, ProxyScannedTotalMB.Delete(targetTotalLabels))
+	assert.True(t, ProxyScannedRemoteMB.Delete(otherRemoteLabels))
+	assert.True(t, ProxyScannedTotalMB.Delete(otherTotalLabels))
+}
+
 // TestDeletePartialMatch test deletes all metrics where the variable labels contain all of those
 // passed in as labels based on DeletePartialMatch API
 func TestDeletePartialMatch(t *testing.T) {

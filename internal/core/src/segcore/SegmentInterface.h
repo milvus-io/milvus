@@ -532,6 +532,10 @@ class SegmentInternalInterface : public SegmentInterface {
     // Bring in base class Retrieve overloads to avoid name hiding
     using SegmentInterface::Retrieve;
 
+    // Synchronous execution primitive. QueryNode user requests enter and
+    // publish operation metrics through the C AsyncRetrieve/
+    // AsyncRetrieveByOffsets boundary; internal callers may invoke this
+    // primitive directly without being counted as user queries.
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,

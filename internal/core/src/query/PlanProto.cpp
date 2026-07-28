@@ -984,6 +984,10 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
               plan_node_proto.ShortDebugString());
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
+    if (plan_node_proto.has_query() && plan_node_proto.query().is_count()) {
+        retrieve_plan->operation_ = RetrieveOperation::Count;
+    }
+
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
 
     retrieve_plan->plan_node_ = std::move(plan_node);

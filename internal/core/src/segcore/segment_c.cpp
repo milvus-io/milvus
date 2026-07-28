@@ -95,6 +95,38 @@
 #include <arrow/record_batch.h>
 #include <arrow/type.h>
 
+namespace {
+
+const char*
+RetrieveOperationLabel(milvus::query::RetrieveOperation operation) {
+    switch (operation) {
+        case milvus::query::RetrieveOperation::Query:
+            return "query";
+        case milvus::query::RetrieveOperation::Count:
+            return "count";
+    }
+    ThrowInfo(milvus::UnexpectedError, "unknown retrieve operation");
+}
+
+void
+ObserveCompletedAsyncRetrieveStorageCost(
+    const milvus::segcore::SegmentInterface& segment,
+    const milvus::proto::segcore::RetrieveResults& results,
+    milvus::query::RetrieveOperation operation) {
+    if (!segment.storage_usage_tracked()) {
+        return;
+    }
+    const auto& schema = segment.get_schema();
+    milvus::monitor::observe_core_query_scanned_bytes(
+        schema.db_name(),
+        schema.collection_name(),
+        RetrieveOperationLabel(operation),
+        results.scanned_total_bytes(),
+        results.scanned_remote_bytes());
+}
+
+}  // namespace
+
 //////////////////////////////    common interfaces    //////////////////////////////
 
 /**
@@ -643,6 +675,9 @@ AsyncRetrieve(CTraceContext c_trace,
                                   collection_ttl,
                                   entity_ttl_physical_time_us);
 
+            ObserveCompletedAsyncRetrieveStorageCost(
+                *segment, *retrieve_result, plan->operation_);
+
             auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
             read_lease.reset();
@@ -683,6 +718,9 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
+
+            ObserveCompletedAsyncRetrieveStorageCost(
+                *segment, *retrieve_result, plan->operation_);
 
             auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));

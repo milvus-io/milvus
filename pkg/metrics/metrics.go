@@ -55,6 +55,7 @@ const (
 	UpsertLabel      = "upsert"
 	SearchLabel      = "search"
 	QueryLabel       = "query"
+	CountLabel       = "count"
 	UpsertQueryLabel = "upsert_query"
 	DeleteQueryLabel = "delete_query"
 	ReQueryLabel     = "requery"
