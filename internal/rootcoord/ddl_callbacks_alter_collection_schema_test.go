@@ -222,10 +222,14 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		DataType: schemapb.DataType_Timestamptz,
 		Nullable: true,
 		DefaultValue: &schemapb.ValueField{
-			Data: &schemapb.ValueField_StringData{StringData: "not-a-timestamp"},
+			Data: &schemapb.ValueField_StringData{StringData: "1234"},
 		},
 	}, false))
-	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	invalidTimestampErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, invalidTimestampErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, invalidTimestampErr, "invalid default value of field, name: invalid_created_at_tz")
+	require.ErrorContains(t, invalidTimestampErr, "invalid timestamp string: '1234'. Does not match any known format")
+	require.NotContains(t, invalidTimestampErr.Error(), "%!w")
 
 	// case 3.4: multiple function schemas remain unsupported.
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
