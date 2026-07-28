@@ -26,6 +26,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
+func TestIsScalarIndexType_NGRAM(t *testing.T) {
+	assert.True(t, IsScalarIndexType(IndexNGRAM))
+}
+
 func TestIsScalarMmapIndex(t *testing.T) {
 	t.Run("inverted index", func(t *testing.T) {
 		assert.True(t, IsScalarMmapIndex(IndexINVERTED))
