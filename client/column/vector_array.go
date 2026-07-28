@@ -201,8 +201,7 @@ func (c *columnVectorArrayBase[T]) slice(start, end int) *columnVectorArrayBase[
 
 	valueStart, valueEnd := start, end
 	if c.nullable && !c.sparseMode {
-		valueStart = countValid(c.validData[:start])
-		valueEnd = valueStart + countValid(c.validData[start:end])
+		valueStart, valueEnd = compactValueRange(c.indexMapping, start, end)
 	}
 	result := &columnVectorArrayBase[T]{
 		name:        c.name,

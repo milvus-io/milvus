@@ -111,8 +111,7 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 
 	valueStart, valueEnd := start, end
 	if c.nullable && !c.sparseMode {
-		valueStart = countValid(c.validData[:start])
-		valueEnd = valueStart + countValid(c.validData[start:end])
+		valueStart, valueEnd = compactValueRange(c.indexMapping, start, end)
 	}
 	result := &genericColumnBase[T]{
 		name:       c.name,
@@ -128,6 +127,23 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 		}
 	}
 	return result
+}
+
+func compactValueRange(indexMapping []int, start, end int) (int, int) {
+	valueStart := 0
+	valueEnd := 0
+	found := false
+	for _, valueIndex := range indexMapping[start:end] {
+		if valueIndex < 0 {
+			continue
+		}
+		if !found {
+			valueStart = valueIndex
+			found = true
+		}
+		valueEnd = valueIndex + 1
+	}
+	return valueStart, valueEnd
 }
 
 func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {

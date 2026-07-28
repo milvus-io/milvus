@@ -239,6 +239,73 @@ func (s *ReadSuite) TestParseEmptyNullableStructArrayWithoutFieldData() {
 	s.Require().NoError(columns[0].ValidateNullable())
 }
 
+func (s *ReadSuite) TestHandleSearchResultSlicesCompactNullableFields() {
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("age").WithDataType(entity.FieldTypeInt64).WithNullable(true))
+	age := s.getInt64FieldData("age", []int64{10, 40})
+	age.ValidData = []bool{true, false, false, true}
+	resp := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 2,
+			Topks:      []int64{2, 2},
+			Scores:     []float32{0.4, 0.3, 0.2, 0.1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+				},
+			},
+			FieldsData: []*schemapb.FieldData{age},
+		},
+	}
+
+	results, err := s.client.handleSearchResult(schema, []string{"age"}, 2, resp)
+	s.Require().NoError(err)
+	s.Require().Len(results, 2)
+	for _, result := range results {
+		s.Require().NoError(result.Err)
+		s.Require().Len(result.Fields, 1)
+		s.Equal(2, result.Fields[0].Len())
+	}
+
+	value, err := results[0].Fields[0].Get(0)
+	s.Require().NoError(err)
+	s.EqualValues(10, value)
+	isNull, err := results[0].Fields[0].IsNull(1)
+	s.Require().NoError(err)
+	s.True(isNull)
+	isNull, err = results[1].Fields[0].IsNull(0)
+	s.Require().NoError(err)
+	s.True(isNull)
+	value, err = results[1].Fields[0].Get(1)
+	s.Require().NoError(err)
+	s.EqualValues(40, value)
+}
+
+func (s *ReadSuite) TestHandleSearchResultRejectsTruncatedFieldData() {
+	resp := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 2,
+			Topks:      []int64{1, 1},
+			Scores:     []float32{0.2, 0.1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+				},
+			},
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{1}),
+			},
+		},
+	}
+
+	results, err := s.client.handleSearchResult(s.schema, []string{"ID"}, 2, resp)
+	s.Require().NoError(err)
+	s.Require().Len(results, 2)
+	s.Error(results[0].Err)
+	s.Error(results[1].Err)
+}
+
 // TestSearch_TextMatch tests the text match search functionality.
 // It tests the minimum_should_match parameter in the expression.
 func (s *ReadSuite) TestSearch_TextMatch() {
