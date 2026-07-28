@@ -222,6 +222,28 @@ func (s *GenericBaseSuite) TestSlice() {
 		s.Require().NoError(err)
 		s.EqualValues(40, value)
 	})
+
+	s.Run("compacting slice does not mutate source", func() {
+		source := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     []int64{0, 10, 40},
+			nullable:   true,
+			validData:  []bool{false, true, true},
+			sparseMode: true,
+		}
+		s.Require().NoError(source.ValidateNullable())
+
+		sliced := source.Slice(0, -1)
+		sliced.CompactNullableValues()
+
+		value, err := source.Get(1)
+		s.Require().NoError(err)
+		s.EqualValues(10, value)
+		value, err = source.Get(2)
+		s.Require().NoError(err)
+		s.EqualValues(40, value)
+	})
 }
 
 func (s *GenericBaseSuite) TestFieldData() {

@@ -116,12 +116,12 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	result := &genericColumnBase[T]{
 		name:       c.name,
 		fieldType:  c.fieldType,
-		values:     c.values[valueStart:valueEnd],
+		values:     append([]T(nil), c.values[valueStart:valueEnd]...),
 		nullable:   c.nullable,
 		sparseMode: c.sparseMode,
 	}
 	if c.nullable {
-		result.validData = c.validData[start:end]
+		result.validData = append([]bool(nil), c.validData[start:end]...)
 		if !c.sparseMode {
 			_ = result.validateNullableCompact()
 		}
