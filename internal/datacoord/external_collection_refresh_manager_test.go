@@ -86,7 +86,7 @@ func addManagerOwnershipTask(
 	task *datapb.ExternalCollectionRefreshTask,
 	ownedSegmentIDs ...int64,
 ) {
-	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersion
+	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersionV1
 	task.OwnedSegmentIds = ownedSegmentIDs
 	assert.NoError(t, refreshMeta.AddTask(task))
 }
@@ -600,7 +600,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsLegacyT
 		JobId:        1,
 		CollectionId: 100,
 	})
-	assert.ErrorContains(t, err, "legacy external refresh task")
+	assert.ErrorContains(t, err, "unsupported ownership plan version 0")
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaseline(t *testing.T) {

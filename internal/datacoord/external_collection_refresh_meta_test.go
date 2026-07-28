@@ -18,15 +18,21 @@ package datacoord
 
 import (
 	"context"
+	"crypto/sha256"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ==================== Helper Functions for Meta Tests ====================
@@ -41,7 +47,190 @@ func createMetaTestRefreshMeta(t *testing.T, jobs []*datapb.ExternalCollectionRe
 	return meta
 }
 
+func createMetaTestRefreshResultStore(t *testing.T) (*externalCollectionRefreshResultStore, *storage.LocalChunkManager) {
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	return newExternalCollectionRefreshResultStore(chunkManager), chunkManager
+}
+
 // ==================== Test Functions ====================
+
+func TestExternalCollectionRefreshResultStore(t *testing.T) {
+	ctx := context.Background()
+	assert.Nil(t, newExternalCollectionRefreshResultStore(nil))
+	resultStore, chunkManager := createMetaTestRefreshResultStore(t)
+	task := &datapb.ExternalCollectionRefreshTask{
+		CollectionId: 100,
+		JobId:        1,
+		TaskId:       1001,
+		Version:      3,
+	}
+	updatedSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 7}
+
+	resultRef, err := resultStore.Save(ctx, task, []int64{1, 2}, []*datapb.SegmentInfo{updatedSegment})
+	assert.NoError(t, err)
+	assert.Len(t, resultRef.checksum, sha256.Size)
+	assert.Contains(t, resultRef.path, path.Join(externalRefreshTaskResultRoot, "100", "1", "1001", "3"))
+
+	updatedSegment.NumOfRows = 99
+	storedTask := &datapb.ExternalCollectionRefreshTask{
+		CollectionId:   task.GetCollectionId(),
+		JobId:          task.GetJobId(),
+		TaskId:         task.GetTaskId(),
+		Version:        task.GetVersion(),
+		ResultPath:     resultRef.path,
+		ResultChecksum: resultRef.checksum,
+	}
+	result, err := resultStore.Load(ctx, storedTask)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{1, 2}, result.GetKeptSegments())
+	assert.Equal(t, int64(7), result.GetUpdatedSegments()[0].GetNumOfRows())
+	cloneStoredTask := func() *datapb.ExternalCollectionRefreshTask {
+		return proto.Clone(storedTask).(*datapb.ExternalCollectionRefreshTask)
+	}
+
+	t.Run("checksum_mismatch", func(t *testing.T) {
+		checksum := append([]byte(nil), resultRef.checksum...)
+		checksum[0] ^= 0xff
+		corruptTask := cloneStoredTask()
+		corruptTask.ResultChecksum = checksum
+
+		_, err := resultStore.Load(ctx, corruptTask)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("identity_mismatch", func(t *testing.T) {
+		foreignTask := cloneStoredTask()
+		foreignTask.JobId = 2
+
+		_, err := resultStore.Load(ctx, foreignTask)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("invalid_reference", func(t *testing.T) {
+		emptyPathTask := cloneStoredTask()
+		emptyPathTask.ResultPath = ""
+		_, err := resultStore.Load(ctx, emptyPathTask)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+
+		shortChecksumTask := cloneStoredTask()
+		shortChecksumTask.ResultChecksum = []byte{1}
+		_, err = resultStore.Load(ctx, shortChecksumTask)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("read_failed", func(t *testing.T) {
+		missingTask := cloneStoredTask()
+		missingTask.ResultPath = path.Join(chunkManager.RootPath(), "missing.pb")
+		_, err := resultStore.Load(ctx, missingTask)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid_proto", func(t *testing.T) {
+		payload := []byte{0xff}
+		checksum := sha256.Sum256(payload)
+		invalidPath := path.Join(chunkManager.RootPath(), "invalid.pb")
+		assert.NoError(t, chunkManager.Write(ctx, invalidPath, payload))
+		invalidTask := cloneStoredTask()
+		invalidTask.ResultPath = invalidPath
+		invalidTask.ResultChecksum = checksum[:]
+
+		_, err := resultStore.Load(ctx, invalidTask)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("marshal_failed", func(t *testing.T) {
+		_, err := resultStore.Save(ctx, task, nil, []*datapb.SegmentInfo{{
+			ManifestPath: string([]byte{0xff}),
+		}})
+		assert.ErrorIs(t, err, merr.ErrSerializationFailed)
+	})
+
+	t.Run("remove", func(t *testing.T) {
+		assert.NoError(t, resultStore.Remove(ctx, ""))
+		removeTask := &datapb.ExternalCollectionRefreshTask{
+			CollectionId: 100,
+			JobId:        3,
+			TaskId:       3001,
+			Version:      1,
+		}
+		removeRef, err := resultStore.Save(ctx, removeTask, nil, nil)
+		assert.NoError(t, err)
+		assert.NoError(t, resultStore.Remove(ctx, removeRef.path))
+		exists, err := chunkManager.Exist(ctx, removeRef.path)
+		assert.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("remove_failed", func(t *testing.T) {
+		mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).
+			Return(merr.WrapErrIoFailed("result", errors.New("remove failed"))).
+			Build()
+		defer mockRemove.UnPatch()
+
+		err := resultStore.Remove(ctx, resultRef.path)
+		assert.Error(t, err)
+	})
+
+	t.Run("remove_job_prefix_failed", func(t *testing.T) {
+		mockRemovePrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).
+			Return(merr.WrapErrIoFailed("result", errors.New("remove prefix failed"))).
+			Build()
+		defer mockRemovePrefix.UnPatch()
+
+		err := resultStore.RemoveJob(ctx, 100, 10)
+		assert.Error(t, err)
+	})
+
+	t.Run("remove_job_root_failed", func(t *testing.T) {
+		rootTask := &datapb.ExternalCollectionRefreshTask{
+			CollectionId: 100,
+			JobId:        10,
+			TaskId:       10001,
+			Version:      1,
+		}
+		rootRef, err := resultStore.Save(ctx, rootTask, nil, nil)
+		assert.NoError(t, err)
+		assert.NoError(t, resultStore.Remove(ctx, rootRef.path))
+
+		mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).
+			Return(merr.WrapErrIoFailed("result", errors.New("remove root failed"))).
+			Build()
+		defer mockRemove.UnPatch()
+
+		err = resultStore.RemoveJob(ctx, 100, 10)
+		assert.Error(t, err)
+	})
+
+	t.Run("remove_job_prefix", func(t *testing.T) {
+		secondTask := &datapb.ExternalCollectionRefreshTask{
+			CollectionId: 100,
+			JobId:        1,
+			TaskId:       1002,
+			Version:      1,
+		}
+		secondRef, err := resultStore.Save(ctx, secondTask, nil, nil)
+		assert.NoError(t, err)
+		otherJobTask := &datapb.ExternalCollectionRefreshTask{
+			CollectionId: 100,
+			JobId:        2,
+			TaskId:       2001,
+			Version:      1,
+		}
+		otherJobRef, err := resultStore.Save(ctx, otherJobTask, nil, nil)
+		assert.NoError(t, err)
+
+		assert.NoError(t, resultStore.RemoveJob(ctx, 100, 1))
+		firstExists, err := chunkManager.Exist(ctx, resultRef.path)
+		assert.NoError(t, err)
+		assert.False(t, firstExists)
+		secondExists, err := chunkManager.Exist(ctx, secondRef.path)
+		assert.NoError(t, err)
+		assert.False(t, secondExists)
+		otherJobExists, err := chunkManager.Exist(ctx, otherJobRef.path)
+		assert.NoError(t, err)
+		assert.True(t, otherJobExists)
+	})
+}
 
 func TestExternalCollectionRefreshMeta_NewMeta(t *testing.T) {
 	ctx := context.Background()
@@ -645,6 +834,110 @@ func TestExternalCollectionRefreshMeta_GetCommittedTasksByJobIDMissingTask(t *te
 	assert.ErrorContains(t, err, "references missing task 1001")
 }
 
+func TestExternalCollectionRefreshMeta_GetCommittedTaskResultsByJobID(t *testing.T) {
+	newJob := func() []*datapb.ExternalCollectionRefreshJob {
+		return []*datapb.ExternalCollectionRefreshJob{{
+			JobId:        1,
+			CollectionId: 100,
+			TaskIds:      []int64{1001},
+		}}
+	}
+
+	t.Run("job_not_found", func(t *testing.T) {
+		meta := createMetaTestRefreshMeta(t, nil, nil)
+		_, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.Error(t, err)
+	})
+
+	t.Run("reference_without_storage_version", func(t *testing.T) {
+		task := &datapb.ExternalCollectionRefreshTask{
+			TaskId:     1001,
+			JobId:      1,
+			ResultPath: "result.pb",
+		}
+		meta := createMetaTestRefreshMeta(t, newJob(), []*datapb.ExternalCollectionRefreshTask{task})
+
+		_, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("version_two_inline_result", func(t *testing.T) {
+		task := &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			ResultReady:          true,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+			KeptSegments:         []int64{1},
+		}
+		meta := createMetaTestRefreshMeta(t, newJob(), []*datapb.ExternalCollectionRefreshTask{task})
+
+		_, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("unpublished_external_result", func(t *testing.T) {
+		task := &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			ResultStorageVersion: externalRefreshTaskResultStorageVersion,
+		}
+		meta := createMetaTestRefreshMeta(t, newJob(), []*datapb.ExternalCollectionRefreshTask{task})
+
+		_, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("missing_result_store", func(t *testing.T) {
+		task := &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			ResultReady:          true,
+			ResultStorageVersion: externalRefreshTaskResultStorageVersion,
+			ResultPath:           "result.pb",
+			ResultChecksum:       make([]byte, sha256.Size),
+		}
+		meta := createMetaTestRefreshMeta(t, newJob(), []*datapb.ExternalCollectionRefreshTask{task})
+
+		_, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.ErrorContains(t, err, "unconfigured result store")
+	})
+
+	t.Run("load_failed", func(t *testing.T) {
+		resultStore, chunkManager := createMetaTestRefreshResultStore(t)
+		task := &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			ResultReady:          true,
+			ResultStorageVersion: externalRefreshTaskResultStorageVersion,
+			ResultPath:           path.Join(chunkManager.RootPath(), "missing.pb"),
+			ResultChecksum:       make([]byte, sha256.Size),
+		}
+		catalog := &stubCatalog{jobs: newJob(), tasks: []*datapb.ExternalCollectionRefreshTask{task}}
+		meta, err := newExternalCollectionRefreshMeta(
+			context.Background(),
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		_, err = meta.GetCommittedTaskResultsByJobID(1)
+		assert.Error(t, err)
+	})
+
+	t.Run("unsupported_storage_version", func(t *testing.T) {
+		task := &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			ResultReady:          true,
+			ResultStorageVersion: 99,
+		}
+		meta := createMetaTestRefreshMeta(t, newJob(), []*datapb.ExternalCollectionRefreshTask{task})
+
+		_, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.ErrorContains(t, err, "unsupported result storage version 99")
+	})
+}
+
 func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 	ctx := context.Background()
 
@@ -723,6 +1016,54 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		// Should not error if job doesn't exist
 		err := meta.DropJob(ctx, 999)
 		assert.NoError(t, err)
+	})
+
+	t.Run("removes_external_result_prefix", func(t *testing.T) {
+		resultStore, chunkManager := createMetaTestRefreshResultStore(t)
+		job := &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100}
+		catalog := &stubCatalog{jobs: []*datapb.ExternalCollectionRefreshJob{job}}
+		meta, err := newExternalCollectionRefreshMeta(
+			ctx,
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		orphanPath := path.Join(
+			chunkManager.RootPath(),
+			externalRefreshTaskResultRoot,
+			"100",
+			"1",
+			"1001",
+			"1",
+			"orphan.pb",
+		)
+		assert.NoError(t, chunkManager.Write(ctx, orphanPath, []byte("orphan")))
+
+		assert.NoError(t, meta.DropJob(ctx, 1))
+		exists, err := chunkManager.Exist(ctx, orphanPath)
+		assert.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("result_cleanup_failure_is_best_effort", func(t *testing.T) {
+		resultStore, _ := createMetaTestRefreshResultStore(t)
+		job := &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100}
+		catalog := &stubCatalog{jobs: []*datapb.ExternalCollectionRefreshJob{job}}
+		meta, err := newExternalCollectionRefreshMeta(
+			ctx,
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		mockRemovePrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).
+			Return(merr.WrapErrIoFailed("result", errors.New("remove prefix failed"))).
+			Build()
+		defer mockRemovePrefix.UnPatch()
+
+		assert.NoError(t, meta.DropJob(ctx, 1))
+		assert.Nil(t, meta.GetJob(1))
 	})
 }
 
@@ -969,6 +1310,202 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		assert.Empty(t, task.GetUpdatedSegments())
 	})
 
+	t.Run("stores_version_two_result_outside_task_metadata", func(t *testing.T) {
+		resultStore, chunkManager := createMetaTestRefreshResultStore(t)
+		jobs := []*datapb.ExternalCollectionRefreshJob{{
+			JobId:        1,
+			CollectionId: 100,
+			TaskIds:      []int64{1001},
+		}}
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			Version:              3,
+			State:                indexpb.JobState_JobStateInProgress,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+		}}
+		catalog := &stubCatalog{jobs: jobs, tasks: tasks}
+		meta, err := newExternalCollectionRefreshMeta(
+			context.Background(),
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		updatedSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 7}
+		err = meta.UpdateTaskResult(
+			1001,
+			indexpb.JobState_JobStateFinished,
+			"",
+			[]int64{1, 2},
+			[]*datapb.SegmentInfo{updatedSegment},
+		)
+		assert.NoError(t, err)
+
+		header := meta.GetTask(1001)
+		assert.Equal(t, externalRefreshTaskResultStorageVersion, header.GetResultStorageVersion())
+		assert.NotEmpty(t, header.GetResultPath())
+		assert.Len(t, header.GetResultChecksum(), sha256.Size)
+		assert.Empty(t, header.GetKeptSegments())
+		assert.Empty(t, header.GetUpdatedSegments())
+		exists, err := chunkManager.Exist(context.Background(), header.GetResultPath())
+		assert.NoError(t, err)
+		assert.True(t, exists)
+
+		updatedSegment.NumOfRows = 99
+		resultTasks, err := meta.GetCommittedTaskResultsByJobID(1)
+		assert.NoError(t, err)
+		assert.Len(t, resultTasks, 1)
+		assert.Equal(t, []int64{1, 2}, resultTasks[0].GetKeptSegments())
+		assert.Equal(t, int64(7), resultTasks[0].GetUpdatedSegments()[0].GetNumOfRows())
+
+		resultPath := header.GetResultPath()
+		assert.NoError(t, meta.ClearTaskResult(1001))
+		cleared := meta.GetTask(1001)
+		assert.True(t, cleared.GetResultReady())
+		assert.Zero(t, cleared.GetResultStorageVersion())
+		assert.Empty(t, cleared.GetResultPath())
+		assert.Empty(t, cleared.GetResultChecksum())
+		exists, err = chunkManager.Exist(context.Background(), resultPath)
+		assert.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("object_write_failed_does_not_update_catalog", func(t *testing.T) {
+		resultStore, _ := createMetaTestRefreshResultStore(t)
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInProgress,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+		}}
+		catalog := &stubCatalog{tasks: tasks}
+		meta, err := newExternalCollectionRefreshMeta(
+			context.Background(),
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		mockWrite := mockey.Mock((*storage.LocalChunkManager).Write).
+			Return(merr.WrapErrIoFailed("result", errors.New("write failed"))).
+			Build()
+		defer mockWrite.UnPatch()
+		saveCalls := 0
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+			To(func(_ context.Context, _ *datapb.ExternalCollectionRefreshTask) error {
+				saveCalls++
+				return nil
+			}).Build()
+		defer mockSave.UnPatch()
+
+		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", []int64{1}, nil)
+		assert.Error(t, err)
+		assert.Zero(t, saveCalls)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+		assert.Empty(t, meta.GetTask(1001).GetResultPath())
+	})
+
+	t.Run("version_two_requires_result_store", func(t *testing.T) {
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInProgress,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+		}}
+		meta := createMetaTestRefreshMeta(t, nil, tasks)
+
+		err := meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil)
+		assert.ErrorContains(t, err, "unconfigured result store")
+	})
+
+	t.Run("rejects_unknown_ownership_version", func(t *testing.T) {
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInProgress,
+			OwnershipPlanVersion: 99,
+		}}
+		meta := createMetaTestRefreshMeta(t, nil, tasks)
+
+		err := meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil)
+		assert.ErrorContains(t, err, "unsupported ownership plan version 99")
+	})
+
+	t.Run("rejects_result_if_task_version_changes_during_write", func(t *testing.T) {
+		resultStore, _ := createMetaTestRefreshResultStore(t)
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			Version:              1,
+			State:                indexpb.JobState_JobStateInProgress,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+		}}
+		catalog := &stubCatalog{tasks: tasks}
+		meta, err := newExternalCollectionRefreshMeta(
+			context.Background(),
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		mockWrite := mockey.Mock((*storage.LocalChunkManager).Write).
+			To(func(_ context.Context, _ string, _ []byte) error {
+				return meta.UpdateTaskVersion(1001, 10)
+			}).Build()
+		defer mockWrite.UnPatch()
+
+		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil)
+		assert.ErrorContains(t, err, "changed while persisting result")
+		assert.Equal(t, int64(2), meta.GetTask(1001).GetVersion())
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+		assert.Empty(t, meta.GetTask(1001).GetResultPath())
+	})
+
+	t.Run("catalog_failure_leaves_external_result_for_job_gc", func(t *testing.T) {
+		resultStore, chunkManager := createMetaTestRefreshResultStore(t)
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			Version:              1,
+			State:                indexpb.JobState_JobStateInProgress,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+		}}
+		catalog := &stubCatalog{tasks: tasks}
+		meta, err := newExternalCollectionRefreshMeta(
+			context.Background(),
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+			Return(errors.New("save error")).
+			Build()
+		defer mockSave.UnPatch()
+
+		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", []int64{1}, nil)
+		assert.Error(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+		assert.Empty(t, meta.GetTask(1001).GetResultPath())
+
+		prefix := path.Join(
+			chunkManager.RootPath(),
+			externalRefreshTaskResultRoot,
+			"100",
+			"1",
+		) + "/"
+		paths, _, err := storage.ListAllChunkWithPrefix(context.Background(), chunkManager, prefix, true)
+		assert.NoError(t, err)
+		assert.Len(t, paths, 1)
+	})
+
 	t.Run("task_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
@@ -1032,6 +1569,46 @@ func TestExternalCollectionRefreshMeta_ClearTaskResultsByJobID_PartialFailure(t 
 	assert.Empty(t, meta.GetTask(1001).GetUpdatedSegments())
 	assert.Equal(t, []int64{2}, meta.GetTask(1002).GetKeptSegments())
 	assert.Len(t, meta.GetTask(1002).GetUpdatedSegments(), 1)
+}
+
+func TestExternalCollectionRefreshMeta_ClearExternalTaskResultBestEffort(t *testing.T) {
+	newTask := func() *datapb.ExternalCollectionRefreshTask {
+		return &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			State:                indexpb.JobState_JobStateFinished,
+			ResultReady:          true,
+			ResultStorageVersion: externalRefreshTaskResultStorageVersion,
+			ResultPath:           "result.pb",
+			ResultChecksum:       make([]byte, sha256.Size),
+		}
+	}
+
+	t.Run("missing_store", func(t *testing.T) {
+		meta := createMetaTestRefreshMeta(t, nil, []*datapb.ExternalCollectionRefreshTask{newTask()})
+
+		assert.NoError(t, meta.ClearTaskResult(1001))
+		assert.Empty(t, meta.GetTask(1001).GetResultPath())
+	})
+
+	t.Run("remove_failed", func(t *testing.T) {
+		resultStore, _ := createMetaTestRefreshResultStore(t)
+		catalog := &stubCatalog{tasks: []*datapb.ExternalCollectionRefreshTask{newTask()}}
+		meta, err := newExternalCollectionRefreshMeta(
+			context.Background(),
+			catalog,
+			withExternalCollectionRefreshResultStore(resultStore),
+		)
+		assert.NoError(t, err)
+
+		mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).
+			Return(merr.WrapErrIoFailed("result", errors.New("remove failed"))).
+			Build()
+		defer mockRemove.UnPatch()
+
+		assert.NoError(t, meta.ClearTaskResult(1001))
+		assert.Empty(t, meta.GetTask(1001).GetResultPath())
+	})
 }
 
 func TestExternalCollectionRefreshMeta_UpdateTaskProgress(t *testing.T) {
