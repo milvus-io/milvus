@@ -3232,6 +3232,30 @@ func TestGenerateExpressionTemplate(t *testing.T) {
 		assert.Nil(t, arrays[1].GetData())
 	})
 
+	t.Run("invalid array element after valid element", func(t *testing.T) {
+		_, err := generateExpressionTemplate(map[string]interface{}{
+			"value": []interface{}{float64(1), nil},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("invalid nested array element", func(t *testing.T) {
+		_, err := generateExpressionTemplate(map[string]interface{}{
+			"value": []interface{}{
+				[]interface{}{float64(1)},
+				[]interface{}{nil},
+			},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("unmarshalable mixed array element", func(t *testing.T) {
+		_, err := generateExpressionTemplate(map[string]interface{}{
+			"value": []interface{}{float64(1), "two", func() {}},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
 	for name, value := range map[string]interface{}{
 		"null":              nil,
 		"object":            map[string]interface{}{"nested": "value"},
