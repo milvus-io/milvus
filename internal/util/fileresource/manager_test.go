@@ -233,7 +233,7 @@ func (suite *SyncManagerSuite) TestSync_UpdateAndRemoveNotifyListener() {
 func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersion() {
 	mockey.PatchConvey("failed analyzer update keeps version retryable", suite.T(), func() {
 		expectedErr := errors.New("mock analyzer update failed")
-		mockey.Mock(analyzer.UpdateGlobalResourceInfo).Return(expectedErr).Build()
+		mocker := mockey.Mock(analyzer.UpdateGlobalResourceInfo).Return(expectedErr).Build()
 
 		resources := []*internalpb.FileResourceInfo{
 			{Id: 1, Name: "test.file", Path: "/storage/test.file"},
@@ -243,6 +243,16 @@ func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersi
 		err := suite.manager.Sync(1, resources)
 		suite.ErrorIs(err, expectedErr)
 		suite.Equal(uint64(0), suite.manager.GetVersion())
+
+		// the same version is retried and reaches the analyzer again, re-downloading the resource
+		suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil).Once()
+		mocker.Return(nil)
+
+		suite.Require().NoError(suite.manager.Sync(1, resources))
+		suite.Equal(uint64(1), suite.manager.GetVersion())
+		content, err := os.ReadFile(path.Join(suite.tempDir, "1", "test.file"))
+		suite.NoError(err)
+		suite.Equal("test content", string(content))
 	})
 }
 
