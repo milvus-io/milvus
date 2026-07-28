@@ -244,6 +244,23 @@ func (s *GenericBaseSuite) TestSlice() {
 		s.Require().NoError(err)
 		s.EqualValues(40, value)
 	})
+
+	s.Run("empty slice preserves initialized storage", func() {
+		source := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     []int64{10},
+			nullable:   true,
+			validData:  []bool{true},
+			sparseMode: true,
+		}
+
+		sliced := source.slice(0, 0)
+		s.NotNil(sliced.values)
+		s.Empty(sliced.values)
+		s.NotNil(sliced.validData)
+		s.Empty(sliced.validData)
+	})
 }
 
 func (s *GenericBaseSuite) TestFieldData() {
