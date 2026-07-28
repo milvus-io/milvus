@@ -508,6 +508,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
+	segment10 := newTestExternalRefreshSegment(10, 100, 7)
+	segment10.SchemaVersion = 1
+	segment20 := newTestExternalRefreshSegment(20, 100, 7)
+	segment20.SchemaVersion = 1
+
 	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1001,
 		JobId:           1,
@@ -515,7 +520,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
 		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+		UpdatedSegments: []*datapb.SegmentInfo{segment10},
 	}, 1)
 	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:          1002,
@@ -523,7 +528,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
 		ResultReady:     true,
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
+		UpdatedSegments: []*datapb.SegmentInfo{segment20},
 	}, 2)
 	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
@@ -618,15 +623,16 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsCrossTa
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsLegacyTask(t *testing.T) {
 	ctx := context.Background()
 	refreshMeta := createTestRefreshMeta(t)
-	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
-		TaskId:       1001,
-		JobId:        1,
-		CollectionId: 100,
-		State:        indexpb.JobState_JobStateFinished,
-		ResultReady:  true,
-	})
-	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
-	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
+	mockTasks := mockey.Mock((*externalCollectionRefreshMeta).GetCommittedTaskResultsByJobID).
+		Return([]*datapb.ExternalCollectionRefreshTask{{
+			TaskId:       1001,
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateFinished,
+			ResultReady:  true,
+		}}, nil).
+		Build()
+	defer mockTasks.UnPatch()
 
 	mgr := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
 	err := mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
@@ -670,6 +676,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNoTasks
 	catalog := &stubCatalog{}
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
+	publishManagerTestTasks(t, refreshMeta, 1, 100)
 
 	mgr := &externalCollectionRefreshManager{
 		refreshMeta: refreshMeta,
@@ -689,13 +696,14 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:       1001,
 		JobId:        1,
 		CollectionId: 100,
 		State:        indexpb.JobState_JobStateFinished,
 		ResultReady:  true,
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	mt := &meta{
 		catalog:     catalog,
@@ -721,18 +729,24 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsSkipsNilUpdate
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
-		TaskId:       1001,
-		JobId:        1,
-		CollectionId: 100,
-		State:        indexpb.JobState_JobStateFinished,
-		ResultReady:  true,
-		UpdatedSegments: []*datapb.SegmentInfo{
-			nil,
-			newTestExternalRefreshSegment(10, 100, 7),
-		},
-	})
-	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
+	segment10 := newTestExternalRefreshSegment(10, 100, 7)
+	segment10.SchemaVersion = 1
+
+	mockTasks := mockey.Mock((*externalCollectionRefreshMeta).GetCommittedTaskResultsByJobID).
+		Return([]*datapb.ExternalCollectionRefreshTask{{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateFinished,
+			ResultReady:          true,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+			UpdatedSegments: []*datapb.SegmentInfo{
+				nil,
+				segment10,
+			},
+		}}, nil).
+		Build()
+	defer mockTasks.UnPatch()
 
 	mt := &meta{
 		catalog:     catalog,
@@ -1055,7 +1069,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSchemaV
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:        1001,
 		JobId:         1,
 		CollectionId:  100,
@@ -1076,7 +1090,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSchemaV
 				}},
 			}},
 		}},
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	mt := &meta{
 		catalog:     catalog,
@@ -1109,7 +1124,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSegment
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
 		TaskId:        1001,
 		JobId:         1,
 		CollectionId:  100,
@@ -1122,7 +1137,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsSegment
 			NumOfRows:     7,
 			SchemaVersion: 3,
 		}},
-	}))
+	})
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	mt := &meta{
 		catalog:     catalog,
