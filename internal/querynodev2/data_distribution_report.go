@@ -137,6 +137,7 @@ func buildSegmentVersionInfo(s segments.Segment) *querypb.SegmentVersionInfo {
 		JsonStatsInfo: s.GetFieldJSONIndexStats(),
 		ManifestPath:  s.LoadInfo().GetManifestPath(),
 		DataVersion:   proto.Int32(s.LoadInfo().GetDataVersion()),
+		MemSize:       s.MemSize(),
 	}
 }
 
