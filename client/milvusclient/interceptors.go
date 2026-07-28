@@ -69,12 +69,16 @@ type clientRequestIDKeyType struct{}
 // trace.TraceID.String()); NewClientRequestID generates a conforming one. An invalid value
 // is dropped rather than sent, because the server would silently ignore it anyway.
 //
-// This is opt-in by design. The header is NOT sent by default because of how the server
-// consumes it: pkg/tracer/client_request_id_propagator.go builds a remote span context
-// with no sampled flag, and the server's ParentBased sampler maps an unsampled remote
-// parent to NeverSample. So a request carrying client_request_id is excluded from trace
-// sampling regardless of trace.sampleFraction. Use this for log correlation; it is not a
-// substitute for W3C traceparent propagation.
+// This is opt-in by design, because the SDK cannot assume what the server does with the
+// header. Servers that predate the clientRequestIDSampler fix turn it into an unsampled
+// remote parent, which their ParentBased sampler maps to NeverSample -- so on those, a
+// request carrying this header is excluded from tracing entirely, whatever
+// trace.sampleFraction says. Fixed servers sample it as a root span, so the ratio applies
+// normally. Sending it unconditionally would therefore silently disable tracing against
+// any older cluster.
+//
+// Either way this is for log correlation, not a substitute for W3C traceparent
+// propagation: it carries no sampling decision and no parent span.
 func WithClientRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, clientRequestIDKeyType{}, id)
 }

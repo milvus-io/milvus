@@ -65,6 +65,7 @@ GET    /_telemetry/clients/{clientId}           - Metrics for one client
 GET    /_telemetry/clients/{clientId}/config    - Ask a client for its config (async)
 GET    /_telemetry/clients/{clientId}/history   - Ask a client for latency history (async)
 POST   /_telemetry/commands                     - Push a command to clients
+GET    /_telemetry/commands/{commandId}/reply   - Fetch a client's reply to a command
 DELETE /_telemetry/commands/{commandId}         - Delete a command
 GET    /telemetry                               - WebUI dashboard
 ```
@@ -367,17 +368,36 @@ REST API endpoints for WebUI and external integrations.
 | `/_telemetry/clients/{clientId}/config` | GET | Push `get_config`; returns a command ID |
 | `/_telemetry/clients/{clientId}/history` | GET | Push `show_latency_history`; `?start_time=`, `?end_time=`, `?detail=` |
 | `/_telemetry/commands` | POST | Push an arbitrary command |
+| `/_telemetry/commands/{commandId}/reply` | GET | Fetch a client's reply; `?client_id=`, `?wait=` |
 | `/_telemetry/commands/{commandId}` | DELETE | Remove a command |
 
 **Authentication:** Basic Auth via `TelemetryAuthMiddleware`, active only when
 `common.security.authorizationEnabled` is set. No RBAC.
 
-**Asynchrony.** The `/config` and `/history` endpoints are fire-and-forget: they push a
-command and immediately return `{"command_id": ..., "status": "pending"}`. The result
-arrives with the client's next heartbeat (up to one `HeartbeatInterval` later) and is
-stored as a `StoredCommandReply`. Callers read it back from `GET /_telemetry/clients`,
-matching on `command_id` in the `command_replies` array. There is no dedicated
-"fetch reply by command ID" endpoint.
+**Asynchrony.** Commands are answered on the client's next heartbeat, so any endpoint that
+pulls data from a client is inherently asynchronous. `/config`, `/history` and the
+command-reply endpoint share one response shape:
+
+```json
+{"command_id": "...", "client_id": "...", "status": "pending" | "done", "reply": { ... }}
+```
+
+Callers branch on `status` and read `reply` when it is `done`. `pending` is returned with
+HTTP 200, not an error: a reply that has not arrived is indistinguishable from one that
+never will, since replies are also evicted once a client accumulates more than 50.
+
+Two ways to collect a result:
+
+- **Synchronous** — pass `?wait=30s` to `/config`, `/history`, or the reply endpoint. The
+  proxy polls until the reply lands or the budget expires. Waits are clamped to 90s and
+  bounded by the request context; expiry is reported as `pending`.
+- **Deferred** — push without `wait`, keep the returned `command_id`, and fetch it later
+  from `/_telemetry/commands/{commandId}/reply`. Passing `?client_id=` makes that a
+  targeted lookup instead of a scan of all clients.
+
+Replies are also visible in the `command_replies` array of `GET /_telemetry/clients`,
+which is how the WebUI polls; on the wire they are JSON-encoded into
+`ClientInfo.Reserved["command_replies"]` rather than carried in a dedicated proto field.
 
 ### Heartbeat Protocol
 
@@ -479,8 +499,10 @@ provides:
 - **Server Compatibility:** Old clients simply never heartbeat; they appear only through
   their `Connect` call, not in telemetry.
 - **Client Compatibility:** Against a server without `ClientTelemetryService`, the heartbeat
-  fails with `codes.Unimplemented`. Telemetry is best-effort and the failure is not
-  surfaced through the normal API surface.
+  fails with `codes.Unimplemented`. The client latches telemetry off and stops the heartbeat
+  loop rather than retrying a call that can never succeed. Because telemetry is best-effort
+  and the `client/` module carries no logger, the failure is not raised through the normal
+  API; inspect it with `ClientTelemetryManager.IsSupported()` and `LastHeartbeatError()`.
 
 ## Implementation Status
 
