@@ -36,6 +36,8 @@ const NullNodeID = -1
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
+	// GetPendingTaskCount returns tasks that are eligible for dispatch now;
+	// tasks waiting for their retry backoff deadline are excluded.
 	GetPendingTaskCount() int
 
 	Start()
@@ -125,7 +127,11 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 }
 
 func (s *globalTaskScheduler) GetPendingTaskCount() int {
-	return s.pendingTasks.TaskCount()
+	now := time.Now()
+	return s.pendingTasks.TaskCountBy(func(task Task) bool {
+		backoff, ok := s.backoffs.Get(task.GetTaskID())
+		return !ok || !now.Before(backoff.notBefore)
+	})
 }
 
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {

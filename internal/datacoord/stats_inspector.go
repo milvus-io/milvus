@@ -62,6 +62,9 @@ type statsInspector struct {
 	handler             Handler
 	compactionInspector CompactionInspector
 	ievm                IndexEngineVersionManager
+
+	lastJSONStatsTrigger int64
+	jsonStatsTaskCount   int
 }
 
 func newStatsInspector(ctx context.Context,
@@ -74,55 +77,24 @@ func newStatsInspector(ctx context.Context,
 ) *statsInspector {
 	ctx, cancel := context.WithCancel(ctx)
 	return &statsInspector{
-		ctx:                 ctx,
-		cancel:              cancel,
-		loopWg:              sync.WaitGroup{},
-		mt:                  mt,
-		scheduler:           scheduler,
-		allocator:           allocator,
-		handler:             handler,
-		compactionInspector: compactionInspector,
-		ievm:                ievm,
+		ctx:                  ctx,
+		cancel:               cancel,
+		loopWg:               sync.WaitGroup{},
+		mt:                   mt,
+		scheduler:            scheduler,
+		allocator:            allocator,
+		handler:              handler,
+		compactionInspector:  compactionInspector,
+		ievm:                 ievm,
+		lastJSONStatsTrigger: time.Now().Unix(),
 	}
 }
 
 func (si *statsInspector) Start() {
-	si.warnDeprecatedThrottleConfigs()
 	si.reloadFromMeta()
 	si.loopWg.Add(2)
 	go si.triggerStatsTaskLoop()
 	go si.cleanupStatsTasksLoop()
-}
-
-// warnDeprecatedThrottleConfigs tells operators whose config still carries the
-// old JSON throttle that it no longer has any effect, instead of letting the
-// setting disappear silently on upgrade.
-func (si *statsInspector) warnDeprecatedThrottleConfigs() {
-	for _, item := range []*paramtable.ParamItem{
-		&Params.DataCoordCfg.JSONStatsTriggerCount,
-		&Params.DataCoordCfg.JSONStatsTriggerInterval,
-	} {
-		if item.GetValue() == item.DefaultValue {
-			continue
-		}
-		mlog.Warn(si.ctx, "deprecated config is set and no longer throttles stats tasks, use dataCoord.statsTaskPendingLimit instead",
-			mlog.String("key", item.Key),
-			mlog.String("value", item.GetValue()))
-	}
-	if jsonShreddingDisabledByDeprecatedConfig() {
-		mlog.Warn(si.ctx, "dataCoord.jsonShreddingTriggerCount is 0, keeping JSON key index submission disabled for compatibility",
-			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
-	}
-}
-
-// jsonShreddingDisabledByDeprecatedConfig reports whether the deprecated
-// jsonShreddingTriggerCount is still being used as a kill switch. The removed
-// limiter broke out of the loop once the submitted count reached the configured
-// value, so 0 disabled JSON key-index submission on the very first segment.
-// Silently re-enabling shredding for an operator who had set 0 would undo a
-// deliberate decision, so that one value keeps its meaning.
-func jsonShreddingDisabledByDeprecatedConfig() bool {
-	return Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() == 0
 }
 
 func (si *statsInspector) Stop() {
@@ -247,10 +219,10 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 }
 
 // canSubmitStatsTask reports whether the global scheduler still has room for a
-// new stats task. The pending queue is shared by every task type, so a deep
-// queue means the workers are already saturated and adding more stats tasks
-// only grows the backlog. Discovery re-runs on every TaskCheckInterval tick, so
-// a segment skipped here is picked up again once the queue drains.
+// new stats task. The pending queue is shared by every task type, but tasks in
+// retry backoff are excluded because they are not currently waiting for a
+// worker slot. Discovery re-runs on every TaskCheckInterval tick, so a segment
+// skipped here is picked up again once the runnable queue drains.
 func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
 	pendingTaskCount := si.scheduler.GetPendingTaskCount()
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
@@ -323,11 +295,17 @@ func (si *statsInspector) triggerTextStatsTask() {
 }
 
 func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
-	if jsonShreddingDisabledByDeprecatedConfig() {
-		mlog.RatedWarn(si.ctx, rate.Limit(0.1), "skip JSON key index stats task, dataCoord.jsonShreddingTriggerCount is set to 0",
-			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
+	now := time.Now().Unix()
+	triggerInterval := int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds())
+	if now-si.lastJSONStatsTrigger > triggerInterval {
+		si.lastJSONStatsTrigger = now
+		si.jsonStatsTaskCount = 0
+	}
+	triggerCount := Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt()
+	if si.jsonStatsTaskCount >= triggerCount {
 		return
 	}
+
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil {
@@ -359,6 +337,9 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob)
 		}))
 		for _, segment := range segments {
+			if si.jsonStatsTaskCount >= triggerCount {
+				return
+			}
 			if !si.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob) {
 				return
 			}
@@ -366,6 +347,9 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 				mlog.Warn(si.ctx, "create stats task with json key index for segment failed, wait for retry:",
 					mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
 				continue
+			}
+			if si.mt.statsTaskMeta.HasStatsTask(segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob) {
+				si.jsonStatsTaskCount++
 			}
 		}
 	}
