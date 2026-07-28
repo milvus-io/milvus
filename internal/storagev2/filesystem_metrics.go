@@ -93,6 +93,7 @@ var (
 	propUseVirtualHost      = C.GoString(C.loon_properties_fs_use_virtual_host)
 	propUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
 	propRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
+	propMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
 	propTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	propUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 )
@@ -161,6 +162,8 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 
 	keys = append(keys, propRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+	keys = append(keys, propMaxConnections)
+	values = append(values, strconv.FormatUint(uint64(storageConfig.GetMaxConnections()), 10))
 
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
 		keys = append(keys, propTLSMinVersion)
@@ -283,6 +286,7 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 			UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),

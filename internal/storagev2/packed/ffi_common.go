@@ -163,9 +163,11 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
 
-	// Add integer field
+	// Add integer fields
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+	keys = append(keys, PropertyFSMaxConnections)
+	values = append(values, strconv.FormatUint(uint64(storageConfig.GetMaxConnections()), 10))
 
 	// Add TLS min version (skip "default" — consistent with C++ layer filtering)
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {

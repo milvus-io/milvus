@@ -1543,11 +1543,13 @@ func TestMakePropertiesFromStorageConfig_AllFields(t *testing.T) {
 		UseIAM:            true,
 		UseVirtualHost:    true,
 		RequestTimeoutMs:  5000,
+		MaxConnections:    237,
 	}
 	props, err := MakePropertiesFromStorageConfig(config, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, props)
 	defer FreeProperties(props)
+	assert.Equal(t, "237", loonPropertyString(props, PropertyFSMaxConnections))
 }
 
 // ==================== FetchFragmentsFromExternalSourceWithRange Tests ====================
