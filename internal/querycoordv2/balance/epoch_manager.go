@@ -392,6 +392,31 @@ func (manager *BalanceEpochManager) ResourceGroupsToObserve() []string {
 	return observe
 }
 
+// runtime returns the per-RG runtime, creating it on first use.
+//
+// Entries are intentionally never removed from manager.runtimes, and that is a
+// correctness requirement rather than an oversight. An rgRuntime is not a cache:
+// it owns the epoch identity counter and the safety state for work that may still
+// be in flight.
+//
+//   - runtime.sequence is one third of the epoch identity (ResourceGroup,
+//     LeaderTerm, Sequence). LeaderTerm is minted once per manager and then stays
+//     fixed, so dropping a runtime and recreating it under the same name restarts
+//     Sequence at zero and re-issues an identity this manager already used. Stale
+//     generation detection compares exactly that triple, so a collision makes a
+//     task left over from the earlier incarnation look like current-generation
+//     work. Tasks outliving their epoch is normal by design, not an edge case.
+//   - runtime.carryOver holds the object locks and the conservative source/target
+//     reservations for ambiguous in-flight work. Discarding them re-permits moving
+//     an object whose remote effect is still unknown, which the epoch protocol
+//     exists to prevent.
+//
+// Growth is one small struct per resource-group name observed, bounded by
+// QueryCoord uptime because epochs are not persisted across restart. Making
+// removal safe would first require decoupling epoch identity from this runtime's
+// lifetime (for example a manager-wide monotonic sequence) and then proving the
+// runtime is quiescent with no scheduler task still carrying its epoch metadata.
+// Do not add a plain delete here.
 func (manager *BalanceEpochManager) runtime(resourceGroup string) *rgRuntime {
 	manager.runtimesMu.Lock()
 	defer manager.runtimesMu.Unlock()
