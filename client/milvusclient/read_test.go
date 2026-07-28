@@ -282,6 +282,40 @@ func (s *ReadSuite) TestHandleSearchResultSlicesCompactNullableFields() {
 	s.EqualValues(40, value)
 }
 
+func (s *ReadSuite) TestHandleSearchResultPreservesNullableGeometryRows() {
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("location").WithDataType(entity.FieldTypeGeometry).WithNullable(true))
+	location := s.getGeometryWktFieldData("location", []string{"POINT (1 2)"})
+	location.ValidData = []bool{false, true}
+	resp := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{2},
+			Scores:     []float32{0.2, 0.1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+				},
+			},
+			FieldsData: []*schemapb.FieldData{location},
+		},
+	}
+
+	results, err := s.client.handleSearchResult(schema, []string{"location"}, 1, resp)
+	s.Require().NoError(err)
+	s.Require().Len(results, 1)
+	s.Require().NoError(results[0].Err)
+	s.Require().Len(results[0].Fields, 1)
+	s.Equal(2, results[0].Fields[0].Len())
+	isNull, err := results[0].Fields[0].IsNull(0)
+	s.Require().NoError(err)
+	s.True(isNull)
+	value, err := results[0].Fields[0].GetAsString(1)
+	s.Require().NoError(err)
+	s.Equal("POINT (1 2)", value)
+}
+
 func (s *ReadSuite) TestHandleSearchResultRejectsTruncatedFieldData() {
 	resp := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
