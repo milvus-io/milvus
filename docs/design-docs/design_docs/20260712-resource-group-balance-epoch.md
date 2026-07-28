@@ -1,14 +1,14 @@
 # MEP: Resource-Group Balance Epoch
 
 - **Created:** 2026-07-12
-- **Last Updated:** 2026-07-15
+- **Last Updated:** 2026-07-28
 - **Author(s):** @xiaofan-luan
 - **Status:** Draft
 - **Component:** Coordinator
 - **Related Issues:** [milvus-io/milvus#51244](https://github.com/milvus-io/milvus/issues/51244)
 - **Related Pull Requests:** [milvus-io/milvus#49861](https://github.com/milvus-io/milvus/pull/49861), [milvus-io/milvus#50774](https://github.com/milvus-io/milvus/pull/50774)
-- **Implementation Baseline:** `milvus-io/milvus@4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d`
-- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `8c7b55f32cdf031ead70e99afdace281434761bb`
+- **Implementation Baseline:** `milvus-io/milvus@8286b0e52c8332d9290a669caf19f75984c9503a`
+- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `edd4ad5900d7ea6bdd55ea7ac3544899d36126ed`
 - **Implementation Pull Request:** [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431)
 - **Released:** Not released
 
@@ -40,26 +40,27 @@ This MEP changes the orchestration and correctness boundary of balancing. It doe
 
 ## Implementation Status
 
-The MVP described by this MEP is implemented and reviewed on the Milvus feature branch. Relative to baseline `4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d`, final implementation commit `8c7b55f32cdf031ead70e99afdace281434761bb` contains 22 commits and changes 39 files, including 38 Go files. Its exact tree is `bf66602b87ebde3dd1332cce9fa956d1a08864e9`. Active rollout remains disabled by default, and the implementation PR has not yet been opened because delivery follows the design-first sequence described below.
+The MVP described by this MEP is implemented and reviewed on the Milvus feature branch. Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `edd4ad5900d7ea6bdd55ea7ac3544899d36126ed` contains 23 commits and changes 39 files, including 38 Go files. Its exact tree is `d2702611f902c4a1517f270938b8c583e1968b56`. Active rollout remains disabled by default, and the implementation PR has not yet been opened because delivery follows the design-first sequence described below.
 
 | Layer | Status | Milvus commits | Main files |
 |---|---|---|---|
-| Task completion and distribution-aware pending effects | Implemented and reviewed | `89232b82ad` | `task/task.go`, `task/scheduler.go` |
-| Typed and generation-aware held admission | Implemented and reviewed | `6301167abb`, `090cd11a34` | `task/balance_admission.go`, `task/scheduler.go` |
-| Atomic distribution publication and immutable RG snapshots | Implemented and reviewed | `18bf3d3850` through `9e586bcf37` | `meta/dist_manager.go`, `dist/dist_handler.go`, `balance/epoch_types.go`, `balance/epoch_snapshot.go` |
-| Hard wave budgets, immutable reservations, and projected placement | Implemented and reviewed | `81ed05fa0d`, `4e0ca8b074` | `balance/epoch_wave.go` |
-| Snapshot-only ScoreBased and ChannelLevel policy | Implemented and reviewed | `00285d5882` | `balance/epoch_score_policy.go`, `balance/balancer_factory.go` |
-| Tick-driven per-RG epoch state machine | Implemented and reviewed | `cf4cc96145` through `9e8358791e` | `balance/epoch_manager.go` |
-| `BalanceChecker` integration | Implemented and reviewed | `c8c1b18d04` | `checkers/balance_checker.go` |
-| Dynamic rollout configuration | Implemented and reviewed | `c052fdbd66` | `configs/milvus.yaml`, `pkg/util/paramtable/component_param.go` |
-| Metrics, shadow mode, and retained-state observation | Implemented and reviewed | `ba3b96816b`, `13f81066a6` | `pkg/metrics/querycoord_metrics.go`, checker and manager files |
-| #51244 convergence and failure fixtures | Implemented and reviewed | `b454240dc6` | `balance/epoch_manager_test.go` |
-| Ambiguous balance RPC outcome preservation | Implemented and reviewed | `5db539d20c` | `session/rpc_outcome.go`, `session/cluster.go`, `task/execution_outcome.go`, `task/executor.go`, `balance/epoch_manager.go` |
-| Dist controller start-loop synchronization | Test-only validation stabilization | `6b3a211127` | `dist/dist_controller_test.go` |
-| Typed balance-epoch error classification | Review fix; no new control-loop architecture | `0db483db33` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `epoch_wave.go`, and focused tests |
-| Unused server snapshot-builder wiring removal | Review cleanup; manager-owned builder unchanged | `8c7b55f32c` | `server.go`, `server_test.go` |
+| Task completion and distribution-aware pending effects | Implemented and reviewed | `1e5e1f380e` | `task/task.go`, `task/scheduler.go` |
+| Typed and generation-aware held admission | Implemented and reviewed | `92f97622a4`, `c25d443269` | `task/balance_admission.go`, `task/scheduler.go` |
+| Atomic distribution publication and immutable RG snapshots | Implemented and reviewed | `316b33aacb` through `9ed6095576` | `meta/dist_manager.go`, `dist/dist_handler.go`, `balance/epoch_types.go`, `balance/epoch_snapshot.go` |
+| Hard wave budgets, immutable reservations, and projected placement | Implemented and reviewed | `1b442030ed`, `bc938a3450` | `balance/epoch_wave.go` |
+| Snapshot-only ScoreBased and ChannelLevel policy | Implemented and reviewed | `eced826c86` | `balance/epoch_score_policy.go`, `balance/balancer_factory.go` |
+| Tick-driven per-RG epoch state machine | Implemented and reviewed | `7cd947b9db` through `460bdd6c1b` | `balance/epoch_manager.go` |
+| `BalanceChecker` integration | Implemented and reviewed | `b536e110ae` | `checkers/balance_checker.go` |
+| Dynamic rollout configuration | Implemented and reviewed | `603aaa9fd1` | `configs/milvus.yaml`, `pkg/util/paramtable/component_param.go` |
+| Metrics, shadow mode, and retained-state observation | Implemented and reviewed | `4955e35daf`, `0fb3cd75c9` | `pkg/metrics/querycoord_metrics.go`, checker and manager files |
+| #51244 convergence and failure fixtures | Implemented and reviewed | `912bcffa96` | `balance/epoch_manager_test.go` |
+| Ambiguous balance RPC outcome preservation | Implemented and reviewed | `de43e4a9d2` | `session/rpc_outcome.go`, `session/cluster.go`, `task/execution_outcome.go`, `task/executor.go`, `balance/epoch_manager.go` |
+| Dist controller start-loop synchronization | Test-only validation stabilization | `d32d15e9bb` | `dist/dist_controller_test.go` |
+| Typed balance-epoch error classification | Review fix; no new control-loop architecture | `51ee307e0d` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `epoch_wave.go`, and focused tests |
+| Unused server snapshot-builder wiring removal | Review cleanup; manager-owned builder unchanged | `34cc194d01` | `server.go`, `server_test.go` |
+| Delta distribution publication atomicity | Rebase follow-up; delta route joins the shared publish lock | `edd4ad5900` | `meta/dist_manager.go`, `meta/dist_manager_test.go` |
 
-Commit `6b3a211127` synchronizes only the dist controller test start loops so the validation fixture waits for both goroutines; it does not change production distribution behavior. Commit `0db483db33` replaces 21 branch-originated raw production errors with typed `merr` origins: 17 invariant/protocol failures use the `ErrServiceInternal` family, while four transient cases use retriable `ErrServiceUnavailable`; the unresolved-ambiguity path preserves the prior cause as an `errors.Join` sibling. Commit `8c7b55f32c` removes the unused server-owned snapshot-builder field, construction, and assertion while leaving the manager-owned builder unchanged. These review fixes refine diagnostics and construction ownership without changing the epoch protocol described by this MEP.
+Commit `d32d15e9bb` synchronizes only the dist controller test start loops so the validation fixture waits for both goroutines; it does not change production distribution behavior. Commit `51ee307e0d` replaces 21 branch-originated raw production errors with typed `merr` origins: 17 invariant/protocol failures use the `ErrServiceInternal` family, while four transient cases use retriable `ErrServiceUnavailable`; the unresolved-ambiguity path preserves the prior cause as an `errors.Join` sibling. Commit `34cc194d01` removes the unused server-owned snapshot-builder field, construction, and assertion while leaving the manager-owned builder unchanged. These review fixes refine diagnostics and construction ownership without changing the epoch protocol described by this MEP.
 
 The final focused, race, and complete `internal/querycoordv2/...` behavioral runs are green on the approved `mini` macOS development host with the repository native-library RPATH and isolated temporary etcd. The final re-review reported zero Critical, Important, or Minor findings. Branch-added raw-constructor scans found zero production origins, and the scoped balance-package ruleguard run reported `rawmerrerror: 0`. Repository-wide `make static-check` is not claimed green: it stops during core-package typechecking, before ruleguard, because this checkout lacks the unchanged generated package `cmd/tools/migration/legacy/legacypb`.
 
@@ -67,7 +68,7 @@ The final focused, race, and complete `internal/querycoordv2/...` behavioral run
 
 ### Current behavior
 
-The implementation was rebased from Milvus master commit `4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d`:
+The implementation was rebased from Milvus master commit `8286b0e52c8332d9290a669caf19f75984c9503a`:
 
 - `BalanceChecker` periodically selects collections and replicas, invokes the configured balancer, converts plans to tasks, and calls `Scheduler.Add` directly.
 - Stopping balance has priority over normal balance.
@@ -316,11 +317,21 @@ func (dm *DistributionManager) PublishNodeDistribution(
     channels []*DmChannel,
 ) []*DmChannel
 
+func (dm *DistributionManager) PatchNodeDistribution(
+    nodeID int64,
+    segments []*Segment,
+    removedSegmentIDs []int64,
+    channels []*DmChannel,
+    removedChannelNames []string,
+) []*DmChannel
+
 func (dm *DistributionManager) RemoveNodeDistribution(nodeID int64)
 func (dm *DistributionManager) Capture() DistributionSnapshot
 ```
 
 Segment and channel managers share one publication RW lock. The lock order is always publication lock followed by the manager's internal lock. `distHandler` constructs both halves of a QueryNode response before publishing them, and node removal uses one atomic removal call. A capture therefore observes either the complete old response or the complete new response, never a mixed segment/channel pair.
+
+`PatchNodeDistribution` is the delta counterpart introduced when this work was rebased onto the incremental distribution path. When a QueryNode reports `IsDelta`, `distHandler` still builds both halves first and then applies them through this single call, so the delta path carries the same atomicity guarantee as the full path. `SegmentDistManager.Patch` and `ChannelDistManager.Patch` follow the same two-level structure as `Update`: the exported method takes the shared publication lock and delegates to an unexported `patchLocked` that takes only the manager's internal lock. A delta update that bypassed the publication lock would let a capture observe a patched segment half against an unpatched channel half, which is exactly the interleaving the snapshot contract forbids.
 
 The snapshot builder has the implemented interface:
 
@@ -1072,6 +1083,25 @@ A node failure invalidates the RG snapshot and immediately stops normal admissio
 
 Recovery does not wait for the normal epoch to reach its original deadline.
 
+The epoch layer does not detect node unresponsiveness on its own. It depends on the existing
+session and heartbeat layer to declare a node down, which reaches the epoch through
+`Server.handleNodeDown`: `DistributionManager.RemoveNodeDistribution` drops that node's placement
+records and `ResourceManager.HandleNodeDown` removes it from the RG. Those two effects are what
+finally resolve objects held as ambiguous carry-over on the node — their source and target both
+become absent, so reconciliation classifies them by precedence 6, records retry history, and
+releases their locks and reservations, while the RG membership change hard-supersedes the
+generation and clears quarantine history.
+
+This is an explicit liveness dependency. If a QueryNode stops serving while its session stays
+alive, its last published distribution remains visible, an ambiguous object on it cannot reach an
+authoritative outcome, and that object stays locked with both endpoints charged. The epoch itself
+still terminates: `NoProgressDeadline` forces reconciliation and the generation ends `TimedOut`,
+so the RG keeps planning unrelated objects and never deadlocks. The stuck window for the affected
+objects is therefore bounded by node-liveness detection, not by any epoch timeout. The design
+accepts that bound deliberately — for an object whose remote effect is unknown, withholding it is
+preferred over moving it again on a wrong assumption — and charging both endpoints is itself
+protective, because the unresponsive node keeps looking occupied and is not selected as a target.
+
 #### Shard leader publication
 
 The admission token freezes `LeaderHash`, so a leader change before commit rejects the suffix. After admission, leader publication is mutable execution-plane state rather than an epoch-generation fence: a successful channel Grow must publish the target as leader, and any delegator may republish while Segment work is running. Execution-time `leader_missing` is therefore ignored for supersession. Channel reconciliation still requires the target record to be serviceable, led by the target node, and at least at the frozen target version; scheduler safety checks continue to protect action dispatch.
@@ -1313,7 +1343,7 @@ Mixed-version QueryNode deployments are supported because the first version of t
 
 ### Verified implementation evidence
 
-Verification targets final implementation commit `8c7b55f32cdf031ead70e99afdace281434761bb`, tree `bf66602b87ebde3dd1332cce9fa956d1a08864e9`, relative to baseline `4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d`. The range contains 22 commits, changes 39 files including 38 Go files, and passes the 22/22 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
+Verification targets final implementation commit `edd4ad5900d7ea6bdd55ea7ac3544899d36126ed`, tree `d2702611f902c4a1517f270938b8c583e1968b56`, relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`. The range contains 23 commits, changes 39 files including 38 Go files, and passes the 23/23 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
 
 Added-line scans over branch-modified non-test Go code and direct scans of `epoch_manager.go`, `epoch_snapshot.go`, and `epoch_wave.go` found zero production origins using `fmt.Errorf`, `errors.New`, `errors.Newf`, or `errors.Errorf`. The repository-configured scoped lint command reached the affected balance package and produced:
 
@@ -1562,15 +1592,15 @@ Focused task, balance, checker, dist, configuration, and metric tests ran first 
 
 ```bash
 git diff --name-only -z \
-  4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d...HEAD -- '*.go' |
+  8286b0e52c8332d9290a669caf19f75984c9503a...HEAD -- '*.go' |
   xargs -0 gofmt -d
 
 git diff --check \
-  4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d...HEAD
+  8286b0e52c8332d9290a669caf19f75984c9503a...HEAD
 
 # No branch-added production raw constructors are expected.
 ! git diff -U0 \
-  4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d...HEAD -- \
+  8286b0e52c8332d9290a669caf19f75984c9503a...HEAD -- \
   '*.go' ':(exclude)**/*_test.go' |
   rg '^\+[^+].*(fmt\.Errorf|errors\.(New|Newf|Errorf))'
 
