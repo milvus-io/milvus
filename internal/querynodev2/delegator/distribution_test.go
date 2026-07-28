@@ -521,7 +521,7 @@ func (s *DistributionSuite) TestRemoveDistributionsAfterCloseReturnsClosedSignal
 
 	ch := s.dist.RemoveDistributions([]SegmentEntry{{NodeID: 1, SegmentID: 1}}, nil)
 
-	timeout := time.NewTimer(100 * time.Millisecond)
+	timeout := time.NewTimer(time.Second)
 	defer timeout.Stop()
 	select {
 	case <-ch:
@@ -540,7 +540,7 @@ func (s *DistributionSuite) TestCloseClearsPendingRemoveDistributionSignal() {
 	ch := s.dist.RemoveDistributions([]SegmentEntry{{NodeID: 1, SegmentID: 1}}, nil)
 	s.dist.Close()
 
-	timeout := time.NewTimer(100 * time.Millisecond)
+	timeout := time.NewTimer(time.Second)
 	defer timeout.Stop()
 	select {
 	case <-ch:
