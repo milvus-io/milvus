@@ -8,7 +8,7 @@
 - **Related Issues:** [milvus-io/milvus#51244](https://github.com/milvus-io/milvus/issues/51244)
 - **Related Pull Requests:** [milvus-io/milvus#49861](https://github.com/milvus-io/milvus/pull/49861), [milvus-io/milvus#50774](https://github.com/milvus-io/milvus/pull/50774)
 - **Implementation Baseline:** `milvus-io/milvus@8286b0e52c8332d9290a669caf19f75984c9503a`
-- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `edd4ad5900d7ea6bdd55ea7ac3544899d36126ed`
+- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `e77f5fa584f941dd87e544f51457f56b34941b3b`
 - **Implementation Pull Request:** [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431)
 - **Released:** Not released
 
@@ -40,7 +40,7 @@ This MEP changes the orchestration and correctness boundary of balancing. It doe
 
 ## Implementation Status
 
-The MVP described by this MEP is implemented and reviewed on the Milvus feature branch. Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `edd4ad5900d7ea6bdd55ea7ac3544899d36126ed` contains 23 commits and changes 39 files, including 38 Go files. Its exact tree is `d2702611f902c4a1517f270938b8c583e1968b56`. Active rollout remains disabled by default, and the implementation PR has not yet been opened because delivery follows the design-first sequence described below.
+The MVP described by this MEP is implemented and reviewed on the Milvus feature branch. Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `e77f5fa584f941dd87e544f51457f56b34941b3b` contains 24 commits and changes 39 files, including 38 Go files. Its exact tree is `f0b4492eb07d9318d368c3b2b6d9fd553d62042a`. Active rollout remains disabled by default, and the implementation PR has not yet been opened because delivery follows the design-first sequence described below.
 
 | Layer | Status | Milvus commits | Main files |
 |---|---|---|---|
@@ -59,6 +59,7 @@ The MVP described by this MEP is implemented and reviewed on the Milvus feature 
 | Typed balance-epoch error classification | Review fix; no new control-loop architecture | `51ee307e0d` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `epoch_wave.go`, and focused tests |
 | Unused server snapshot-builder wiring removal | Review cleanup; manager-owned builder unchanged | `34cc194d01` | `server.go`, `server_test.go` |
 | Delta distribution publication atomicity | Rebase follow-up; delta route joins the shared publish lock | `edd4ad5900` | `meta/dist_manager.go`, `meta/dist_manager_test.go` |
+| Per-RG runtime retention invariant | Documentation only; no behavior change | `e77f5fa584` | `balance/epoch_manager.go` |
 
 Commit `d32d15e9bb` synchronizes only the dist controller test start loops so the validation fixture waits for both goroutines; it does not change production distribution behavior. Commit `51ee307e0d` replaces 21 branch-originated raw production errors with typed `merr` origins: 17 invariant/protocol failures use the `ErrServiceInternal` family, while four transient cases use retriable `ErrServiceUnavailable`; the unresolved-ambiguity path preserves the prior cause as an `errors.Join` sibling. Commit `34cc194d01` removes the unused server-owned snapshot-builder field, construction, and assertion while leaving the manager-owned builder unchanged. These review fixes refine diagnostics and construction ownership without changing the epoch protocol described by this MEP.
 
@@ -1343,7 +1344,7 @@ Mixed-version QueryNode deployments are supported because the first version of t
 
 ### Verified implementation evidence
 
-Verification targets final implementation commit `edd4ad5900d7ea6bdd55ea7ac3544899d36126ed`, tree `d2702611f902c4a1517f270938b8c583e1968b56`, relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`. The range contains 23 commits, changes 39 files including 38 Go files, and passes the 23/23 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
+Verification targets final implementation commit `e77f5fa584f941dd87e544f51457f56b34941b3b`, tree `f0b4492eb07d9318d368c3b2b6d9fd553d62042a`, relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`. The range contains 24 commits, changes 39 files including 38 Go files, and passes the 24/24 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
 
 Added-line scans over branch-modified non-test Go code and direct scans of `epoch_manager.go`, `epoch_snapshot.go`, and `epoch_wave.go` found zero production origins using `fmt.Errorf`, `errors.New`, `errors.Newf`, or `errors.Errorf`. The repository-configured scoped lint command reached the affected balance package and produced:
 
