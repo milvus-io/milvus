@@ -95,8 +95,12 @@ const (
 	MaxFPR = 0.05
 
 	// DefaultFPR is the recommended false-positive rate when a caller has no
-	// specific target: ~1.38 bytes/member, so a 32 MiB blob (the largest that
-	// fits the default 64 MiB gRPC recv limit) holds ~24 M members.
+	// specific target. Sizing follows OptimalNumOfBytes, so a body holds roughly
+	// 0.72 members per byte at this rate: a 64 MiB body (the default
+	// proxy.maxBloomFilterSize) holds ~48.6M members, a 32 MiB body ~24.3M.
+	// Because bodies are powers of two, a member count just past a tier boundary
+	// doubles the blob; raising fpr is usually the cheaper fix. 50M members, for
+	// example, need fpr >= ~0.0058 to stay inside 64 MiB.
 	DefaultFPR = 0.005
 )
 
