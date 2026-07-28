@@ -101,7 +101,7 @@ type RefreshExternalCollectionTask struct {
 	milvusTableSourceDeltalogs   map[string][]*datapb.FieldBinlog
 
 	// Result after execution — tracked separately for correct response building
-	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
+	keptSegmentIDs  []int64               // IDs of current segments whose physical data was reused
 	updatedSegments []*datapb.SegmentInfo // upsert payload: patched current segments plus newly created segments
 
 	// Pre-allocated segment IDs
@@ -292,12 +292,14 @@ func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
 
 // GetUpdatedSegments returns segments that DataCoord should upsert after execution.
 // This includes patched same-ID current segments and newly created segments, but
-// excludes unchanged kept segments.
+// excludes segments whose physical data was reused without a manifest update.
 func (t *RefreshExternalCollectionTask) GetUpdatedSegments() []*datapb.SegmentInfo {
 	return t.updatedSegments
 }
 
-// GetKeptSegmentIDs returns IDs of current segments that were kept unchanged
+// GetKeptSegmentIDs returns IDs of current segments whose physical data was
+// reused. DataCoord may still advance their schema version when it commits the
+// refresh result.
 func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 	return t.keptSegmentIDs
 }
@@ -441,10 +443,11 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			usedFragments[key] = true
 		}
 		if patchedSegment == nil {
-			// Keep this segment unchanged
+			// Keep the physical segment unchanged. DataCoord advances its schema
+			// version when committing the refresh result.
 			keptSegments = append(keptSegments, seg)
-			mlog.Debug(context.TODO(), "Segment kept unchanged",
-				mlog.Int64("segmentID", seg.GetID()))
+			mlog.Debug(ctx, "Segment physical data kept unchanged",
+				mlog.FieldSegmentID(seg.GetID()))
 		} else {
 			patchedSegments = append(patchedSegments, patchedSegment)
 		}
@@ -477,7 +480,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	t.keptSegmentIDs = keptSegmentIDs
 	t.updatedSegments = updatedSegments
 
-	// Visible result contains unchanged kept segments plus upsert segments.
+	// Visible result contains physically reused segments plus upsert segments.
 	result := append(keptSegments, updatedSegments...)
 
 	mlog.Info(context.TODO(), "Segment organization complete",
