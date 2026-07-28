@@ -415,6 +415,44 @@ func TestDelegatorGrowingSourceProviderRollbackKeepsConcurrentHandoff(t *testing
 	provider.Close()
 }
 
+// TestDelegatorGrowingSourceProviderOverlappingBeginRollbackKeepsFence covers the
+// case the test above does not: two handoffs over the SAME segment, both entered
+// through Begin. Two concurrent UnsubDmChannel calls on one vchannel derive their
+// segment list from the same localGrowingSegmentIDs, so overlap is the norm rather
+// than an edge case. Begin deliberately takes no in-flight count, so nothing else
+// holds the fence up here -- if handoffAllowed were a plain set owned by whoever
+// inserted first, A's rollback would revoke B's entry and lower the fence while
+// B's handoff is still running.
+func TestDelegatorGrowingSourceProviderOverlappingBeginRollbackKeepsFence(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	rollbackA := provider.BeginGrowingSourceReleaseHandoff([]int64{1001})
+	rollbackB := provider.BeginGrowingSourceReleaseHandoff([]int64{1001})
+
+	rollbackA()
+
+	provider.mu.Lock()
+	stillArmed := provider.handoffOnly
+	refs := provider.handoffAllowed[1001]
+	provider.mu.Unlock()
+	require.True(t, stillArmed, "fence must stay armed while B still holds the handoff")
+	require.Equal(t, 1, refs, "B's reference must survive A's rollback")
+
+	require.False(t, provider.acquireLease(3003), "unrelated segment must not get a lease mid-handoff")
+	require.True(t, provider.acquireLease(1001), "the handed-off segment must stay reachable")
+	provider.releaseLease()
+
+	rollbackB()
+
+	provider.mu.Lock()
+	handoffOnly := provider.handoffOnly
+	_, stillAllowed := provider.handoffAllowed[1001]
+	provider.mu.Unlock()
+	require.False(t, handoffOnly, "fence must drop once the last handoff rolls back")
+	require.False(t, stillAllowed, "no reference may outlive both rollbacks")
+}
+
 // TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight pins the
 // invariant that a concurrent ClearReleasePrepared must NOT drop the handoff-only
 // fence while a PrepareGrowingSourceReleaseHandoff is still parked in waitFence.

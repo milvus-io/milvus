@@ -50,7 +50,7 @@ type delegatorGrowingSourceProvider struct {
 	releaseAllowed  map[int64]uint64
 	releasePrepared map[int64]int64
 	handoffOnly     bool
-	handoffAllowed  map[int64]struct{}
+	handoffAllowed  map[int64]int
 	handoffInflight int
 }
 
@@ -62,7 +62,7 @@ func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, w
 		retained:        make(map[int64]*retainedGrowingFlushSource),
 		releaseAllowed:  make(map[int64]uint64),
 		releasePrepared: make(map[int64]int64),
-		handoffAllowed:  make(map[int64]struct{}),
+		handoffAllowed:  make(map[int64]int),
 	}
 	if len(getTSafe) > 0 {
 		provider.getTSafe = getTSafe[0]
@@ -358,11 +358,9 @@ func (p *delegatorGrowingSourceProvider) enterHandoffOnlyLocked(segments []syncm
 
 	p.handoffOnly = true
 	for _, segment := range segments {
-		if _, ok := p.handoffAllowed[segment.SegmentID]; ok {
-			// Already allowed by a concurrent handoff: not ours to undo.
-			continue
-		}
-		p.handoffAllowed[segment.SegmentID] = struct{}{}
+		// handoffAllowed is ref-counted: overlapping handoffs each hold one
+		// reference on the same segment, so a rollback gives back only its own.
+		p.handoffAllowed[segment.SegmentID]++
 		snapshot.added[segment.SegmentID] = struct{}{}
 	}
 	return snapshot
@@ -373,6 +371,10 @@ func (p *delegatorGrowingSourceProvider) rollbackHandoffOnly(snapshot handoffSna
 	defer p.mu.Unlock()
 
 	for segmentID := range snapshot.added {
+		if p.handoffAllowed[segmentID] > 1 {
+			p.handoffAllowed[segmentID]--
+			continue
+		}
 		delete(p.handoffAllowed, segmentID)
 	}
 	// Never clear handoffOnly directly. Another handoff may still be parked in
@@ -588,7 +590,7 @@ func (p *delegatorGrowingSourceProvider) Close() {
 	p.releaseAllowed = make(map[int64]uint64)
 	p.releasePrepared = make(map[int64]int64)
 	p.handoffOnly = false
-	p.handoffAllowed = make(map[int64]struct{})
+	p.handoffAllowed = make(map[int64]int)
 	registration := p.registration
 	p.registration = nil
 	p.deleteRetainedMetricsLocked()
@@ -608,7 +610,7 @@ func (p *delegatorGrowingSourceProvider) unregisterIfInactiveLocked() *syncmgr.G
 	p.releaseAllowed = make(map[int64]uint64)
 	p.releasePrepared = make(map[int64]int64)
 	p.handoffOnly = false
-	p.handoffAllowed = make(map[int64]struct{})
+	p.handoffAllowed = make(map[int64]int)
 	p.deleteRetainedMetricsLocked()
 	return registration
 }
