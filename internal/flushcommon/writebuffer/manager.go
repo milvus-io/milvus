@@ -83,6 +83,10 @@ type bufferManager struct {
 	ch lifetime.SafeChan
 }
 
+type evictableMemoryWriteBuffer interface {
+	EvictableMemorySize() int64
+}
+
 func (m *bufferManager) Start() {
 	m.wg.Add(1)
 	go func() {
@@ -141,8 +145,12 @@ func (m *bufferManager) memoryCheck() {
 		m.buffers.Range(func(chanName string, buf WriteBuffer) bool {
 			size := buf.MemorySize()
 			total += size
-			if size > candiSize {
-				candiSize = size
+			evictable := size
+			if sized, ok := buf.(evictableMemoryWriteBuffer); ok {
+				evictable = sized.EvictableMemorySize()
+			}
+			if evictable > candiSize {
+				candiSize = evictable
 				candidate = buf
 				candiChan = chanName
 			}
@@ -158,10 +166,21 @@ func (m *bufferManager) memoryCheck() {
 			return
 		}
 
-		if candidate != nil {
-			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
-			mlog.Info(context.TODO(), "notify writebuffer to sync",
-				mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		if candidate == nil {
+			mlog.RatedWarn(context.TODO(), rate.Limit(20), "memory watermark exceeded by in-flight flush payload",
+				mlog.Float64("current_total_memory_usage", logutil.ToMB(float64(total))),
+				mlog.Float64("current_memory_watermark", logutil.ToMB(memoryWatermark)))
+			return
+		}
+
+		candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+		mlog.Info(context.TODO(), "notify writebuffer to sync",
+			mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		if sized, ok := candidate.(evictableMemoryWriteBuffer); ok && sized.EvictableMemorySize() >= candiSize {
+			mlog.RatedWarn(context.TODO(), rate.Limit(20), "memory force sync made no progress",
+				mlog.String("channel", candiChan),
+				mlog.Float64("evictable_memory", logutil.ToMB(float64(candiSize))))
+			return
 		}
 	}
 }

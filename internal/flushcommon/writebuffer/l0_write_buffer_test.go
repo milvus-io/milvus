@@ -380,6 +380,81 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 	})
 }
 
+func (s *L0WriteBufferSuite) TestOrdinaryPayloadBackpressureStartsAfterSubmit() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key)
+
+	const segmentID = int64(1000)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		CollectionID:   s.collID,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Once()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		idAllocator:  s.allocator,
+		syncPolicies: []SyncPolicy{GetFullBufferPolicy()},
+	})
+	s.Require().NoError(err)
+	l0wb := wb.(*l0WriteBuffer)
+
+	submitted := make(chan *syncmgr.SyncTask, 1)
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, task syncmgr.Task, _ ...func(error) error) (*conc.Future[struct{}], error) {
+			ordinaryTask := task.(*syncmgr.SyncTask)
+			submitted <- ordinaryTask
+			return conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil
+		}).Once()
+
+	_, msg := s.composeInsertMsg(segmentID, 1, 128, schemapb.DataType_Int64)
+	insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+	s.Require().NoError(err)
+	metrics.DataNodeFlowGraphBufferDataSize.Reset()
+
+	bufferDone := make(chan error, 1)
+	go func() {
+		bufferDone <- wb.BufferData(insertData, nil,
+			&msgpb.MsgPosition{Timestamp: 100},
+			&msgpb.MsgPosition{Timestamp: 200}, 100)
+	}()
+
+	var task *syncmgr.SyncTask
+	select {
+	case task = <-submitted:
+	case <-time.After(time.Second):
+		s.FailNow("full payload was not submitted before backpressure")
+	}
+	select {
+	case err := <-bufferDone:
+		s.FailNow("BufferData returned before the in-flight payload was released", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.Equal(task.PayloadBytes(), l0wb.MemorySize())
+	value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(
+		paramtable.GetStringNodeID(), fmt.Sprint(s.metacache.Collection()))
+	s.Require().NoError(err)
+	s.MetricsEqual(value, float64(task.PayloadBytes()))
+
+	task.ReleasePayload()
+	select {
+	case err := <-bufferDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("payload release did not remove BufferData backpressure")
+	}
+	s.Zero(l0wb.MemorySize())
+	s.MetricsEqual(value, 0)
+}
+
 func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")

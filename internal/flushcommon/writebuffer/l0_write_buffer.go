@@ -105,7 +105,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 		wb.syncSegments(wb.syncCtx, segmentsSync)
 	}
 
-	return nil
+	return wb.waitFlushCapacity()
 }
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.

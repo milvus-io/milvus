@@ -2,11 +2,11 @@ package syncmgr
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"

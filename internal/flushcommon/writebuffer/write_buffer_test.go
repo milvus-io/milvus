@@ -109,6 +109,61 @@ func (s *WriteBufferSuite) TestOrdinarySyncStateBlocksSecondLogicalTask() {
 	s.True(buffered, "new rows must stay buffered behind the outstanding logical task")
 }
 
+func (s *WriteBufferSuite) TestOrdinaryPayloadCountsTowardFlushCapacity() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key)
+
+	segmentID := int64(1102)
+	payloadReleased := make(chan struct{})
+	releasedBytes := make(chan int64, 1)
+	task := syncmgr.NewSyncTask().
+		WithSyncPack(new(syncmgr.SyncPack).WithSegmentID(segmentID)).
+		WithPayloadAccounting(60, 0, func(released int64) {
+			releasedBytes <- released
+			close(payloadReleased)
+		})
+	state := &ordinarySyncState{
+		task:            task,
+		phase:           ordinarySyncAttemptInFlight,
+		attempt:         1,
+		payloadReleased: payloadReleased,
+		done:            make(chan struct{}),
+	}
+	s.wb.mut.Lock()
+	s.wb.ordinarySyncs[segmentID] = state
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID: segmentID,
+		insertBuffer: &InsertBuffer{BufferBase: BufferBase{
+			size: 40,
+		}},
+		deltaBuffer: &DeltaBuffer{},
+	}
+	s.wb.mut.Unlock()
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- s.wb.waitFlushCapacity()
+	}()
+	select {
+	case err := <-waitDone:
+		s.FailNow("flush capacity did not apply backpressure", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.EqualValues(100, s.wb.MemorySize())
+	s.Zero(s.wb.EvictableMemorySize())
+	task.ReleasePayload()
+	s.EqualValues(60, <-releasedBytes)
+
+	select {
+	case err := <-waitDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("payload release did not unblock flush capacity")
+	}
+	s.EqualValues(40, s.wb.MemorySize())
+}
+
 func (s *WriteBufferSuite) TestGrowingObserverPanicHappensAfterLifecycleCleanup() {
 	segmentID := int64(1109)
 	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil)

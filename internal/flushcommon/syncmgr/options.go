@@ -78,3 +78,13 @@ func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
 	t.failureCallback = callback
 	return t
 }
+
+// WithPayloadAccounting tracks the in-memory row payload until ReleaseData is
+// actually called. The callback runs exactly once, including terminal discard
+// paths that never enter Run.
+func (t *SyncTask) WithPayloadAccounting(insertBytes, deleteBytes int64, onRelease func(int64)) *SyncTask {
+	t.payload = &syncTaskPayloadAccounting{onRelease: onRelease}
+	t.payload.insertBytes.Store(insertBytes)
+	t.payload.deleteBytes.Store(deleteBytes)
+	return t
+}

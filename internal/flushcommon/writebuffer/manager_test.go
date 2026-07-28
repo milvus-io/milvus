@@ -344,6 +344,36 @@ func (s *ManagerSuite) TestStopDuringMemoryCheck() {
 	manager.Stop()
 }
 
+func (s *ManagerSuite) TestMemoryCheckDoesNotSpinOnInFlightPayload() {
+	param := paramtable.Get()
+	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "true")
+	param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0")
+	defer param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key)
+	defer param.Reset(param.DataNodeCfg.MemoryForceSyncWatermark.Key)
+
+	segmentID := int64(1001)
+	task := syncmgr.NewSyncTask().
+		WithSyncPack(new(syncmgr.SyncPack).WithSegmentID(segmentID)).
+		WithPayloadAccounting(100, 0, nil)
+	wb := &l0WriteBuffer{writeBufferBase: &writeBufferBase{
+		buffers:               make(map[int64]*segmentBuffer),
+		ordinarySyncs:         map[int64]*ordinarySyncState{segmentID: {task: task}},
+		growingSourceProgress: make(map[int64]*growingSourceProgress),
+	}}
+	s.manager.buffers.Insert(s.channelName, wb)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.manager.memoryCheck()
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		s.FailNow("memory check spun on non-evictable in-flight payload")
+	}
+}
+
 func TestManager(t *testing.T) {
 	suite.Run(t, new(ManagerSuite))
 }

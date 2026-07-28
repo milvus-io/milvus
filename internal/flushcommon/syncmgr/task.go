@@ -19,6 +19,8 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -44,6 +46,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type syncTaskPayloadAccounting struct {
+	insertBytes atomic.Int64
+	deleteBytes atomic.Int64
+	releaseOnce sync.Once
+	onRelease   func(int64)
+}
 
 type SyncTask struct {
 	chunkManager storage.ChunkManager
@@ -87,6 +96,7 @@ type SyncTask struct {
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
+	payload         *syncTaskPayloadAccounting
 	dataWritten     bool
 	preparedStats   *metacache.SegmentStats
 	preparedColumns []storagecommon.ColumnGroup
@@ -330,9 +340,21 @@ func (t *SyncTask) BatchRows() int64 {
 }
 
 func (t *SyncTask) releasePayload() {
-	if t.pack != nil {
-		t.pack.ReleaseData()
+	if t.payload == nil {
+		if t.pack != nil {
+			t.pack.ReleaseData()
+		}
+		return
 	}
+	t.payload.releaseOnce.Do(func() {
+		if t.pack != nil {
+			t.pack.ReleaseData()
+		}
+		released := t.payload.insertBytes.Swap(0) + t.payload.deleteBytes.Swap(0)
+		if t.payload.onRelease != nil {
+			t.payload.onRelease(released)
+		}
+	})
 }
 
 // ReleasePayload discards the in-memory input owned by this logical task. It
@@ -340,6 +362,29 @@ func (t *SyncTask) releasePayload() {
 // task will never be submitted again (shutdown or terminal failure).
 func (t *SyncTask) ReleasePayload() {
 	t.releasePayload()
+}
+
+// PayloadBytes is the ordinary row payload still retained by this task.
+// Metadata-only retries report zero after the object data has been written.
+func (t *SyncTask) PayloadBytes() int64 {
+	if t.payload == nil {
+		return 0
+	}
+	return t.payload.insertBytes.Load() + t.payload.deleteBytes.Load()
+}
+
+func (t *SyncTask) InsertPayloadBytes() int64 {
+	if t.payload == nil {
+		return 0
+	}
+	return t.payload.insertBytes.Load()
+}
+
+func (t *SyncTask) DeletePayloadBytes() int64 {
+	if t.payload == nil {
+		return 0
+	}
+	return t.payload.deleteBytes.Load()
 }
 
 func (t *SyncTask) SegmentID() int64 {

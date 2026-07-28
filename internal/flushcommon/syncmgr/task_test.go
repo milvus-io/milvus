@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -477,15 +479,19 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Once()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 
+		var payloadReleases atomic.Int32
 		task := s.getSuiteSyncTask(new(SyncPack).
 			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
 			WithCheckpoint(&msgpb.MsgPosition{
 				ChannelName: s.channelName,
 				MsgID:       []byte{1, 2, 3, 4},
 				Timestamp:   100,
-			}))
+			})).WithPayloadAccounting(100, 0, func(int64) {
+			payloadReleases.Add(1)
+		})
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(1)))
 		s.NotEmpty(task.pack.insertData)
+		s.EqualValues(100, task.PayloadBytes())
 		writeCallCount := func() int {
 			count := 0
 			for _, call := range s.chunkManager.Calls {
@@ -500,6 +506,8 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.ErrorIs(err, metaErr)
 		s.True(task.dataWritten)
 		s.Empty(task.pack.insertData, "metadata retry must not retain the row payload")
+		s.Zero(task.PayloadBytes())
+		s.EqualValues(1, payloadReleases.Load())
 		firstWriteCalls := writeCallCount()
 		s.Positive(firstWriteCalls)
 
@@ -507,23 +515,65 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.NoError(err)
 		s.Empty(task.pack.insertData)
 		s.Equal(firstWriteCalls, writeCallCount(), "metadata retry must not rewrite object-storage payloads")
+		s.EqualValues(1, payloadReleases.Load())
 	})
 
 	s.Run("chunk_manager_save_fail", func() {
 		flag := false
+		var payloadReleases atomic.Int32
 		handler := func(_ error) { flag = true }
 		s.chunkManager.ExpectedCalls = nil
 		s.chunkManager.EXPECT().RootPath().Return("files")
 		s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrIoPermissionDenied("mocked-key", errors.New("mocked")))
 		task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
 			WithFailureCallback(handler).
+			WithPayloadAccounting(100, 0, func(int64) { payloadReleases.Add(1) }).
 			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
 
 		err := task.Run(ctx)
 
 		s.Error(err)
 		s.False(flag, "SyncManager owns the single HandleError call")
+		s.EqualValues(100, task.PayloadBytes())
+		s.Zero(payloadReleases.Load())
+		task.ReleasePayload()
+		s.Zero(task.PayloadBytes())
+		s.EqualValues(1, payloadReleases.Load())
 	})
+}
+
+func (s *SyncTaskSuite) TestPayloadAccountingReleaseIsExactOnce() {
+	pack := new(SyncPack).
+		WithInsertData([]*storage.InsertData{{}}).
+		WithDeleteData(&storage.DeleteData{})
+	var releaseCount atomic.Int32
+	var releasedBytes atomic.Int64
+	task := NewSyncTask().
+		WithSyncPack(pack).
+		WithPayloadAccounting(60, 40, func(released int64) {
+			releaseCount.Add(1)
+			releasedBytes.Add(released)
+		})
+
+	s.EqualValues(100, task.PayloadBytes())
+	s.EqualValues(60, task.InsertPayloadBytes())
+	s.EqualValues(40, task.DeletePayloadBytes())
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			task.ReleasePayload()
+		}()
+	}
+	wg.Wait()
+
+	s.Zero(task.PayloadBytes())
+	s.Empty(pack.insertData)
+	s.Nil(pack.deltaData)
+	s.EqualValues(1, releaseCount.Load())
+	s.EqualValues(100, releasedBytes.Load())
 }
 
 func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {

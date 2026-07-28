@@ -28,15 +28,16 @@ type retryTimer interface {
 type retryAfterFunc func(time.Duration, func()) retryTimer
 
 type ordinarySyncState struct {
-	task        *syncmgr.SyncTask
-	phase       ordinarySyncPhase
-	attempt     uint64
-	retryTimer  retryTimer
-	retryCtx    context.Context
-	done        chan struct{}
-	doneOnce    sync.Once
-	terminalErr error
-	pending     bool
+	task            *syncmgr.SyncTask
+	phase           ordinarySyncPhase
+	attempt         uint64
+	retryTimer      retryTimer
+	retryCtx        context.Context
+	payloadReleased chan struct{}
+	done            chan struct{}
+	doneOnce        sync.Once
+	terminalErr     error
+	pending         bool
 }
 
 type ordinarySyncOutcome struct {
@@ -232,6 +233,7 @@ func (wb *writeBufferBase) discardOrdinarySyncLocked(state *ordinarySyncState, r
 func (wb *writeBufferBase) handleOrdinarySyncResult(ctx context.Context, task *syncmgr.SyncTask, attempt uint64, attemptErr error) ordinarySyncOutcome {
 	segmentID := task.SegmentID()
 	var followup bool
+	var followupTasks []syncmgr.Task
 
 	wb.mut.Lock()
 	state, ok := wb.ordinarySyncs[segmentID]
@@ -297,10 +299,18 @@ func (wb *writeBufferBase) handleOrdinarySyncResult(ctx context.Context, task *s
 	}
 	delete(wb.ordinarySyncs, segmentID)
 	followupAllowed := !wb.closed && !wb.dropping
+	if followup && followupAllowed {
+		// Build the next logical owner before state.done is published. Otherwise a
+		// BufferData waiter can observe a full tail with no owner during the gap
+		// between this callback and an asynchronous syncSegments call.
+		followupTasks = wb.getSyncTasksLocked(wb.syncCtx, []int64{segmentID})
+	}
 	wb.mut.Unlock()
 
-	if followup && followupAllowed {
-		go wb.syncSegments(wb.syncCtx, []int64{segmentID})
+	if len(followupTasks) > 0 {
+		// Submission can block on dispatcher admission. Keep it asynchronous so
+		// the current callback can finish and release its own semaphore slot.
+		go wb.submitSyncTasks(wb.syncCtx, followupTasks)
 	}
 	return ordinarySyncOutcome{terminal: true}
 }

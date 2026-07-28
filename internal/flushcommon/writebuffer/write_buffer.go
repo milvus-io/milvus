@@ -618,7 +618,7 @@ func (wb *writeBufferBase) MemorySize() int64 {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	return wb.totalBufferedMemorySizeLocked()
+	return wb.totalBufferedMemorySizeLocked() + wb.totalOrdinaryPayloadMemorySizeLocked()
 }
 
 func (wb *writeBufferBase) totalBufferedMemorySizeLocked() int64 {
@@ -627,6 +627,85 @@ func (wb *writeBufferBase) totalBufferedMemorySizeLocked() int64 {
 		size += segBuf.MemorySize()
 	}
 	return size
+}
+
+func (wb *writeBufferBase) totalOrdinaryPayloadMemorySizeLocked() int64 {
+	var size int64
+	for _, state := range wb.ordinarySyncs {
+		size += state.task.PayloadBytes()
+	}
+	return size
+}
+
+// EvictableMemorySize is the buffered subset that can be yielded immediately.
+// Retained ordinary payload is resident memory, but selecting it for eviction
+// would only spin while the existing logical owner is still active.
+func (wb *writeBufferBase) EvictableMemorySize() int64 {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	var size int64
+	for segmentID, buffer := range wb.buffers {
+		if _, owned := wb.ordinarySyncs[segmentID]; owned {
+			continue
+		}
+		if progress, ok := wb.growingSourceProgress[segmentID]; ok && progress.syncing {
+			continue
+		}
+		size += buffer.MemorySize()
+	}
+	return size
+}
+
+func (wb *writeBufferBase) flushCapacityWaiterLocked() <-chan struct{} {
+	insertLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
+	deleteLimit := paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
+	for segmentID, state := range wb.ordinarySyncs {
+		insertBytes := state.task.InsertPayloadBytes()
+		deleteBytes := state.task.DeletePayloadBytes()
+		if buffer := wb.buffers[segmentID]; buffer != nil {
+			if buffer.insertBuffer != nil {
+				insertBytes += buffer.insertBuffer.size
+			}
+			if buffer.deltaBuffer != nil {
+				deleteBytes += buffer.deltaBuffer.size
+			}
+		}
+		insertFull := insertBytes > 0 && insertLimit != noLimit && insertBytes >= insertLimit
+		deleteFull := deleteBytes > 0 && deleteLimit != noLimit && deleteBytes >= deleteLimit
+		if !insertFull && !deleteFull {
+			continue
+		}
+		if state.task.PayloadBytes() > 0 && state.payloadReleased != nil {
+			return state.payloadReleased
+		}
+		return state.done
+	}
+	return nil
+}
+
+// waitFlushCapacity applies per-segment backpressure using the existing flush
+// thresholds. The triggering batch is submitted before this wait, so a batch
+// larger than the threshold can still make progress and release its payload.
+func (wb *writeBufferBase) waitFlushCapacity() error {
+	for {
+		wb.mut.RLock()
+		if wb.closed || wb.dropping {
+			wb.mut.RUnlock()
+			return merr.WrapErrChannelNotFound(wb.channelName)
+		}
+		waiter := wb.flushCapacityWaiterLocked()
+		wb.mut.RUnlock()
+		if waiter == nil {
+			return nil
+		}
+
+		select {
+		case <-waiter:
+		case <-wb.syncCtx.Done():
+			return merr.WrapErrChannelNotFound(wb.channelName)
+		}
+	}
 }
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
@@ -1680,7 +1759,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		return wb.getGrowingSourceSyncTask(ctx, segmentInfo, progress)
 	}
 	var batchSize int64
-	var totalMemSize float64
+	var insertMemSize int64
+	var deleteMemSize int64
 	var tsFrom, tsTo uint64
 
 	insert, bm25, delta, schema, timeRange, startPos := wb.yieldBuffer(segmentID)
@@ -1696,10 +1776,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 	for _, chunk := range insert {
 		batchSize += int64(chunk.GetRowNum())
-		totalMemSize += float64(chunk.GetMemorySize())
+		insertMemSize += int64(chunk.GetMemorySize())
 	}
 	if delta != nil {
-		totalMemSize += float64(delta.Size())
+		deleteMemSize += delta.Size()
 	}
 
 	actions = append(actions, metacache.StartSyncing(batchSize))
@@ -1736,6 +1816,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		pack.WithDrop()
 	}
 
+	payloadReleased := make(chan struct{})
 	task := syncmgr.NewSyncTask().
 		WithAllocator(wb.allocator).
 		WithMetaWriter(wb.metaWriter).
@@ -1743,19 +1824,25 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithSchema(schema).
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig()).
+		WithPayloadAccounting(insertMemSize, deleteMemSize, func(released int64) {
+			if released > 0 {
+				metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(
+					paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Sub(float64(released))
+			}
+			close(payloadReleased)
+		}).
 		// Keep the storage write inside this logical attempt retrying until its
 		// context is canceled. Submission and metadata failures are handled by
 		// the per-segment logical retry state.
 		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
 			retry.RetryErr(func(error) bool { return true }))
-	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(
-		paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 	wb.ordinarySyncs[segmentID] = &ordinarySyncState{
-		task:     task,
-		phase:    ordinarySyncAttemptInFlight,
-		attempt:  1,
-		retryCtx: ctx,
-		done:     make(chan struct{}),
+		task:            task,
+		phase:           ordinarySyncAttemptInFlight,
+		attempt:         1,
+		retryCtx:        ctx,
+		payloadReleased: payloadReleased,
+		done:            make(chan struct{}),
 	}
 	return task, nil
 }
@@ -1997,12 +2084,6 @@ func (wb *writeBufferBase) abortDrop(cancel context.CancelFunc, terminalErr erro
 }
 
 func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
-	var dropCtx context.Context
-	var dropCancel context.CancelFunc
-	if drop {
-		dropCtx, dropCancel = context.WithCancel(ctx)
-	}
-
 	wb.mut.Lock()
 	wb.growingSourceRetryScheduled = false
 	if wb.growingSourceRetryTimer != nil {
@@ -2033,10 +2114,11 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		_ = wb.waitGrowingSourceSyncs(context.Background())
 		return
 	}
+	dropCtx, dropCancel := context.WithCancel(ctx)
+	defer dropCancel()
 	wb.dropping = true
 	ordinaryTasks, ordinaryWaiters := wb.beginOrdinaryDropLocked(dropCtx)
 	wb.mut.Unlock()
-	defer dropCancel()
 	defer func() {
 		if panicValue := recover(); panicValue != nil {
 			wb.mut.RLock()
