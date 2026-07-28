@@ -283,8 +283,10 @@ A published text index has one of two source identities:
   version/build ID, scalar-index version, base path, sizes, and ordered file
   list.
 - **RawBuilt**: built locally from the field column or scalar-index raw data;
-  `SegmentLoadInfo::created_text_indexes_` records that source identity as
-  snapshot-owned bookkeeping.
+  `SegmentLoadInfo::created_text_indexes_` records the actual source kind
+  (`FieldData` or `ScalarIndexRawData`) as snapshot-owned bookkeeping. The
+  field/scalar-index load identities remain the authoritative identities of
+  those source resources.
 
 The schema identity of either source includes the field data type,
 `enable_match`, `enable_analyzer`, and analyzer parameters. Online `Reopen`
@@ -294,6 +296,8 @@ supports only these transitions:
 - no text index to RawBuilt
 - unchanged Prebuilt to unchanged Prebuilt
 - unchanged RawBuilt to unchanged RawBuilt
+- RawBuilt to rebuilt RawBuilt when its field data, scalar-index source, or
+  analyzer/schema identity changes
 - either source to field removal from the schema
 
 The following transitions are rejected during diff validation, before index
@@ -302,12 +306,23 @@ IO or staged runtime mutation begins:
 - replacing a Prebuilt load identity
 - Prebuilt to RawBuilt or RawBuilt to Prebuilt
 - removing a RawBuilt index while retaining the field
-- changing text-index schema identity while retaining the field
 
-These transitions require full segment replacement until staged text-index
-replacement is implemented explicitly. This keeps online reopen from silently
-retaining an old runtime index under new metadata or destroying a published
-index before a replacement is ready.
+These remaining transitions require full segment replacement. RawBuilt
+replacement, however, is prepared online as a derived-resource rebuild:
+
+1. compute field/index/schema dependency changes from complete load identities
+   (including build ID, version, store-path version, parameters, and ordered
+   files rather than only `index_id`);
+2. load or drop the target field/scalar-index sources in cloned runtime;
+3. build a replacement holder from that staged source without mutating live
+   runtime;
+4. install the holder and its actual source-kind marker in the cloned state;
+5. publish data, text index, and metadata atomically.
+
+Build failure or cancellation discards the cloned generation, leaving the old
+field data, marker, and query results published. Each local Tantivy build uses
+a UUID-scoped path so mmap-backed old and new holders can coexist while old
+readers retain their snapshot.
 
 Text-index update serialization belongs to `reopen_mutex_`: full load,
 `Reopen`, and direct `CreateTextIndex` cannot overlap. Within one staged load,
@@ -323,7 +338,11 @@ entry is erased from the cloned runtime; old snapshots retain the old index by
 shared ownership until their readers finish. The new load-info snapshot also
 prunes both the runtime-only `created_text_indexes_` marker and the proto-backed
 `textstatslogs` entry for the removed field, so a later `Reopen` cannot observe
-stale text-index identity metadata.
+stale text-index identity metadata. Before final publication, the segment
+validates the bidirectional invariant: every raw holder has exactly one raw
+marker, every prebuilt cache slot has exactly one `TextIndexStats` entry, no
+field has both identities, and no dropped-schema field retains text-index
+runtime or metadata.
 
 ---
 

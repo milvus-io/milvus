@@ -371,6 +371,7 @@ TEST_F(SegmentLoadInfoTest,
     auto* cur_index = current_proto.add_index_infos();
     cur_index->set_fieldid(101);
     cur_index->set_indexid(1001);
+    cur_index->set_buildid(5001);
     cur_index->add_index_file_paths("/path/to/old_index");
     auto* cur_param = cur_index->add_index_params();
     cur_param->set_key("index_type");
@@ -382,7 +383,8 @@ TEST_F(SegmentLoadInfoTest,
     new_proto.set_manifest_path("/path/to/current_manifest");
     auto* new_index = new_proto.add_index_infos();
     new_index->set_fieldid(101);
-    new_index->set_indexid(2001);
+    new_index->set_indexid(1001);
+    new_index->set_buildid(5002);
     new_index->add_index_file_paths("/path/to/new_index");
     auto* new_param = new_index->add_index_params();
     new_param->set_key("index_type");
@@ -404,9 +406,9 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_EQ(diff.indexes_to_replace.size(), 1);
     ASSERT_TRUE(diff.indexes_to_replace.count(FieldId(101)) > 0);
     ASSERT_EQ(diff.indexes_to_replace[FieldId(101)].size(), 1);
-    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_id, 2001);
-    EXPECT_EQ(diff.indexes_to_drop.size(), 1);
-    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(101)) > 0);
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_id, 1001);
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_build_id, 5002);
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
 }
 
 TEST_F(SegmentLoadInfoTest,
@@ -517,6 +519,51 @@ TEST_F(SegmentLoadInfoTest, BinlogInfo) {
 
     auto zero_count = info.GetFieldBinlogRowCount(FieldId(999));
     EXPECT_EQ(zero_count, 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ValidateReopenRowCountAcceptsMatchingBinlogs) {
+    auto proto = proto_;
+    proto.clear_manifest_path();
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo info(proto, schema_);
+    EXPECT_NO_THROW(info.ValidateReopenRowCount(1000));
+}
+
+TEST_F(SegmentLoadInfoTest, ValidateReopenRowCountRejectsRetainedGroup) {
+    auto proto = proto_;
+    proto.clear_manifest_path();
+    proto.set_num_of_rows(1000);
+    proto.mutable_binlog_paths(1)->mutable_binlogs(0)->set_entries_num(999);
+
+    SegmentLoadInfo info(proto, schema_);
+    try {
+        info.ValidateReopenRowCount(1000);
+        FAIL() << "mismatched retained column group should be rejected";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_NE(std::string(err.what()).find("field binlog group 104"),
+                  std::string::npos);
+        EXPECT_NE(std::string(err.what()).find("expected 1000, actual 999"),
+                  std::string::npos);
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, ValidateReopenRowCountIgnoresDroppedGroup) {
+    auto proto = proto_;
+    proto.clear_manifest_path();
+    proto.clear_index_infos();
+    proto.set_num_of_rows(1000);
+    proto.mutable_binlog_paths(1)->mutable_binlogs(0)->set_entries_num(999);
+
+    auto reduced_schema = std::make_shared<Schema>();
+    auto pk = reduced_schema->AddDebugField("pk", DataType::INT64);
+    reduced_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    reduced_schema->set_primary_field_id(pk);
+
+    SegmentLoadInfo info(proto, reduced_schema);
+    EXPECT_NO_THROW(info.ValidateReopenRowCount(1000));
 }
 
 TEST_F(SegmentLoadInfoTest, ColumnGroup) {
@@ -1519,14 +1566,19 @@ TEST_F(SegmentLoadInfoTest, CreatedTextIndexesCopyConstructor) {
     proto.set_num_of_rows(1000);
 
     SegmentLoadInfo info1(proto, schema_);
-    info1.SetTextIndexCreated(FieldId(101));
-    info1.SetTextIndexCreated(FieldId(102));
+    info1.SetTextIndexCreated(FieldId(101), RawTextIndexSource::FieldData);
+    info1.SetTextIndexCreated(FieldId(102),
+                              RawTextIndexSource::ScalarIndexRawData);
 
     // Copy constructor
     SegmentLoadInfo info2(info1);
     EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(101)));
     EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(102)));
     EXPECT_FALSE(info2.HasTextIndexCreated(FieldId(103)));
+    EXPECT_EQ(info2.GetTextIndexCreatedSource(FieldId(101)),
+              RawTextIndexSource::FieldData);
+    EXPECT_EQ(info2.GetTextIndexCreatedSource(FieldId(102)),
+              RawTextIndexSource::ScalarIndexRawData);
 }
 
 TEST_F(SegmentLoadInfoTest, CreatedTextIndexesMoveConstructor) {
@@ -1875,7 +1927,7 @@ TEST_F(SegmentLoadInfoTest, RejectsRawBuiltToPrebuiltTextIndexChange) {
     EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
 }
 
-TEST_F(SegmentLoadInfoTest, RejectsRawBuiltTextIndexSchemaIdentityChange) {
+TEST_F(SegmentLoadInfoTest, RebuildsRawBuiltTextIndexOnSchemaIdentityChange) {
     auto old_schema = CreateSchemaWithTextMatchField();
 
     auto new_schema = std::make_shared<Schema>();
@@ -1900,9 +1952,123 @@ TEST_F(SegmentLoadInfoTest, RejectsRawBuiltTextIndexSchemaIdentityChange) {
     proto.set_num_of_rows(1000);
 
     SegmentLoadInfo current_info(proto, old_schema);
-    current_info.SetTextIndexCreated(FieldId(102));
+    current_info.SetTextIndexCreated(FieldId(102),
+                                     RawTextIndexSource::FieldData);
     SegmentLoadInfo new_info(proto, new_schema);
-    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+    auto diff = current_info.ComputeDiff(new_info);
+    ASSERT_EQ(diff.text_indexes_to_rebuild.size(), 1);
+    EXPECT_EQ(diff.text_indexes_to_rebuild.at(FieldId(102)),
+              RawTextIndexSource::FieldData);
+}
+
+TEST_F(SegmentLoadInfoTest, RebuildsRawTextIndexOnlyForChangedFieldSource) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+    auto add_binlog = [](proto::segcore::SegmentLoadInfo& proto,
+                         int64_t field_id,
+                         const std::string& path) {
+        auto* field_binlog = proto.add_binlog_paths();
+        field_binlog->set_fieldid(field_id);
+        auto* binlog = field_binlog->add_binlogs();
+        binlog->set_log_path(path);
+        binlog->set_entries_num(1000);
+    };
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    add_binlog(current_proto, 102, "/text/old");
+    add_binlog(current_proto, 103, "/plain/old");
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    current_info.SetTextIndexCreated(FieldId(102),
+                                     RawTextIndexSource::FieldData);
+
+    auto unchanged_proto = current_proto;
+    SegmentLoadInfo unchanged_info(unchanged_proto, text_schema);
+    EXPECT_TRUE(current_info.ComputeDiff(unchanged_info)
+                    .text_indexes_to_rebuild.empty());
+
+    auto unrelated_proto = current_proto;
+    unrelated_proto.mutable_binlog_paths(1)->mutable_binlogs(0)->set_log_path(
+        "/plain/new");
+    SegmentLoadInfo unrelated_info(unrelated_proto, text_schema);
+    EXPECT_TRUE(current_info.ComputeDiff(unrelated_info)
+                    .text_indexes_to_rebuild.empty());
+
+    auto changed_proto = current_proto;
+    changed_proto.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/text/new");
+    SegmentLoadInfo changed_info(changed_proto, text_schema);
+    auto changed_diff = current_info.ComputeDiff(changed_info);
+    ASSERT_EQ(changed_diff.text_indexes_to_rebuild.size(), 1);
+    EXPECT_EQ(changed_diff.text_indexes_to_rebuild.at(FieldId(102)),
+              RawTextIndexSource::FieldData);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       RebuildsRawTextIndexWhenScalarSourceIdentityChanges) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+    auto add_index = [](proto::segcore::SegmentLoadInfo& proto,
+                        int64_t build_id,
+                        const std::string& path) {
+        auto* index = proto.add_index_infos();
+        index->set_fieldid(102);
+        index->set_indexid(7001);
+        index->set_buildid(build_id);
+        index->set_index_version(3);
+        index->add_index_file_paths(path);
+        auto* param = index->add_index_params();
+        param->set_key("index_type");
+        param->set_value(milvus::index::ASCENDING_SORT);
+    };
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    add_index(current_proto, 8001, "/scalar/old");
+
+    auto new_proto = current_proto;
+    new_proto.clear_index_infos();
+    add_index(new_proto, 8002, "/scalar/new");
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    current_info.SetTextIndexCreated(FieldId(102),
+                                     RawTextIndexSource::ScalarIndexRawData);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.indexes_to_replace.at(FieldId(102)).size(), 1);
+    ASSERT_EQ(diff.text_indexes_to_rebuild.size(), 1);
+    EXPECT_EQ(diff.text_indexes_to_rebuild.at(FieldId(102)),
+              RawTextIndexSource::ScalarIndexRawData);
+}
+
+TEST_F(SegmentLoadInfoTest, RebuildsRawTextIndexWhenManifestIdentityChanges) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path("/manifest/old");
+
+    auto new_proto = current_proto;
+    new_proto.set_manifest_path("/manifest/new");
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    current_info.SetTextIndexCreated(FieldId(102),
+                                     RawTextIndexSource::FieldData);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    current_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    new_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.manifest_updated);
+    ASSERT_EQ(diff.text_indexes_to_rebuild.size(), 1);
+    EXPECT_EQ(diff.text_indexes_to_rebuild.at(FieldId(102)),
+              RawTextIndexSource::FieldData);
 }
 
 TEST_F(SegmentLoadInfoTest, RejectsRawBuiltTextIndexRemovalWithFieldRetained) {
@@ -2516,6 +2682,54 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDropsJsonIndexByNestedPath) {
     auto diff = current_info.ComputeDiff(new_info);
 
     ASSERT_EQ(diff.json_indexes_to_drop.count(FieldId(102)), 1);
+    EXPECT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).count("a"), 1);
+    EXPECT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).count("b"), 0);
+    EXPECT_EQ(diff.indexes_to_drop.count(FieldId(102)), 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDropsOldJsonPathWhenSameIndexIdMoves) {
+    auto add_json_index = [](proto::segcore::SegmentLoadInfo& proto,
+                             const std::string& nested_path,
+                             const std::string& file_path) {
+        auto* index = proto.add_index_infos();
+        index->set_fieldid(102);
+        index->set_indexid(5001);
+        index->set_buildid(6001);
+        index->add_index_file_paths(file_path);
+        auto* type = index->add_index_params();
+        type->set_key(milvus::index::INDEX_TYPE);
+        type->set_value(milvus::index::INVERTED_INDEX_TYPE);
+        auto* path = index->add_index_params();
+        path->set_key(JSON_PATH);
+        path->set_value(nested_path);
+        auto* cast = index->add_index_params();
+        cast->set_key(JSON_CAST_TYPE);
+        cast->set_value("DOUBLE");
+    };
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path("/path/to/manifest");
+    add_json_index(current_proto, "a", "/path/to/json_index_a");
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    new_proto.set_manifest_path("/path/to/manifest");
+    add_json_index(new_proto, "b", "/path/to/json_index_b");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    current_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    new_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.indexes_to_replace.at(FieldId(102)).size(), 1);
+    ASSERT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).size(), 1);
     EXPECT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).count("a"), 1);
     EXPECT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).count("b"), 0);
     EXPECT_EQ(diff.indexes_to_drop.count(FieldId(102)), 0);

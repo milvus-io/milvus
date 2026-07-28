@@ -13,6 +13,8 @@
 #include "segcore/default_fs.h"
 
 #include <cxxabi.h>
+#include <boost/uuid/random_generator.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <fmt/core.h>
 #include <folly/ScopeGuard.h>
 #include <folly/Try.h>
@@ -1358,6 +1360,82 @@ ChunkedSegmentSealedImpl::NormalizePublishedState(
     SetSystemFieldReadyInState(state, state.load_info.get());
 }
 
+void
+ChunkedSegmentSealedImpl::ValidateTextIndexState(
+    const PublishedSegmentState& state) const {
+    if (state.schema == nullptr || state.load_info == nullptr ||
+        state.runtime == nullptr) {
+        bool has_runtime_text_index =
+            state.runtime != nullptr && !state.runtime->text_indexes.empty();
+        bool has_text_index_metadata =
+            state.load_info != nullptr &&
+            (!state.load_info->GetCreatedTextIndexes().empty() ||
+             !state.load_info->GetTextStatsLogs().empty());
+        AssertInfo(!has_runtime_text_index && !has_text_index_metadata,
+                   "published text-index state requires schema, load info, "
+                   "and runtime resources");
+        return;
+    }
+
+    const auto& markers = state.load_info->GetCreatedTextIndexes();
+    const auto& stats = state.load_info->GetTextStatsLogs();
+    const auto& indexes = state.runtime->text_indexes;
+
+    for (const auto& [field_id, _] : markers) {
+        AssertInfo(field_exists_in_schema(state.schema, field_id),
+                   "raw-built text index marker references dropped field {}",
+                   field_id.get());
+        AssertInfo(stats.find(field_id.get()) == stats.end(),
+                   "text index field {} is both raw-built and pre-built",
+                   field_id.get());
+        auto runtime_it = indexes.find(field_id);
+        AssertInfo(runtime_it != indexes.end() &&
+                       std::holds_alternative<
+                           std::shared_ptr<index::TextMatchIndexHolder>>(
+                           runtime_it->second) &&
+                       std::get<std::shared_ptr<index::TextMatchIndexHolder>>(
+                           runtime_it->second) != nullptr,
+                   "raw-built text index marker for field {} has no raw "
+                   "runtime holder",
+                   field_id.get());
+    }
+
+    for (const auto& [field_id_value, _] : stats) {
+        auto field_id = FieldId(field_id_value);
+        AssertInfo(field_exists_in_schema(state.schema, field_id),
+                   "pre-built text index metadata references dropped field {}",
+                   field_id_value);
+        AssertInfo(markers.find(field_id) == markers.end(),
+                   "text index field {} is both pre-built and raw-built",
+                   field_id_value);
+        auto runtime_it = indexes.find(field_id);
+        using PrebuiltTextIndexSlot =
+            std::shared_ptr<cachinglayer::CacheSlot<index::TextMatchIndex>>;
+        AssertInfo(
+            runtime_it != indexes.end() &&
+                std::holds_alternative<PrebuiltTextIndexSlot>(
+                    runtime_it->second) &&
+                std::get<PrebuiltTextIndexSlot>(runtime_it->second) != nullptr,
+            "pre-built text index metadata for field {} has no cache "
+            "slot",
+            field_id_value);
+    }
+
+    for (const auto& [field_id, runtime_index] : indexes) {
+        AssertInfo(field_exists_in_schema(state.schema, field_id),
+                   "runtime text index references dropped field {}",
+                   field_id.get());
+        bool raw = std::holds_alternative<
+            std::shared_ptr<index::TextMatchIndexHolder>>(runtime_index);
+        AssertInfo(raw ? markers.find(field_id) != markers.end()
+                       : stats.find(field_id.get()) != stats.end(),
+                   "runtime {} text index for field {} has no matching "
+                   "published metadata",
+                   raw ? "raw-built" : "pre-built",
+                   field_id.get());
+    }
+}
+
 std::shared_ptr<ChunkedSegmentSealedImpl::PublishedSegmentState>
 ChunkedSegmentSealedImpl::BuildNextPublishedState(
     const std::shared_ptr<const PublishedSegmentState>& current,
@@ -1444,9 +1522,11 @@ ChunkedSegmentSealedImpl::CloneLoadInfoWithDefaultFilled(
 
 std::shared_ptr<const SegmentLoadInfo>
 ChunkedSegmentSealedImpl::CloneLoadInfoWithTextIndexCreated(
-    const std::shared_ptr<const SegmentLoadInfo>& current, FieldId field_id) {
+    const std::shared_ptr<const SegmentLoadInfo>& current,
+    FieldId field_id,
+    RawTextIndexSource source) {
     auto load_info_copy = std::make_shared<SegmentLoadInfo>(*current);
-    load_info_copy->SetTextIndexCreated(field_id);
+    load_info_copy->SetTextIndexCreated(field_id, source);
     return std::const_pointer_cast<const SegmentLoadInfo>(load_info_copy);
 }
 
@@ -2291,7 +2371,10 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         runtime->timestamps = std::move(timestamps);
         runtime->timestamp_index = std::make_shared<const TimestampIndex>();
         runtime->timestamp_index_slot.reset();
-        SetRuntimeRowCount(*runtime, 0);
+        // This is an explicit staged-runtime clear, not a field-data load.
+        // Non-zero load paths still go through SetRuntimeRowCount and must
+        // preserve the existing row-count invariant.
+        runtime->row_count = 0;
         return;
     }
 
@@ -5274,33 +5357,24 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
         field_id, CaptureSchemaSnapshot(), op_ctx, true, nullptr);
 }
 
-void
-ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
+ChunkedSegmentSealedImpl::RawTextIndexBuildResult
+ChunkedSegmentSealedImpl::BuildRawTextIndexWithSchema(
     FieldId field_id,
     const SchemaPtr& schema_snapshot,
     milvus::OpContext* op_ctx,
-    bool publish_marker,
-    RuntimeResourceState* runtime) {
+    const RuntimeResourceState& runtime) {
     CheckCancellation(op_ctx,
                       id_,
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
 
-    std::shared_ptr<RuntimeResourceState> owned_runtime;
-    auto* target_runtime = runtime;
-    if (target_runtime == nullptr) {
-        owned_runtime = CloneMutableRuntimeResourceState();
-        target_runtime = owned_runtime.get();
-    }
-    AssertInfo(target_runtime->text_indexes.find(field_id) ==
-                   target_runtime->text_indexes.end(),
-               "text index for field {} already exists, refusing to rebuild",
-               field_id.get());
-
     const auto& field_meta = schema_snapshot->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
-    std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
+    auto build_uuid = boost::uuids::random_generator()();
+    auto unique_id = fmt::format("{}_{}",
+                                 GetUniqueFieldId(field_meta.get_id().get()),
+                                 boost::uuids::to_string(build_uuid));
     if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
         // Sealed interim index: no background merge — finish() ends with an
@@ -5326,9 +5400,9 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
 
     {
         // build
-        auto it = target_runtime->fields.find(field_id);
+        auto it = runtime.fields.find(field_id);
         std::shared_ptr<ChunkedColumnInterface> column =
-            it != target_runtime->fields.end() ? it->second : nullptr;
+            it != runtime.fields.end() ? it->second : nullptr;
         if (column) {
             // Check for cancellation before bulk operation
             CheckCancellation(op_ctx,
@@ -5336,7 +5410,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
             if (field_meta.get_data_type() == DataType::TEXT) {
-                const auto* path_map = &target_runtime->text_lob_paths;
+                const auto* path_map = &runtime.text_lob_paths;
                 auto it = path_map->find(field_id);
                 AssertInfo(it != path_map->end(),
                            "TEXT field {} has no LOB path. TEXT type "
@@ -5411,12 +5485,10 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     });
             }
         } else {  // fetch raw data from index.
-            auto field_index_iter =
-                target_runtime->scalar_indexings.find(field_id);
-            AssertInfo(
-                field_index_iter != target_runtime->scalar_indexings.end(),
-                "failed to create text index, neither raw data nor "
-                "index are found");
+            auto field_index_iter = runtime.scalar_indexings.find(field_id);
+            AssertInfo(field_index_iter != runtime.scalar_indexings.end(),
+                       "failed to create text index, neither raw data nor "
+                       "index are found");
             auto accessor =
                 SemiInlineGet(field_index_iter->second->PinCells(op_ctx, {0}));
             auto ptr = accessor->get_cell_of(0);
@@ -5462,20 +5534,11 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       id_,
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
-    target_runtime->text_indexes.emplace(field_id,
-                                         std::move(text_index_holder));
-
-    if (owned_runtime != nullptr) {
-        auto current = CapturePublishedState();
-        auto next = ClonePublishedState(current);
-        next->runtime = ToConstRuntimeState(std::move(owned_runtime));
-        if (publish_marker) {
-            next->load_info =
-                CloneLoadInfoWithTextIndexCreated(next->load_info, field_id);
-        }
-        NormalizePublishedState(*next);
-        PublishStateOnline(std::move(next));
-    }
+    return RawTextIndexBuildResult{
+        std::move(text_index_holder),
+        runtime.fields.count(field_id) > 0
+            ? RawTextIndexSource::FieldData
+            : RawTextIndexSource::ScalarIndexRawData};
 }
 
 void
@@ -5483,9 +5546,58 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
     FieldId field_id,
     const SchemaPtr& schema_snapshot,
     milvus::OpContext* op_ctx,
+    bool publish_marker,
+    RuntimeResourceState* runtime) {
+    std::shared_ptr<RuntimeResourceState> owned_runtime;
+    auto* target_runtime = runtime;
+    if (target_runtime == nullptr) {
+        owned_runtime = CloneMutableRuntimeResourceState();
+        target_runtime = owned_runtime.get();
+    }
+    AssertInfo(target_runtime->text_indexes.find(field_id) ==
+                   target_runtime->text_indexes.end(),
+               "text index for field {} already exists, refusing to rebuild",
+               field_id.get());
+
+    auto result = BuildRawTextIndexWithSchema(
+        field_id, schema_snapshot, op_ctx, *target_runtime);
+    auto source = result.source;
+    target_runtime->text_indexes.emplace(field_id, std::move(result.index));
+
+    if (owned_runtime != nullptr) {
+        auto current = CapturePublishedState();
+        auto next = ClonePublishedState(current);
+        next->runtime = ToConstRuntimeState(std::move(owned_runtime));
+        if (publish_marker) {
+            next->load_info = CloneLoadInfoWithTextIndexCreated(
+                next->load_info, field_id, source);
+        }
+        NormalizePublishedState(*next);
+        ValidateTextIndexState(*next);
+        PublishStateOnline(std::move(next));
+    }
+}
+
+RawTextIndexSource
+ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
+    FieldId field_id,
+    const SchemaPtr& schema_snapshot,
+    milvus::OpContext* op_ctx,
     StagedStateCommitter& committer) {
-    CreateTextIndexWithSchema(
-        field_id, schema_snapshot, op_ctx, false, committer.runtime());
+    auto* runtime = committer.runtime();
+    AssertInfo(
+        runtime->text_indexes.find(field_id) == runtime->text_indexes.end(),
+        "text index for field {} already exists, refusing to create",
+        field_id.get());
+    auto result = BuildRawTextIndexWithSchema(
+        field_id, schema_snapshot, op_ctx, *runtime);
+    auto source = result.source;
+    committer.Commit([field_id, index = std::move(result.index)](
+                         RuntimeResourceState& staged_runtime,
+                         PublishedSegmentState&) mutable {
+        staged_runtime.text_indexes.emplace(field_id, std::move(index));
+    });
+    return source;
 }
 
 void
@@ -5513,8 +5625,10 @@ ChunkedSegmentSealedImpl::RecordDefaultFieldsFilled(
 
 void
 ChunkedSegmentSealedImpl::RecordTextIndexCreated(
-    SegmentLoadInfo& segment_load_info, FieldId field_id) {
-    segment_load_info.SetTextIndexCreated(field_id);
+    SegmentLoadInfo& segment_load_info,
+    FieldId field_id,
+    RawTextIndexSource source) {
+    segment_load_info.SetTextIndexCreated(field_id, source);
 }
 ChunkedSegmentSealedImpl::TextIndexVariant
 ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
@@ -7321,11 +7435,66 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+    if (!diff.text_indexes_to_rebuild.empty()) {
+        for (const auto& [field_id, _] : diff.text_indexes_to_rebuild) {
+            CheckCancellation(op_ctx,
+                              id_,
+                              field_id.get(),
+                              "ChunkedSegmentSealedImpl::RebuildTextIndex()");
+
+            // Make the cloned runtime describe the target source set before
+            // choosing whether to rebuild from a field column or scalar-index
+            // raw data. Pure drops normally happen in FinalizeLoadDiff, which
+            // is too late for source selection here.
+            if (diff.field_data_to_drop.erase(field_id) > 0) {
+                committer.Commit([&](RuntimeResourceState& runtime,
+                                     PublishedSegmentState& staged_state) {
+                    bool drop_binlog_index = get_bit_if_present(
+                        staged_state.binlog_index_bitset, field_id);
+                    DropFieldData(field_id, schema_snapshot, &runtime);
+                    if (drop_binlog_index) {
+                        committer.StageVectorIndexDropLocked(field_id);
+                    }
+                    DropFieldFromState(staged_state, field_id);
+                });
+            }
+            if (diff.indexes_to_drop.count(field_id) > 0 &&
+                diff.indexes_to_replace.count(field_id) == 0 &&
+                diff.indexes_to_load.count(field_id) == 0) {
+                committer.Commit([&](RuntimeResourceState& runtime,
+                                     PublishedSegmentState& staged_state) {
+                    committer.RetireCacheIndexingLocked(
+                        DropIndex(field_id, schema_snapshot, &runtime));
+                    committer.StageVectorIndexDropLocked(field_id);
+                    DropIndexFromState(staged_state, field_id);
+                });
+                diff.indexes_to_drop.erase(field_id);
+            }
+
+            auto result = BuildRawTextIndexWithSchema(
+                field_id, schema_snapshot, op_ctx, *committer.runtime());
+            auto source = result.source;
+            committer.Commit([field_id, index = std::move(result.index)](
+                                 RuntimeResourceState& runtime,
+                                 PublishedSegmentState&) mutable {
+                runtime.text_indexes.insert_or_assign(field_id,
+                                                      std::move(index));
+            });
+            RecordTextIndexCreated(segment_load_info, field_id, source);
+            committer.Commit([&](RuntimeResourceState&,
+                                 PublishedSegmentState& staged_state) {
+                staged_state.load_info =
+                    std::make_shared<const SegmentLoadInfo>(segment_load_info);
+            });
+        }
+    }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.text_indexes_to_create.empty()) {
         for (const auto& field_id : diff.text_indexes_to_create) {
-            CreateTextIndexWithSchema(
+            auto source = CreateTextIndexWithSchema(
                 field_id, schema_snapshot, op_ctx, committer);
-            RecordTextIndexCreated(segment_load_info, field_id);
+            RecordTextIndexCreated(segment_load_info, field_id, source);
             committer.Commit([&](RuntimeResourceState&,
                                  PublishedSegmentState& staged_state) {
                 staged_state.load_info =
@@ -7533,17 +7702,15 @@ ChunkedSegmentSealedImpl::Reopen(
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
-    AssertInfo(
-        current->load_info->GetNumOfRows() == new_local.GetNumOfRows(),
-        "online reopen cannot change row count for segment {}: current {}, "
-        "incoming {}; use full segment replacement instead",
-        id_,
-        current->load_info->GetNumOfRows(),
-        new_local.GetNumOfRows());
+    // Construction filters derived caches, while reopen normalization also
+    // removes proto-backed state for fields dropped from the target schema.
+    new_local.ReplaceSchemaForReopen(target_schema);
+    new_local.ValidateReopenRowCount(current->load_info->GetNumOfRows());
     new_local.InheritCachedColumnGroupsFrom(*current->load_info);
-    for (auto fid : current->load_info->GetCreatedTextIndexes()) {
+    for (const auto& [fid, meta] :
+         current->load_info->GetCreatedTextIndexes()) {
         if (field_exists_in_schema(target_schema, fid)) {
-            new_local.SetTextIndexCreated(fid);
+            new_local.SetTextIndexCreated(fid, meta.source);
         }
     }
 
@@ -8831,8 +8998,9 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
                                  snapshot->schema);
     mutable_copy.SetFieldsFilledWithDefault(
         snapshot->load_info->GetFieldsFilledWithDefault());
-    for (auto fid : snapshot->load_info->GetCreatedTextIndexes()) {
-        mutable_copy.SetTextIndexCreated(fid);
+    for (const auto& [fid, meta] :
+         snapshot->load_info->GetCreatedTextIndexes()) {
+        mutable_copy.SetTextIndexCreated(fid, meta.source);
     }
     auto diff = mutable_copy.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());

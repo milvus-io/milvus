@@ -40,6 +40,16 @@
 
 namespace milvus::segcore {
 
+enum class RawTextIndexSource {
+    Unknown,
+    FieldData,
+    ScalarIndexRawData,
+};
+
+struct RawBuiltTextIndexMeta {
+    RawTextIndexSource source{RawTextIndexSource::Unknown};
+};
+
 /**
  * @brief Structure representing the difference between two SegmentLoadInfos,
  *       used for reopening segments.
@@ -122,6 +132,11 @@ struct LoadDiff {
     // Text fields that need text indexes created from raw data
     std::unordered_set<FieldId> text_indexes_to_create;
 
+    // Existing raw-built text indexes whose underlying field/index source is
+    // being replaced in this reopen. Values record the source used by the
+    // currently published index; the rebuild records the actual new source.
+    std::unordered_map<FieldId, RawTextIndexSource> text_indexes_to_rebuild;
+
     // External collections with manifest should bypass ComputeDiffColumnGroups
     // (their column names are parquet field names, not numeric field IDs)
     // and use LoadColumnGroups(manifest_path) directly in ApplyLoadDiff
@@ -146,7 +161,8 @@ struct LoadDiff {
                !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
                !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
-               !text_indexes_to_create.empty() || manifest_updated ||
+               !text_indexes_to_create.empty() ||
+               !text_indexes_to_rebuild.empty() || manifest_updated ||
                load_external_manifest;
     }
 
@@ -386,6 +402,17 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // text_indexes_to_rebuild
+        oss << "text_indexes_to_rebuild=[";
+        first = true;
+        for (const auto& [field_id, source] : text_indexes_to_rebuild) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get() << ":" << static_cast<int>(source);
+        }
+        oss << "], ";
+
         // manifest_updated and new_manifest_path
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
@@ -443,7 +470,7 @@ class SegmentLoadInfo {
         : info_(other.info_),
           schema_(other.schema_),
           converted_field_index_cache_(other.converted_field_index_cache_),
-          field_index_id_cache_(other.field_index_id_cache_),
+          field_index_identity_cache_(other.field_index_identity_cache_),
           json_index_path_cache_(other.json_index_path_cache_),
           field_index_has_raw_data_(other.field_index_has_raw_data_),
           fields_filled_with_default_(other.fields_filled_with_default_),
@@ -460,7 +487,8 @@ class SegmentLoadInfo {
           schema_(std::move(other.schema_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
-          field_index_id_cache_(std::move(other.field_index_id_cache_)),
+          field_index_identity_cache_(
+              std::move(other.field_index_identity_cache_)),
           json_index_path_cache_(std::move(other.json_index_path_cache_)),
           field_index_has_raw_data_(std::move(other.field_index_has_raw_data_)),
           fields_filled_with_default_(
@@ -481,7 +509,7 @@ class SegmentLoadInfo {
             info_ = other.info_;
             schema_ = other.schema_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
-            field_index_id_cache_ = other.field_index_id_cache_;
+            field_index_identity_cache_ = other.field_index_identity_cache_;
             json_index_path_cache_ = other.json_index_path_cache_;
             field_index_has_raw_data_ = other.field_index_has_raw_data_;
             column_groups_ = other.column_groups_;
@@ -502,7 +530,8 @@ class SegmentLoadInfo {
             schema_ = std::move(other.schema_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
-            field_index_id_cache_ = std::move(other.field_index_id_cache_);
+            field_index_identity_cache_ =
+                std::move(other.field_index_identity_cache_);
             json_index_path_cache_ = std::move(other.json_index_path_cache_);
             field_index_has_raw_data_ =
                 std::move(other.field_index_has_raw_data_);
@@ -618,6 +647,16 @@ class SegmentLoadInfo {
     GetEstimatedBytesPerRow() const {
         return info_.estimated_bytes_per_row();
     }
+
+    /**
+     * @brief Validate that an online reopen preserves the segment row count
+     *
+     * In binlog mode, the top-level row count is only metadata. Validate each
+     * schema-visible field/column-group against the published row count too,
+     * before reopen diff computation can schedule storage IO.
+     */
+    void
+    ValidateReopenRowCount(int64_t expected) const;
 
     // ==================== Compaction Info ====================
 
@@ -974,8 +1013,11 @@ class SegmentLoadInfo {
     // ==================== Created Text Indexes Tracking ====================
 
     void
-    SetTextIndexCreated(FieldId field_id) {
-        created_text_indexes_.insert(field_id);
+    SetTextIndexCreated(
+        FieldId field_id,
+        RawTextIndexSource source = RawTextIndexSource::Unknown) {
+        created_text_indexes_.insert_or_assign(field_id,
+                                               RawBuiltTextIndexMeta{source});
     }
 
     [[nodiscard]] bool
@@ -984,7 +1026,19 @@ class SegmentLoadInfo {
                created_text_indexes_.end();
     }
 
-    [[nodiscard]] const std::unordered_set<FieldId>&
+    [[nodiscard]] RawTextIndexSource
+    GetTextIndexCreatedSource(FieldId field_id) const {
+        auto it = created_text_indexes_.find(field_id);
+        return it == created_text_indexes_.end() ? RawTextIndexSource::Unknown
+                                                 : it->second.source;
+    }
+
+    void
+    ClearTextIndexCreated(FieldId field_id) {
+        created_text_indexes_.erase(field_id);
+    }
+
+    [[nodiscard]] const std::unordered_map<FieldId, RawBuiltTextIndexMeta>&
     GetCreatedTextIndexes() const {
         return created_text_indexes_;
     }
@@ -1190,11 +1244,11 @@ class SegmentLoadInfo {
         };
 
         prune_map(converted_field_index_cache_);
-        prune_map(field_index_id_cache_);
+        prune_map(field_index_identity_cache_);
         prune_map(json_index_path_cache_);
         prune_set(field_index_has_raw_data_);
         prune_set(fields_filled_with_default_);
-        prune_set(created_text_indexes_);
+        prune_map(created_text_indexes_);
 
         std::vector<int64_t> dropped_text_stats_fields;
         for (const auto& [field_id, _] : info_.textstatslogs()) {
@@ -1225,7 +1279,7 @@ class SegmentLoadInfo {
 
         // Convert index infos to LoadIndexInfo and build per-field cache
         converted_field_index_cache_.clear();
-        field_index_id_cache_.clear();
+        field_index_identity_cache_.clear();
         json_index_path_cache_.clear();
         field_index_has_raw_data_.clear();
         for (int i = 0; i < info_.index_infos_size(); i++) {
@@ -1237,7 +1291,6 @@ class SegmentLoadInfo {
             if (!HasFieldInSchema(field_id)) {
                 continue;
             }
-            field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
             auto index_type_it =
@@ -1262,6 +1315,8 @@ class SegmentLoadInfo {
             if (CheckIndexHasRawData(load_index_info)) {
                 field_index_has_raw_data_.insert(field_id);
             }
+            field_index_identity_cache_[field_id].push_back(
+                FieldIndexIdentity::From(load_index_info));
             if (load_index_info.field_type == DataType::JSON) {
                 auto path_it = load_index_info.index_params.find(JSON_PATH);
                 if (path_it != load_index_info.index_params.end()) {
@@ -1295,6 +1350,10 @@ class SegmentLoadInfo {
     void
     ComputeDiffJsonKeyStats(LoadDiff& diff, SegmentLoadInfo& new_info);
 
+    void
+    PlanRawBuiltTextIndexRebuilds(LoadDiff& diff,
+                                  const SegmentLoadInfo& new_info) const;
+
     [[nodiscard]] std::set<FieldId>
     CollectDataFields() const;
 
@@ -1306,10 +1365,48 @@ class SegmentLoadInfo {
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>
         converted_field_index_cache_;
 
-    // Lightweight runtime identity for current loaded indexes. Manifest mode
-    // can drop converted_field_index_cache_ after load, but reopen diff still
-    // needs to know which index ids are already present per field.
-    std::unordered_map<FieldId, std::vector<int64_t>> field_index_id_cache_;
+    struct FieldIndexIdentity {
+        int64_t index_id{0};
+        int64_t build_id{0};
+        int64_t index_version{0};
+        proto::index::IndexStorePathVersion store_path_version{
+            proto::index::IndexStorePathVersion::
+                INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
+        IndexVersion index_engine_version{};
+        bool enable_mmap{false};
+        std::map<std::string, std::string> index_params;
+        std::vector<std::string> index_files;
+
+        static FieldIndexIdentity
+        From(const LoadIndexInfo& info) {
+            return FieldIndexIdentity{info.index_id,
+                                      info.index_build_id,
+                                      info.index_version,
+                                      info.index_store_path_version,
+                                      info.index_engine_version,
+                                      info.enable_mmap,
+                                      info.index_params,
+                                      info.index_files};
+        }
+
+        bool
+        operator==(const FieldIndexIdentity& other) const {
+            return index_id == other.index_id && build_id == other.build_id &&
+                   index_version == other.index_version &&
+                   store_path_version == other.store_path_version &&
+                   index_engine_version == other.index_engine_version &&
+                   enable_mmap == other.enable_mmap &&
+                   index_params == other.index_params &&
+                   index_files == other.index_files;
+        }
+    };
+
+    // Full runtime identity for current loaded indexes. Manifest mode drops
+    // converted_field_index_cache_ after load, but reopen still has to detect
+    // a rebuilt index whose index_id stayed constant while build/version/files
+    // changed.
+    std::unordered_map<FieldId, std::vector<FieldIndexIdentity>>
+        field_index_identity_cache_;
 
     // Lightweight JSON index identity retained after manifest load-info
     // compaction so reopen can drop one nested path without affecting sibling
@@ -1333,7 +1430,7 @@ class SegmentLoadInfo {
 
     // Field IDs where text indexes were created from raw data (not loaded from files)
     // These should NOT be re-loaded in diff computation
-    std::unordered_set<FieldId> created_text_indexes_;
+    std::unordered_map<FieldId, RawBuiltTextIndexMeta> created_text_indexes_;
 };
 
 }  // namespace milvus::segcore

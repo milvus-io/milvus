@@ -1314,6 +1314,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     static void
     SetRuntimeRowCount(RuntimeResourceState& runtime, int64_t row_count) {
+        AssertInfo(runtime.row_count == 0 || runtime.row_count == row_count,
+                   "runtime row count mismatch: current {}, incoming {}",
+                   runtime.row_count,
+                   row_count);
         runtime.row_count = row_count;
     }
 
@@ -1506,6 +1510,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     NormalizePublishedState(PublishedSegmentState& state) const;
 
+    void
+    ValidateTextIndexState(const PublishedSegmentState& state) const;
+
     enum class PublishMode {
         Drain,
         FailFast,
@@ -1587,6 +1594,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 next = segment_.BuildNextPublishedState(current, delta);
+                segment_.ValidateTextIndexState(*next);
                 retired_indexings.swap(retired_vector_indexings_);
                 retired_cache_indexings.swap(retired_cache_indexings_);
             }
@@ -1725,7 +1733,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     static std::shared_ptr<const SegmentLoadInfo>
     CloneLoadInfoWithTextIndexCreated(
         const std::shared_ptr<const SegmentLoadInfo>& current,
-        FieldId field_id);
+        FieldId field_id,
+        RawTextIndexSource source = RawTextIndexSource::Unknown);
 
     static std::shared_ptr<const SegmentLoadInfo>
     CloneLoadInfoForReopen(const SegmentLoadInfo& load_info,
@@ -2074,6 +2083,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         StagedStateCommitter& committer);
 
+    struct RawTextIndexBuildResult {
+        std::shared_ptr<index::TextMatchIndexHolder> index;
+        RawTextIndexSource source{RawTextIndexSource::Unknown};
+    };
+
+    RawTextIndexBuildResult
+    BuildRawTextIndexWithSchema(FieldId field_id,
+                                const SchemaPtr& schema_snapshot,
+                                milvus::OpContext* op_ctx,
+                                const RuntimeResourceState& runtime);
+
     void
     CreateTextIndexWithSchema(FieldId field_id,
                               const SchemaPtr& schema_snapshot,
@@ -2081,7 +2101,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               bool publish_marker = true,
                               RuntimeResourceState* runtime = nullptr);
 
-    void
+    RawTextIndexSource
     CreateTextIndexWithSchema(FieldId field_id,
                               const SchemaPtr& schema_snapshot,
                               milvus::OpContext* op_ctx,
@@ -2095,7 +2115,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     RecordTextIndexCreated(SegmentLoadInfo& segment_load_info,
-                           FieldId field_id);
+                           FieldId field_id,
+                           RawTextIndexSource source);
 
     void
     PrepareSchemaForReopen(const SchemaPtr& sch);

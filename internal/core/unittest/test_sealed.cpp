@@ -380,6 +380,11 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
     segment->LoadIndex(load_info);
 
     ASSERT_NO_THROW(segment->CreateTextIndex(text_fid));
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    EXPECT_EQ(
+        sealed->TestGetLoadInfoSnapshot()->GetTextIndexCreatedSource(text_fid),
+        RawTextIndexSource::ScalarIndexRawData);
     auto text_index = segment->GetTextIndex(nullptr, text_fid);
 
     auto nulls = text_index.get()->IsNull();
@@ -4219,6 +4224,70 @@ TEST(SealedSegmentReopen, RejectsRowCountChangeBeforePublication) {
     EXPECT_EQ(bitset.count(), 1);
 }
 
+TEST(SealedSegmentReopen, RejectsStorageV2BinlogRowCountMismatchBeforeIO) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    constexpr int64_t row_count = 4;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(kSegmentID);
+    current_proto.set_partitionid(kPartitionID);
+    current_proto.set_collectionid(kCollectionID);
+    current_proto.set_num_of_rows(row_count);
+    sealed->SetLoadInfo(current_proto);
+    LoadGeneratedDataIntoSegment(dataset, sealed);
+
+    auto before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(before, nullptr);
+    ASSERT_NE(before->runtime, nullptr);
+    EXPECT_EQ(before->load_info->GetNumOfRows(), row_count);
+    EXPECT_EQ(before->runtime->row_count, row_count);
+
+    auto reopen_proto = current_proto;
+    reopen_proto.set_storageversion(2);
+    auto* field_binlog = reopen_proto.add_binlog_paths();
+    field_binlog->set_fieldid(pk_id.get());
+    auto* binlog = field_binlog->add_binlogs();
+    binlog->set_log_path("/must/not/be/read/row-count-mismatch");
+    binlog->set_entries_num(row_count + 1);
+
+    milvus::OpContext op_ctx;
+    try {
+        sealed->Reopen(&op_ctx, reopen_proto);
+        FAIL() << "actual binlog row-count mismatch should fail";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_NE(std::string(err.what()).find("field binlog group"),
+                  std::string::npos);
+        EXPECT_NE(std::string(err.what()).find("expected 4, actual 5"),
+                  std::string::npos);
+    }
+
+    auto after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(after, before);
+    EXPECT_EQ(after->load_info->GetNumOfRows(), row_count);
+    EXPECT_EQ(after->load_info->GetBinlogPathCount(), 0);
+    EXPECT_EQ(after->runtime->row_count, row_count);
+
+    auto pks = dataset.get_col<int64_t>(pk_id);
+    auto delete_ids = std::make_unique<IdArray>();
+    delete_ids->mutable_int_id()->add_data(pks.back());
+    Timestamp delete_ts = 1000000;
+    auto status = sealed->Delete(1, delete_ids.get(), &delete_ts);
+    ASSERT_TRUE(status.ok());
+
+    BitsetType bitset(row_count, false);
+    auto bitset_view = BitsetTypeView(bitset);
+    segment->mask_with_delete(bitset_view, row_count, delete_ts + 1);
+    EXPECT_EQ(bitset.count(), 1);
+}
+
 TEST(SealedSegmentReopen, DropFieldReopenPublishesSchemaAndLoadInfoTogether) {
     auto old_schema = std::make_shared<Schema>();
     auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
@@ -4250,6 +4319,67 @@ TEST(SealedSegmentReopen, DropFieldReopenPublishesSchemaAndLoadInfoTogether) {
     EXPECT_FALSE(sealed->HasFieldData(dropped_id));
     EXPECT_FALSE(sealed->HasIndex(dropped_id));
     EXPECT_FALSE(sealed->FieldAccessible(dropped_id));
+}
+
+TEST(SealedSegmentReopen, FullReopenPrunesDroppedPrebuiltTextIndexMetadata) {
+    std::map<std::string, std::string> analyzer_params;
+    auto old_schema = std::make_shared<Schema>();
+    auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = old_schema->AddDebugVarcharField(FieldName("text_field"),
+                                                     DataType::VARCHAR,
+                                                     /*max_length=*/65535,
+                                                     /*nullable=*/false,
+                                                     /*enable_match=*/true,
+                                                     /*enable_analyzer=*/true,
+                                                     analyzer_params,
+                                                     std::nullopt);
+    old_schema->set_primary_field_id(pk_id);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+
+    auto segment = CreateSealedSegment(old_schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(kSegmentID);
+    load_info.set_partitionid(kPartitionID);
+    load_info.set_collectionid(kCollectionID);
+    load_info.set_num_of_rows(0);
+    auto* field_binlog = load_info.add_binlog_paths();
+    field_binlog->set_fieldid(pk_id.get());
+    auto* binlog = field_binlog->add_binlogs();
+    binlog->set_log_path("/must/not/be/read/unchanged-pk-binlog");
+    binlog->set_entries_num(0);
+    auto& text_stats = (*load_info.mutable_textstatslogs())[text_fid.get()];
+    text_stats.set_fieldid(text_fid.get());
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.add_files("/must/not/be/read/dropped-text-index");
+    sealed->SetLoadInfo(load_info);
+
+    milvus::OpContext op_ctx;
+    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, load_info, new_schema));
+
+    auto first = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->schema->get_schema_version(), 200);
+    EXPECT_FALSE(first->load_info->HasFieldInSchema(text_fid));
+    EXPECT_FALSE(first->load_info->HasTextStatsLog(text_fid.get()));
+
+    // A stale dropped-field textstats entry in the first published load info
+    // would make ComputeDiffTextIndexes reject every subsequent reopen.
+    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, load_info, new_schema));
+
+    auto second = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->schema->get_schema_version(), 200);
+    EXPECT_FALSE(second->load_info->HasFieldInSchema(text_fid));
+    EXPECT_FALSE(second->load_info->HasTextStatsLog(text_fid.get()));
 }
 
 TEST(SealedSegmentReopen, CancelledTextIndexBuildDoesNotPublishAndCanRetry) {
@@ -4290,6 +4420,139 @@ TEST(SealedSegmentReopen, CancelledTextIndexBuildDoesNotPublishAndCanRetry) {
     EXPECT_NE(after_retry, before);
     EXPECT_EQ(after_retry->runtime->text_indexes.count(text_fid), 1);
     EXPECT_TRUE(after_retry->load_info->HasTextIndexCreated(text_fid));
+}
+
+TEST(SealedSegmentReopen, RebuildsRawTextIndexFromReplacedFieldDataAtomically) {
+    std::map<std::string, std::string> analyzer_params;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugVarcharField(FieldName("text_field"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/false,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    schema->set_primary_field_id(pk_id);
+
+    constexpr int64_t row_count = 4;
+    auto set_text_values = [text_fid](GeneratedData& dataset,
+                                      const std::string& value) {
+        for (auto& field : *dataset.raw_->mutable_fields_data()) {
+            if (field.field_id() != text_fid.get()) {
+                continue;
+            }
+            auto* values = field.mutable_scalars()->mutable_string_data();
+            values->clear_data();
+            for (int64_t i = 0; i < dataset.raw_->num_rows(); ++i) {
+                values->add_data(value);
+            }
+            return;
+        }
+        FAIL() << "text field not found in generated data";
+    };
+
+    auto old_dataset = DataGen(schema, row_count);
+    set_text_values(old_dataset, "apple");
+    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(kSegmentID);
+    current_proto.set_partitionid(kPartitionID);
+    current_proto.set_collectionid(kCollectionID);
+    current_proto.set_num_of_rows(row_count);
+    auto add_binlog = [&](FieldId field_id, const std::string& path) {
+        auto* field_binlog = current_proto.add_binlog_paths();
+        field_binlog->set_fieldid(field_id.get());
+        auto* binlog = field_binlog->add_binlogs();
+        binlog->set_log_path(path);
+        binlog->set_entries_num(row_count);
+    };
+    add_binlog(pk_id, TestRemotePath + std::to_string(pk_id.get()));
+    add_binlog(text_fid, TestRemotePath + std::to_string(text_fid.get()));
+    sealed->SetLoadInfo(current_proto);
+    sealed->CreateTextIndex(text_fid);
+
+    auto before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_TRUE(before->load_info->HasTextIndexCreated(text_fid));
+    EXPECT_EQ(before->load_info->GetTextIndexCreatedSource(text_fid),
+              RawTextIndexSource::FieldData);
+    auto old_pin = sealed->GetTextIndex(nullptr, text_fid);
+    ASSERT_EQ(old_pin.get()->MatchQuery("apple", 1).count(), row_count);
+    ASSERT_EQ(old_pin.get()->MatchQuery("banana", 1).count(), 0);
+
+    auto new_dataset = DataGen(schema, row_count);
+    set_text_values(new_dataset, "banana");
+
+    // Cancellation after a replacement source has been staged in a cloned
+    // runtime must not leak either that source or a partial text index.
+    auto replacement_segment =
+        CreateSealedWithFieldDataLoaded(schema, new_dataset);
+    auto* replacement_sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(replacement_segment.get());
+    ASSERT_NE(replacement_sealed, nullptr);
+    auto replacement_snapshot =
+        replacement_sealed->TestGetPublishedStateSnapshot();
+    auto abandoned_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    abandoned_runtime->fields.insert_or_assign(
+        text_fid, replacement_snapshot->runtime->fields.at(text_fid));
+    abandoned_runtime->text_indexes.erase(text_fid);
+    folly::CancellationSource cancelled_source;
+    cancelled_source.requestCancellation();
+    milvus::OpContext cancelled(cancelled_source.getToken());
+    EXPECT_THROW(sealed->TestCreateTextIndexWithSchema(text_fid,
+                                                       schema,
+                                                       &cancelled,
+                                                       /*publish_marker=*/false,
+                                                       abandoned_runtime.get()),
+                 SegcoreError);
+    EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+    EXPECT_EQ(old_pin.get()->MatchQuery("apple", 1).count(), row_count);
+
+    const DataArray* new_text_array = nullptr;
+    for (const auto& field : new_dataset.raw_->fields_data()) {
+        if (field.field_id() == text_fid.get()) {
+            new_text_array = &field;
+            break;
+        }
+    }
+    ASSERT_NE(new_text_array, nullptr);
+    auto new_text_data = CreateFieldDataFromDataArray(
+        row_count, new_text_array, schema->operator[](text_fid));
+    auto chunk_manager = storage::RemoteChunkManagerSingleton::GetInstance()
+                             .GetRemoteChunkManager();
+    auto replacement = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                      kPartitionID,
+                                                      kSegmentID + 1000,
+                                                      text_fid.get(),
+                                                      {new_text_data},
+                                                      chunk_manager);
+    const auto& replacement_info = replacement.field_infos.at(text_fid.get());
+    ASSERT_EQ(replacement_info.insert_files.size(), 1);
+
+    auto reopen_proto = current_proto;
+    reopen_proto.mutable_binlog_paths(1)->mutable_binlogs(0)->set_log_path(
+        replacement_info.insert_files.front());
+
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&op_ctx, reopen_proto));
+
+    auto after = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(after, before);
+    EXPECT_TRUE(after->load_info->HasTextIndexCreated(text_fid));
+    EXPECT_EQ(after->load_info->GetTextIndexCreatedSource(text_fid),
+              RawTextIndexSource::FieldData);
+    auto new_pin = sealed->GetTextIndex(nullptr, text_fid);
+    EXPECT_EQ(new_pin.get()->MatchQuery("banana", 1).count(), row_count);
+    EXPECT_EQ(new_pin.get()->MatchQuery("apple", 1).count(), 0);
+
+    // The old generation remains queryable while pinned; rebuild never
+    // mutates or destroys the published holder in place.
+    EXPECT_EQ(old_pin.get()->MatchQuery("apple", 1).count(), row_count);
+    EXPECT_EQ(old_pin.get()->MatchQuery("banana", 1).count(), 0);
 }
 
 TEST(SealedSegmentReopen, RejectsRawBuiltToPrebuiltTextIndexBeforePublication) {
@@ -4409,7 +4672,7 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPreservesCreatedTextIndexState) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    sealed->TestRecordTextIndexCreated(text_fid);
+    sealed->CreateTextIndex(text_fid);
     ASSERT_TRUE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
 
