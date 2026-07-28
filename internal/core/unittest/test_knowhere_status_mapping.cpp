@@ -47,6 +47,22 @@ TEST(KnowhereStatusMapping, CapabilityAndDataErrorsAreNotInputErrors) {
     EXPECT_EQ(milvus::KnowhereStatusToErrorCode(
                   knowhere::Status::invalid_serialized_index_type),
               milvus::ErrorCode::DataFormatBroken);
+    // Index lifecycle/state failures ("index not loaded", build-state
+    // violations) are server-side, not the caller's request: blaming the
+    // request would make lb_policy stop replica failover.
+    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(knowhere::Status::empty_index),
+              milvus::ErrorCode::KnowhereError);
+    EXPECT_EQ(
+        milvus::KnowhereStatusToErrorCode(knowhere::Status::index_not_trained),
+        milvus::ErrorCode::KnowhereError);
+    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(
+                  knowhere::Status::index_already_trained),
+              milvus::ErrorCode::KnowhereError);
+    // A binary set that fails to deserialize is a corrupt/incompatible
+    // persisted index, same bucket as invalid_serialized_index_type.
+    EXPECT_EQ(
+        milvus::KnowhereStatusToErrorCode(knowhere::Status::invalid_binary_set),
+        milvus::ErrorCode::DataFormatBroken);
 }
 
 // Engine/internal failures with no retry value map to the permanent

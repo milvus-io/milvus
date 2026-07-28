@@ -132,8 +132,7 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 		return segcoreClass{sentinel: KnowhereError}, true
 
 	// Caller-input errors -> InputError (non-retriable by construction).
-	case CodeOpTypeInvalid,
-		CodeDataIsEmpty, CodeJsonKeyInvalid, CodeMetricTypeInvalid, CodeExprInvalid,
+	case CodeJsonKeyInvalid, CodeMetricTypeInvalid, CodeExprInvalid,
 		CodeMetricTypeNotMatch, CodeDimNotMatch, CodeInvalidParameter:
 		return segcoreClass{sentinel: ErrSegcore, inputError: true}, true
 
@@ -152,7 +151,15 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 	// availability regression. Default them to plain (non-retriable) system
 	// errors; the few genuine request-validation sites can be tagged at the
 	// request boundary (WrapErrAsInputErrorWhen) or split at the C++ source.
-	case CodeDataTypeInvalid, CodeFieldIDInvalid, CodeFieldAlreadyExist:
+	//   - OpTypeInvalid(2022): thrown while decoding internally generated plans
+	//     (PlanProto/expr op switches) — an unknown enum there is an internal
+	//     protocol or rolling-upgrade mismatch, not the caller's request;
+	//   - DataIsEmpty(2023): thrown by index builders when an internally
+	//     scheduled build sees zero/null rows.
+	// A request boundary that can prove the value came from the user may mark
+	// that specific error input; the global table stays system-classified.
+	case CodeDataTypeInvalid, CodeFieldIDInvalid, CodeFieldAlreadyExist,
+		CodeOpTypeInvalid, CodeDataIsEmpty:
 		return segcoreClass{sentinel: ErrSegcore}, true
 
 	// Transient system errors -> retriable (a retry / reroute to another replica
