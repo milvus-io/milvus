@@ -11,6 +11,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -215,6 +216,21 @@ func TestFutures(t *testing.T) {
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 	assert.Nil(t, result)
 	runtime.GC()
+}
+
+func TestFutureFieldNotLoadedIsRetriable(t *testing.T) {
+	future := createFutureWithTestCase(context.Background(), testCase{
+		caseNo: caseNoThrowFieldNotLoaded,
+	})
+	defer future.Release()
+
+	result, err := future.BlockAndLeakyGet()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrSegcore)
+	assert.True(t, merr.IsRetryableErr(err))
+	assert.True(t, merr.Status(err).GetRetriable())
+	assert.Contains(t, err.Error(), "segcoreCode=2027")
+	assert.Nil(t, result)
 }
 
 func TestConcurrent(t *testing.T) {

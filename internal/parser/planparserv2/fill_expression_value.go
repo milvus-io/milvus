@@ -49,6 +49,14 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return nil
 	case *planpb.Expr_MatchExpr:
 		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
+	case *planpb.Expr_CallExpr:
+		// Only a deferred bloom_match call carries IsTemplate today; once the
+		// template value is known, its client-built blob is validated and the
+		// call is materialized into a BloomFilterExpr here.
+		if e.CallExpr.GetFunctionName() == BloomMatchFunctionName {
+			return FillBloomMatchExpressionValue(expr, e.CallExpr, templateValues)
+		}
+		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	default:
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	}
