@@ -2482,6 +2482,28 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor() {
 	suite.True(usage.MemorySize >= 150000, "should include raw data factor: got %d", usage.MemorySize)
 }
 
+func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactorSkippedWithTieredEviction() {
+	loadInfo := suite.externalLoadInfo(1000, 100000)
+	factor := resourceEstimateFactor{
+		externalRawDataFactor: 2.0,
+		TieredEvictionEnabled: true,
+	}
+
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Equal(int64(100), loadInfo.EstimatedBytesPerRow)
+
+	baselineLoadInfo := suite.externalLoadInfo(1000, 100000)
+	baselineFactor := resourceEstimateFactor{
+		externalRawDataFactor: 1.0,
+		TieredEvictionEnabled: true,
+	}
+	baselineUsage, err := estimateLoadingResourceUsageOfSegment(suite.schema, baselineLoadInfo, baselineFactor)
+	suite.NoError(err)
+	suite.Equal(baselineUsage.MemorySize, usage.MemorySize)
+	suite.Equal(baselineUsage.DiskSize, usage.DiskSize)
+}
+
 func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor_NoExtraWhenFactorLe1() {
 	loadInfo := suite.externalLoadInfo(1000, 100000)
 	factor := resourceEstimateFactor{externalRawDataFactor: 0.8}
