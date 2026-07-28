@@ -3322,23 +3322,26 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
+	// bloom_match is not supported inside a MATCH_* element predicate. Its
+	// one-sided error (false positives) is only safe for monotonic
+	// aggregations; MATCH_MOST / MATCH_EXACT bound the hit count from above, so
+	// a false positive would wrongly drop a true row (row-level false
+	// negative), breaking the never-miss-a-member guarantee. Reject rather than
+	// ship a per-MatchType error-semantics matrix. Checked before the generic
+	// element-level validation so the specific message wins over the blanket
+	// "function calls are not supported" rejection (a deferred bloom_match is
+	// still a CallExpr at this point).
+	if hasBloomFilterExpr(predicateExpr.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"bloom_match is not supported inside %s element predicates", funcName)
+	}
+
 	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
 	}
 	if !isElementLevel {
 		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
-	}
-
-	// bloom_match is not supported inside a MATCH_* element predicate. Its
-	// one-sided error (false positives) is only safe for monotonic
-	// aggregations; MATCH_MOST / MATCH_EXACT bound the hit count from above, so
-	// a false positive would wrongly drop a true row (row-level false
-	// negative), breaking the never-miss-a-member guarantee. Reject rather than
-	// ship a per-MatchType error-semantics matrix.
-	if hasBloomFilterExpr(predicateExpr.expr) {
-		return merr.WrapErrParameterInvalidMsg(
-			"bloom_match is not supported inside %s element predicates", funcName)
 	}
 
 	// Build MatchExpr proto

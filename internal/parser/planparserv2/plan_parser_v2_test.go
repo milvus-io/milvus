@@ -2641,7 +2641,7 @@ func Test_JSONContainsStructFieldUsesSubFieldNullable(t *testing.T) {
 			require.NotNil(t, jsonContainsExpr)
 			columnInfo := jsonContainsExpr.GetColumnInfo()
 			require.NotNil(t, columnInfo)
-			assert.Equal(t, int64(134), columnInfo.GetFieldId())
+			assert.Equal(t, schema.StructArrayFields[0].Fields[1].GetFieldID(), columnInfo.GetFieldId())
 			assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 			assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 			assert.Equal(t, testcase.wantNullable, columnInfo.GetNullable())
