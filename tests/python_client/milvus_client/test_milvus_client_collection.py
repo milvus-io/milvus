@@ -517,7 +517,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(limit_num):
             schema_1.add_field(cf.gen_unique_str("field_name"), DataType.INT64)
         schema_1.add_field(cf.gen_unique_str("extra_field"), DataType.INT64)
-        error_fields_over = {ct.err_code: 1, ct.err_msg: "maximum field's number should be limited to 64"}
+        error_fields_over = {
+            ct.err_code: 1,
+            ct.err_msg: f"maximum field's number should be limited to {ct.max_field_num}",
+        }
         self.create_collection(
             client,
             collection_name,
@@ -551,14 +554,17 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(ct.max_field_num):
             schema_3.add_field(cf.gen_unique_str("field_name"), DataType.INT64)
         schema_3.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        error_fields_over_64 = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
+        error_fields_over = {
+            ct.err_code: 65535,
+            ct.err_msg: f"maximum field's number should be limited to {ct.max_field_num}",
+        }
         self.create_collection(
             client,
             collection_name,
             default_dim,
             schema=schema_3,
             check_task=CheckTasks.err_res,
-            check_items=error_fields_over_64,
+            check_items=error_fields_over,
         )
         # ========== Scenario 4: over maximum vector fields and over maximum total fields ==========
         schema_4 = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -574,7 +580,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             default_dim,
             schema=schema_4,
             check_task=CheckTasks.err_res,
-            check_items=error_fields_over_64,
+            check_items=error_fields_over,
         )
 
     @pytest.mark.tags(CaseLabel.L0)

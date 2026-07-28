@@ -2231,10 +2231,10 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxFieldNum = ParamItem{
 		Key:          "proxy.maxFieldNum",
-		DefaultValue: "64",
+		DefaultValue: "256",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
-		Doc:          "The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.",
+		Doc:          "The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.",
 		Export:       true,
 	}
 	p.MaxFieldNum.Init(base.mgr)
