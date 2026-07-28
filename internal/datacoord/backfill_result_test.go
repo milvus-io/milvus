@@ -215,8 +215,8 @@ func TestBuildV2Groups(t *testing.T) {
 		assert.Len(t, groups, 1)
 		fb := groups[100]
 		assert.Equal(t, int64(100), fb.GetFieldID())
-		// ChildFields must be populated — index creation and backfill-
-		// compaction detection look up fields via ChildFields, not FieldID.
+		// ChildFields must be populated because backfill-compaction detection
+		// looks up fields via ChildFields, not FieldID.
 		assert.Equal(t, []int64{100}, fb.GetChildFields())
 		assert.Len(t, fb.GetBinlogs(), 1)
 		assert.Equal(t, int64(1000), fb.GetBinlogs()[0].GetEntriesNum())
