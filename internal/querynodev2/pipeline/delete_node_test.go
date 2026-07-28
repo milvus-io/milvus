@@ -184,9 +184,7 @@ func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotAdvanceTSafe() {
 		}))
 	}()
 
-	suite.Eventually(func() bool {
-		return updateSchemaCalled.Load()
-	}, time.Second, time.Millisecond)
+	suite.Eventually(updateSchemaCalled.Load, time.Second, time.Millisecond)
 	node.Close()
 	suite.Eventually(func() bool {
 		select {

@@ -235,6 +235,7 @@ func newDeleteNode(
 	manager *DataManager, delegator delegator.ShardDelegator,
 	maxQueueLength int32,
 ) *deleteNode {
+	// #nosec G118 -- cancel is stored on deleteNode and called by PreClose/Close.
 	ctx, cancel := context.WithCancel(context.Background())
 	return &deleteNode{
 		BaseNode:     base.NewBaseNode(fmt.Sprintf("DeleteNode-%s", channel), maxQueueLength),
