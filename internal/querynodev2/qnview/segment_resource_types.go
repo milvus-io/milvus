@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -54,6 +55,7 @@ type CollectionRuntime interface {
 	Schema() *schemapb.CollectionSchema
 	SchemaVersion() int64
 	CCollection() *segcore.CCollection
+	PinnedCollection() *segments.Collection
 }
 
 type CollectionIndexMetaUpdater interface {
