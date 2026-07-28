@@ -7,46 +7,62 @@ import (
 
 var jsonTermKindOrder = []string{"bool", "int64", "float", "string", "array"}
 
-// normalizeJSONTermExprs enforces the execution invariant that every JSON
-// TermExpr contains one concrete GenericValue kind.  This is correctness
-// normalization, not an optional optimization: segcore selects the executor
-// type from the first term value and therefore cannot safely consume a mixed
-// list.
-func normalizeJSONTermExprs(expr *planpb.Expr) *planpb.Expr {
+// normalizeTermExprs enforces the execution invariant that every TermExpr can
+// be dispatched to one scalar executor. JSON terms are partitioned by concrete
+// value kind, while whole-ARRAY membership is lowered to array equality
+// branches because segcore has no array-valued TermExpr executor. This is
+// correctness normalization, not an optional optimization.
+func normalizeTermExprs(expr *planpb.Expr) *planpb.Expr {
 	if expr == nil {
 		return nil
 	}
 
 	switch real := expr.GetExpr().(type) {
 	case *planpb.Expr_BinaryExpr:
-		real.BinaryExpr.Left = normalizeJSONTermExprs(real.BinaryExpr.GetLeft())
-		real.BinaryExpr.Right = normalizeJSONTermExprs(real.BinaryExpr.GetRight())
+		real.BinaryExpr.Left = normalizeTermExprs(real.BinaryExpr.GetLeft())
+		real.BinaryExpr.Right = normalizeTermExprs(real.BinaryExpr.GetRight())
 		return expr
 	case *planpb.Expr_UnaryExpr:
-		real.UnaryExpr.Child = normalizeJSONTermExprs(real.UnaryExpr.GetChild())
+		real.UnaryExpr.Child = normalizeTermExprs(real.UnaryExpr.GetChild())
 		return expr
 	case *planpb.Expr_BinaryArithExpr:
-		real.BinaryArithExpr.Left = normalizeJSONTermExprs(real.BinaryArithExpr.GetLeft())
-		real.BinaryArithExpr.Right = normalizeJSONTermExprs(real.BinaryArithExpr.GetRight())
+		real.BinaryArithExpr.Left = normalizeTermExprs(real.BinaryArithExpr.GetLeft())
+		real.BinaryArithExpr.Right = normalizeTermExprs(real.BinaryArithExpr.GetRight())
 		return expr
 	case *planpb.Expr_CallExpr:
 		for i, parameter := range real.CallExpr.GetFunctionParameters() {
-			real.CallExpr.FunctionParameters[i] = normalizeJSONTermExprs(parameter)
+			real.CallExpr.FunctionParameters[i] = normalizeTermExprs(parameter)
 		}
 		return expr
 	case *planpb.Expr_RandomSampleExpr:
-		real.RandomSampleExpr.Predicate = normalizeJSONTermExprs(real.RandomSampleExpr.GetPredicate())
+		real.RandomSampleExpr.Predicate = normalizeTermExprs(real.RandomSampleExpr.GetPredicate())
 		return expr
 	case *planpb.Expr_TermExpr:
-		return normalizeJSONTermExpr(expr, real.TermExpr)
+		return normalizeTermExpr(expr, real.TermExpr)
 	default:
 		return expr
 	}
 }
 
-func normalizeJSONTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Expr {
-	if term == nil || term.GetColumnInfo() == nil || term.GetIsInField() ||
-		term.GetColumnInfo().GetDataType() != schemapb.DataType_JSON || len(term.GetValues()) == 0 {
+func normalizeTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Expr {
+	if term == nil || term.GetColumnInfo() == nil || term.GetIsInField() || len(term.GetValues()) == 0 {
+		return original
+	}
+
+	columnInfo := term.GetColumnInfo()
+	if columnInfo.GetDataType() == schemapb.DataType_Array && len(columnInfo.GetNestedPath()) == 0 {
+		parts := make([]*planpb.Expr, 0, len(term.GetValues()))
+		for _, value := range term.GetValues() {
+			if valueCaseWithNil(value) != "array" {
+				return original
+			}
+			parts = append(parts, newUnaryRangeExpr(
+				columnInfo, planpb.OpType_Equal, value))
+		}
+		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
+	}
+
+	if columnInfo.GetDataType() != schemapb.DataType_JSON {
 		return original
 	}
 

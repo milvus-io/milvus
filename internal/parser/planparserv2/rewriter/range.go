@@ -406,13 +406,10 @@ func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclus
 	}
 }
 
-// compareInt64ToFloat64 compares an int64 and float64 without converting the
-// integer to float64. The boundary checks also avoid an out-of-range float to
-// int conversion. This mirrors segcore's JSON numeric comparison semantics.
+// compareInt64ToFloat64 compares an int64 and float64 without lossy integer
+// promotion. Callers must reject NaN before relying on the result.
 func compareInt64ToFloat64(lhs int64, rhs float64) int {
 	if math.IsNaN(rhs) {
-		// Range optimizer entry points reject NaN before comparison. Keep this
-		// defensive return deterministic if a future caller misses that gate.
 		return 0
 	}
 	const (
@@ -442,6 +439,16 @@ func compareInt64ToFloat64(lhs int64, rhs float64) int {
 		return 1
 	}
 	return 0
+}
+
+// CompareRangeValues compares two supported range literals exactly.
+func CompareRangeValues(a, b *planpb.GenericValue) (int, bool) {
+	aType, aOK := resolveJSONEffectiveType(a)
+	bType, bOK := resolveJSONEffectiveType(b)
+	if !aOK || !bOK || aType != bType {
+		return 0, false
+	}
+	return cmpGeneric(aType, a, b), true
 }
 
 // -1 means a < b, 0 means a == b, 1 means a > b

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -767,9 +768,22 @@ func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
 		})
 	}
 
-	// Bounds with different JSON dynamic types have no parser-level ordering.
-	// Their runtime type semantics are evaluated by segcore.
-	assertValidExpr(t, helper, `1 <= A < "z"`)
+	for _, exprStr := range []string{
+		`1 <= A < "z"`,
+		`"z" > A >= 1`,
+		`false < A < true`,
+		`[1] < A < [2]`,
+	} {
+		_, err := ParseExpr(helper, exprStr, nil)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, exprStr)
+		assert.Contains(t, err.Error(), "bounds are not comparable", exprStr)
+	}
+
+	// Separate comparisons keep their own JSON dynamic-type semantics and must
+	// not be rejected or merged into a mixed-type BinaryRangeExpr.
+	expr, err := ParseExpr(helper, `A >= 1 AND A < "z"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr.GetBinaryExpr())
 }
 
 func TestExpr_castValue(t *testing.T) {

@@ -114,3 +114,129 @@ func TestRewriteNonEmptyArrayComparisonUnchanged(t *testing.T) {
 	require.NotNil(t, result.GetUnaryRangeExpr())
 	require.Nil(t, result.GetBinaryArithOpEvalRangeExpr())
 }
+
+func TestRewriteWholeArrayMembershipToEqualityBranches(t *testing.T) {
+	for _, optimizeEnabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "optimization disabled", true: "optimization enabled"}[optimizeEnabled], func(t *testing.T) {
+			columnInfo := &planpb.ColumnInfo{
+				FieldId:     101,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				Nullable:    true,
+			}
+			input := &planpb.Expr{
+				Expr: &planpb.Expr_TermExpr{
+					TermExpr: &planpb.TermExpr{
+						ColumnInfo: columnInfo,
+						Values: []*planpb.GenericValue{
+							newArrayLiteral(),
+							newArrayLiteral(1, 2),
+						},
+					},
+				},
+			}
+
+			result := rewriter.RewriteExprWithConfig(input, optimizeEnabled)
+			require.Nil(t, findTermExpr(result))
+
+			var emptyArrayLengths int
+			var nonEmptyEqualities int
+			walkArrayMembershipExpr(result, func(current *planpb.Expr) {
+				if arrayLength := current.GetBinaryArithOpEvalRangeExpr(); arrayLength != nil &&
+					arrayLength.GetArithOp() == planpb.ArithOpType_ArrayLength &&
+					arrayLength.GetOp() == planpb.OpType_Equal &&
+					arrayLength.GetValue().GetInt64Val() == 0 {
+					emptyArrayLengths++
+				}
+				if equality := current.GetUnaryRangeExpr(); equality != nil &&
+					equality.GetOp() == planpb.OpType_Equal &&
+					len(equality.GetValue().GetArrayVal().GetArray()) > 0 {
+					nonEmptyEqualities++
+				}
+			})
+			require.Equal(t, 1, emptyArrayLengths)
+			require.Equal(t, 1, nonEmptyEqualities)
+		})
+	}
+}
+
+func TestRewriteWholeArrayNotInKeepsOuterNot(t *testing.T) {
+	for _, optimizeEnabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "optimization disabled", true: "optimization enabled"}[optimizeEnabled], func(t *testing.T) {
+			columnInfo := &planpb.ColumnInfo{
+				FieldId:     101,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				Nullable:    true,
+			}
+			term := &planpb.Expr{
+				Expr: &planpb.Expr_TermExpr{
+					TermExpr: &planpb.TermExpr{
+						ColumnInfo: columnInfo,
+						Values: []*planpb.GenericValue{
+							newArrayLiteral(1, 2),
+							newArrayLiteral(3, 4),
+						},
+					},
+				},
+			}
+			input := &planpb.Expr{
+				Expr: &planpb.Expr_UnaryExpr{
+					UnaryExpr: &planpb.UnaryExpr{
+						Op:    planpb.UnaryExpr_Not,
+						Child: term,
+					},
+				},
+			}
+
+			result := rewriter.RewriteExprWithConfig(input, optimizeEnabled)
+			unary := result.GetUnaryExpr()
+			require.NotNil(t, unary)
+			require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+			require.NotNil(t, unary.GetChild().GetBinaryExpr())
+			require.Nil(t, findTermExpr(result))
+
+			var equalities int
+			walkArrayMembershipExpr(unary.GetChild(), func(current *planpb.Expr) {
+				if equality := current.GetUnaryRangeExpr(); equality != nil &&
+					equality.GetOp() == planpb.OpType_Equal &&
+					equality.GetValue().GetArrayVal() != nil {
+					equalities++
+				}
+			})
+			require.Equal(t, 2, equalities)
+		})
+	}
+}
+
+func newArrayLiteral(values ...int64) *planpb.GenericValue {
+	elements := make([]*planpb.GenericValue, 0, len(values))
+	for _, value := range values {
+		elements = append(elements, &planpb.GenericValue{
+			Val: &planpb.GenericValue_Int64Val{Int64Val: value},
+		})
+	}
+	return &planpb.GenericValue{
+		Val: &planpb.GenericValue_ArrayVal{
+			ArrayVal: &planpb.Array{
+				Array:       elements,
+				SameType:    true,
+				ElementType: schemapb.DataType_Int64,
+			},
+		},
+	}
+}
+
+func walkArrayMembershipExpr(expr *planpb.Expr, visit func(*planpb.Expr)) {
+	if expr == nil {
+		return
+	}
+	visit(expr)
+	if binary := expr.GetBinaryExpr(); binary != nil {
+		walkArrayMembershipExpr(binary.GetLeft(), visit)
+		walkArrayMembershipExpr(binary.GetRight(), visit)
+	}
+	if unary := expr.GetUnaryExpr(); unary != nil {
+		walkArrayMembershipExpr(unary.GetChild(), visit)
+	}
+}

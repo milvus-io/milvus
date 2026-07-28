@@ -1203,6 +1203,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			Expr: &planpb.Expr_RandomSampleExpr{
 				RandomSampleExpr: randomSampleExpr,
 			},
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 		}
 	} else {
 		expr = &planpb.Expr{
