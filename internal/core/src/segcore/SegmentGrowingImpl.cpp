@@ -714,10 +714,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
         }
-        // A synchronized interim index that owns raw data consumes later
-        // batches directly. Do not repopulate chunks reclaimed by
-        // try_remove_chunks.
-        if (!indexing_record_.HasRawData(field_id)) {
+        // A synchronized vector interim index that owns raw data consumes
+        // later batches directly. Do not repopulate chunks reclaimed by
+        // try_remove_chunks. Scalar indexes do not take over raw-data
+        // ownership from ConcurrentVector.
+        const bool index_owns_raw_data =
+            IsVectorDataType(field_meta.get_data_type()) &&
+            indexing_record_.HasRawData(field_id);
+        if (!index_owns_raw_data) {
             if (field_meta.get_data_type() == DataType::TEXT) {
                 auto spillover = GetTextLobSpillover(field_id);
                 AssertInfo(spillover != nullptr,
@@ -980,9 +984,13 @@ SegmentGrowingImpl::load_field_data_common(
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
     }
-    // Keep the load path aligned with Insert: once the interim index owns raw
-    // data, append the loaded batch to the index without rebuilding raw chunks.
-    if (!indexing_record_.HasRawData(field_id)) {
+    // Keep the load path aligned with Insert: once a vector interim index owns
+    // raw data, append the loaded batch to the index without rebuilding raw
+    // chunks. Scalar indexes do not take over raw-data ownership.
+    const bool index_owns_raw_data =
+        IsVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.HasRawData(field_id);
+    if (!index_owns_raw_data) {
         insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
                                                              field_data);
     }
