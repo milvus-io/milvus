@@ -62,11 +62,11 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                         const BitsetView& bitset,
                         milvus::OpContext* op_context,
                         SearchResult& search_result) {
-    auto& schema = segment.get_schema();
+    auto schema = segment.get_schema_snapshot();
     auto& indexing_record = segment.get_indexing_record();
 
     auto vecfield_id = info.field_id_;
-    auto& field = schema[vecfield_id];
+    auto& field = (*schema)[vecfield_id];
     auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
@@ -107,13 +107,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const BitsetView& bitset,
                 milvus::OpContext* op_context,
                 SearchResult& search_result) {
-    auto& schema = segment.get_schema();
+    auto schema = segment.get_schema_snapshot();
     auto& record = segment.get_insert_record();
 
     // step 1.1: get meta
     // step 1.2: get which vector field to search
     auto vecfield_id = info.field_id_;
-    auto& field = schema[vecfield_id];
+    auto& field = (*schema)[vecfield_id];
     CheckBruteForceSearchParam(field, info);
 
     auto data_type = field.get_data_type();

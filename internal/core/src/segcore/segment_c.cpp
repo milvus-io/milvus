@@ -1694,13 +1694,13 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
         }
         auto ids = growing_segment->get_insert_record().get_data_field_ids();
         std::unordered_set<int64_t> seen(ids.begin(), ids.end());
-        const auto& schema = growing_segment->get_schema();
-        for (const auto& field_id : schema.get_field_ids()) {
+        auto schema = growing_segment->get_schema_snapshot();
+        for (const auto& field_id : schema->get_field_ids()) {
             auto raw_field_id = field_id.get();
             if (seen.find(raw_field_id) != seen.end()) {
                 continue;
             }
-            const auto& field_meta = schema[field_id];
+            const auto& field_meta = (*schema)[field_id];
             if (milvus::IsVectorDataType(field_meta.get_data_type()) &&
                 growing_segment->CanReadRawVectorFromIndex(field_id)) {
                 ids.push_back(raw_field_id);
@@ -1990,6 +1990,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto flush_schema =
             ParseFlushSchema(config->schema_blob, config->schema_length);
         const auto& schema = *flush_schema;
+        auto runtime_schema = growing_segment->get_schema_snapshot();
         auto& insert_record = growing_segment->get_insert_record();
 
         int64_t total_rows = end_offset - start_offset;
@@ -2048,7 +2049,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                     // compaction). The Go layer normally trims such columns
                     // from the layout already — this is the defense for
                     // stale layouts.
-                    if (!growing_segment->get_schema().has_field(field_id)) {
+                    if (!runtime_schema->has_field(field_id)) {
                         LOG_INFO(
                             "skip dropped field {} when flushing growing "
                             "segment {}",
