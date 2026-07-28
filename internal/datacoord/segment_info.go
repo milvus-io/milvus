@@ -318,7 +318,7 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 
 // SetIsCompacting sets compaction status for segment.
 // NOTE: This method manually updates secondary indexes after ShadowClone.
-// Other Set methods (SetRowCount, SetLevel, SetFlushTime, etc.) have the same
+// Other Set methods (SetRowCount, SetFlushTime, etc.) have the same
 // stale-index problem but are not yet fixed. See #48593 for the tracking issue
 // to extract a common updateSegment helper for all Set methods.
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
@@ -356,13 +356,6 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 		}
 	}
 	return false
-}
-
-// SetLevel sets level for segment
-func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetLevel(level))
-	}
 }
 
 // Clone deep clone the segment info and return a new instance.
@@ -519,13 +512,6 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
-	}
-}
-
-// SetLevel is the option to set level for segment info
-func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.Level = level
 	}
 }
 
