@@ -242,7 +242,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		if seg == nil {
 			continue
 		}
-		if err := validateExternalRefreshUpdatedSegment(seg, collectionID); err != nil {
+		if err := validateExternalRefreshUpdatedSegment(seg, collectionID, expectedSchemaVersion); err != nil {
 			return err
 		}
 		if keptSegmentMap[seg.GetID()] {
@@ -382,6 +382,14 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				if existing.GetState() == commonpb.SegmentState_Dropped {
 					return modPack.fail(merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID))
 				}
+				if existing.GetSchemaVersion() > expectedSchemaVersion {
+					return modPack.fail(merr.WrapErrServiceInternalMsg(
+						"kept segment %d schema version %d is newer than refresh schema version %d",
+						segmentID,
+						existing.GetSchemaVersion(),
+						expectedSchemaVersion,
+					))
+				}
 				continue
 			}
 			if incoming == nil {
@@ -414,6 +422,13 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				"new external refresh segment %d collides with existing metadata",
 				segmentID,
 			))
+		}
+
+		for segmentID := range keptSegmentMap {
+			existing := modPack.meta.segments.GetSegment(segmentID)
+			if existing.GetSchemaVersion() < expectedSchemaVersion {
+				modPack.Get(segmentID).SchemaVersion = expectedSchemaVersion
+			}
 		}
 		return true
 	}
@@ -497,10 +512,19 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	return nil
 }
 
-func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collectionID int64) error {
+func validateExternalRefreshUpdatedSegment(
+	incoming *datapb.SegmentInfo,
+	collectionID int64,
+	expectedSchemaVersion int32,
+) error {
 	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
 		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
 			incoming.GetID(), incoming.GetCollectionID(), collectionID)
+	}
+	if incoming.GetSchemaVersion() != expectedSchemaVersion {
+		return merr.WrapErrServiceInternalMsg(
+			"refresh result segment %d schema version %d does not match expected schema version %d",
+			incoming.GetID(), incoming.GetSchemaVersion(), expectedSchemaVersion)
 	}
 	if incoming.GetManifestPath() == "" {
 		return merr.WrapErrServiceInternalMsg("updated segment %d has empty manifest path", incoming.GetID())
