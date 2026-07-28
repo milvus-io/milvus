@@ -97,7 +97,7 @@ func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.C
 	if collection == nil {
 		return nil, fmt.Errorf("query view collection runtime is nil")
 	}
-	localCollection := l.collections.Get(collection.CollectionID())
+	localCollection := collection.PinnedCollection()
 	if localCollection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collection.CollectionID())
 	}

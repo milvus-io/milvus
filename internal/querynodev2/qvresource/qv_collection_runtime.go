@@ -60,12 +60,14 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	); err != nil {
 		return nil, false, err
 	}
+	localCollection := m.collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
-	if local := m.collections.Get(meta.GetCollectionId()); local != nil {
-		ccollection = local.GetCCollection()
+	if localCollection != nil {
+		ccollection = localCollection.GetCCollection()
 	}
 	return &queryViewCollectionRuntimeGuard{
 		collections:   m.collections,
+		collection:    localCollection,
 		collectionID:  meta.GetCollectionId(),
 		databaseName:  collection.GetDbName(),
 		schema:        collection.GetSchema(),
@@ -91,6 +93,7 @@ func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *
 
 type queryViewCollectionRuntimeGuard struct {
 	collections   qvCollectionManager
+	collection    *segments.Collection
 	collectionID  int64
 	databaseName  string
 	schema        *schemapb.CollectionSchema
@@ -118,22 +121,13 @@ func (g *queryViewCollectionRuntimeGuard) CCollection() *segcore.CCollection {
 	return g.ccollection
 }
 
+func (g *queryViewCollectionRuntimeGuard) PinnedCollection() *segments.Collection {
+	return g.collection
+}
+
 func (g *queryViewCollectionRuntimeGuard) UpdateIndexMeta(ctx context.Context, indexes []*indexpb.IndexInfo) error {
-	if err := g.collections.PutOrRef(
-		g.collectionID,
-		g.schema,
-		segments.ComposeIndexMeta(ctx, indexes, g.schema),
-		&querypb.LoadMetaInfo{
-			LoadType:        querypb.LoadType_LoadCollection,
-			CollectionID:    g.collectionID,
-			DbName:          g.databaseName,
-			SchemaBarrierTs: uint64(g.schemaVersion),
-		},
-	); err != nil {
-		return err
-	}
-	g.collections.Unref(g.collectionID, 1)
-	return nil
+	indexMeta := segments.ComposeIndexMeta(ctx, indexes, g.schema)
+	return g.collection.UpdateIndexMeta(indexMeta)
 }
 
 func (g *queryViewCollectionRuntimeGuard) Release() {
