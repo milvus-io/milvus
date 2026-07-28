@@ -135,6 +135,9 @@ func (dm *DistributionManager) PatchNodeDistribution(
 	channels []*DmChannel,
 	removedChannelNames []string,
 ) []*DmChannel {
+	if dm.publishHook != nil {
+		dm.publishHook(publishStageBeforeLock)
+	}
 	dm.publishMu.Lock()
 	defer dm.publishMu.Unlock()
 

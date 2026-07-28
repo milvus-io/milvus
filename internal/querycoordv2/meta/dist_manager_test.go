@@ -115,6 +115,85 @@ func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
 	require.True(t, wholeOld || wholeNew, "capture returned a mixed segment/channel pair")
 }
 
+func TestDistributionManagerPatchIsNodeAtomic(t *testing.T) {
+	manager := NewDistributionManager(session.NewNodeManager())
+	manager.PublishNodeDistribution(1,
+		[]*Segment{SegmentFromInfo(&datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "channel-old",
+			NumOfRows:     100,
+		})},
+		[]*DmChannel{{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-old"},
+			Version:      1,
+			View: &LeaderView{
+				ID:           1,
+				CollectionID: 100,
+				Channel:      "channel-old",
+				Version:      1,
+				Status:       &querypb.LeaderViewStatus{Serviceable: true},
+			},
+		}},
+	)
+
+	upsertSegments := []*Segment{SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  100,
+		PartitionID:   20,
+		InsertChannel: "channel-new",
+		NumOfRows:     200,
+	})}
+	upsertChannels := []*DmChannel{{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-new"},
+		Version:      2,
+		View: &LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "channel-new",
+			Version:      2,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	}}
+
+	segmentsWritten := make(chan struct{})
+	releasePatch := make(chan struct{})
+	releasePatcher := closeMetaTestChannelOnCleanup(t, releasePatch)
+	manager.publishHook = func(stage publishStage) {
+		if stage == publishStageSegmentsWritten {
+			close(segmentsWritten)
+			<-releasePatch
+		}
+	}
+	patched := make(chan struct{})
+	go func() {
+		defer close(patched)
+		manager.PatchNodeDistribution(1, upsertSegments, []int64{1}, upsertChannels, []string{"channel-old"})
+	}()
+	receiveMetaTestSignal(t, segmentsWritten, "segments-written hook")
+
+	captureAttempted := make(chan struct{})
+	manager.captureHook = func(stage captureStage) {
+		if stage == captureStageBeforeLock {
+			close(captureAttempted)
+		}
+	}
+	captured := make(chan DistributionSnapshot, 1)
+	go func() {
+		captured <- manager.Capture()
+	}()
+	receiveMetaTestSignal(t, captureAttempted, "capture-before-lock hook")
+	releasePatcher()
+	snapshot := receiveMetaTestSignal(t, captured, "atomic delta distribution capture")
+	receiveMetaTestSignal(t, patched, "distribution patcher completion")
+
+	segmentIDs, channelNames := distributionRecordsForNode(snapshot, 1)
+	wholeOld := assert.ObjectsAreEqual([]int64{1}, segmentIDs) && assert.ObjectsAreEqual([]string{"channel-old"}, channelNames)
+	wholeNew := assert.ObjectsAreEqual([]int64{2}, segmentIDs) && assert.ObjectsAreEqual([]string{"channel-new"}, channelNames)
+	require.True(t, wholeOld || wholeNew, "delta capture returned a mixed segment/channel pair: segments=%v channels=%v", segmentIDs, channelNames)
+}
+
 func distributionRecordsForNode(snapshot DistributionSnapshot, nodeID int64) ([]int64, []string) {
 	segmentIDs := make([]int64, 0)
 	for _, segment := range snapshot.Segments {
