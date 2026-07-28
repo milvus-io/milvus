@@ -295,6 +295,25 @@ func TestSegments_IncrementalProgress(t *testing.T) {
 	assert.Equal(t, qviews.QueryViewStateReady, sm.State())
 }
 
+func TestSegments_ReportBuiltLazilyAndCoalescesProgress(t *testing.T) {
+	sm := newTestSM()
+
+	sm.OnSegmentsReady(map[int64][]int64{10: {1000}})
+	assert.True(t, sm.reportPending)
+
+	// A second event before ConsumeReport should update the tracked state while
+	// keeping a single pending report intent.
+	sm.OnSegmentsReady(map[int64][]int64{10: {1001}, 20: {2000}})
+	assert.True(t, sm.reportPending)
+
+	report := sm.ConsumeReport()
+	require.NotNil(t, report)
+	assert.ElementsMatch(t, []int64{1000, 1001}, getReadySegments(report, 10))
+	assert.ElementsMatch(t, []int64{2000}, getReadySegments(report, 20))
+	assert.False(t, sm.reportPending)
+	assertNoReport(t, sm)
+}
+
 func TestSegments_DuplicateIdempotent(t *testing.T) {
 	sm := newTestSM()
 
