@@ -787,6 +787,23 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 		mlog.Int64("totalRows", totalRows), mlog.Int64("totalSize", totalSize))
 }
 
+// normalizeStorageKey folds a storage key into a single namespace so that a
+// candidate path and a deny-list entry are always comparable.
+//
+// Rooting at "/" before cleaning does three things at once:
+//   - an absolute storage root (localStorage.path, e.g. /var/lib/milvus/data)
+//     and a relative one (minio.rootPath, e.g. files) end up in the same
+//     namespace, so the deny list applies to both;
+//   - any number of leading slashes collapses to one, so "//files/insert_log"
+//     cannot dodge an entry that "/files/insert_log" matches;
+//   - a leading ".." is resolved away rather than preserved, which path.Clean
+//     cannot do for a relative path. This matters because LocalChunkManager
+//     opens the caller's path with os.Open, where "../files/insert_log/x"
+//     resolves against the process working directory.
+func normalizeStorageKey(key string) string {
+	return path.Clean("/" + key)
+}
+
 // ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
 // point into Milvus's own internal storage layout under the storage root path.
 //
@@ -806,15 +823,12 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 	rootPath := cm.RootPath()
 	denied := make([]string, 0, len(common.InternalStorageRootSegments))
 	for _, segment := range common.InternalStorageRootSegments {
-		denied = append(denied, path.Clean(path.Join(rootPath, segment)))
+		denied = append(denied, normalizeStorageKey(path.Join(rootPath, segment)))
 	}
 
 	for _, file := range files {
 		for _, filePath := range file.GetPaths() {
-			// TrimPrefix first: an object key never carries a leading slash, but
-			// some S3-compatible backends normalize it away, which would let
-			// "/files/insert_log/..." through a comparison done before cleaning.
-			cleaned := path.Clean(strings.TrimPrefix(filePath, "/"))
+			cleaned := normalizeStorageKey(filePath)
 			for _, deniedPath := range denied {
 				// Boundary match, not a raw prefix match: a raw prefix would also
 				// reject a caller's own "files/insert_logs_2026/a.json".
