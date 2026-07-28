@@ -1847,7 +1847,7 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		assert.Equal(t, "dst-ch", seg.GetInsertChannel())
 		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
 		assert.True(t, seg.GetIsImporting())
-		assert.Equal(t, int64(storage.StorageV3), seg.GetStorageVersion())
+		assert.Equal(t, storage.StorageV3, seg.GetStorageVersion())
 		basePath, version, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
 		require.NoError(t, err)
 		assert.Equal(t, "files/insert_log/200/20/2001", basePath)

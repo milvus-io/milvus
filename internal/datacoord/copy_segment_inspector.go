@@ -18,10 +18,11 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -130,7 +131,7 @@ func NewCopySegmentInspector(
 	scheduler task.GlobalScheduler,
 	cluster session.Cluster,
 ) CopySegmentInspector {
-	dropCtx, dropCancel := context.WithCancel(ctx)
+	dropCtx, dropCancel := context.WithCancel(ctx) //nolint:gosec // dropCancel is stored on the inspector and called in Close()
 	return &copySegmentInspector{
 		ctx:       ctx,
 		meta:      meta,
