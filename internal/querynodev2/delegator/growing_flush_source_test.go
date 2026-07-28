@@ -501,9 +501,111 @@ func TestDelegatorGrowingSourceProviderKeepsHandoffOnlyWhileHandoffInflight(t *t
 	provider.mu.Lock()
 	drained := provider.handoffOnly
 	inflight := provider.handoffInflight
+	handoffAllowed := len(provider.handoffAllowed)
+	releaseAllowed := len(provider.releaseAllowed)
+	releasePrepared := len(provider.releasePrepared)
+	retained := len(provider.retained)
 	provider.mu.Unlock()
 	require.False(t, drained, "handoffOnly should lower once the in-flight handoff finishes and maps are drained")
 	require.Equal(t, 0, inflight)
+	// Assert the maps, not just the fence: a resuming Prepare must not re-create
+	// state for a segment ClearReleasePrepared already retired.
+	require.Equal(t, 0, handoffAllowed, "handoffAllowed must be empty")
+	require.Equal(t, 0, releaseAllowed, "releaseAllowed must not be resurrected")
+	require.Equal(t, 0, releasePrepared, "releasePrepared must not be resurrected")
+	require.Equal(t, 0, retained, "retained must be empty")
+	require.True(t, provider.acquireLease(3003), "an unrelated segment must be servable once drained")
+	provider.releaseLease()
+}
+
+// TestDelegatorGrowingSourceProviderRetiredSegmentIsNotResurrected is the
+// TargetOffset>0 counterpart of the test above. A Prepare parked in waitFence must
+// not re-register a retained entry -- and with it a segment pin -- for a segment
+// ClearReleasePrepared retired while it was parked; nothing would ever detach it.
+// GetGrowing is allowed but not required: with the fix the resume never reaches
+// registerRetained, and without it the resurrection surfaces as a failed map
+// assertion rather than an unexpected-call panic on a background goroutine.
+func TestDelegatorGrowingSourceProviderRetiredSegmentIsNotResurrected(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Maybe()
+
+	fenceEntered := make(chan struct{})
+	fenceRelease := make(chan struct{})
+	provider := newDelegatorGrowingSourceProvider(segmentManager, func(ctx context.Context, fenceTs uint64) error {
+		close(fenceEntered)
+		<-fenceRelease
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 100,
+			[]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1001, TargetOffset: 5}})
+	}()
+	<-fenceEntered
+
+	provider.ClearReleasePrepared(1001)
+	close(fenceRelease)
+	require.NoError(t, <-done)
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Empty(t, provider.retained, "no retained entry may be created for a retired segment")
+	require.Empty(t, provider.releaseAllowed, "releaseAllowed must not be resurrected")
+	require.Empty(t, provider.releasePrepared, "releasePrepared must not be resurrected")
+	require.Empty(t, provider.handoffAllowed)
+	require.False(t, provider.handoffOnly)
+}
+
+// TestDelegatorGrowingSourceProviderDeactivatedDuringFence covers Deactivate landing
+// while a Prepare is parked. Resuming into the active path would register a retained
+// entry, and a segment pin, on a deactivated provider -- nothing detaches it, so
+// unregisterIfInactiveLocked could never fire again. No GetGrowing expectation is
+// set, so reaching registerRetained fails the test.
+func TestDelegatorGrowingSourceProviderDeactivatedDuringFence(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+
+	fenceEntered := make(chan struct{})
+	fenceRelease := make(chan struct{})
+	provider := newDelegatorGrowingSourceProvider(segmentManager, func(ctx context.Context, fenceTs uint64) error {
+		close(fenceEntered)
+		<-fenceRelease
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 100,
+			[]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1001, TargetOffset: 5}})
+	}()
+	<-fenceEntered
+
+	provider.Deactivate()
+	close(fenceRelease)
+	require.NoError(t, <-done)
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Empty(t, provider.retained, "no retained entry may be created on a deactivated provider")
+	require.Empty(t, provider.handoffAllowed)
+}
+
+// TestDelegatorGrowingSourceProviderDuplicateSegmentRollback pins that a rollback
+// returns exactly as many references as its call took. While the snapshot was a
+// set, passing one segment twice took two references and gave back one, pinning
+// handoffOnly until some unrelated ClearReleasePrepared wiped the entry. Both
+// production callers dedup today, so this guards the invariant structurally
+// rather than fixing a reachable bug.
+func TestDelegatorGrowingSourceProviderDuplicateSegmentRollback(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	provider.BeginGrowingSourceReleaseHandoff([]int64{1001, 1001})()
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Empty(t, provider.handoffAllowed, "both references must be returned")
+	require.False(t, provider.handoffOnly, "the fence must lower once the last reference is returned")
 }
 
 func TestDelegatorGrowingSourceProviderDeactivatedOnlyServesRetainedSources(t *testing.T) {

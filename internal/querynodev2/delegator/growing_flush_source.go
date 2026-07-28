@@ -165,6 +165,23 @@ func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx 
 			return err
 		}
 	}
+	// waitFence parks without holding p.mu, so Deactivate may have landed while we
+	// were there. Resuming into the active path would register a retained entry --
+	// and a segment pin -- on a deactivated provider, which nothing detaches and
+	// which keeps unregisterIfInactiveLocked from ever firing. Take the same route
+	// a handoff arriving after Deactivate takes.
+	if p.isDeactivated() {
+		p.rollbackHandoffOnly(handoffSnapshot)
+		return p.prepareDeactivatedGrowingSourceReleaseHandoff(fenceTs, segments)
+	}
+	// Drop segments retired while we were parked. ClearReleasePrepared wipes a
+	// segment's handoffAllowed entry to mean "this handoff is over, forget it";
+	// republishing releaseAllowed/releasePrepared -- or re-pinning via
+	// registerRetained -- would resurrect state nothing will clear again.
+	segments = p.stillFenced(segments)
+	if len(segments) == 0 {
+		return nil
+	}
 	snapshot := p.snapshotRetained(segments)
 	allowedSegments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segments))
 	preparedSegments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segments))
@@ -186,6 +203,21 @@ func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx 
 	p.markReleaseAllowed(fenceTs, allowedSegments)
 	p.markReleasePrepared(fenceTs, preparedSegments)
 	return nil
+}
+
+// stillFenced keeps only the segments whose handoffAllowed reference this
+// provider still holds. A reference disappears when ClearReleasePrepared retires
+// the segment, which can happen while a handoff is parked in waitFence.
+func (p *delegatorGrowingSourceProvider) stillFenced(segments []syncmgr.GrowingSourceReleaseHandoffSegment) []syncmgr.GrowingSourceReleaseHandoffSegment {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	kept := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segments))
+	for _, segment := range segments {
+		if p.handoffAllowed[segment.SegmentID] > 0 {
+			kept = append(kept, segment)
+		}
+	}
+	return kept
 }
 
 func (p *delegatorGrowingSourceProvider) prepareDeactivatedGrowingSourceReleaseHandoff(fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {
@@ -218,6 +250,13 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 	if p.closing {
 		p.mu.Unlock()
 		return errGrowingSourceProviderClosed
+	}
+	if p.deactivated {
+		p.mu.Unlock()
+		// Classified as channel-not-available on purpose: the provider is
+		// deactivated because the delegator is closing, and the unsubscribe path
+		// treats that as "prepare unavailable, carry on" rather than a failure.
+		return merr.WrapErrChannelNotAvailable(p.channelName, "growing source provider is deactivated")
 	}
 	if retained, ok := p.retained[segmentID]; ok {
 		if retained.targetOffset < targetOffset {
@@ -328,7 +367,10 @@ func (p *delegatorGrowingSourceProvider) rollbackRetained(snapshot map[int64]ret
 // lower handoffOnly without consulting handoffInflight -- while another handoff
 // is still parked in waitFence.
 type handoffSnapshot struct {
-	added map[int64]struct{}
+	// added counts the references this call took per segment, so a rollback
+	// gives back exactly as many as it took even if the caller passed the same
+	// segment twice.
+	added map[int64]int
 }
 
 // enterHandoffOnly arms the handoff-only fence without registering an in-flight
@@ -354,14 +396,14 @@ func (p *delegatorGrowingSourceProvider) enterHandoffOnlyInflight(segments []syn
 }
 
 func (p *delegatorGrowingSourceProvider) enterHandoffOnlyLocked(segments []syncmgr.GrowingSourceReleaseHandoffSegment) handoffSnapshot {
-	snapshot := handoffSnapshot{added: make(map[int64]struct{}, len(segments))}
+	snapshot := handoffSnapshot{added: make(map[int64]int, len(segments))}
 
 	p.handoffOnly = true
 	for _, segment := range segments {
 		// handoffAllowed is ref-counted: overlapping handoffs each hold one
 		// reference on the same segment, so a rollback gives back only its own.
 		p.handoffAllowed[segment.SegmentID]++
-		snapshot.added[segment.SegmentID] = struct{}{}
+		snapshot.added[segment.SegmentID]++
 	}
 	return snapshot
 }
@@ -370,9 +412,9 @@ func (p *delegatorGrowingSourceProvider) rollbackHandoffOnly(snapshot handoffSna
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	for segmentID := range snapshot.added {
-		if p.handoffAllowed[segmentID] > 1 {
-			p.handoffAllowed[segmentID]--
+	for segmentID, taken := range snapshot.added {
+		if p.handoffAllowed[segmentID] > taken {
+			p.handoffAllowed[segmentID] -= taken
 			continue
 		}
 		delete(p.handoffAllowed, segmentID)
