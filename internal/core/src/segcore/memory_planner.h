@@ -103,11 +103,6 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
 // ---- Cell-batch loading ----
 
-// The channel capacity multiplier relative to pool size.
-// The bounded channel holds at most (pool_size * kChannelCapacityMultiplier) items,
-// providing backpressure to producer threads while keeping them busy.
-constexpr double kChannelCapacityMultiplier = 1.5;
-
 // Load-time readers use one process-wide transient memory budget, so all
 // translators backed by that budget must share one MCL overhead group.
 constexpr const char* kLoadTransientOverheadGroup = "LoadTransientOverhead";
@@ -118,9 +113,6 @@ constexpr int64_t kDefaultFieldDataLoadBatchTargetBytes =
 constexpr int64_t kDefaultFieldDataReadWindowBytes =
     DEFAULT_INDEX_FILE_SLICE_SIZE;
 
-constexpr int64_t kDefaultFieldDataMaxReadParallelism =
-    DEFAULT_FIELD_MAX_MEMORY_LIMIT / DEFAULT_INDEX_FILE_SLICE_SIZE;
-
 int64_t
 FieldDataLoadBatchTargetBytes();
 
@@ -130,17 +122,20 @@ FieldDataLoadBatchSplitTargetBytes();
 int64_t
 FieldDataReadWindowBytes();
 
-int64_t
-FieldDataMaxReadParallelism();
-
 void
 SetFieldDataLoadBatchTargetBytes(int64_t bytes);
 
 void
 SetFieldDataReadWindowBytes(int64_t bytes);
 
-void
-SetFieldDataMaxReadParallelism(int64_t parallelism);
+int64_t
+LoadTransientPoolUpperBound(size_t max_task_overhead_bytes);
+
+// Process-wide upper bound enforced by the configured load transient budget.
+// A single oversized task can exceed the budget and therefore supplies the
+// lower bound. Callers must not register a shared cap when the budget is zero.
+int64_t
+LoadTransientSharedOverheadUpperBound(size_t max_task_overhead_bytes);
 
 milvus::cachinglayer::ResourceUsage
 FieldDataLoadingOverheadUpperBound(
@@ -153,21 +148,18 @@ struct CellSpec {
     size_t file_idx;          // index into the remote_files list
     int64_t local_rg_offset;  // file-local row group start offset
     int64_t rg_count;         // number of row groups in this cell
-    int64_t memory_size = 0;  // estimated Arrow memory in bytes; 0 = unknown
+    int64_t memory_size = 0;  // estimated final loaded memory in bytes
     int64_t loading_overhead_size =
-        0;  // transient overhead budget; 0 = memory_size
+        0;  // extra transient bytes during loading; 0 = memory_size
 };
 
-// Result of loading a single cell: cid + either the loaded Arrow tables or the
-// finalized group chunk when a cell finalizer is provided.
-struct CellLoadResult {
+struct LoadedCell {
     int64_t cid;
-    size_t budget_bytes{0};
-    std::vector<std::shared_ptr<arrow::Table>> tables;
     std::unique_ptr<milvus::GroupChunk> chunk;
 };
 
-using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
+using LoadedCellBatch = std::vector<LoadedCell>;
+using CellLoadFuture = std::future<LoadedCellBatch>;
 
 // Creates a batch reader for a range of contiguous row groups.
 // Returns all row groups as a vector of tables in one call.
@@ -175,15 +167,12 @@ using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
 // rg_offset: start row group index for this batch
 // total_rg_count: total row groups across all cells in this batch
 // reader_memory_limit: per-reader window size for this batch
-// read_parallelism: max number of readers/chunks to run within this batch for
-// factories that support intra-batch parallel reads.
 using BatchReaderFactory =
     std::function<arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>(
         size_t batch_key,
         int64_t rg_offset,
         int64_t total_rg_count,
-        int64_t reader_memory_limit,
-        uint64_t read_parallelism)>;
+        int64_t reader_memory_limit)>;
 
 using CellFinalizeFunc = std::function<std::unique_ptr<milvus::GroupChunk>(
     const std::vector<std::shared_ptr<arrow::Table>>& tables, int64_t cid)>;
@@ -191,32 +180,29 @@ using CellFinalizeFunc = std::function<std::unique_ptr<milvus::GroupChunk>(
 /**
  * Load cells in batches using a pluggable reader factory. Cells are sorted by
  * (file_idx, local_rg_offset) and grouped into IO-merged batches.
- * Each completed cell is pushed to the channel immediately. When finalize_cell
- * is provided, the batch task converts Arrow tables into the final GroupChunk
- * before pushing and releases the transient Arrow budget immediately.
+ * Each completed cell is finalized and returned in its batch future.
+ * Batch admission waits on the global transient memory budget before
+ * submitting work to the load pool. After finalize_cell returns, the batch task
+ * releases transient Arrow tables before storing the result in the future.
  *
  * @param op_ctx operation context for cancellation
  * @param cell_specs cell specifications (sorted internally)
  * @param reader_factory factory that reads all row groups for a batch
- * @param channel channel to receive loaded cell data; closed when all done
- * @param memory_limit batch split target and per-reader upper bound. A global
- * transient memory budget gates concurrent batch loading across calls.
+ * @param memory_limit split target for per-batch loading overhead and
+ * per-reader upper bound for final loaded memory. A global transient memory
+ * budget gates concurrent batch loading across calls.
  * @param priority load priority
- * @return vector of futures for the batch loading tasks
+ * @param finalize_cell converts loaded Arrow tables into the final GroupChunk
+ * before the cell is stored in the batch result
+ * @return futures containing finalized cells for each batch
  */
-std::vector<std::future<void>>
+std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority =
-                       milvus::proto::common::LoadPriority::HIGH,
-                   CellFinalizeFunc finalize_cell = nullptr);
-
-void
-ReleaseCellLoadResultBudget(
-    const std::shared_ptr<CellLoadResult>& cell_load_result);
+                   milvus::proto::common::LoadPriority priority,
+                   CellFinalizeFunc finalize_cell);
 
 /**
  * Creates a BatchReaderFactory that reads from Parquet files via

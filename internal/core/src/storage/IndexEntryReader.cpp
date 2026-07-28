@@ -43,34 +43,33 @@ namespace milvus::storage {
 namespace {
 
 using SliceLoader = std::function<std::vector<uint8_t>(size_t seq)>;
-using SliceBudgetBytes = std::function<size_t(size_t seq)>;
+using SliceTransientBytes = std::function<size_t(size_t seq)>;
 
 struct ActiveSliceTask {
-    size_t budget_bytes{0};
+    size_t slice_transient_bytes{0};
     std::shared_ptr<StreamSliceResult> result;
     std::future<void> future;
 };
 
 class TransientBudgetGuard {
  public:
-    TransientBudgetGuard(size_t bytes,
+    TransientBudgetGuard(size_t slice_transient_bytes,
                          const folly::CancellationToken& cancellation_token,
                          const std::string& operation)
-        : bytes_(bytes) {
+        : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
         auto acquired =
             TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
-                bytes_, [&cancellation_token]() {
-                    return cancellation_token.isCancellationRequested();
-                });
+                slice_transient_bytes_, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
-            ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
+            ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
         }
     }
 
     ~TransientBudgetGuard() {
-        TransientMemoryBudget::GetLoadTransientBudget().Release(bytes_);
+        TransientMemoryBudget::GetLoadTransientBudget().Release(
+            slice_transient_bytes_);
     }
 
     TransientBudgetGuard(const TransientBudgetGuard&) = delete;
@@ -78,7 +77,7 @@ class TransientBudgetGuard {
     operator=(const TransientBudgetGuard&) = delete;
 
  private:
-    size_t bytes_;
+    size_t slice_transient_bytes_;
 };
 
 bool
@@ -121,6 +120,14 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
     return cipher_len + 2 * plain_len;
 }
 
+size_t
+SaturatingAdd(size_t lhs, size_t rhs) {
+    if (rhs > std::numeric_limits<size_t>::max() - lhs) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return lhs + rhs;
+}
+
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
 
 void
@@ -148,7 +155,7 @@ ReadOrderedEntryStream(
     ThreadPoolPriority priority,
     const folly::CancellationToken& cancellation_token,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
-    const SliceBudgetBytes& slice_budget_bytes,
+    const SliceTransientBytes& slice_transient_bytes,
     const SliceLoader& load_slice) {
     ThrowIfCancelled(cancellation_token, "ReadEntryStream");
     if (num_slices == 0) {
@@ -199,44 +206,42 @@ ReadOrderedEntryStream(
                     rememberError(std::current_exception());
                 }
             }
-            budget.Release(task.budget_bytes);
+            budget.Release(task.slice_transient_bytes);
         }
     };
 
     auto submitOne = [&](bool block_for_budget) -> bool {
         size_t seq = next_submit;
-        size_t budget_bytes = 0;
+        size_t slice_transient_byte_count = 0;
         std::shared_ptr<StreamSliceResult> result;
         try {
-            budget_bytes = slice_budget_bytes(seq);
+            slice_transient_byte_count = slice_transient_bytes(seq);
             result = std::make_shared<StreamSliceResult>();
-            result->budget_bytes = budget_bytes;
+            result->slice_transient_bytes = slice_transient_byte_count;
         } catch (...) {
             rememberError(std::current_exception());
             return false;
         }
 
         if (block_for_budget) {
-            auto acquired =
-                budget.AcquireUntil(budget_bytes, [&cancellation_token]() {
-                    return cancellation_token.isCancellationRequested();
-                });
+            auto acquired = budget.AcquireUntil(slice_transient_byte_count,
+                                                cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
             }
-        } else if (!budget.TryAcquire(budget_bytes)) {
+        } else if (!budget.TryAcquire(slice_transient_byte_count)) {
             return false;
         }
 
         if (rememberCancellation()) {
-            budget.Release(budget_bytes);
+            budget.Release(slice_transient_byte_count);
             return false;
         }
 
         try {
-            active_tasks.push_back(
-                ActiveSliceTask{budget_bytes, result, std::future<void>()});
+            active_tasks.push_back(ActiveSliceTask{
+                slice_transient_byte_count, result, std::future<void>()});
             active_tasks.back().future =
                 pool.Submit([result, load_slice, seq, cancellation_token]() {
                     try {
@@ -252,7 +257,7 @@ ReadOrderedEntryStream(
                 !active_tasks.back().future.valid()) {
                 active_tasks.pop_back();
             }
-            budget.Release(budget_bytes);
+            budget.Release(slice_transient_byte_count);
             rememberError(std::current_exception());
             return false;
         }
@@ -305,7 +310,7 @@ ReadOrderedEntryStream(
             deliverSlice(task.result);
         }
 
-        budget.Release(task.budget_bytes);
+        budget.Release(task.slice_transient_bytes);
 
         if (first_error) {
             drainActiveTasks();
@@ -333,6 +338,23 @@ DefaultEntryStreamSliceSize() {
     return DefaultStreamSliceSize();
 }
 
+EntryStreamLoadInfo
+IndexEntryReader::InspectStreamLoadInfo(
+    std::shared_ptr<milvus::InputStream> input,
+    int64_t file_size,
+    folly::CancellationToken cancellation_token) {
+    auto reader = std::unique_ptr<IndexEntryReader>(new IndexEntryReader());
+    reader->input_ = std::move(input);
+    reader->file_size_ = file_size;
+    reader->cancellation_token_ = cancellation_token;
+    reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
+    // The caller has already selected the V3 path. Actual loading validates
+    // the magic; inspection avoids a separate range read at offset zero.
+    reader->ReadFooterAndDirectory();
+    reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
+    return reader->stream_load_info_;
+}
+
 std::unique_ptr<IndexEntryReader>
 IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                        int64_t file_size,
@@ -349,6 +371,12 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     reader->ValidateMagic();
     reader->ReadFooterAndDirectory();
     reader->CheckCancelled("IndexEntryReader::Open");
+
+    if (reader->is_encrypted_) {
+        reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(reader->cipher_plugin_ != nullptr,
+                   "Cipher plugin required for encrypted V3 index");
+    }
 
     // Parse __meta__ entry
     auto meta_entry = reader->ReadEntry(MILVUS_V3_META_ENTRY_NAME);
@@ -421,13 +449,12 @@ IndexEntryReader::ReadFooterAndDirectory() {
                    static_cast<size_t>(file_size_),
                "Directory table + meta entry + footer size exceeds file size");
 
-    // Check if we need a second read
-    size_t needed =
-        static_cast<size_t>(dir_size) + meta_entry_size + MILVUS_V3_FOOTER_SIZE;
+    // Check if the directory itself needs a second read. The meta entry is
+    // loaded separately by Open() and is not needed for directory parsing.
+    size_t needed = static_cast<size_t>(dir_size) + MILVUS_V3_FOOTER_SIZE;
     size_t available_before_footer = tail_size - MILVUS_V3_FOOTER_SIZE;
 
-    if (static_cast<size_t>(dir_size) + meta_entry_size >
-        available_before_footer) {
+    if (static_cast<size_t>(dir_size) > available_before_footer) {
         size_t new_tail_size = needed;
         size_t new_tail_offset = file_size_ - new_tail_size;
 
@@ -465,6 +492,7 @@ IndexEntryReader::ReadFooterAndDirectory() {
 
     if (dir_json.contains("__edek__")) {
         is_encrypted_ = true;
+        stream_load_info_.encrypted = true;
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
@@ -473,19 +501,37 @@ IndexEntryReader::ReadFooterAndDirectory() {
                    kStreamSliceAlignment,
                    slice_size_);
 
-        cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(cipher_plugin_ != nullptr,
-                   "Cipher plugin required for encrypted V3 index");
-
         for (const auto& entry : dir_json["entries"]) {
             EntryMeta meta;
             meta.encrypted = true;
             meta.enc.original_size = entry["original_size"].get<uint64_t>();
             meta.enc.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
+            size_t output_offset = 0;
             for (const auto& s : entry["slices"]) {
-                meta.enc.slices.push_back(
-                    {s["offset"].get<uint64_t>(), s["size"].get<uint64_t>()});
+                auto slice = SliceMeta{s["offset"].get<uint64_t>(),
+                                       s["size"].get<uint64_t>()};
+                meta.enc.slices.push_back(slice);
+
+                AssertInfo(output_offset < meta.enc.original_size,
+                           "Encrypted slice exceeds original entry size {}",
+                           meta.enc.original_size);
+                auto remaining =
+                    static_cast<size_t>(meta.enc.original_size - output_offset);
+                auto plain_len = std::min(remaining, slice_size_);
+                auto task_transient_bytes = EncryptedStreamBudgetBytes(
+                    static_cast<size_t>(slice.size), plain_len);
+                stream_load_info_.total_transient_bytes =
+                    SaturatingAdd(stream_load_info_.total_transient_bytes,
+                                  task_transient_bytes);
+                stream_load_info_.max_task_transient_bytes =
+                    std::max(stream_load_info_.max_task_transient_bytes,
+                             task_transient_bytes);
+                output_offset += plain_len;
             }
+            AssertInfo(output_offset == meta.enc.original_size,
+                       "Encrypted slices cover {} bytes, expected {}",
+                       output_offset,
+                       meta.enc.original_size);
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
             entry_index_.emplace(std::move(name), std::move(meta));
@@ -923,6 +969,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                        em.original_size);
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
+            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+                EncryptedStreamBudgetBytes(slice.size, plain_len),
+                cancellation_token,
+                "IndexEntryReader::ReadEntriesStreamToFiles");
 
             futures.push_back(pool.Submit([input,
                                            cipher_plugin,
@@ -935,11 +985,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            plain_len,
                                            i,
                                            &state,
-                                           cancellation_token]() {
-                TransientBudgetGuard budget_guard(
-                    EncryptedStreamBudgetBytes(slice.size, plain_len),
-                    cancellation_token,
-                    "IndexEntryReader::ReadEntriesStreamToFiles");
+                                           cancellation_token,
+                                           budget_guard =
+                                               std::move(budget_guard)]() {
+                (void)budget_guard;
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -978,6 +1027,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len =
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
+            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+                PlainEntryFileStreamTransientBytes(len),
+                cancellation_token,
+                "IndexEntryReader::ReadEntriesStreamToFiles");
 
             futures.push_back(pool.Submit([input,
                                            writer,
@@ -986,11 +1039,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            len,
                                            seq,
                                            &state,
-                                           cancellation_token]() {
-                TransientBudgetGuard budget_guard(
-                    len,
-                    cancellation_token,
-                    "IndexEntryReader::ReadEntriesStreamToFiles");
+                                           cancellation_token,
+                                           budget_guard =
+                                               std::move(budget_guard)]() {
+                (void)budget_guard;
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1223,15 +1275,19 @@ IndexEntryReader::ReadPlainEntryStream(
                slice_size);
     auto entry_size = static_cast<size_t>(pm.size);
     auto num_slices = PlainStreamSliceCount(entry_size, slice_size);
-    auto sliceBytes = [entry_size, slice_size, num_slices](size_t seq) {
+    auto sliceTransientBytes = [entry_size, slice_size, num_slices](
+                                   size_t seq) {
         return PlainStreamSliceBytes(entry_size, slice_size, num_slices, seq);
     };
     auto input = input_;
     auto cancellation_token = cancellation_token_;
-    auto load_slice = [input, pm, slice_size, sliceBytes, cancellation_token](
-                          size_t seq) {
+    auto load_slice = [input,
+                       pm,
+                       slice_size,
+                       sliceTransientBytes,
+                       cancellation_token](size_t seq) {
         size_t off = seq * slice_size;
-        size_t len = sliceBytes(seq);
+        size_t len = sliceTransientBytes(seq);
         size_t src = pm.offset + off;
         std::vector<uint8_t> data(len);
         ThrowIfCancelled(cancellation_token,
@@ -1249,7 +1305,7 @@ IndexEntryReader::ReadPlainEntryStream(
                            priority_,
                            cancellation_token_,
                            slice_consumer,
-                           sliceBytes,
+                           sliceTransientBytes,
                            load_slice);
 }
 
@@ -1268,7 +1324,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
         size_t remaining = em.original_size - output_offset;
         return std::min(remaining, slice_size_);
     };
-    auto sliceBudgetBytes = [&](size_t seq) {
+    auto sliceTransientBytes = [&](size_t seq) {
         auto plain_len = slicePlainBytes(seq);
         auto cipher_len = em.slices[seq].size;
         AssertInfo(plain_len <= (std::numeric_limits<size_t>::max() / 2) &&
@@ -1323,7 +1379,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
                            priority_,
                            cancellation_token_,
                            slice_consumer,
-                           sliceBudgetBytes,
+                           sliceTransientBytes,
                            load_slice);
 }
 
