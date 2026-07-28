@@ -418,6 +418,15 @@ func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error 
 	return c.ccollection.UpdateIndexMeta(meta)
 }
 
+// UpdateIndexMeta updates the native collection index metadata while keeping
+// it in the same transition epoch as schema changes.
+func (c *Collection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	return c.updateIndexMeta(meta)
+}
+
 func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
