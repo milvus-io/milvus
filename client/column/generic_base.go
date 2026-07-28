@@ -17,6 +17,8 @@
 package column
 
 import (
+	"slices"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
@@ -116,12 +118,12 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	result := &genericColumnBase[T]{
 		name:       c.name,
 		fieldType:  c.fieldType,
-		values:     append([]T(nil), c.values[valueStart:valueEnd]...),
+		values:     slices.Clone(c.values[valueStart:valueEnd]),
 		nullable:   c.nullable,
 		sparseMode: c.sparseMode,
 	}
 	if c.nullable {
-		result.validData = append([]bool(nil), c.validData[start:end]...)
+		result.validData = slices.Clone(c.validData[start:end])
 		if !c.sparseMode {
 			_ = result.validateNullableCompact()
 		}
