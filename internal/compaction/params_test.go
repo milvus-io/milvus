@@ -56,6 +56,19 @@ func TestGetJSONParams(t *testing.T) {
 	}, result)
 }
 
+func TestCreateStorageConfigMaxConnections(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "minio")
+	pt.Save(pt.MinioCfg.MaxConnections.Key, "237")
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.MinioCfg.MaxConnections.Key)
+	})
+
+	assert.Equal(t, uint32(237), CreateStorageConfig().GetMaxConnections())
+}
+
 func TestGetParamsFromJSON(t *testing.T) {
 	input := `{
 		"storage_version": 0,

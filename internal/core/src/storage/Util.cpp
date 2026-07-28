@@ -24,7 +24,6 @@
 
 #include "arrow/array/builder_binary.h"
 #include "arrow/array/builder_nested.h"
-#include "arrow/util/byte_size.h"
 #include "arrow/array/builder_primitive.h"
 #include "arrow/array/concatenate.h"
 #include "arrow/buffer_builder.h"
@@ -56,6 +55,7 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/minio/MinioChunkManager.h"
+#include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "common/Common.h"
@@ -1761,15 +1761,10 @@ IterateFieldDataFromManifest(
             continue;
         }
 
-        // Estimate the decoded footprint of this batch for the byte budget.
-        // The arrow buffers backing the batch are the best available proxy
-        // for the FieldData it will materialize into; fall back to the row
-        // count when the size cannot be computed.
-        int64_t batch_bytes = 0;
-        {
-            auto size_result = arrow::util::TotalBufferSize(*batch);
-            batch_bytes = size_result > 0 ? size_result : num_rows;
-        }
+        // Estimate the decoded footprint of this slice for the byte budget.
+        // A record batch may share a large row-group backing buffer with
+        // adjacent slices, so count only the ranges this slice references.
+        auto batch_bytes = EstimateRecordBatchBytes(*batch);
 
         auto decode_future = pool.Submit([batch,
                                           column_name,

@@ -397,6 +397,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 			UseVirtualHost:    Params.MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     Params.MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: Params.MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  Params.MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: Params.MinioCfg.UseCRC32C.GetAsBool(),

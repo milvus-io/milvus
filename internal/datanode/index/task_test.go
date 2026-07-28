@@ -20,14 +20,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -129,6 +134,44 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 	err = t.PostExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var captured *indexcgopb.BuildIndexInfo
+	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+			captured = info
+			return nil, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	req := &workerpb.CreateJobRequest{
+		BuildID:     1,
+		NumRows:     int64(suite.numRows),
+		Dim:         int64(suite.dim),
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+		},
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType:    "minio",
+			MaxConnections: 237,
+		},
+	}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
+	task.newIndexParams = map[string]string{common.IndexTypeKey: "FLAT"}
+	task.newTypeParams = map[string]string{"dim": "128"}
+	task.tr = timerecord.NewTimeRecorder("test-max-connections")
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	suite.Require().NotNil(captured)
+	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
 }
 
 func TestIndexBuildTask(t *testing.T) {
@@ -233,6 +276,45 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var captured *clusteringpb.AnalyzeInfo
+	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
+		func(_ context.Context, info *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error) {
+			captured = info
+			return nil, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	req := &workerpb.AnalyzeRequest{
+		TaskID:       suite.taskID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		FieldID:      suite.fieldID,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_FloatVector,
+		Dim:          128,
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType:    "minio",
+			RootPath:       "files",
+			MaxConnections: 237,
+		},
+	}
+	task := &analyzeTask{
+		ctx:    ctx,
+		cancel: cancel,
+		req:    req,
+		tr:     timerecord.NewTimeRecorder("test-analyze-max-connections"),
+	}
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	suite.Require().NotNil(captured)
+	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {
