@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"fmt"
 	"math/rand"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,6 +89,44 @@ func (s *SearchOptionSuite) TestBasic() {
 	opt = NewSearchOption(collName, topK, []entity.Vector{nonSupportData{}})
 	_, err = opt.Request()
 	s.Error(err)
+}
+
+func (s *SearchOptionSuite) TestTemplateArrayParams() {
+	req, err := NewSearchOption(
+		"template_array_params",
+		10,
+		[]entity.Vector{entity.FloatVector([]float32{0.1, 0.2})},
+	).
+		WithFilter("array_contains_any(tags, {generic_empty})").
+		WithTemplateParam("generic_empty", []any{}).
+		WithTemplateParam("typed_empty", []int64{}).
+		WithTemplateParam("nested", [][]int64{{1, 2}, {3, 4}}).
+		WithTemplateParam("nested_empty", [][]int64{{}}).
+		WithTemplateParam("nested_outer_empty", [][]int64{}).
+		Request()
+	s.Require().NoError(err)
+
+	genericEmpty := req.GetExprTemplateValues()["generic_empty"].GetArrayVal()
+	s.Require().NotNil(genericEmpty)
+	s.Nil(genericEmpty.GetData())
+
+	typedEmpty := req.GetExprTemplateValues()["typed_empty"].GetArrayVal()
+	s.Require().NotNil(typedEmpty.GetLongData())
+	s.Empty(typedEmpty.GetLongData().GetData())
+
+	nested := req.GetExprTemplateValues()["nested"].GetArrayVal().GetArrayData().GetData()
+	s.Require().Len(nested, 2)
+	s.Equal([]int64{1, 2}, nested[0].GetLongData().GetData())
+	s.Equal([]int64{3, 4}, nested[1].GetLongData().GetData())
+
+	nestedEmpty := req.GetExprTemplateValues()["nested_empty"].GetArrayVal().GetArrayData().GetData()
+	s.Require().Len(nestedEmpty, 1)
+	s.Require().NotNil(nestedEmpty[0].GetLongData())
+	s.Empty(nestedEmpty[0].GetLongData().GetData())
+
+	nestedOuterEmpty := req.GetExprTemplateValues()["nested_outer_empty"].GetArrayVal()
+	s.Require().NotNil(nestedOuterEmpty.GetArrayData())
+	s.Empty(nestedOuterEmpty.GetArrayData().GetData())
 }
 
 func (s *SearchOptionSuite) TestWithNamespace() {
@@ -457,6 +496,61 @@ func TestAny2TmplValue(t *testing.T) {
 				assert.EqualValues(t, v[i], val)
 			}
 		})
+
+		t.Run("interface", func(t *testing.T) {
+			val, err := any2TmplValue([]any{int64(1), int32(2)})
+			assert.NoError(t, err)
+			assert.Equal(t, []int64{1, 2}, val.GetArrayVal().GetLongData().GetData())
+		})
+
+		t.Run("empty interface", func(t *testing.T) {
+			val, err := any2TmplValue([]any{})
+			assert.NoError(t, err)
+			assert.Nil(t, val.GetArrayVal().GetData())
+		})
+
+		t.Run("empty typed", func(t *testing.T) {
+			val, err := any2TmplValue([]int64{})
+			assert.NoError(t, err)
+			assert.NotNil(t, val.GetArrayVal().GetLongData())
+			assert.Empty(t, val.GetArrayVal().GetLongData().GetData())
+		})
+
+		t.Run("nested", func(t *testing.T) {
+			val, err := any2TmplValue([][]int64{{1, 2}, {3, 4}})
+			assert.NoError(t, err)
+
+			data := val.GetArrayVal().GetArrayData().GetData()
+			assert.Len(t, data, 2)
+			assert.Equal(t, []int64{1, 2}, data[0].GetLongData().GetData())
+			assert.Equal(t, []int64{3, 4}, data[1].GetLongData().GetData())
+		})
+
+		t.Run("nested empty", func(t *testing.T) {
+			val, err := any2TmplValue([]any{[]any{}})
+			assert.NoError(t, err)
+
+			data := val.GetArrayVal().GetArrayData().GetData()
+			assert.Len(t, data, 1)
+			assert.Nil(t, data[0].GetData())
+		})
+
+		t.Run("nested empty typed", func(t *testing.T) {
+			val, err := any2TmplValue([][]int64{{}})
+			assert.NoError(t, err)
+
+			data := val.GetArrayVal().GetArrayData().GetData()
+			assert.Len(t, data, 1)
+			assert.NotNil(t, data[0].GetLongData())
+			assert.Empty(t, data[0].GetLongData().GetData())
+		})
+
+		t.Run("nested outer empty typed", func(t *testing.T) {
+			val, err := any2TmplValue([][]int64{})
+			assert.NoError(t, err)
+			assert.NotNil(t, val.GetArrayVal().GetArrayData())
+			assert.Empty(t, val.GetArrayVal().GetArrayData().GetData())
+		})
 	})
 
 	t.Run("unsupported", func(*testing.T) {
@@ -465,6 +559,46 @@ func TestAny2TmplValue(t *testing.T) {
 
 		_, err = any2TmplValue([]struct{}{})
 		assert.Error(t, err)
+
+		_, err = any2TmplValue(nil)
+		assert.EqualError(t, err, "unsupported template value type: <nil>")
+	})
+
+	t.Run("invalid array elements", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			value any
+		}{
+			{name: "inconsistent types", value: []any{int64(1), "two"}},
+			{name: "nil integer", value: []any{int64(1), nil}},
+			{name: "nil boolean", value: []any{true, nil}},
+			{name: "nil float", value: []any{float64(1), nil}},
+			{name: "nil string", value: []any{"one", nil}},
+			{name: "nil nested array", value: []any{[]int64{1}, nil}},
+			{name: "invalid nested array element", value: []any{[]any{int64(1)}, []any{nil}}},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := any2TmplValue(tc.value)
+				assert.Error(t, err)
+			})
+		}
+	})
+
+	t.Run("invalid array values", func(t *testing.T) {
+		_, err := slice2TmplArrayValue(reflect.ValueOf(int64(1)))
+		assert.EqualError(t, err, "unsupported template array value type: int64")
+
+		_, _, err = templateArrayElement(reflect.Value{})
+		assert.EqualError(t, err, "unsupported template type: invalid array element")
+
+		nilElement := reflect.ValueOf([]any{nil}).Index(0)
+		_, _, err = templateArrayElement(nilElement)
+		assert.EqualError(t, err, "unsupported template type: nil array element")
+
+		_, _, err = templateArrayElement(reflect.ValueOf(struct{}{}))
+		assert.EqualError(t, err, "unsupported template type: slice of struct")
 	})
 }
 

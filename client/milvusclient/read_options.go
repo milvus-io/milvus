@@ -199,7 +199,8 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 	case string:
 		result.Val = &schemapb.TemplateValue_StringVal{StringVal: v}
 	default:
-		if reflect.TypeOf(val).Kind() == reflect.Slice {
+		valueType := reflect.TypeOf(val)
+		if valueType != nil && valueType.Kind() == reflect.Slice {
 			return slice2TmplValue(val)
 		}
 		return nil, fmt.Errorf("unsupported template value type: %T", val)
@@ -208,59 +209,174 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 }
 
 func slice2TmplValue(val any) (*schemapb.TemplateValue, error) {
-	arrVal := &schemapb.TemplateValue_ArrayVal{
-		ArrayVal: &schemapb.TemplateArrayValue{},
-	}
-
-	rv := reflect.ValueOf(val)
-	switch t := reflect.TypeOf(val).Elem().Kind(); t {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		data := make([]int64, 0, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			data = append(data, rv.Index(i).Int())
-		}
-		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_LongData{
-			LongData: &schemapb.LongArray{
-				Data: data,
-			},
-		}
-	case reflect.Bool:
-		data := make([]bool, 0, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			data = append(data, rv.Index(i).Bool())
-		}
-		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_BoolData{
-			BoolData: &schemapb.BoolArray{
-				Data: data,
-			},
-		}
-	case reflect.Float32, reflect.Float64:
-		data := make([]float64, 0, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			data = append(data, rv.Index(i).Float())
-		}
-		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_DoubleData{
-			DoubleData: &schemapb.DoubleArray{
-				Data: data,
-			},
-		}
-	case reflect.String:
-		data := make([]string, 0, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			data = append(data, rv.Index(i).String())
-		}
-		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_StringData{
-			StringData: &schemapb.StringArray{
-				Data: data,
-			},
-		}
-	default:
-		return nil, fmt.Errorf("unsupported template type: slice of %v", t)
+	arrayVal, err := slice2TmplArrayValue(reflect.ValueOf(val))
+	if err != nil {
+		return nil, err
 	}
 
 	return &schemapb.TemplateValue{
-		Val: arrVal,
+		Val: &schemapb.TemplateValue_ArrayVal{
+			ArrayVal: arrayVal,
+		},
 	}, nil
+}
+
+func slice2TmplArrayValue(rv reflect.Value) (*schemapb.TemplateArrayValue, error) {
+	rv, err := unwrapTemplateArrayElement(rv)
+	if err != nil {
+		return nil, err
+	}
+	if rv.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("unsupported template array value type: %v", rv.Kind())
+	}
+
+	result := &schemapb.TemplateArrayValue{}
+
+	var elementKind reflect.Kind
+	if rv.Len() == 0 {
+		// Preserve the data oneof for typed empty slices so older servers can
+		// decode them. An empty interface slice has no encodable element type.
+		if rv.Type().Elem().Kind() == reflect.Interface {
+			return result, nil
+		}
+		elementKind, err = normalizeTemplateArrayElementKind(rv.Type().Elem().Kind())
+	} else {
+		_, elementKind, err = templateArrayElement(rv.Index(0))
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	elementAt := func(index int) (reflect.Value, error) {
+		element, kind, err := templateArrayElement(rv.Index(index))
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		if kind != elementKind {
+			return reflect.Value{}, fmt.Errorf(
+				"template array elements have inconsistent types: %v and %v",
+				elementKind,
+				kind,
+			)
+		}
+		return element, nil
+	}
+
+	switch elementKind {
+	case reflect.Int64:
+		data := make([]int64, rv.Len())
+		for i := range data {
+			element, err := elementAt(i)
+			if err != nil {
+				return nil, err
+			}
+			data[i] = element.Int()
+		}
+		result.Data = &schemapb.TemplateArrayValue_LongData{
+			LongData: &schemapb.LongArray{Data: data},
+		}
+	case reflect.Bool:
+		data := make([]bool, rv.Len())
+		for i := range data {
+			element, err := elementAt(i)
+			if err != nil {
+				return nil, err
+			}
+			data[i] = element.Bool()
+		}
+		result.Data = &schemapb.TemplateArrayValue_BoolData{
+			BoolData: &schemapb.BoolArray{Data: data},
+		}
+	case reflect.Float64:
+		data := make([]float64, rv.Len())
+		for i := range data {
+			element, err := elementAt(i)
+			if err != nil {
+				return nil, err
+			}
+			data[i] = element.Float()
+		}
+		result.Data = &schemapb.TemplateArrayValue_DoubleData{
+			DoubleData: &schemapb.DoubleArray{Data: data},
+		}
+	case reflect.String:
+		data := make([]string, rv.Len())
+		for i := range data {
+			element, err := elementAt(i)
+			if err != nil {
+				return nil, err
+			}
+			data[i] = element.String()
+		}
+		result.Data = &schemapb.TemplateArrayValue_StringData{
+			StringData: &schemapb.StringArray{Data: data},
+		}
+	case reflect.Slice:
+		data := make([]*schemapb.TemplateArrayValue, rv.Len())
+		for i := range data {
+			element, err := elementAt(i)
+			if err != nil {
+				return nil, err
+			}
+			data[i], err = slice2TmplArrayValue(element)
+			if err != nil {
+				return nil, err
+			}
+		}
+		result.Data = &schemapb.TemplateArrayValue_ArrayData{
+			ArrayData: &schemapb.TemplateArrayValueArray{Data: data},
+		}
+	default:
+		return nil, fmt.Errorf("unsupported template type: slice of %v", elementKind)
+	}
+
+	return result, nil
+}
+
+func templateArrayElement(rv reflect.Value) (reflect.Value, reflect.Kind, error) {
+	rv, err := unwrapTemplateArrayElement(rv)
+	if err != nil {
+		return reflect.Value{}, reflect.Invalid, err
+	}
+
+	kind, err := normalizeTemplateArrayElementKind(rv.Kind())
+	if err != nil {
+		return reflect.Value{}, reflect.Invalid, err
+	}
+	return rv, kind, nil
+}
+
+func normalizeTemplateArrayElementKind(kind reflect.Kind) (reflect.Kind, error) {
+	switch kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return reflect.Int64, nil
+	case reflect.Bool:
+		return reflect.Bool, nil
+	case reflect.Float32, reflect.Float64:
+		return reflect.Float64, nil
+	case reflect.String:
+		return reflect.String, nil
+	case reflect.Slice:
+		return reflect.Slice, nil
+	default:
+		return reflect.Invalid, fmt.Errorf(
+			"unsupported template type: slice of %v",
+			kind,
+		)
+	}
+}
+
+func unwrapTemplateArrayElement(rv reflect.Value) (reflect.Value, error) {
+	for rv.IsValid() && rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return reflect.Value{}, fmt.Errorf("unsupported template type: nil array element")
+		}
+		rv = rv.Elem()
+	}
+	if !rv.IsValid() {
+		return reflect.Value{}, fmt.Errorf("unsupported template type: invalid array element")
+	}
+	return rv, nil
 }
 
 func (r *AnnRequest) WithANNSField(annsField string) *AnnRequest {
