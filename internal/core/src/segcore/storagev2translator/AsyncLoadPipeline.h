@@ -25,7 +25,7 @@
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
 #include "folly/Executor.h"
-#include "folly/futures/Future.h"
+#include "folly/coro/Task.h"
 #include "milvus-storage/reader.h"
 #include "pb/common.pb.h"
 #include "segcore/memory_planner.h"
@@ -48,6 +48,8 @@ struct AsyncLoadPipelineOptions {
     int64_t read_window_bytes{0};
     milvus::proto::common::LoadPriority load_priority{
         milvus::proto::common::LoadPriority::HIGH};
+    // A custom executor must support Folly KeepAlive, or otherwise outlive the
+    // returned task and all work started by it.
     folly::Executor* executor{nullptr};
 };
 
@@ -57,7 +59,10 @@ using AsyncCellResult =
 folly::Executor*
 GetAsyncLoadExecutor();
 
-folly::SemiFuture<std::vector<AsyncCellResult>>
+// Lazy coroutine: admission, storage read, and finalization start when the task
+// is awaited. The executor keep-alive and ctx cancellation token are captured
+// when this function is called.
+folly::coro::Task<std::vector<AsyncCellResult>>
 LoadCellsAsync(milvus::OpContext* ctx,
                std::vector<CellSpec> cells,
                std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
