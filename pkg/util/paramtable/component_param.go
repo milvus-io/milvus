@@ -791,9 +791,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`(row-group) reads issued by one storage-v3/external reader may be ` +
 			`fanned out across this pool. 0 keeps the pre-existing sequential ` +
 			`behavior. ` +
-			`Applies to DataNode only: the pool is created during DataNode's ` +
-			`segcore init, so query-node readers are unaffected and keep ` +
-			`parallelism 1 no matter what this is set to. ` +
+			`Only DataNode's segcore init creates the pool, but the pool itself ` +
+			`is a process-wide singleton in milvus-storage. In a cluster ` +
+			`deployment QueryNode runs in its own process, never creates one, ` +
+			`and keeps parallelism 1 no matter what this is set to. In ` +
+			`standalone all roles share one process, so QueryNode readers ` +
+			`opened after DataNode's segcore init pick up this pool too and ` +
+			`fan out on it — size it with the co-located search traffic in ` +
+			`mind. ` +
 			`IMPORTANT: milvus-storage splits a round's chunks into contiguous ` +
 			`blocks and merges them without limit when the chunk count does not ` +
 			`exceed the pool size, so a round whose chunks are contiguous and ` +
