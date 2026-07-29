@@ -395,25 +395,32 @@ GrowingOffsetMapping::TransformBitset(const BitsetView& bitset,
         return BitsetTransformStatus::NoFilter;
     }
     const auto valid_count = valid_count_;
-    const auto total_count = total_count_;
 
     result.clear();
+    AssertInfo(!bitset.empty(),
+               "growing nullable vector search requires a bounded bitset");
     if (bitset.all()) {
         return BitsetTransformStatus::AllFiltered;
     }
 
-    if (static_cast<int64_t>(bitset.size()) >= total_count && bitset.none()) {
-        result.resize(valid_count, false);
-        return BitsetTransformStatus::Transformed;
-    }
-
-    result.resize(valid_count, true);
-    for (int64_t physical_idx = 0; physical_idx < valid_count; ++physical_idx) {
-        auto it = p2l_map_.find(static_cast<int32_t>(physical_idx));
-        if (it != p2l_map_.end() &&
-            it->second < static_cast<int64_t>(bitset.size())) {
-            result[physical_idx] = bitset.test(it->second);
+    const auto logical_count = static_cast<int64_t>(bitset.size());
+    const auto max_physical_count = std::min(valid_count, logical_count);
+    result.resize(max_physical_count, true);
+    int64_t physical_bound = 0;
+    for (; physical_bound < max_physical_count; ++physical_bound) {
+        auto it = p2l_map_.find(static_cast<int32_t>(physical_bound));
+        if (it == p2l_map_.end()) {
+            break;
         }
+        if (it->second >= logical_count) {
+            break;
+        }
+        result[physical_bound] = bitset.test(it->second);
+    }
+    result.resize(physical_bound);
+
+    if (result.empty()) {
+        return BitsetTransformStatus::AllFiltered;
     }
     return BitsetTransformStatus::Transformed;
 }

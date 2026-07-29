@@ -33,11 +33,15 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Vector.h"
+#include "exec/operator/VectorSearchNode.h"
+#include "exec/Task.h"
 #include "index/IndexFactory.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "mmap/ChunkedColumn.h"
+#include "query/PlanImpl.h"
 #include "query/SearchOnGrowing.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowing.h"
@@ -532,6 +536,128 @@ TEST(SearchOnGrowingBitsetLifetime,
                     search_result);
 
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+}
+
+TEST(PhyVectorSearchNodeGrowingNullableAllVisible,
+     MaterializesSnapshotBitsetBeforeSearch) {
+    constexpr int64_t snapshot_rows = 4;
+    constexpr int64_t later_rows = 1;
+    constexpr int64_t topk = 1;
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::L2, true);
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field);
+
+    auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing_segment =
+        dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    // Row 0 is null, rows 1..3 are valid. This makes the logical snapshot
+    // length different from the physical vector count after offset mapping.
+    auto snapshot_data = segcore::DataGen(schema,
+                                          snapshot_rows,
+                                          /*seed=*/100,
+                                          /*ts_offset=*/0,
+                                          /*repeat_count=*/1,
+                                          /*array_len=*/10,
+                                          /*group_count=*/1,
+                                          /*random_pk=*/false,
+                                          /*random_val=*/true,
+                                          /*random_valid=*/false,
+                                          /*null_percent=*/1);
+    auto snapshot_offset = segment->PreInsert(snapshot_rows);
+    segment->Insert(snapshot_offset,
+                    snapshot_rows,
+                    snapshot_data.row_ids_.data(),
+                    snapshot_data.timestamps_.data(),
+                    snapshot_data.raw_);
+
+    auto later_data = segcore::DataGen(schema,
+                                       later_rows,
+                                       /*seed=*/200,
+                                       /*ts_offset=*/snapshot_rows,
+                                       /*repeat_count=*/1,
+                                       /*array_len=*/10,
+                                       /*group_count=*/1,
+                                       /*random_pk=*/false,
+                                       /*random_val=*/true,
+                                       /*random_valid=*/false,
+                                       /*null_percent=*/0);
+    const auto& later_vectors =
+        FindFieldData(later_data, vector_field).vectors().float_vector().data();
+    ASSERT_EQ(later_vectors.size(), kDim);
+
+    auto later_offset = segment->PreInsert(later_rows);
+    segment->Insert(later_offset,
+                    later_rows,
+                    later_data.row_ids_.data(),
+                    later_data.timestamps_.data(),
+                    later_data.raw_);
+
+    const auto& offset_mapping = growing_segment->get_insert_record()
+                                     .get_data_base(vector_field)
+                                     ->get_offset_mapping();
+    ASSERT_TRUE(offset_mapping.IsEnabled());
+    ASSERT_EQ(offset_mapping.GetValidCount(), snapshot_rows);
+    ASSERT_EQ(offset_mapping.GetPhysicalOffset(0), -1);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = topk;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::indexparam::NPROBE, "1"},
+    };
+
+    Plan placeholder_plan(schema);
+    placeholder_plan.plan_node_ = std::make_unique<VectorPlanNode>();
+    placeholder_plan.plan_node_->search_info_ = search_info;
+    placeholder_plan.tag2field_["$0"] = vector_field;
+    auto ph_group_raw =
+        segcore::CreatePlaceholderGroupFromBlob(1, kDim, later_vectors.data());
+    auto ph_group = ParsePlaceholderGroup(&placeholder_plan,
+                                          ph_group_raw.SerializeAsString());
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "growing-nullable-all-visible",
+        growing_segment,
+        snapshot_rows,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        PlanOptions{false},
+        std::make_shared<exec::QueryConfig>());
+    query_context->set_search_info(search_info);
+    query_context->set_placeholder_group(ph_group.get());
+    query_context->set_all_rows_visible(true);
+
+    auto vector_plan = std::make_shared<plan::VectorSearchNode>("vector");
+    auto task = exec::Task::Create("growing-nullable-all-visible-task",
+                                   plan::PlanFragment(vector_plan),
+                                   0,
+                                   query_context);
+    exec::DriverContext driver_context(task, 0, 0, 0, 0);
+    exec::PhyVectorSearchNode node(1, &driver_context, vector_plan);
+
+    auto input = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+    node.AddInput(input);
+    node.NoMoreInput();
+    auto output = node.GetOutput();
+    ASSERT_NE(output, nullptr);
+
+    auto search_result = query_context->get_search_result();
+    ASSERT_EQ(search_result.seg_offsets_.size(), topk);
+    ASSERT_EQ(search_result.pinned_bitsets_.size(), 1);
+    ASSERT_EQ(search_result.pinned_bitsets_[0]->size(), snapshot_rows - 1);
+
+    auto offset = search_result.seg_offsets_[0];
+    ASSERT_NE(offset, INVALID_SEG_OFFSET);
+    EXPECT_GE(offset, 1);
+    EXPECT_LT(offset, snapshot_rows);
 }
 
 TEST(SearchOnSealedColumnBitsetLifetime,
