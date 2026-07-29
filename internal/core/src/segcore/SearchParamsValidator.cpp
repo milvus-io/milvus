@@ -1,0 +1,77 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and limitations under the License.
+
+#include "segcore/SearchParamsValidator.h"
+
+#include <string>
+
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "knowhere/config.h"
+#include "knowhere/index/index_static.h"
+#include "knowhere/operands.h"
+#include "knowhere/version.h"
+#include "nlohmann/json.hpp"
+
+namespace milvus::segcore {
+
+namespace {
+// Build the knowhere config for index_type and run FormatAndCheck + Load
+// (SEARCH) against the user params, so knowhere — the sole owner of the
+// range/type contract (e.g. nprobe in [1, 65536] in ivf_config.h) — produces
+// any error. No range is re-stated in milvus code.
+template <typename T>
+void
+LoadAndCheck(const std::string& index_type, const knowhere::Json& params) {
+    auto cfg = knowhere::IndexStaticFaced<T>::CreateConfig(
+        index_type, knowhere::Version::GetCurrentVersion().VersionNumber());
+    knowhere::Json json(params);
+    std::string msg;
+    auto status = knowhere::Config::FormatAndCheck(*cfg, json, &msg);
+    if (status == knowhere::Status::success) {
+        status = knowhere::Config::Load(
+            *cfg, json, knowhere::PARAM_TYPE::SEARCH, &msg);
+    }
+    if (status != knowhere::Status::success) {
+        ThrowInfo(milvus::ErrorCode::InvalidParameter, msg);
+    }
+}
+}  // namespace
+
+void
+ValidateVectorSearchParams(query::SearchInfo& search_info,
+                           const std::string& index_type,
+                           DataType data_type) {
+    // Mirror PrepareSearchParams (index/VectorIndex.h): seed metric_type and
+    // topk so the validated input is byte-identical to the indexed path —
+    // the two then cannot disagree because they run the same knowhere code.
+    knowhere::Json json = search_info.search_params_;
+    json[knowhere::meta::METRIC_TYPE] = search_info.metric_type_;
+    json[knowhere::meta::TOPK] = search_info.topk_;
+
+    if (data_type == DataType::VECTOR_FLOAT) {
+        LoadAndCheck<knowhere::fp32>(index_type, json);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        LoadAndCheck<knowhere::fp16>(index_type, json);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        LoadAndCheck<knowhere::bf16>(index_type, json);
+    } else if (data_type == DataType::VECTOR_BINARY) {
+        LoadAndCheck<knowhere::bin1>(index_type, json);
+    } else if (data_type == DataType::VECTOR_INT8) {
+        LoadAndCheck<knowhere::int8>(index_type, json);
+    } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+        LoadAndCheck<knowhere::sparse_u32_f32>(index_type, json);
+    }
+    // Other (non-vector) data types: nothing to validate here.
+}
+
+}  // namespace milvus::segcore

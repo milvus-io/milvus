@@ -31,6 +31,7 @@
 #include "query/SearchBruteForce.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
+#include "segcore/SearchParamsValidator.h"
 
 // Note: serialized_expr_plan is of binary format
 CStatus
@@ -67,6 +68,18 @@ CreateSearchPlanByExpr(CCollection c_col,
         search_info.metric_type_ = field_index_meta.GeMetricType();
         milvus::query::PopulateBruteForceIndexParams(search_info,
                                                      field_index_meta);
+
+        // Route search params through knowhere's own Config::Load so the
+        // range/type contracts (e.g. nprobe in [1, 65536]) stay owned by
+        // knowhere and cover every segment path (indexed / brute-force /
+        // binlog index), which all originate from this plan. See #47729.
+        auto& plan_field = (*schema)[milvus::FieldId(field_id)];
+        auto plan_data_type = plan_field.get_data_type();
+        ValidateVectorSearchParams(search_info,
+                                   field_index_meta.GetIndexType(),
+                                   plan_data_type == DataType::VECTOR_ARRAY
+                                       ? plan_field.get_element_type()
+                                       : plan_data_type);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
