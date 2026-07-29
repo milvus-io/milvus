@@ -1367,67 +1367,82 @@ func TestValidateImportFilePaths(t *testing.T) {
 	l0Options := []*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}}
 
 	tests := []struct {
-		name       string
-		rootPath   string
-		path       string
-		options    []*commonpb.KeyValuePair
-		wantReject bool
+		name        string
+		rootPath    string
+		path        string
+		options     []*commonpb.KeyValuePair
+		wantReject  bool
+		storageType string // "" means leave the configured default (remote)
 	}{
-		{"plain internal insert_log", "files", "files/insert_log/1/2/3/100/4", nil, true},
-		{"dot dot escape back into insert_log", "files", "files/../files/insert_log/1/2/3/100/4", nil, true},
-		{"leading slash", "files", "/files/insert_log/1/2/3/100/4", nil, true},
-		{"single dot segment", "files", "files/./insert_log/1/2/3/100/4", nil, true},
-		{"delta_log", "files", "files/delta_log/1/2/3/4", nil, true},
-		{"snapshots", "files", "files/snapshots/449/metadata/12.json", nil, true},
+		{"plain internal insert_log", "files", "files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"dot dot escape back into insert_log", "files", "files/../files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"leading slash", "files", "/files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"single dot segment", "files", "files/./insert_log/1/2/3/100/4", nil, true, ""},
+		{"delta_log", "files", "files/delta_log/1/2/3/4", nil, true, ""},
+		{"snapshots", "files", "files/snapshots/449/metadata/12.json", nil, true, ""},
 		// Woodpecker's WAL lives under the same root; its segment reached the
 		// registry only after the milvus#51894 review flagged the omission.
-		{"woodpecker wal", "files", "files/wp/0/1/2.log", nil, true},
+		{"woodpecker wal", "files", "files/wp/0/1/2.log", nil, true, ""},
 
-		// Declared as C++ literals and joined onto GetRootPath(); they share the
-		// root with datacoord only under storageType=local, so an absolute root
-		// is the configuration that actually exposes them.
-		{"cpp raw_datas", "/var/lib/milvus/data", "/var/lib/milvus/data/raw_datas/449_100/0", nil, true},
-		{"cpp ngram_log", "/var/lib/milvus/data", "/var/lib/milvus/data/ngram_log/1/2/3", nil, true},
-		{"cpp temp index build", "/var/lib/milvus/data", "/var/lib/milvus/data/tmp/HNSW/1/2/3", nil, true},
-		{"cpp rtree index", "/var/lib/milvus/data", "/var/lib/milvus/data/rtree-index/1/2", nil, true},
+		// Declared as C++ literals and joined onto GetRootPath(). They are rooted
+		// at localStorage.path, so they are denied only when that is also the
+		// ChunkManager root -- i.e. storageType=local.
+		{"cpp raw_datas", "/var/lib/milvus/data", "/var/lib/milvus/data/raw_datas/449_100/0", nil, true, "local"},
+		{"cpp ngram_log", "/var/lib/milvus/data", "/var/lib/milvus/data/ngram_log/1/2/3", nil, true, "local"},
+		{"cpp temp index build", "/var/lib/milvus/data", "/var/lib/milvus/data/tmp/HNSW/1/2/3", nil, true, "local"},
+		{"cpp rtree index", "/var/lib/milvus/data", "/var/lib/milvus/data/rtree-index/1/2", nil, true, "local"},
+		{"local cache dir", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/x", nil, true, "local"},
 
-		// The node-local cache dir, same inclusion criterion.
-		{"local cache dir", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/x", nil, true},
-		{"exact directory with no trailing content", "files", "files/insert_log", nil, true},
-		{"empty root path", "", "insert_log/1/2/3/100/4", nil, true},
+		// ...and must NOT be denied on a remote root, where Milvus never writes
+		// them. <minio.rootPath>/tmp/ is a plausible staging location, so denying
+		// it there would silently break existing imports on upgrade.
+		{"remote root, tmp staging", "files", "files/tmp/data.parquet", nil, false, "remote"},
+		{"remote root, cache-named dir", "files", "files/cache/mine.json", nil, false, "remote"},
+		{"remote root, raw_datas-named dir", "files", "files/raw_datas/a.json", nil, false, "remote"},
+
+		// Woodpecker writes under BOTH roots, so it stays denied on remote.
+		{"remote root, woodpecker still denied", "files", "files/wp/0/1/2.log", nil, true, "remote"},
+		{"exact directory with no trailing content", "files", "files/insert_log", nil, true, ""},
+		{"empty root path", "", "insert_log/1/2/3/100/4", nil, true, ""},
 
 		// An absolute storage root is what storageType=local uses
 		// (localStorage.path). The candidate path and the deny list must be
 		// normalized into one namespace or none of these can ever match.
-		{"absolute root", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_log/1/2/3/100/4", nil, true},
-		{"absolute root, doubled slash", "/var/lib/milvus/data", "//var/lib/milvus/data/snapshots/449/metadata/1.json", nil, true},
+		{"absolute root", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_log/1/2/3/100/4", nil, true, ""},
+		{"absolute root, doubled slash", "/var/lib/milvus/data", "//var/lib/milvus/data/snapshots/449/metadata/1.json", nil, true, ""},
 
 		// path.Clean collapses repeated slashes only once the key is rooted;
 		// stripping a single leading slash by hand leaves "//x" as "/x".
-		{"doubled leading slash", "files", "//files/insert_log/1/2/3/100/4", nil, true},
-		{"tripled leading slash", "files", "///files/insert_log/1/2/3/100/4", nil, true},
+		{"doubled leading slash", "files", "//files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"tripled leading slash", "files", "///files/insert_log/1/2/3/100/4", nil, true, ""},
 
 		// LocalChunkManager passes the key straight to os.Open, where a leading
 		// ".." resolves against the process working directory.
-		{"leading dot dot", "files", "../files/insert_log/1/2/3/100/4", nil, true},
-		{"two leading dot dots", "files", "../../files/insert_log/1/2/3/100/4", nil, true},
+		{"leading dot dot", "files", "../files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"two leading dot dots", "files", "../../files/insert_log/1/2/3/100/4", nil, true, ""},
 
 		// Must NOT be rejected: prefix collision on a non-boundary.
-		{"user directory sharing a prefix", "files", "files/insert_logs_2026/a.json", nil, false},
-		{"ordinary staging path", "files", "staging/a.json", nil, false},
-		{"user file named centroids", "files", "staging/centroids", nil, false},
-		{"absolute root, unrelated path", "/var/lib/milvus/data", "/home/user/data.json", nil, false},
-		{"absolute root, prefix collision", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_logs_2026/a.json", nil, false},
-		{"dot dot into an unrelated directory", "files", "../staging/a.json", nil, false},
-		{"caller top-level dir sharing the segment name", "files", "insert_log/mine.json", nil, false},
+		{"user directory sharing a prefix", "files", "files/insert_logs_2026/a.json", nil, false, ""},
+		{"ordinary staging path", "files", "staging/a.json", nil, false, ""},
+		{"user file named centroids", "files", "staging/centroids", nil, false, ""},
+		{"absolute root, unrelated path", "/var/lib/milvus/data", "/home/user/data.json", nil, false, ""},
+		{"absolute root, prefix collision", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_logs_2026/a.json", nil, false, ""},
+		{"dot dot into an unrelated directory", "files", "../staging/a.json", nil, false, ""},
+		{"caller top-level dir sharing the segment name", "files", "insert_log/mine.json", nil, false, ""},
 
 		// Must NOT be rejected: backup and L0 import legitimately read binlogs.
-		{"backup import into insert_log", "files", "files/insert_log/1/2/3", backupOptions, false},
-		{"l0 import into delta_log", "files", "files/delta_log/1/2/3", l0Options, false},
+		{"backup import into insert_log", "files", "files/insert_log/1/2/3", backupOptions, false, ""},
+		{"l0 import into delta_log", "files", "files/delta_log/1/2/3", l0Options, false, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.storageType != "" {
+				key := paramtable.Get().CommonCfg.StorageType.Key
+				paramtable.Get().Save(key, tt.storageType)
+				defer paramtable.Get().Reset(key)
+			}
+
 			cm := mocks2.NewChunkManager(t)
 			cm.EXPECT().RootPath().Return(tt.rootPath).Maybe()
 
