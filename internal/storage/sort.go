@@ -358,8 +358,11 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	recs := make([]Record, len(rr))
 	// keys[ri][fp] is the fp-th merge key column of the record reader ri holds.
 	// Allocated once and overwritten in place on every advance; recs[ri] == nil
-	// is the sole exhausted-reader sentinel, and a reader's keys are only read
-	// while that reader has an entry in the heap.
+	// is the sole exhausted-reader sentinel. keys[ri] stays valid until
+	// seedNext(ri) advances that reader again -- not merely while ri has a heap
+	// entry: the main loop reads keys[ri] in compareWithLast and saveLast after
+	// popping ri's only entry. Moving either of those after seedNext would be a
+	// use-after-advance.
 	keys := make([][]sortKeyCol, len(rr))
 	for i := range keys {
 		keys[i] = make([]sortKeyCol, nk)
@@ -426,10 +429,13 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			if c := compareKeys(x, y); c != 0 {
 				return c < 0
 			}
-			if x.ri != y.ri {
-				return x.ri < y.ri
-			}
-			return x.i < y.i
+			// Equal keys break by reader index alone: a reader holds at most one
+			// heap entry, since seedNext pushes a single row and is called again
+			// only after that entry is popped. So x.ri != y.ri always holds here,
+			// and there is no second row of the same reader to order against.
+			// Stability is unaffected -- a reader's equal-key rows are re-seeded
+			// in increasing pos, so they still leave the heap in input order.
+			return x.ri < y.ri
 		},
 	}
 
