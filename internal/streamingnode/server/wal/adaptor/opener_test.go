@@ -186,7 +186,7 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
 			return rmq.NewRmqID(1), nil
 		},
-	}, func() {})
+	}, func() {}, nil)
 	rateLimitComponent := roWAL.WALRateLimitComponent
 
 	rs := mock_recovery.NewMockRecoveryStorage(t)
