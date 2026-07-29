@@ -221,7 +221,17 @@ type SnapshotManager interface {
 		validateResources ValidateResourcesFunc,
 	) (int64, error)
 
-	ExportSnapshot(ctx context.Context, collectionID int64, snapshotName string, targetS3Path string, externalSpec string) (string, error)
+	ExportSnapshot(
+		ctx context.Context,
+		collectionID int64,
+		snapshotName string,
+		dbName string,
+		collectionName string,
+		targetS3Path string,
+		externalSpec string,
+	) (int64, error)
+
+	GetExportSnapshotState(jobID int64) (*datapb.ExportSnapshotJobInfo, error)
 
 	// RestoreCollection creates a new collection and its user partitions based on snapshot data.
 	// It marshals the schema, sets preserve field IDs property, calls RootCoord to create collection,
@@ -369,7 +379,7 @@ type snapshotManager struct {
 	// Serialize external restores by target name without holding RootCoord's DDL lock.
 	externalRestoreTargetLockOnce sync.Once
 	externalRestoreTargetLock     *lock.KeyLock[restoreTarget]
-	snapshotExportTargetLock      *lock.KeyLock[snapshotExportTarget]
+	exportManager                 *snapshotExportManager
 }
 
 type restoreTarget struct {
@@ -404,7 +414,7 @@ func NewSnapshotManager(
 	broker broker.Broker,
 	getChannelsFunc func(context.Context, int64) ([]RWChannel, error),
 	ievm IndexEngineVersionManager,
-) SnapshotManager {
+) *snapshotManager {
 	return &snapshotManager{
 		meta:                      meta,
 		snapshotMeta:              snapshotMeta,
@@ -414,7 +424,6 @@ func NewSnapshotManager(
 		broker:                    broker,
 		getChannelsByCollectionID: getChannelsFunc,
 		indexEngineVersionManager: ievm,
-		snapshotExportTargetLock:  lock.NewKeyLock[snapshotExportTarget](),
 	}
 }
 
@@ -1028,9 +1037,11 @@ func (sm *snapshotManager) ExportSnapshot(
 	ctx context.Context,
 	collectionID int64,
 	snapshotName string,
+	dbName string,
+	collectionName string,
 	targetS3Path string,
 	externalSpec string,
-) (string, error) {
+) (int64, error) {
 	logger := mlog.With(
 		mlog.Int64("collectionID", collectionID),
 		mlog.String("snapshotName", snapshotName),
@@ -1038,83 +1049,31 @@ func (sm *snapshotManager) ExportSnapshot(
 		mlog.Bool("externalSpecSet", externalSpec != ""),
 	)
 	logger.Info(ctx, "export snapshot request received")
-
-	if targetS3Path == "" {
-		return "", merr.WrapErrParameterInvalidMsg("target_s3_path is required")
+	if sm.exportManager == nil {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot export manager is not initialized")
 	}
-	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
-	resolved, err := snapshotstorage.ResolveForeignStorage(
+	jobID, err := sm.exportManager.Submit(
 		ctx,
-		instanceCfg,
-		snapshotstorage.DirectionExport,
+		collectionID,
+		snapshotName,
+		dbName,
+		collectionName,
 		targetS3Path,
 		externalSpec,
 	)
 	if err != nil {
-		return "", err
+		logger.Warn(ctx, "failed to submit snapshot export job", mlog.Err(err))
+		return 0, err
 	}
-	unlockExportTarget := sm.lockSnapshotExportTarget(resolved.ForeignBucket, targetS3Path)
-	defer unlockExportTarget()
-	pinTTLSeconds := Params.DataCoordCfg.SnapshotRestorePinTTLSeconds.GetAsInt64()
-	// Export reads the source snapshot and then copies the files it references.
-	// Pin the catalog snapshot for the whole copy window so DropSnapshot/GC
-	// cannot remove the only protection for those files mid-export.
-	pinID, activePins, err := sm.snapshotMeta.PinSnapshot(ctx, collectionID, snapshotName, pinTTLSeconds)
-	if err != nil {
-		logger.Warn(ctx, "failed to pin source snapshot for export", mlog.Err(err))
-		return "", merr.Wrap(err, "failed to pin source snapshot for export")
-	}
-	setSnapshotActivePinsGauge(collectionID, snapshotName, activePins)
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotPinCleanupTimeout)
-		defer cancel()
-		collID, snapName, remaining, unpinErr := sm.snapshotMeta.UnpinSnapshot(cleanupCtx, pinID)
-		if unpinErr != nil {
-			logger.Warn(cleanupCtx, "failed to release export snapshot pin",
-				mlog.Int64("pinID", pinID),
-				mlog.Err(unpinErr))
-			return
-		}
-		if snapName != "" {
-			setSnapshotActivePinsGauge(collID, snapName, remaining)
-		}
-		logger.Info(cleanupCtx, "released export snapshot pin", mlog.Int64("pinID", pinID))
-	}()
-
-	snapshotData, err := sm.ReadSnapshotData(ctx, collectionID, snapshotName)
-	if err != nil {
-		logger.Warn(ctx, "failed to read snapshot data for export", mlog.Err(err))
-		return "", err
-	}
-
-	metadataURI, err := exportSnapshot(
-		ctx,
-		sm.snapshotMeta.chunkManager,
-		resolved.ForeignCM,
-		resolved.Copier,
-		instanceCfg.BucketName,
-		resolved.ForeignBucket,
-		snapshotData,
-		targetS3Path,
-	)
-	if err != nil {
-		logger.Warn(ctx, "failed to export snapshot", mlog.Err(err))
-		return "", err
-	}
-	logger.Info(ctx, "export snapshot completed",
-		mlog.String("snapshotMetadataURI", snapshotstorage.RedactSnapshotObjectPath(metadataURI)))
-	return metadataURI, nil
+	logger.Info(ctx, "snapshot export job submitted", mlog.FieldJobID(jobID))
+	return jobID, nil
 }
 
-func (sm *snapshotManager) lockSnapshotExportTarget(bucket, targetPath string) func() {
-	target := snapshotExportTarget{
-		bucket: strings.TrimSpace(bucket),
-		root:   strings.Trim(snapshotstorage.NormalizeSnapshotObjectPath(targetPath), "/"),
+func (sm *snapshotManager) GetExportSnapshotState(jobID int64) (*datapb.ExportSnapshotJobInfo, error) {
+	if sm.exportManager == nil {
+		return nil, merr.WrapErrServiceInternalMsg("snapshot export manager is not initialized")
 	}
-	sm.snapshotExportTargetLock.Lock(target)
-	return func() {
-		sm.snapshotExportTargetLock.Unlock(target)
-	}
+	return sm.exportManager.GetJobInfo(jobID)
 }
 
 // RestoreCollection creates a new collection and its user partitions based on snapshot data.

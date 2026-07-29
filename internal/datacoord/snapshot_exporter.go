@@ -2,8 +2,13 @@ package datacoord
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -15,6 +20,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+const snapshotExportPlanVersion int32 = 1
+
+type snapshotExportPlanItem struct {
+	sourcePath      string
+	destinationPath string
+	fileType        snapshotstorage.SnapshotFileType
+	sourceSize      int64
+}
+
+type snapshotExportPlan struct {
+	version             int32
+	fingerprint         string
+	snapshotFingerprint string
+	targetRoot          string
+	metadataURI         string
+	mappings            map[string]string
+	items               []snapshotExportPlanItem
+	dataBytes           int64
+}
+
 func exportSnapshot(
 	ctx context.Context,
 	sourceCM storage.ChunkManager,
@@ -25,24 +50,55 @@ func exportSnapshot(
 	snapshot *snapshotstorage.SnapshotData,
 	targetPath string,
 ) (string, error) {
+	plan, err := buildSnapshotExportPlan(
+		ctx,
+		sourceCM,
+		targetCM,
+		sourceBucket,
+		targetBucket,
+		snapshot,
+		targetPath,
+	)
+	if err != nil {
+		return "", err
+	}
+	if err := copySnapshotExportPlan(
+		ctx,
+		copier,
+		sourceBucket,
+		targetBucket,
+		plan.items,
+		Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt(),
+	); err != nil {
+		return "", err
+	}
+	return publishSnapshotExportPlan(ctx, targetCM, snapshot, plan)
+}
+
+func buildSnapshotExportPlan(
+	ctx context.Context,
+	sourceCM storage.ChunkManager,
+	targetCM storage.ChunkManager,
+	sourceBucket string,
+	targetBucket string,
+	snapshot *snapshotstorage.SnapshotData,
+	targetPath string,
+) (*snapshotExportPlan, error) {
 	if snapshot == nil || snapshot.SnapshotInfo == nil {
-		return "", merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
+		return nil, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
 	if sourceCM == nil {
-		return "", merr.WrapErrServiceInternalMsg("source chunk manager cannot be nil")
+		return nil, merr.WrapErrServiceInternalMsg("source chunk manager cannot be nil")
 	}
 	if targetCM == nil {
-		return "", merr.WrapErrServiceInternalMsg("target chunk manager cannot be nil")
-	}
-	if copier == nil {
-		return "", merr.WrapErrServiceInternalMsg("cross-bucket copier cannot be nil")
+		return nil, merr.WrapErrServiceInternalMsg("target chunk manager cannot be nil")
 	}
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(targetCM, "target_s3_path", targetPath, targetBucket); err != nil {
-		return "", err
+		return nil, err
 	}
 	targetRoot := strings.TrimSuffix(snapshotstorage.NormalizeSnapshotObjectPath(targetPath), "/")
 	if targetRoot == "" {
-		return "", merr.WrapErrParameterMissingMsg("target_s3_path cannot be empty")
+		return nil, merr.WrapErrParameterMissingMsg("target_s3_path cannot be empty")
 	}
 
 	refs, err := snapshotstorage.ListSnapshotDataFiles(
@@ -52,7 +108,7 @@ func exportSnapshot(
 		nil,
 	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	_, metadataObjectPath := snapshotstorage.GetSnapshotPaths(
 		targetRoot,
@@ -68,10 +124,11 @@ func exportSnapshot(
 			snapshotstorage.SnapshotMetadataSubPath,
 			fmt.Sprintf("%d.json", snapshot.SnapshotInfo.GetId()))
 		if err != nil {
-			return "", merr.WrapErrServiceInternalErr(err, "failed to build snapshot metadata URI")
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to build snapshot metadata URI")
 		}
 	}
 	mappings := make(map[string]string, len(refs)*2)
+	items := make([]snapshotExportPlanItem, 0, len(refs))
 	for _, ref := range refs {
 		dst := snapshotstorage.ExportedSnapshotPath(sourceCM, ref.NormalizedPath, targetRoot)
 		// Metadata may store either the original URI string or the chunk-manager
@@ -79,22 +136,107 @@ func exportSnapshot(
 		// how a referenced snapshot was originally written.
 		mappings[ref.Path] = dst
 		mappings[ref.NormalizedPath] = dst
+		if ref.Type != snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot {
+			items = append(items, snapshotExportPlanItem{
+				sourcePath:      ref.NormalizedPath,
+				destinationPath: dst,
+				fileType:        ref.Type,
+			})
+		}
 	}
 	if strings.TrimSpace(sourceBucket) == strings.TrimSpace(targetBucket) {
 		if err := rejectExportObjectOverlap(snapshot, refs, mappings, targetRoot, metadataURI); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
+	dataBytes, err := populateSnapshotExportPlanSizes(
+		ctx,
+		sourceCM,
+		items,
+		Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	snapshotFingerprint, err := snapshotstorage.SnapshotFingerprint(snapshot)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to fingerprint source snapshot")
+	}
+	fingerprint := fingerprintSnapshotExportPlan(
+		snapshotExportPlanVersion,
+		snapshotFingerprint,
+		normalizeSnapshotExportTargetIdentity(targetPath, targetBucket, targetRoot),
+		items,
+	)
+	return &snapshotExportPlan{
+		version:             snapshotExportPlanVersion,
+		fingerprint:         fingerprint,
+		snapshotFingerprint: snapshotFingerprint,
+		targetRoot:          targetRoot,
+		metadataURI:         metadataURI,
+		mappings:            mappings,
+		items:               items,
+		dataBytes:           dataBytes,
+	}, nil
+}
+
+func populateSnapshotExportPlanSizes(
+	ctx context.Context,
+	sourceCM storage.ChunkManager,
+	items []snapshotExportPlanItem,
+	concurrency int,
+) (int64, error) {
+	if sourceCM == nil {
+		return 0, merr.WrapErrServiceInternalMsg("source chunk manager cannot be nil")
+	}
+	if concurrency <= 0 {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot export size concurrency must be positive")
+	}
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(concurrency)
+	for index := range items {
+		index := index
+		group.Go(func() error {
+			size, err := sourceCM.Size(groupCtx, items[index].sourcePath)
+			if err != nil {
+				return merr.Wrapf(err, "failed to get snapshot source object size for %s", items[index].sourcePath)
+			}
+			if size < 0 {
+				return merr.WrapErrDataIntegrityMsg("snapshot source object has negative size: %s", items[index].sourcePath)
+			}
+			items[index].sourceSize = size
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return 0, err
+	}
+	var totalBytes int64
+	for _, item := range items {
+		totalBytes += item.sourceSize
+	}
+	return totalBytes, nil
+}
+
+func copySnapshotExportPlan(
+	ctx context.Context,
+	copier storage.CrossBucketCopier,
+	sourceBucket string,
+	targetBucket string,
+	items []snapshotExportPlanItem,
+	concurrency int,
+) error {
+	if copier == nil {
+		return merr.WrapErrServiceInternalMsg("cross-bucket copier cannot be nil")
+	}
+	if concurrency <= 0 {
+		return merr.WrapErrServiceInternalMsg("snapshot export copy concurrency must be positive")
+	}
 	copyGroup, copyCtx := errgroup.WithContext(ctx)
-	copyGroup.SetLimit(Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
-	for _, ref := range refs {
-		if ref.Type == snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot {
-			// Prefix references are rewrite anchors only. They do not correspond
-			// to a concrete object that can be copied.
-			continue
-		}
-		src := ref.NormalizedPath
-		dst := mappings[ref.NormalizedPath]
+	copyGroup.SetLimit(concurrency)
+	for _, item := range items {
+		src := item.sourcePath
+		dst := item.destinationPath
 		copyGroup.Go(func() error {
 			if err := copier.CopyCrossBucket(copyCtx, sourceBucket, src, targetBucket, dst); err != nil {
 				return merr.Wrapf(err, "failed to copy snapshot file from %s to %s", src, dst)
@@ -103,30 +245,86 @@ func exportSnapshot(
 		})
 	}
 	if err := copyGroup.Wait(); err != nil {
-		return "", err
+		return err
 	}
+	return nil
+}
 
+func publishSnapshotExportPlan(
+	ctx context.Context,
+	targetCM storage.ChunkManager,
+	snapshot *snapshotstorage.SnapshotData,
+	plan *snapshotExportPlan,
+) (string, error) {
+	metadataURI, _, err := publishSnapshotExportPlanWithSize(ctx, targetCM, snapshot, plan)
+	return metadataURI, err
+}
+
+func publishSnapshotExportPlanWithSize(
+	ctx context.Context,
+	targetCM storage.ChunkManager,
+	snapshot *snapshotstorage.SnapshotData,
+	plan *snapshotExportPlan,
+) (string, int64, error) {
+	if plan == nil {
+		return "", 0, merr.WrapErrServiceInternalMsg("snapshot export plan cannot be nil")
+	}
 	// Keep metadata under targetRoot/snapshots/... so RestoreExternalSnapshot can
 	// derive the bundle root without adding another API parameter.
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, mappings, targetRoot, metadataURI)
+	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, plan.mappings, plan.targetRoot, plan.metadataURI)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	// Data objects can be shared by multiple exported snapshots under one root.
 	// Metadata is written last, so a failed attempt leaves only unreachable or
 	// retryable objects; deleting them could corrupt an older published bundle.
-	if _, err := snapshotstorage.NewSnapshotWriter(targetCM).SaveToRoot(
+	_, metadataBytes, err := snapshotstorage.NewSnapshotWriter(targetCM).SaveToRootWithSize(
 		ctx,
 		rewritten,
-		targetRoot,
+		plan.targetRoot,
 		datapb.SnapshotLayout_SnapshotLayoutSelfContained,
-	); err != nil {
-		return "", err
+	)
+	if err != nil {
+		return "", 0, err
 	}
 	mlog.Info(ctx, "export snapshot completed",
 		mlog.String("snapshotName", snapshot.SnapshotInfo.GetName()),
-		mlog.String("snapshotMetadataURI", snapshotstorage.RedactSnapshotObjectPath(metadataURI)))
-	return metadataURI, nil
+		mlog.String("snapshotMetadataURI", snapshotstorage.RedactSnapshotObjectPath(plan.metadataURI)))
+	return plan.metadataURI, plan.dataBytes + metadataBytes, nil
+}
+
+func normalizeSnapshotExportTargetIdentity(targetPath, targetBucket, targetRoot string) string {
+	parsed, err := url.Parse(targetPath)
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host) + "/" + targetRoot + "|" + strings.TrimSpace(targetBucket)
+	}
+	return strings.TrimSpace(targetBucket) + "/" + targetRoot
+}
+
+func fingerprintSnapshotExportPlan(
+	version int32,
+	snapshotFingerprint string,
+	targetIdentity string,
+	items []snapshotExportPlanItem,
+) string {
+	hasher := sha256.New()
+	writeExportFingerprintValue(hasher, strconv.FormatInt(int64(version), 10))
+	writeExportFingerprintValue(hasher, snapshotFingerprint)
+	writeExportFingerprintValue(hasher, targetIdentity)
+	for _, item := range items {
+		writeExportFingerprintValue(hasher, item.sourcePath)
+		writeExportFingerprintValue(hasher, string(item.fileType))
+		writeExportFingerprintValue(hasher, item.destinationPath)
+		writeExportFingerprintValue(hasher, strconv.FormatInt(item.sourceSize, 10))
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func writeExportFingerprintValue(hasher hash.Hash, value string) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+	_, _ = hasher.Write(length[:])
+	_, _ = hasher.Write([]byte(value))
 }
 
 func rejectExportObjectOverlap(

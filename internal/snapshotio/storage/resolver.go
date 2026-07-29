@@ -61,6 +61,57 @@ func ResolveForeignStorage(
 	foreignURI string,
 	externalSpec string,
 ) (*ResolvedForeignStorage, error) {
+	resolvedCfg, err := resolveForeignStorageConfig(instanceCfg, direction, foreignURI, externalSpec)
+	if err != nil {
+		return nil, err
+	}
+	foreignCM, err := milvusstorage.NewRemoteChunkManager(ctx, resolvedCfg.foreignCfg)
+	if err != nil {
+		return nil, err
+	}
+	var copier milvusstorage.CrossBucketCopier = foreignCM
+	if resolvedCfg.hasSpec && (direction == DirectionRestore || direction == DirectionCopySource) {
+		// Layer 2 restore uses foreign credentials against the target endpoint so
+		// the provider can authorize both sides of the server-side copy request.
+		copier, err = milvusstorage.NewRemoteChunkManager(ctx, restoreProviderCopyConfig(instanceCfg, resolvedCfg.foreignCfg))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &ResolvedForeignStorage{
+		ForeignBucket:        resolvedCfg.foreignBucket,
+		ForeignCM:            foreignCM,
+		ForeignStorageConfig: storageConfigFromObjectConfig(resolvedCfg.foreignCfg, resolvedCfg.storageType),
+		Copier:               copier,
+	}, nil
+}
+
+// ValidateForeignStorageRequest validates URI, provider, endpoint, and
+// external-spec structure without constructing a storage client or issuing IO.
+func ValidateForeignStorageRequest(
+	instanceCfg *objectstorage.Config,
+	direction Direction,
+	foreignURI string,
+	externalSpec string,
+) error {
+	_, err := resolveForeignStorageConfig(instanceCfg, direction, foreignURI, externalSpec)
+	return err
+}
+
+type resolvedForeignStorageConfig struct {
+	foreignBucket string
+	foreignCfg    *objectstorage.Config
+	storageType   string
+	hasSpec       bool
+}
+
+func resolveForeignStorageConfig(
+	instanceCfg *objectstorage.Config,
+	direction Direction,
+	foreignURI string,
+	externalSpec string,
+) (*resolvedForeignStorageConfig, error) {
 	if instanceCfg == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("instance storage config is nil")
 	}
@@ -101,25 +152,11 @@ func ResolveForeignStorage(
 	if err := validateProviderEndpointPair(instanceCfg, foreignCfg, uriScheme, uriEndpoint, hasSpec); err != nil {
 		return nil, err
 	}
-	foreignCM, err := milvusstorage.NewRemoteChunkManager(ctx, foreignCfg)
-	if err != nil {
-		return nil, err
-	}
-	var copier milvusstorage.CrossBucketCopier = foreignCM
-	if hasSpec && (direction == DirectionRestore || direction == DirectionCopySource) {
-		// Layer 2 restore uses foreign credentials against the target endpoint so
-		// the provider can authorize both sides of the server-side copy request.
-		copier, err = milvusstorage.NewRemoteChunkManager(ctx, restoreProviderCopyConfig(instanceCfg, foreignCfg))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &ResolvedForeignStorage{
-		ForeignBucket:        foreignBucket,
-		ForeignCM:            foreignCM,
-		ForeignStorageConfig: storageConfigFromObjectConfig(foreignCfg, storageType),
-		Copier:               copier,
+	return &resolvedForeignStorageConfig{
+		foreignBucket: foreignBucket,
+		foreignCfg:    foreignCfg,
+		storageType:   storageType,
+		hasSpec:       hasSpec,
 	}, nil
 }
 

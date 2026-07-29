@@ -75,12 +75,15 @@ Export to the source or a foreign bucket:
 
 1. The caller invokes `ExportSnapshot` with a `target_s3_path` in the configured
    source bucket or a foreign bucket.
-2. Milvus resolves the target storage config from the instance credential or
-   request `external_spec`.
-3. For a same-bucket export, Milvus rejects the request before copying if any
+2. DataCoord validates the request, pins the source snapshot, persists a
+   `Pending` export job, and immediately returns its `job_id`.
+3. A background worker resolves the target storage config from the instance
+   credential or request `external_spec`.
+4. For a same-bucket export, Milvus rejects the job before copying if any
    generated target metadata, segment manifest, or data object key would
    overwrite an object used by the source snapshot.
-4. The provider performs object copy without streaming through Milvus.
+5. The provider performs object copy without streaming through Milvus. The
+   caller polls `GetExportSnapshotState` until the job completes or fails.
 
 Restore from a foreign bucket:
 
@@ -131,8 +134,17 @@ caller uses it with `GetRestoreSnapshotState`.
 - `target_s3_path`: destination root for the self-contained bundle.
 - `external_spec`: optional JSON storage spec for the foreign target.
 
-`ExportSnapshotResponse.snapshot_metadata_uri` is the metadata URI of the
-exported bundle.
+`ExportSnapshotResponse.job_id` identifies the accepted asynchronous export
+job. Field 2, `snapshot_metadata_uri`, remains reserved as a deprecated
+compatibility field and is empty on submission.
+
+`GetExportSnapshotStateRequest` contains the export `job_id`.
+`GetExportSnapshotStateResponse.info` contains the job identity, state,
+checkpoint-based progress, copied and total file counts, timing, sanitized
+failure reason, total bundle bytes, and the completed bundle metadata URI.
+`total_bytes` is populated for Completed jobs and sums the unique copied data
+objects plus generated segment manifests and metadata. The metadata URI is
+empty unless the state is `Completed`.
 
 The final API does not include `foreign_storage_spec`,
 `foreign_credential_ref`, or `external_credential_ref`. Splitting storage config
@@ -145,6 +157,7 @@ table `extfs` shape and snapshot-specific validation.
 The Go SDK exposes:
 
 - `ExportSnapshot(ctx, NewExportSnapshotOption(...).WithExternalSpec(...))`
+- `GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(jobID))`
 - `RestoreExternalSnapshot(ctx, NewRestoreExternalSnapshotOption(...).WithExternalSpec(...))`
 - `GetRestoreSnapshotState(ctx, NewGetRestoreSnapshotStateOption(jobID))`
 
@@ -157,6 +170,7 @@ REST exposes:
 
 ```text
 POST /v2/vectordb/jobs/snapshot/export
+POST /v2/vectordb/jobs/snapshot/export/describe
 POST /v2/vectordb/jobs/snapshot/restore_external
 POST /v2/vectordb/jobs/snapshot/describe
 POST /v2/vectordb/jobs/snapshot/list
@@ -170,7 +184,7 @@ handler forwards it to the gRPC `external_spec` field.
 Go SDK export:
 
 ```go
-metadataURI, err := client.ExportSnapshot(
+exportJobID, err := client.ExportSnapshot(
     ctx,
     milvusclient.NewExportSnapshotOption(
         "snapshot_20260608",
@@ -178,6 +192,16 @@ metadataURI, err := client.ExportSnapshot(
         "s3://foreign-bucket/export-root",
     ).WithExternalSpec(`{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`),
 )
+```
+
+Go SDK export status:
+
+```go
+exportInfo, err := client.GetExportSnapshotState(
+    ctx,
+    milvusclient.NewGetExportSnapshotStateOption(exportJobID),
+)
+metadataURI := exportInfo.GetSnapshotMetadataUri() // Completed only
 ```
 
 Go SDK external restore:
@@ -230,6 +254,15 @@ curl -X POST "$MILVUS_ADDR/v2/vectordb/jobs/snapshot/restore_external" \
   }'
 ```
 
+REST export status:
+
+```bash
+curl -X POST "$MILVUS_ADDR/v2/vectordb/jobs/snapshot/export/describe" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jobId":"12345"}'
+```
+
 REST restore status:
 
 ```bash
@@ -241,11 +274,12 @@ curl -X POST "$MILVUS_ADDR/v2/vectordb/jobs/snapshot/describe" \
 
 ### 3.5 RBAC and `db_name`
 
-`RestoreExternalSnapshot` and `ExportSnapshot` are Global RBAC operations. The
-source collection for external restore belongs to another cluster, and the
-target collection may not exist when the request enters Proxy. Authorization
-must therefore check a global privilege instead of treating either collection
-name as the permission object.
+`RestoreExternalSnapshot`, `ExportSnapshot`, and `GetExportSnapshotState` are
+Global RBAC operations. The source collection for external restore belongs to
+another cluster, and the target collection may not exist when the request
+enters Proxy. Authorization must therefore check a global privilege instead of
+treating either collection name as the permission object. Export submission and
+state query both use `PrivilegeExportSnapshot`.
 
 `db_name` remains in both requests because the database interceptor and
 namespace routing still need database context. It is not the RBAC object.
@@ -390,13 +424,16 @@ Metadata reads/writes and large object copy can use different helper objects,
 but the large object move itself must be one provider-side copy request.
 Export schedules object copies with the refreshable DataCoord configuration
 `dataCoord.snapshot.exportCopyConcurrency`, which defaults to `16`. Each export
-reads the limit once when it starts, so configuration changes affect new export
-requests without changing in-flight work. Invalid or non-positive values fall
-back to `16`. Snapshot metadata is written only after every object copy
-succeeds. Exports to the same normalized bucket and target root are serialized
-within one DataCoord process. A failed attempt may leave unreferenced objects;
-Milvus does not remove them because their paths may be shared by an older
-published bundle.
+worker reads the limit once when it starts, so configuration changes affect new
+worker attempts without changing an active attempt. Invalid or non-positive
+values fall back to `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` defaults
+to `1`, `dataCoord.snapshot.exportJobTimeout` defaults to 12 hours including
+queue wait, and `dataCoord.snapshot.exportJobRetention` keeps terminal state for
+3 hours after pin cleanup. Snapshot metadata is written only after every object
+copy succeeds. Exports to the same normalized bucket and target root are
+serialized within one DataCoord process. A failed attempt may leave
+unreferenced objects; Milvus does not remove them because their paths may be
+shared by an older published bundle.
 
 Same-bucket export is supported, but source protection is an object-level
 invariant. Before copy starts, DataCoord builds the complete source object set:
@@ -419,6 +456,17 @@ DataCoord:
 
 - Owns snapshot metadata parsing, validation, export layout generation, restore
   job creation, and WAL restore message emission.
+- Owns a durable `SnapshotExportManager`. Submission persists one constant-size
+  job record before returning. Reconciliation schedules `Pending` and recovered
+  `Executing` jobs, enforces the configured deadline and concurrency limit,
+  retries pin cleanup, and removes credential-free terminal jobs after
+  retention.
+- Builds a deterministic ordered copy plan and persists its version,
+  fingerprint, total file count, and copy cursor. A recovered job resumes only
+  when the rebuilt plan matches; otherwise it fails closed.
+- Advances public progress only after an entire copy batch is durably
+  checkpointed. Uncheckpointed batches may be replayed to the same deterministic
+  destination keys after restart.
 - For external restore, reads metadata/manifests from the foreign source before
   broadcasting the restore message.
 - The WAL ACK callback retries transient source failures. If the source is
@@ -427,9 +475,11 @@ DataCoord:
   released.
 - Persists enough external storage information for restore jobs and DataNode
   copy tasks.
-- For export, resolves the target, prevents same-bucket source-object overwrite,
-  and copies data before manifests and metadata. Metadata is the publication
-  marker and is written last.
+- For export, resolves the target in the background, prevents same-bucket
+  source-object overwrite, and copies data before manifests and metadata.
+  Metadata is the publication marker and is written last. `external_spec` is
+  retained only while a job is non-terminal, and the first terminal update
+  clears it atomically.
 - Computes a deterministic fingerprint of external snapshot metadata and loaded
   segment manifests after preflight. The fingerprint is carried through WAL and
   copy-job state so ACK and task assembly reject metadata that changed between
@@ -468,8 +518,11 @@ Data flow:
 
 ```text
 ExportSnapshot:
-Proxy -> DataCoord -> local snapshot metadata -> provider-side copies ->
-foreign target bundle -> snapshot_metadata_uri
+Proxy -> DataCoord durable Pending job -> background plan/checkpoint loop ->
+provider-side copies -> manifests -> metadata publication -> Completed job
+
+GetExportSnapshotState:
+Proxy -> DataCoord in-memory cache backed by persisted export job metadata
 
 RestoreExternalSnapshot:
 Proxy -> DataCoord -> foreign metadata/manifests -> WAL restore message ->
@@ -501,7 +554,8 @@ Access probing:
 - Export does not issue a separate target write probe. The first provider-side
   copy request is the end-to-end check for source read, target write, copy API,
   and KMS permissions.
-- A permission failure therefore aborts export before metadata is written.
+- A permission failure after acceptance transitions the export job to `Failed`
+  before metadata is written.
 - A failed attempt may leave unreferenced data or manifest objects. Export does
   not delete them because object paths may already be shared by an older
   published bundle; deleting them could corrupt that bundle. A later retry can
@@ -512,6 +566,8 @@ Secret handling:
 - Redact `external_spec` in logs and errors.
 - Do not include raw secrets in task labels, metric labels, or user-facing
   failure messages.
+- Persist export `external_spec` only for non-terminal restart recovery and
+  clear it in the first durable `Completed` or `Failed` update.
 - Treat restore raw secret persistence through WAL/meta as an operational red
   line.
 
@@ -529,7 +585,8 @@ Fail-closed behavior:
 API contract tests:
 
 - gRPC request builders and Proxy forwarding include `external_spec`.
-- `RestoreExternalSnapshot` and `ExportSnapshot` use Global RBAC.
+- `RestoreExternalSnapshot` uses Global restore RBAC; `ExportSnapshot` and
+  `GetExportSnapshotState` use Global `PrivilegeExportSnapshot` RBAC.
 - `db_name` is filled by the database interceptor and is not treated as the RBAC
   object.
 - REST `externalSpec` is forwarded, and describe/list snapshot job routes map to
@@ -576,6 +633,12 @@ Restore tests:
 
 Export tests:
 
+- Submission returns a durable job ID without object-store access; state query
+  hides the metadata URI until `Completed`.
+- Copy progress advances only after a complete persisted batch, remains
+  non-decreasing after restart, and fails closed if the rebuilt plan changes.
+- Queue timeout, active-worker timeout, shutdown, finalization replay, terminal
+  credential clearing, pin cleanup retry, and retention are covered.
 - Export to the same bucket succeeds when destination objects do not overlap the
   source snapshot and fails before copy when metadata, manifest, or data objects
   would overlap.

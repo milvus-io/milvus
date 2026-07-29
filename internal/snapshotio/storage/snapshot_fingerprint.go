@@ -27,6 +27,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -49,7 +50,12 @@ func SnapshotFingerprint(snapshot *SnapshotData) (string, error) {
 	hasher := sha256.New()
 	writeFingerprintBytes(hasher, []byte(snapshotFingerprintVersion))
 	writeFingerprintUint64(hasher, uint64(snapshot.Layout))
-	if err := writeFingerprintProto(hasher, snapshot.SnapshotInfo); err != nil {
+	fingerprintInfo := proto.Clone(snapshot.SnapshotInfo).(*datapb.SnapshotInfo)
+	// Pins protect source objects inside one cluster. They do not change the
+	// snapshot content consumed by restore and may change while an export runs.
+	fingerprintInfo.PinIds = nil
+	fingerprintInfo.PinExpireAtMs = nil
+	if err := writeFingerprintProto(hasher, fingerprintInfo); err != nil {
 		return "", merr.Wrap(err, "failed to fingerprint snapshot info")
 	}
 	if err := writeFingerprintProto(hasher, snapshot.Collection); err != nil {

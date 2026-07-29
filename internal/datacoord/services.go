@@ -2564,6 +2564,10 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
+	if req == nil {
+		err := merr.WrapErrParameterInvalidMsg("export snapshot request is nil")
+		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 	mlog.Info(ctx, "receive ExportSnapshot request",
 		mlog.String("snapshot", req.GetName()),
 		mlog.Int64("collectionID", req.GetCollectionId()),
@@ -2607,10 +2611,12 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 	}
 	defer locker.Close()
 
-	metadataURI, err := s.snapshotManager.ExportSnapshot(
+	jobID, err := s.snapshotManager.ExportSnapshot(
 		ctx,
 		req.GetCollectionId(),
 		req.GetName(),
+		dbName,
+		collectionName,
 		req.GetTargetS3Path(),
 		req.GetExternalSpec(),
 	)
@@ -2619,8 +2625,29 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotR
 		return &datapb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
 	return &datapb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: metadataURI,
+		Status: merr.Success(),
+		JobId:  jobID,
+	}, nil
+}
+
+func (s *Server) GetExportSnapshotState(
+	ctx context.Context,
+	req *datapb.GetExportSnapshotStateRequest,
+) (*datapb.GetExportSnapshotStateResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	if req == nil || req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("valid snapshot export job_id is required")
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	info, err := s.snapshotManager.GetExportSnapshotState(req.GetJobId())
+	if err != nil {
+		return &datapb.GetExportSnapshotStateResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info:   info,
 	}, nil
 }
 

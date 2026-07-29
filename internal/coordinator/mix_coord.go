@@ -1359,6 +1359,10 @@ func (s *mixCoordImpl) ExportSnapshot(ctx context.Context, req *datapb.ExportSna
 	return s.datacoordServer.ExportSnapshot(ctx, req)
 }
 
+func (s *mixCoordImpl) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	return s.datacoordServer.GetExportSnapshotState(ctx, req)
+}
+
 func (s *mixCoordImpl) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	return s.datacoordServer.GetRestoreSnapshotState(ctx, req)
 }

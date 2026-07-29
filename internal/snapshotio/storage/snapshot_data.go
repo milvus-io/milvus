@@ -81,11 +81,18 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 
 // Save stores a referenced snapshot under the writer root.
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
-	return w.save(ctx, snapshot, w.chunkManager.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	metadataPath, _, err := w.save(ctx, snapshot, w.chunkManager.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	return metadataPath, err
 }
 
 // SaveToRoot saves snapshot data under a caller-provided root path.
 func (w *SnapshotWriter) SaveToRoot(ctx context.Context, snapshot *SnapshotData, rootPath string, layout datapb.SnapshotLayout) (string, error) {
+	metadataPath, _, err := w.save(ctx, snapshot, rootPath, layout)
+	return metadataPath, err
+}
+
+// SaveToRootWithSize saves snapshot data and returns the bytes written for manifests and metadata.
+func (w *SnapshotWriter) SaveToRootWithSize(ctx context.Context, snapshot *SnapshotData, rootPath string, layout datapb.SnapshotLayout) (string, int64, error) {
 	return w.save(ctx, snapshot, rootPath, layout)
 }
 
@@ -94,24 +101,24 @@ func (w *SnapshotWriter) save(
 	snapshot *SnapshotData,
 	rootPath string,
 	layout datapb.SnapshotLayout,
-) (string, error) {
+) (string, int64, error) {
 	if snapshot == nil {
-		return "", merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
+		return "", 0, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
 	if snapshot.SnapshotInfo == nil {
-		return "", merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
+		return "", 0, merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
 	}
 	collectionID := snapshot.SnapshotInfo.GetCollectionId()
 	if collectionID <= 0 {
-		return "", merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
+		return "", 0, merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
 	}
 	if snapshot.Collection == nil {
-		return "", merr.WrapErrServiceInternalMsg("collection description cannot be nil")
+		return "", 0, merr.WrapErrServiceInternalMsg("collection description cannot be nil")
 	}
 
 	snapshotID := snapshot.SnapshotInfo.GetId()
 	if snapshotID <= 0 {
-		return "", merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
+		return "", 0, merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
 	}
 	if layout == datapb.SnapshotLayout_SnapshotLayoutUnknown {
 		layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
@@ -120,11 +127,14 @@ func (w *SnapshotWriter) save(
 	manifestDir, metadataPath := GetSnapshotPaths(rootPath, collectionID, snapshotID)
 
 	manifestPaths := make([]string, 0, len(snapshot.Segments))
+	var totalBytes int64
 	for _, segment := range snapshot.Segments {
 		manifestPath := GetSegmentManifestPath(manifestDir, segment.GetSegmentId())
-		if err := w.writeSegmentManifest(ctx, manifestPath, segment); err != nil {
-			return "", merr.Wrapf(err, "failed to write manifest for segment %d", segment.GetSegmentId())
+		manifestBytes, err := w.writeSegmentManifest(ctx, manifestPath, segment)
+		if err != nil {
+			return "", 0, merr.Wrapf(err, "failed to write manifest for segment %d", segment.GetSegmentId())
 		}
+		totalBytes += manifestBytes
 		manifestPaths = append(manifestPaths, manifestPath)
 	}
 
@@ -142,28 +152,36 @@ func (w *SnapshotWriter) save(
 		}
 	}
 
-	if err := w.writeMetadataFile(ctx, metadataPath, snapshot, manifestPaths, storagev2Manifests); err != nil {
-		return "", merr.Wrap(err, "failed to write metadata file")
+	// Metadata is the publication marker for a complete snapshot. Recheck the
+	// caller context after manifest writes so a canceled export does not publish
+	// a bundle that its durable job has already stopped advancing.
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
 	}
+	metadataBytes, err := w.writeMetadataFile(ctx, metadataPath, snapshot, manifestPaths, storagev2Manifests)
+	if err != nil {
+		return "", 0, merr.Wrap(err, "failed to write metadata file")
+	}
+	totalBytes += metadataBytes
 
 	mlog.Info(ctx, "Successfully wrote metadata file",
 		mlog.String("metadataPath", metadataPath))
 
-	return metadataPath, nil
+	return metadataPath, totalBytes, nil
 }
 
-func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath string, segment *datapb.SegmentDescription) error {
+func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath string, segment *datapb.SegmentDescription) (int64, error) {
 	binaryData, err := snapshotio.MarshalSegmentManifest(segment)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to marshal segment manifest")
+		return 0, merr.WrapErrServiceInternalErr(err, "failed to marshal segment manifest")
 	}
 	if err := w.chunkManager.Write(ctx, manifestPath, binaryData); err != nil {
-		return merr.Wrap(err, "failed to write segment manifest object")
+		return 0, merr.Wrap(err, "failed to write segment manifest object")
 	}
-	return nil
+	return int64(len(binaryData)), nil
 }
 
-func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath string, snapshot *SnapshotData, manifestPaths []string, storagev2Manifests []*datapb.StorageV2SegmentManifest) error {
+func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath string, snapshot *SnapshotData, manifestPaths []string, storagev2Manifests []*datapb.StorageV2SegmentManifest) (int64, error) {
 	metadata := &datapb.SnapshotMetadata{
 		FormatVersion:         int32(SnapshotFormatVersion),
 		SnapshotInfo:          snapshot.SnapshotInfo,
@@ -184,13 +202,13 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 	}
 	jsonData, err := opts.Marshal(metadata)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
+		return 0, merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
 	}
 
 	if err := w.chunkManager.Write(ctx, metadataPath, jsonData); err != nil {
-		return merr.Wrap(err, "failed to write snapshot metadata object")
+		return 0, merr.Wrap(err, "failed to write snapshot metadata object")
 	}
-	return nil
+	return int64(len(jsonData)), nil
 }
 
 // Drop removes snapshot metadata and manifest files.

@@ -115,6 +115,52 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	assert.Equal(t, copiedIndex, readSnapshot.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
 }
 
+func TestSnapshotExporter_PopulatePlanSizes(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	sourcePaths := []string{
+		path.Join(cm.RootPath(), "files/data-1"),
+		path.Join(cm.RootPath(), "files/data-2"),
+	}
+	objects := map[string][]byte{
+		sourcePaths[0]: []byte("data"),
+		sourcePaths[1]: []byte("second-data"),
+	}
+	var expected int64
+	for objectPath, data := range objects {
+		require.NoError(t, cm.Write(ctx, objectPath, data))
+		expected += int64(len(data))
+	}
+	items := []snapshotExportPlanItem{
+		{sourcePath: sourcePaths[0]},
+		{sourcePath: sourcePaths[1]},
+	}
+
+	totalBytes, err := populateSnapshotExportPlanSizes(ctx, cm, items, 2)
+	require.NoError(t, err)
+	assert.Equal(t, expected, totalBytes)
+	assert.Equal(t, int64(len(objects[sourcePaths[0]])), items[0].sourceSize)
+	assert.Equal(t, int64(len(objects[sourcePaths[1]])), items[1].sourceSize)
+
+	_, err = populateSnapshotExportPlanSizes(ctx, nil, items, 1)
+	assert.Error(t, err)
+	_, err = populateSnapshotExportPlanSizes(ctx, cm, items, 0)
+	assert.Error(t, err)
+
+	_, err = populateSnapshotExportPlanSizes(
+		ctx,
+		cm,
+		[]snapshotExportPlanItem{{sourcePath: path.Join(cm.RootPath(), "files/missing")}},
+		1,
+	)
+	assert.Error(t, err)
+
+	mockSize := mockey.Mock((*storage.LocalChunkManager).Size).Return(int64(-1), nil).Build()
+	defer mockSize.UnPatch()
+	_, err = populateSnapshotExportPlanSizes(ctx, cm, items, 1)
+	assert.Error(t, err)
+}
+
 type snapshotExporterCopierTarget struct {
 	storage.CrossBucketCopier
 }
@@ -148,9 +194,11 @@ func TestSnapshotExporter_CopiesFilesWithBoundedConcurrency(t *testing.T) {
 	segment := snapshotData.Segments[0]
 	binlogs := make([]*datapb.Binlog, configuredConcurrency+1)
 	for i := range binlogs {
+		sourcePath := path.Join(cm.RootPath(), fmt.Sprintf("files/insert_log/100/1/1001/%d", i+1))
+		require.NoError(t, cm.Write(context.Background(), sourcePath, []byte("binlog")))
 		binlogs[i] = &datapb.Binlog{
 			LogID:   int64(i + 1),
-			LogPath: fmt.Sprintf("files/insert_log/100/1/1001/%d", i+1),
+			LogPath: sourcePath,
 		}
 	}
 	segment.Binlogs = []*datapb.FieldBinlog{{
@@ -213,11 +261,13 @@ func TestSnapshotExporter_CopyFailureDoesNotWriteMetadata(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	snapshotData := createTestSnapshotDataForMeta()
 	segment := snapshotData.Segments[0]
+	sourcePath := path.Join(cm.RootPath(), "files/insert_log/100/1/1001/1")
+	require.NoError(t, cm.Write(context.Background(), sourcePath, []byte("binlog")))
 	segment.Binlogs = []*datapb.FieldBinlog{{
 		FieldID: 1,
 		Binlogs: []*datapb.Binlog{{
 			LogID:   1,
-			LogPath: "files/insert_log/100/1/1001/1",
+			LogPath: sourcePath,
 		}},
 	}}
 	segment.Statslogs = nil
@@ -262,11 +312,15 @@ func TestSnapshotExporter_CopyFailureLeavesObjectsUnpublished(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	snapshotData := createTestSnapshotDataForMeta()
 	segment := snapshotData.Segments[0]
+	firstSource := path.Join(cm.RootPath(), "files/insert_log/100/1/1001/1")
+	secondSource := path.Join(cm.RootPath(), "files/insert_log/100/1/1001/2")
+	require.NoError(t, cm.Write(context.Background(), firstSource, []byte("first")))
+	require.NoError(t, cm.Write(context.Background(), secondSource, []byte("second")))
 	segment.Binlogs = []*datapb.FieldBinlog{{
 		FieldID: 1,
 		Binlogs: []*datapb.Binlog{
-			{LogPath: "files/insert_log/100/1/1001/1"},
-			{LogPath: "files/insert_log/100/1/1001/2"},
+			{LogPath: firstSource},
+			{LogPath: secondSource},
 		},
 	}}
 	clearSegmentNonInsertFiles(segment)
@@ -274,7 +328,7 @@ func TestSnapshotExporter_CopyFailureLeavesObjectsUnpublished(t *testing.T) {
 	targetRoot := path.Join(t.TempDir(), "export-root")
 	firstTarget := snapshotstorage.ExportedSnapshotPath(
 		cm,
-		"files/insert_log/100/1/1001/1",
+		firstSource,
 		targetRoot,
 	)
 	_, metadataPath := snapshotstorage.GetSnapshotPaths(targetRoot, 100, 1)
@@ -480,6 +534,7 @@ func TestSnapshotExporter_CrossBucketCopiesMatchingObjectKey(t *testing.T) {
 		Binlogs: []*datapb.Binlog{{LogPath: sourcePath}},
 	}}
 	clearSegmentNonInsertFiles(segment)
+	require.NoError(t, cm.Write(context.Background(), sourcePath, []byte("binlog")))
 
 	copyCalled := false
 	_, err := exportSnapshot(
@@ -728,4 +783,77 @@ func TestSnapshotExporter_ExportReturnsManifestLobError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to list LOB files for segment 1001")
 	assert.Contains(t, err.Error(), "lob unavailable")
+}
+
+func TestSnapshotExporter_ValidationAndPublicationErrors(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	snapshot := createTestSnapshotDataForMeta()
+
+	t.Run("plan input validation", func(t *testing.T) {
+		_, err := buildSnapshotExportPlan(ctx, cm, cm, "", "", nil, "target")
+		require.Error(t, err)
+		_, err = buildSnapshotExportPlan(ctx, nil, cm, "", "", snapshot, "target")
+		require.Error(t, err)
+		_, err = buildSnapshotExportPlan(ctx, cm, nil, "", "", snapshot, "target")
+		require.Error(t, err)
+		_, err = buildSnapshotExportPlan(ctx, cm, cm, "", "expected-bucket", snapshot, "s3://other-bucket/target")
+		require.Error(t, err)
+		_, err = buildSnapshotExportPlan(ctx, cm, cm, "", "", snapshot, "/")
+		require.Error(t, err)
+	})
+
+	t.Run("snapshot fingerprint failure", func(t *testing.T) {
+		invalid := createTestSnapshotDataForMeta()
+		invalid.Collection = nil
+		_, err := buildSnapshotExportPlan(ctx, cm, cm, "source-bucket", "target-bucket", invalid, "target")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fingerprint")
+	})
+
+	t.Run("copy validation", func(t *testing.T) {
+		require.Error(t, copySnapshotExportPlan(ctx, nil, "source", "target", nil, 1))
+		copier := newSnapshotExporterCopierMock(t, func(context.Context, string, string, string, string) error {
+			return nil
+		})
+		require.Error(t, copySnapshotExportPlan(ctx, copier, "source", "target", nil, 0))
+	})
+
+	t.Run("publication validation and write failure", func(t *testing.T) {
+		_, err := publishSnapshotExportPlan(ctx, cm, snapshot, nil)
+		require.Error(t, err)
+		_, err = publishSnapshotExportPlan(ctx, cm, nil, &snapshotExportPlan{targetRoot: "target"})
+		require.Error(t, err)
+
+		emptySnapshot := createTestSnapshotDataForMeta()
+		emptySnapshot.Segments = nil
+		emptySnapshot.SegmentIDs = nil
+		emptySnapshot.Indexes = nil
+		emptySnapshot.BuildIDs = nil
+		expected := errors.New("write failed")
+		mockSave := mockey.Mock((*snapshotstorage.SnapshotWriter).SaveToRootWithSize).
+			Return("", int64(0), expected).
+			Build()
+		defer mockSave.UnPatch()
+		_, err = publishSnapshotExportPlan(ctx, cm, emptySnapshot, &snapshotExportPlan{
+			targetRoot:  "target",
+			metadataURI: "target/snapshots/100/metadata/1.json",
+			mappings:    map[string]string{},
+		})
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("empty destination mapping is ignored by overlap validation", func(t *testing.T) {
+		emptySnapshot := createTestSnapshotDataForMeta()
+		emptySnapshot.Segments = nil
+		emptySnapshot.MetadataPath = "source/snapshots/100/metadata/1.json"
+		err := rejectExportObjectOverlap(
+			emptySnapshot,
+			nil,
+			map[string]string{"source": ""},
+			"target",
+			"target/snapshots/100/metadata/1.json",
+		)
+		require.NoError(t, err)
+	})
 }

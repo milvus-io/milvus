@@ -2820,6 +2820,8 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 
 	var capturedCollectionID int64
 	var capturedSnapshotName string
+	var capturedDBName string
+	var capturedCollectionName string
 	var capturedTargetS3Path string
 	var capturedExternalSpec string
 	var capturedKeys []message.ResourceKey
@@ -2849,15 +2851,19 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 			_ context.Context,
 			collectionID int64,
 			snapshotName string,
+			dbName string,
+			collectionName string,
 			targetS3Path string,
 			externalSpec string,
-		) (string, error) {
+		) (int64, error) {
 			assert.True(t, lockAcquired, "export must acquire snapshot resource lock before pinning")
 			capturedCollectionID = collectionID
 			capturedSnapshotName = snapshotName
+			capturedDBName = dbName
+			capturedCollectionName = collectionName
 			capturedTargetS3Path = targetS3Path
 			capturedExternalSpec = externalSpec
-			return "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", nil
+			return 9001, nil
 		}).Build()
 	defer mockExport.UnPatch()
 
@@ -2875,9 +2881,11 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
-	assert.Equal(t, "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", resp.GetSnapshotMetadataUri())
+	assert.Equal(t, int64(9001), resp.GetJobId())
 	assert.Equal(t, int64(100), capturedCollectionID)
 	assert.Equal(t, "snapshot-1", capturedSnapshotName)
+	assert.Equal(t, "test_db", capturedDBName)
+	assert.Equal(t, "test_coll", capturedCollectionName)
 	assert.Equal(t, "s3://foreign-bucket/export-root", capturedTargetS3Path)
 	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedExternalSpec)
 
@@ -3502,7 +3510,7 @@ func TestServer_ExportSnapshot(t *testing.T) {
 	defer mockClose.UnPatch()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(mockBroadcaster, nil).Build()
 	defer mockBroadcast.UnPatch()
-	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).Return("", merr.WrapErrServiceUnimplemented(errors.New("not implemented"))).Build()
+	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).Return(int64(0), merr.WrapErrServiceUnimplemented(errors.New("not implemented"))).Build()
 	defer mockExport.UnPatch()
 
 	server := &Server{
@@ -3522,6 +3530,57 @@ func TestServer_ExportSnapshot(t *testing.T) {
 	assert.Error(t, statusErr)
 	assert.True(t, errors.Is(statusErr, merr.ErrServiceUnimplemented))
 	assert.False(t, merr.IsRetryableErr(statusErr))
+}
+
+func TestServer_GetExportSnapshotState(t *testing.T) {
+	t.Run("validates request", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.GetExportSnapshotState(context.Background(), nil)
+		require.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+
+		resp, err = server.GetExportSnapshotState(context.Background(), &datapb.GetExportSnapshotStateRequest{})
+		require.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("returns persisted job info", func(t *testing.T) {
+		manager := &snapshotManager{}
+		expected := &datapb.ExportSnapshotJobInfo{
+			JobId:               9001,
+			State:               datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted,
+			Progress:            100,
+			SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json",
+		}
+		mockGetState := mockey.Mock((*snapshotManager).GetExportSnapshotState).Return(expected, nil).Build()
+		defer mockGetState.UnPatch()
+		server := &Server{snapshotManager: manager}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.GetExportSnapshotState(context.Background(), &datapb.GetExportSnapshotStateRequest{JobId: 9001})
+
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, expected, resp.GetInfo())
+	})
+
+	t.Run("returns lookup error in status", func(t *testing.T) {
+		manager := &snapshotManager{}
+		mockGetState := mockey.Mock((*snapshotManager).GetExportSnapshotState).
+			Return((*datapb.ExportSnapshotJobInfo)(nil), merr.WrapErrParameterInvalidMsg("snapshot export job 9001 not found")).
+			Build()
+		defer mockGetState.UnPatch()
+		server := &Server{snapshotManager: manager}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.GetExportSnapshotState(context.Background(), &datapb.GetExportSnapshotStateRequest{JobId: 9001})
+
+		require.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Nil(t, resp.GetInfo())
+	})
 }
 
 // --- Test CreateSnapshot additional cases ---

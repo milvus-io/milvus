@@ -248,20 +248,21 @@ Returns:
 
 ### Export Snapshot
 
-Export a snapshot as a self-contained object-storage bundle. The returned
-`snapshotMetadataURI` points to the exported metadata file. When `targetS3Path`
-is a complete URI, the returned value can be passed directly to
-`RestoreExternalSnapshot`; an object-key result must first be qualified with the
-configured bucket URI. The export target may be in another bucket when the
-object-storage provider supports server-side copy and one resolved credential
-can read the source bucket and write the target bucket. Exporting to the source
-bucket is also supported, provided the generated target metadata, segment
-manifest, and data object keys do not overwrite any object used by the source
-snapshot. Milvus rejects such overlap before the first copy.
+Export a snapshot as a self-contained object-storage bundle. Export is
+asynchronous: `ExportSnapshot` durably accepts the job and returns a job ID,
+while `GetExportSnapshotState` reports copy progress and the final metadata URI.
+The metadata URI is visible only after the job reaches `Completed`.
+
+The export target may be in another bucket when the object-storage provider
+supports server-side copy and one resolved credential can read the source
+bucket and write the target bucket. Exporting to the source bucket is also
+supported, provided the generated target metadata, segment manifest, and data
+object keys do not overwrite any object used by the source snapshot. Milvus
+rejects such overlap before the first copy.
 
 **Go SDK Example:**
 ```go
-metadataURI, err := client.ExportSnapshot(context.Background(),
+jobID, err := client.ExportSnapshot(context.Background(),
     milvusclient.NewExportSnapshotOption(
         "backup_20240101",
         "my_collection",
@@ -270,7 +271,28 @@ metadataURI, err := client.ExportSnapshot(context.Background(),
 if err != nil {
     log.Fatal(err)
 }
-log.Printf("Exported snapshot metadata: %s", metadataURI)
+
+var metadataURI string
+for {
+    info, err := client.GetExportSnapshotState(context.Background(),
+        milvusclient.NewGetExportSnapshotStateOption(jobID))
+    if err != nil {
+        log.Fatal(err)
+    }
+    switch info.GetState() {
+    case milvuspb.ExportSnapshotState_ExportSnapshotCompleted:
+        metadataURI = info.GetSnapshotMetadataUri()
+        log.Printf("Exported snapshot metadata: %s", metadataURI)
+        break
+    case milvuspb.ExportSnapshotState_ExportSnapshotFailed:
+        log.Fatalf("Export failed: %s", info.GetReason())
+    default:
+        log.Printf("Export progress: %d%%", info.GetProgress())
+        time.Sleep(time.Second)
+        continue
+    }
+    break
+}
 ```
 
 **REST Example:**
@@ -287,10 +309,53 @@ POST /v2/vectordb/jobs/snapshot/export
 }
 ```
 
+The submission response contains `data.jobId`. Poll the job with:
+
+```text
+POST /v2/vectordb/jobs/snapshot/export/describe
+```
+
+```json
+{
+  "jobId": "9001"
+}
+```
+
+The describe response contains `state`, `progress`, `copiedFiles`,
+`totalFiles`, `totalBytes`, `reason`, and `snapshotMetadataURI`. `totalBytes`
+is the total size of the completed bundle objects and is zero until completion.
+The URI is empty for `Pending`, `Executing`, and `Failed` jobs.
+
+Progress is checkpoint based: `0` means queued, `5` means planning completed,
+values from `5` through `95` reflect durably checkpointed object copies, `99`
+means metadata finalization, and `100` means the bundle is published. A restart
+may replay an uncheckpointed copy batch, but reported progress does not move
+backward.
+
 `dataCoord.snapshot.exportCopyConcurrency` controls the maximum number of
-provider-side object copy requests executed concurrently by each export. The
-default is `16`. The setting is refreshable and affects new export requests;
-invalid or non-positive values use the default.
+provider-side object copy requests executed concurrently by each job. The
+default is `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` limits concurrent
+jobs and defaults to `1`. `dataCoord.snapshot.exportJobTimeout` covers queue and
+execution time and defaults to 12 hours. Completed and failed jobs remain
+queryable for `dataCoord.snapshot.exportJobRetention`, which defaults to 3
+hours. These settings are refreshable.
+
+Request validation, source snapshot lookup, pin creation, and job persistence
+can fail synchronously before a job ID is returned. Storage permission errors,
+missing source objects, provider copy failures, plan changes, publication
+errors, and timeout after acceptance are reported as a `Failed` job. DataCoord
+keeps the source snapshot pinned until the job is terminal and recovers accepted
+jobs after restart. A failed job does not automatically delete objects already
+copied to the target root.
+
+Raw credentials in export `externalSpec` are persisted only while the job is
+active so that DataCoord can recover it after restart. The terminal update
+clears the stored spec. Prefer instance credentials and bucket policy when
+possible.
+
+When `targetS3Path` is a complete URI, the completed metadata URI can be passed
+directly to `RestoreExternalSnapshot`. An object-key result must first be
+qualified with the configured bucket URI.
 
 StorageV2 manifest files are copied as ordinary objects; StorageV3 manifest and
 LOB objects are discovered from the packed manifest path.

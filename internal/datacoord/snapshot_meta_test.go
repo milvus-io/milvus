@@ -27,8 +27,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kv_datacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -38,6 +40,67 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type snapshotExportCatalogFake struct {
+	metastore.DataCoordCatalog
+
+	mu         sync.Mutex
+	jobs       map[int64]*datapb.ExportSnapshotJob
+	listErr    error
+	saveErr    error
+	dropErr    error
+	beforeSave func(*datapb.ExportSnapshotJob)
+}
+
+func newSnapshotExportCatalogFake(jobs ...*datapb.ExportSnapshotJob) *snapshotExportCatalogFake {
+	catalog := &snapshotExportCatalogFake{jobs: make(map[int64]*datapb.ExportSnapshotJob)}
+	for _, job := range jobs {
+		if job != nil {
+			catalog.jobs[job.GetJobId()] = proto.Clone(job).(*datapb.ExportSnapshotJob)
+		}
+	}
+	return catalog
+}
+
+func (c *snapshotExportCatalogFake) SaveExportSnapshotJob(_ context.Context, job *datapb.ExportSnapshotJob) error {
+	c.mu.Lock()
+	saveErr := c.saveErr
+	beforeSave := c.beforeSave
+	c.mu.Unlock()
+	if saveErr != nil {
+		return saveErr
+	}
+	if beforeSave != nil {
+		beforeSave(proto.Clone(job).(*datapb.ExportSnapshotJob))
+	}
+	c.mu.Lock()
+	c.jobs[job.GetJobId()] = proto.Clone(job).(*datapb.ExportSnapshotJob)
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *snapshotExportCatalogFake) ListExportSnapshotJobs(_ context.Context) ([]*datapb.ExportSnapshotJob, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.listErr != nil {
+		return nil, c.listErr
+	}
+	jobs := make([]*datapb.ExportSnapshotJob, 0, len(c.jobs))
+	for _, job := range c.jobs {
+		jobs = append(jobs, proto.Clone(job).(*datapb.ExportSnapshotJob))
+	}
+	return jobs, nil
+}
+
+func (c *snapshotExportCatalogFake) DropExportSnapshotJob(_ context.Context, jobID int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.dropErr != nil {
+		return c.dropErr
+	}
+	delete(c.jobs, jobID)
+	return nil
+}
 
 // waitForRefIndexLoaded waits for a specific RefIndex to be loaded with timeout.
 func waitForRefIndexLoaded(sm *snapshotMeta, snapshotID int64, timeout time.Duration) bool {
@@ -185,6 +248,207 @@ func TestDeriveSnapshotRootPath(t *testing.T) {
 // Same as createTestSnapshotMeta since RefIndex state is now per-snapshot.
 func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
 	return createTestSnapshotMeta(t)
+}
+
+func TestSnapshotExportMeta_DurableUpdatesAndDefensiveCopies(t *testing.T) {
+	ctx := context.Background()
+	job := &datapb.ExportSnapshotJob{
+		JobId:          9001,
+		SnapshotName:   "snapshot-1",
+		CollectionId:   100,
+		CollectionName: "collection-1",
+		ExternalSpec:   `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
+	}
+	catalog := newSnapshotExportCatalogFake(job)
+	meta, err := newSnapshotExportMeta(ctx, catalog)
+	require.NoError(t, err)
+
+	loaded, ok := meta.GetJob(job.GetJobId())
+	require.True(t, ok)
+	loaded.Progress = 77
+	unchanged, ok := meta.GetJob(job.GetJobId())
+	require.True(t, ok)
+	assert.Zero(t, unchanged.GetProgress())
+
+	var retained *datapb.ExportSnapshotJob
+	catalog.beforeSave = func(persisting *datapb.ExportSnapshotJob) {
+		cached, exists := meta.GetJob(job.GetJobId())
+		require.True(t, exists)
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPending, cached.GetState())
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting, persisting.GetState())
+	}
+	updated, applied, err := meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
+		retained = candidate
+		candidate.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
+		candidate.Progress = 5
+		return false, nil
+	})
+	require.NoError(t, err)
+	require.True(t, applied)
+	assert.Equal(t, int32(5), updated.GetProgress())
+
+	retained.Progress = 90
+	cached, ok := meta.GetJob(job.GetJobId())
+	require.True(t, ok)
+	assert.Equal(t, int32(5), cached.GetProgress())
+
+	catalog.beforeSave = nil
+	catalog.saveErr = errors.New("etcd unavailable")
+	_, applied, err = meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
+		candidate.Progress = 10
+		return false, nil
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
+	assert.False(t, applied)
+	cached, ok = meta.GetJob(job.GetJobId())
+	require.True(t, ok)
+	assert.Equal(t, int32(5), cached.GetProgress())
+
+	catalog.saveErr = nil
+	updated, applied, err = meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
+		candidate.State = datapb.ExportSnapshotJobState_ExportSnapshotJobFailed
+		candidate.ExternalSpec = ""
+		return false, nil
+	})
+	require.NoError(t, err)
+	require.True(t, applied)
+	assert.Empty(t, updated.GetExternalSpec())
+
+	meta.locks.Lock(job.GetJobId())
+	_, acquired, applied, err := meta.TryUpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
+		candidate.Progress = 100
+		return false, nil
+	})
+	meta.locks.Unlock(job.GetJobId())
+	require.NoError(t, err)
+	assert.False(t, acquired)
+	assert.False(t, applied)
+
+	require.NoError(t, meta.DropJob(ctx, job.GetJobId()))
+	_, ok = meta.GetJob(job.GetJobId())
+	assert.False(t, ok)
+}
+
+func TestSnapshotExportMeta_ReplaysPreApplyAfterPersistenceFailure(t *testing.T) {
+	ctx := context.Background()
+	job := &datapb.ExportSnapshotJob{
+		JobId:        9001,
+		ExternalSpec: `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+		State:        datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting,
+	}
+	catalog := newSnapshotExportCatalogFake(job)
+	meta, err := newSnapshotExportMeta(ctx, catalog)
+	require.NoError(t, err)
+
+	publishCount := 0
+	preApply := func(*datapb.ExportSnapshotJob) error {
+		publishCount++
+		return nil
+	}
+	complete := func(candidate *datapb.ExportSnapshotJob) (bool, error) {
+		candidate.State = datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted
+		candidate.Progress = 100
+		candidate.SnapshotMetadataUri = "s3://bucket/root/snapshots/100/metadata/1.json"
+		candidate.ExternalSpec = ""
+		return false, nil
+	}
+
+	catalog.saveErr = errors.New("etcd unavailable")
+	_, applied, err := meta.UpdateJobWithPreApply(ctx, job.GetJobId(), preApply, complete)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
+	assert.False(t, applied)
+	assert.Equal(t, 1, publishCount)
+	unchanged, ok := meta.GetJob(job.GetJobId())
+	require.True(t, ok)
+	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting, unchanged.GetState())
+	assert.NotEmpty(t, unchanged.GetExternalSpec())
+	assert.Empty(t, unchanged.GetSnapshotMetadataUri())
+
+	catalog.saveErr = nil
+	completed, applied, err := meta.UpdateJobWithPreApply(ctx, job.GetJobId(), preApply, complete)
+	require.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, 2, publishCount)
+	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted, completed.GetState())
+	assert.Empty(t, completed.GetExternalSpec())
+	assert.NotEmpty(t, completed.GetSnapshotMetadataUri())
+}
+
+func TestSnapshotExportMeta_LoadErrors(t *testing.T) {
+	ctx := context.Background()
+	catalog := newSnapshotExportCatalogFake()
+	catalog.listErr = errors.New("etcd unavailable")
+	_, err := newSnapshotExportMeta(ctx, catalog)
+	require.Error(t, err)
+
+	catalog.listErr = nil
+	catalog.jobs[0] = &datapb.ExportSnapshotJob{}
+	_, err = newSnapshotExportMeta(ctx, catalog)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid snapshot export job record")
+}
+
+func TestSnapshotExportMeta_ErrorAndEdgePaths(t *testing.T) {
+	t.Run("persistence error preserves cause", func(t *testing.T) {
+		cause := errors.New("catalog unavailable")
+		err := &snapshotExportJobPersistenceError{cause: cause}
+		assert.Equal(t, cause.Error(), err.Error())
+		assert.Same(t, cause, err.Unwrap())
+		assert.ErrorIs(t, err, cause)
+		assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
+	})
+
+	t.Run("duplicate jobs fail loading", func(t *testing.T) {
+		job := &datapb.ExportSnapshotJob{JobId: 9001}
+		catalog := newSnapshotExportCatalogFake()
+		mockList := mockey.Mock((*snapshotExportCatalogFake).ListExportSnapshotJobs).Return(
+			[]*datapb.ExportSnapshotJob{job, proto.Clone(job).(*datapb.ExportSnapshotJob)}, nil).Build()
+		defer mockList.UnPatch()
+		_, err := newSnapshotExportMeta(context.Background(), catalog)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate snapshot export job")
+	})
+
+	t.Run("create validates identity and uniqueness", func(t *testing.T) {
+		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake())
+		require.NoError(t, err)
+		require.Error(t, meta.CreateJob(context.Background(), nil))
+		require.Error(t, meta.CreateJob(context.Background(), &datapb.ExportSnapshotJob{}))
+		job := &datapb.ExportSnapshotJob{JobId: 9001}
+		require.NoError(t, meta.CreateJob(context.Background(), job))
+		require.Error(t, meta.CreateJob(context.Background(), job))
+	})
+
+	t.Run("jobs with equal start time are ordered by id", func(t *testing.T) {
+		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(
+			&datapb.ExportSnapshotJob{JobId: 9002, StartTime: 100},
+			&datapb.ExportSnapshotJob{JobId: 9001, StartTime: 100},
+		))
+		require.NoError(t, err)
+		jobs := meta.GetJobs()
+		require.Len(t, jobs, 2)
+		assert.Equal(t, int64(9001), jobs[0].GetJobId())
+		assert.Equal(t, int64(9002), jobs[1].GetJobId())
+	})
+
+	t.Run("missing update and failed drop preserve cache", func(t *testing.T) {
+		job := &datapb.ExportSnapshotJob{JobId: 9001}
+		catalog := newSnapshotExportCatalogFake(job)
+		meta, err := newSnapshotExportMeta(context.Background(), catalog)
+		require.NoError(t, err)
+		_, _, err = meta.UpdateJob(context.Background(), 9999, func(*datapb.ExportSnapshotJob) (bool, error) {
+			return false, nil
+		})
+		require.Error(t, err)
+
+		catalog.dropErr = errors.New("catalog unavailable")
+		require.Error(t, meta.DropJob(context.Background(), job.GetJobId()))
+		_, ok := meta.GetJob(job.GetJobId())
+		assert.True(t, ok)
+	})
 }
 
 // insertTestSnapshot is a LIGHTWEIGHT helper that only primes the three lookup maps

@@ -5475,6 +5475,9 @@ type dataCoordConfig struct {
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
 	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
+	SnapshotExportJobTimeout               ParamItem `refreshable:"true"`
+	SnapshotExportJobRetention             ParamItem `refreshable:"true"`
+	SnapshotExportMaxConcurrentJobs        ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	// LOB Garbage Collection
@@ -6477,6 +6480,54 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.SnapshotExportCopyConcurrency.Init(base.mgr)
+
+	p.SnapshotExportJobTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.exportJobTimeout",
+		Version:      "2.6.15",
+		DefaultValue: "43200",
+		Doc:          "Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				return "43200"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportJobTimeout.Init(base.mgr)
+
+	p.SnapshotExportJobRetention = ParamItem{
+		Key:          "dataCoord.snapshot.exportJobRetention",
+		Version:      "2.6.15",
+		DefaultValue: "10800",
+		Doc:          "Retention period in seconds for completed or failed snapshot export jobs after pin cleanup.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				return "10800"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportJobRetention.Init(base.mgr)
+
+	p.SnapshotExportMaxConcurrentJobs = ParamItem{
+		Key:          "dataCoord.snapshot.exportMaxConcurrentJobs",
+		Version:      "2.6.15",
+		DefaultValue: "1",
+		Doc:          "Maximum number of snapshot export jobs executed concurrently by DataCoord.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed <= 0 {
+				return "1"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotExportMaxConcurrentJobs.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

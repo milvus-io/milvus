@@ -349,6 +349,59 @@ func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
 	assert.Equal(t, 2, writeCallCount) // manifest, metadata
 }
 
+func TestSnapshotWriter_SaveToRootWithSize(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	writer := snapshotstorage.NewSnapshotWriter(cm)
+	snapshotData := createTestSnapshotData()
+	targetRoot := path.Join(cm.RootPath(), "export-root")
+
+	metadataPath, totalBytes, err := writer.SaveToRootWithSize(
+		ctx,
+		snapshotData,
+		targetRoot,
+		datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+	)
+	require.NoError(t, err)
+	manifestDir, expectedMetadataPath := snapshotstorage.GetSnapshotPaths(
+		targetRoot,
+		snapshotData.SnapshotInfo.GetCollectionId(),
+		snapshotData.SnapshotInfo.GetId(),
+	)
+	assert.Equal(t, expectedMetadataPath, metadataPath)
+
+	manifestPath := snapshotstorage.GetSegmentManifestPath(manifestDir, snapshotData.Segments[0].GetSegmentId())
+	manifestBytes, err := cm.Size(ctx, manifestPath)
+	require.NoError(t, err)
+	metadataBytes, err := cm.Size(ctx, metadataPath)
+	require.NoError(t, err)
+	assert.Equal(t, manifestBytes+metadataBytes, totalBytes)
+}
+
+func TestSnapshotWriter_Save_DoesNotPublishMetadataAfterCancellation(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	writer := snapshotstorage.NewSnapshotWriter(cm)
+	snapshotData := createTestSnapshotData()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	writeCallCount := 0
+	mockWrite := mockey.Mock((*storage.LocalChunkManager).Write).To(func(context.Context, string, []byte) error {
+		writeCallCount++
+		if writeCallCount == 1 {
+			cancel()
+		}
+		return nil
+	}).Build()
+	defer mockWrite.UnPatch()
+
+	_, err := writer.Save(ctx, snapshotData)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, writeCallCount)
+}
+
 func TestSnapshotWriter_Save_StorageError(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
@@ -1305,10 +1358,47 @@ func TestSnapshotFingerprintIsDeterministicAndContentSensitive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, leftFingerprint, rightFingerprint)
 
+	right.SnapshotInfo.PinIds = []int64{9001}
+	right.SnapshotInfo.PinExpireAtMs = map[int64]int64{9001: time.Now().Add(time.Hour).UnixMilli()}
+	pinnedFingerprint, err := snapshotstorage.SnapshotFingerprint(right)
+	require.NoError(t, err)
+	assert.Equal(t, leftFingerprint, pinnedFingerprint)
+
 	right.Segments[0].NumOfRows++
 	changedFingerprint, err := snapshotstorage.SnapshotFingerprint(right)
 	require.NoError(t, err)
 	assert.NotEqual(t, leftFingerprint, changedFingerprint)
+}
+
+func TestRewriteSnapshotWithMapping_RemovesSourcePins(t *testing.T) {
+	snapshot := createTestSnapshotData()
+	snapshot.SnapshotInfo.PinIds = []int64{9001}
+	snapshot.SnapshotInfo.PinExpireAtMs = map[int64]int64{9001: time.Now().Add(time.Hour).UnixMilli()}
+	refs, err := snapshotstorage.ListSnapshotDataFiles(
+		context.Background(),
+		storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())),
+		snapshot,
+		nil,
+	)
+	require.NoError(t, err)
+	mappings := make(map[string]string, len(refs)*2)
+	for _, ref := range refs {
+		destination := path.Join("bundle/files", ref.NormalizedPath)
+		mappings[ref.Path] = destination
+		mappings[ref.NormalizedPath] = destination
+	}
+
+	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
+		snapshot,
+		mappings,
+		"bundle",
+		"s3://bucket/bundle/snapshots/100/metadata/1.json",
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, rewritten.SnapshotInfo.GetPinIds())
+	assert.Empty(t, rewritten.SnapshotInfo.GetPinExpireAtMs())
+	assert.Equal(t, []int64{9001}, snapshot.SnapshotInfo.GetPinIds())
 }
 
 func TestListSnapshotDataFiles_DoesNotLimitFileCount(t *testing.T) {

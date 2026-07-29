@@ -82,6 +82,25 @@ func waitForRestoreComplete(ctx context.Context, mc *base.MilvusClient, jobID in
 	return nil, fmt.Errorf("timeout waiting for restore to complete: jobID=%d", jobID)
 }
 
+func waitForExportComplete(ctx context.Context, mc *base.MilvusClient, jobID int64, timeout time.Duration) (*milvuspb.ExportSnapshotInfo, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		info, err := mc.GetExportSnapshotState(ctx, client.NewGetExportSnapshotStateOption(jobID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get export state: %w", err)
+		}
+		switch info.GetState() {
+		case milvuspb.ExportSnapshotState_ExportSnapshotCompleted:
+			return info, nil
+		case milvuspb.ExportSnapshotState_ExportSnapshotFailed:
+			return info, fmt.Errorf("export snapshot failed: jobID=%d, reason=%s", jobID, info.GetReason())
+		default:
+			time.Sleep(time.Second)
+		}
+	}
+	return nil, fmt.Errorf("timeout waiting for export to complete: jobID=%d", jobID)
+}
+
 // waitForAllIndexesBuilt polls DescribeIndex for each index in the collection until all indexes
 // have finished building (PendingIndexRows == 0 and TotalRows == IndexedRows).
 // If the collection has no indexes, the function returns immediately.
@@ -443,9 +462,14 @@ func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
 	require.NotEmpty(t, snapshotInfo.GetS3Location())
 
 	exportRoot := fmt.Sprintf("snapshot_export_%s", common.GenRandomString(snapshotPrefix, 6))
-	metadataURI, err := mc.ExportSnapshot(ctx,
+	exportJobID, err := mc.ExportSnapshot(ctx,
 		client.NewExportSnapshotOption(snapshotName, collName, exportRoot))
 	common.CheckErr(t, err, true)
+	require.NotZero(t, exportJobID)
+	exportInfo, err := waitForExportComplete(ctx, mc, exportJobID, 2*time.Minute)
+	common.CheckErr(t, err, true)
+	require.Positive(t, exportInfo.GetTotalBytes())
+	metadataURI := exportInfo.GetSnapshotMetadataUri()
 	require.NotEmpty(t, metadataURI)
 	require.NotEqual(t, snapshotInfo.GetS3Location(), metadataURI)
 

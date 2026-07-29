@@ -1314,6 +1314,10 @@ func (s *Server) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnapsho
 	return s.proxy.ExportSnapshot(ctx, req)
 }
 
+func (s *Server) GetExportSnapshotState(ctx context.Context, req *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	return s.proxy.GetExportSnapshotState(ctx, req)
+}
+
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.GetRestoreSnapshotStateRequest) (*milvuspb.GetRestoreSnapshotStateResponse, error) {
 	return s.proxy.GetRestoreSnapshotState(ctx, req)
 }

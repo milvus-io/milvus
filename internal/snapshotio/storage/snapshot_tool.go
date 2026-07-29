@@ -311,6 +311,10 @@ func RewriteSnapshotWithMapping(
 		BuildIDs:     append([]int64(nil), snapshot.BuildIDs...),
 		Layout:       datapb.SnapshotLayout_SnapshotLayoutSelfContained,
 	}
+	// Pin IDs are cluster-local lifecycle state. A portable bundle must not
+	// retain the source cluster's active pin records.
+	exported.SnapshotInfo.PinIds = nil
+	exported.SnapshotInfo.PinExpireAtMs = nil
 	exported.SnapshotInfo.S3Location = metadataURI
 	exported.Indexes = make([]*indexpb.IndexInfo, 0, len(snapshot.Indexes))
 	for i, index := range snapshot.Indexes {
