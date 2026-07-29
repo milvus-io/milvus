@@ -19,8 +19,7 @@ package paramtable
 import (
 	"context"
 	"fmt"
-	"math/big"
-	"regexp"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -32,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
-
-var decimalSizePattern = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
 
 type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue string) error
 
@@ -437,30 +434,15 @@ func getAsFloat(v string) float64 {
 
 func getAsSize(value string) int64 {
 	number, multiplier := splitSizeUnit(value)
-	const (
-		maxInt64 = int64(^uint64(0) >> 1)
-		minInt64 = -maxInt64 - 1
-	)
 	integer, err := strconv.ParseInt(number, 10, 64)
 	if err == nil {
-		if integer > maxInt64/multiplier || integer < minInt64/multiplier {
-			return 0
-		}
 		return integer * multiplier
 	}
-	if !decimalSizePattern.MatchString(number) {
+	decimal, err := strconv.ParseFloat(number, 64)
+	if err != nil || math.IsNaN(decimal) || math.IsInf(decimal, 0) {
 		return 0
 	}
-	decimal, ok := new(big.Rat).SetString(number)
-	if !ok {
-		return 0
-	}
-	size := decimal.Mul(decimal, big.NewRat(multiplier, 1))
-	truncated := new(big.Int).Quo(size.Num(), size.Denom())
-	if !truncated.IsInt64() {
-		return 0
-	}
-	return truncated.Int64()
+	return int64(decimal * float64(multiplier))
 }
 
 func splitSizeUnit(value string) (string, int64) {
