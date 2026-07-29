@@ -579,7 +579,7 @@ func TestPlacementSnapshotRetriesForNilReplicaUnscopedMutations(t *testing.T) {
 		newSnapshot := buildSnapshot(t, fixture)
 		require.Equal(t, 2, attempts)
 		require.Empty(t, newSnapshot.PendingWork.Tasks)
-		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(AdmissionToken{
+		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(context.Background(), AdmissionToken{
 			Snapshot: oldSnapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica,
 		}))
 	})
@@ -792,7 +792,7 @@ func TestPlacementSnapshotPendingInvalidationIsRGScopedAndWaveAware(t *testing.T
 
 		snapshot := buildSnapshot(t, fixture)
 		require.Equal(t, 1, attempts)
-		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(AdmissionToken{
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(context.Background(), AdmissionToken{
 			Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica,
 		}))
 	})
@@ -819,14 +819,14 @@ func TestPlacementSnapshotPendingInvalidationIsRGScopedAndWaveAware(t *testing.T
 			EpochRevisions:         map[task.BalanceEpochMeta]uint64{epoch: 1},
 			Tasks:                  []task.PendingBalanceTaskSnapshot{first},
 		})
-		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(token))
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(context.Background(), token))
 		fixture.inspector.set(task.PendingBalanceSnapshot{
 			Revision:               2,
 			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 2},
 			EpochRevisions:         map[task.BalanceEpochMeta]uint64{epoch: 2},
 			Tasks:                  []task.PendingBalanceTaskSnapshot{first, second},
 		})
-		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(token))
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(context.Background(), token))
 
 		external := task.PendingBalanceTaskSnapshot{
 			TaskID: 3, CollectionID: 100, ReplicaID: testEligibleReplica, ResourceGroup: testSnapshotRG,
@@ -838,7 +838,7 @@ func TestPlacementSnapshotPendingInvalidationIsRGScopedAndWaveAware(t *testing.T
 			EpochRevisions:         map[task.BalanceEpochMeta]uint64{epoch: 2},
 			Tasks:                  []task.PendingBalanceTaskSnapshot{first, second, external},
 		})
-		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(token))
+		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(context.Background(), token))
 	})
 }
 
@@ -894,7 +894,7 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 		fixture := newPlacementSnapshotFixture(t)
 		snapshot := buildSnapshot(t, fixture)
 		require.NoError(t, fixture.meta.ResourceManager.DropResourceGroup(fixture.ctx, testSnapshotRG))
-		require.Equal(t, task.BalanceAdmissionRGChanged, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
+		require.Equal(t, task.BalanceAdmissionRGChanged, fixture.builder.Validate(context.Background(), AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
 
 		missing, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
 		require.Nil(t, missing)
@@ -909,7 +909,7 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 			Segment: &SegmentObjectKey{ReplicaID: testEligibleReplica, SegmentID: 101, Scope: querypb.DataScope_Historical},
 		}
 		fixture.dist.PublishNodeDistribution(1, fixture.node1Segments, fixture.node1Channels)
-		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(token))
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(context.Background(), token))
 	})
 
 	t.Run("source gone", func(t *testing.T) {
@@ -920,7 +920,7 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 			Segment: &SegmentObjectKey{ReplicaID: testEligibleReplica, SegmentID: 101, Scope: querypb.DataScope_Historical},
 		}
 		fixture.dist.PublishNodeDistribution(1, fixture.node1Segments[1:], fixture.node1Channels)
-		require.Equal(t, task.BalanceAdmissionSourceGone, fixture.builder.Validate(token))
+		require.Equal(t, task.BalanceAdmissionSourceGone, fixture.builder.Validate(context.Background(), token))
 	})
 
 	t.Run("target changed", func(t *testing.T) {
@@ -929,7 +929,7 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 		fixture.targetState.mu.Lock()
 		fixture.targetState.nextVersion[100]++
 		fixture.targetState.mu.Unlock()
-		require.Equal(t, task.BalanceAdmissionTargetChanged, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
+		require.Equal(t, task.BalanceAdmissionTargetChanged, fixture.builder.Validate(context.Background(), AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
 	})
 
 	t.Run("pending changed", func(t *testing.T) {
@@ -947,7 +947,7 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 				Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeGrow, SegmentID: 999, Scope: querypb.DataScope_Historical, Workload: 1}},
 			}},
 		})
-		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
+		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(context.Background(), AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
 	})
 
 	t.Run("leader changed", func(t *testing.T) {
@@ -955,14 +955,14 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 		snapshot := buildSnapshot(t, fixture)
 		fixture.node1Channels[0].View.Version++
 		fixture.dist.PublishNodeDistribution(1, fixture.node1Segments, fixture.node1Channels)
-		require.Equal(t, task.BalanceAdmissionLeaderMissing, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
+		require.Equal(t, task.BalanceAdmissionLeaderMissing, fixture.builder.Validate(context.Background(), AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
 	})
 
 	t.Run("node ineligible", func(t *testing.T) {
 		fixture := newPlacementSnapshotFixture(t)
 		snapshot := buildSnapshot(t, fixture)
 		fixture.nodes.Get(1).SetState(session.NodeStateStopping)
-		require.Equal(t, task.BalanceAdmissionNodeIneligible, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
+		require.Equal(t, task.BalanceAdmissionNodeIneligible, fixture.builder.Validate(context.Background(), AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
 	})
 }
 

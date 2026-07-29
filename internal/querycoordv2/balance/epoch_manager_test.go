@@ -105,7 +105,7 @@ func (s *epochManagerSnapshotSource) Build(
 	return &cloned, nil
 }
 
-func (s *epochManagerSnapshotSource) Validate(token AdmissionToken) task.BalanceAdmissionReason {
+func (s *epochManagerSnapshotSource) Validate(_ context.Context, token AdmissionToken) task.BalanceAdmissionReason {
 	s.mu.Lock()
 	validate := s.validate
 	s.mu.Unlock()
@@ -1783,7 +1783,12 @@ func TestEpochManagerAmbiguousQuiescentIsDegraded(t *testing.T) {
 	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
 
 	fixture.manager.Advance(context.Background(), request)
-	fixture.admitter.acceptedTasks()[0].Cancel(errors.New("executor outcome ambiguous"))
+	// The carry-over path is keyed on the ambiguous-execution marker, not on the
+	// task status alone: only a dispatched RPC whose application outcome was never
+	// observed may still take effect remotely. A cancellation carrying a plain
+	// error is a terminal fact and resolves definitively instead.
+	fixture.admitter.acceptedTasks()[0].Cancel(
+		task.NewAmbiguousExecutionError(errors.New("executor outcome ambiguous")))
 	result := fixture.manager.Advance(context.Background(), request)
 
 	require.Equal(t, EpochDegraded, result.State)
@@ -3060,6 +3065,55 @@ func TestEpochManagerFailedStatusBeforeDoneIsAmbiguous(t *testing.T) {
 	}
 
 	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(observation))
+}
+
+func TestEpochManagerTerminalRevertResolvesDefinitively(t *testing.T) {
+	// A task that ended with the object back on its source and absent from the
+	// target has a terminal, observable outcome. Classifying it ambiguous would
+	// re-observe the same state every cycle, so the object would never leave
+	// carryOver and would pin the resource group in EpochDegraded while holding
+	// its reservation on both charged nodes.
+	reverted := workObservation{
+		sourcePresent: true,
+		targetPresent: false,
+		done:          true,
+	}
+	for _, status := range []task.Status{
+		task.TaskStatusCanceled,
+		task.TaskStatusSucceeded,
+		task.TaskStatusFailed,
+	} {
+		observation := reverted
+		observation.status = status
+		require.Equal(t, terminalWorkGrowFailed, classifyTerminalWork(observation),
+			"status %v with source present and target absent must resolve definitively", status)
+	}
+
+	// The exits that must stay ambiguous: a dispatched RPC whose application
+	// outcome was never observed, and a task that has not reached a terminal state.
+	ambiguousErr := reverted
+	ambiguousErr.status = task.TaskStatusFailed
+	ambiguousErr.err = task.NewAmbiguousExecutionError(errors.New("lost response"))
+	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(ambiguousErr))
+
+	notDone := reverted
+	notDone.status = task.TaskStatusSucceeded
+	notDone.done = false
+	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(notDone))
+
+	started := reverted
+	started.status = task.TaskStatusStarted
+	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(started))
+
+	// Target resident but not yet serviceable stays ambiguous on readiness.
+	unready := workObservation{
+		sourcePresent: false,
+		targetPresent: true,
+		targetReady:   false,
+		status:        task.TaskStatusSucceeded,
+		done:          true,
+	}
+	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(unready))
 }
 
 func TestSnapshotTokenWithPendingRevisionDeepCopies(t *testing.T) {

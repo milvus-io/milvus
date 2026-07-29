@@ -1066,43 +1066,43 @@ func (scheduler *taskScheduler) pendingRevisionLocked(resourceGroup string, epoc
 }
 
 func (scheduler *taskScheduler) GetPendingBalanceTasks() PendingBalanceSnapshot {
-	for {
-		scheduler.pendingMu.RLock()
-		before := scheduler.pendingRevision
-		unscopedRevision := scheduler.pendingUnscopedRevision
-		rgRevisions := make(map[string]uint64, len(scheduler.pendingRevisionByRG))
-		for resourceGroup, revision := range scheduler.pendingRevisionByRG {
-			rgRevisions[resourceGroup] = revision
-		}
-		epochRevisions := make(map[BalanceEpochMeta]uint64, len(scheduler.pendingRevisionByEpoch))
-		for epoch, revision := range scheduler.pendingRevisionByEpoch {
-			epochRevisions[epoch] = revision
-		}
-		byID := make(map[int64]PendingBalanceTaskSnapshot)
-		copyTask := func(task Task) bool {
-			byID[task.ID()] = copyPendingBalanceTask(task)
-			return true
-		}
-		scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool { return copyTask(task) })
-		scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool { return copyTask(task) })
-		after := scheduler.pendingRevision
-		scheduler.pendingMu.RUnlock()
-		if before != after {
-			continue
-		}
+	// The only writer of the pending indexes and revisions, incrementPendingRevisionsLocked,
+	// runs under the exclusive pendingMu, so a single read section already yields a
+	// consistent snapshot and no revision recheck is needed. Collect task references
+	// under the read lock but deep-copy them after releasing it: the copy is O(all
+	// tasks) and would otherwise block every pending add, admit, and remove on the
+	// balance hot path for its full duration.
+	scheduler.pendingMu.RLock()
+	revision := scheduler.pendingRevision
+	unscopedRevision := scheduler.pendingUnscopedRevision
+	rgRevisions := make(map[string]uint64, len(scheduler.pendingRevisionByRG))
+	for resourceGroup, rgRevision := range scheduler.pendingRevisionByRG {
+		rgRevisions[resourceGroup] = rgRevision
+	}
+	epochRevisions := make(map[BalanceEpochMeta]uint64, len(scheduler.pendingRevisionByEpoch))
+	for epoch, epochRevision := range scheduler.pendingRevisionByEpoch {
+		epochRevisions[epoch] = epochRevision
+	}
+	pending := make(map[int64]Task)
+	collect := func(t Task) bool {
+		pending[t.ID()] = t
+		return true
+	}
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, t Task) bool { return collect(t) })
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, t Task) bool { return collect(t) })
+	scheduler.pendingMu.RUnlock()
 
-		tasks := make([]PendingBalanceTaskSnapshot, 0, len(byID))
-		for _, pending := range byID {
-			tasks = append(tasks, pending)
-		}
-		sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
-		return PendingBalanceSnapshot{
-			Revision:               after,
-			UnscopedRevision:       unscopedRevision,
-			ResourceGroupRevisions: rgRevisions,
-			EpochRevisions:         epochRevisions,
-			Tasks:                  tasks,
-		}
+	tasks := make([]PendingBalanceTaskSnapshot, 0, len(pending))
+	for _, t := range pending {
+		tasks = append(tasks, copyPendingBalanceTask(t))
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
+	return PendingBalanceSnapshot{
+		Revision:               revision,
+		UnscopedRevision:       unscopedRevision,
+		ResourceGroupRevisions: rgRevisions,
+		EpochRevisions:         epochRevisions,
+		Tasks:                  tasks,
 	}
 }
 

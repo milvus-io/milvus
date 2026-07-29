@@ -103,7 +103,7 @@ type EpochTaskFactory interface {
 
 type PlacementSnapshotSource interface {
 	Build(context.Context, string, []int64, []task.PendingBalanceTaskSnapshot) (*PlacementSnapshot, error)
-	Validate(AdmissionToken) task.BalanceAdmissionReason
+	Validate(context.Context, AdmissionToken) task.BalanceAdmissionReason
 }
 
 type EpochManagerOption func(*BalanceEpochManager)
@@ -696,7 +696,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 			if !manager.isCurrentLocked(runtime, active.epoch) {
 				return task.BalanceAdmissionStaleEpoch
 			}
-			return manager.snapshotBuilder.Validate(plan.Token)
+			return manager.snapshotBuilder.Validate(ctx, plan.Token)
 		})
 		admissionDeadlineExpired := manager.deadlineExpired(active, manager.now())
 		manager.publishAdmissionMetric(active.epoch.ResourceGroup, admission.Reason)
@@ -735,7 +735,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 }
 
 func (manager *BalanceEpochManager) advanceActiveLocked(
-	_ context.Context,
+	ctx context.Context,
 	runtime *rgRuntime,
 ) EpochAdvanceResult {
 	active := runtime.active
@@ -749,7 +749,7 @@ func (manager *BalanceEpochManager) advanceActiveLocked(
 		active.lastProgressAt = manager.now()
 	}
 	if active.terminalIntent == EpochIdle {
-		if reason := manager.currentInvalidation(runtime, active); reason != task.BalanceAdmissionAccepted {
+		if reason := manager.currentInvalidation(ctx, runtime, active); reason != task.BalanceAdmissionAccepted {
 			active.terminalIntent = EpochSuperseded
 			active.result.Rejected[reason]++
 		}
@@ -824,8 +824,16 @@ func (manager *BalanceEpochManager) reconcileLocked(
 			state = EpochCompleted
 		}
 	}
-	if state == EpochTimedOut && len(nextCarry) == 0 && !hadFailure {
-		state = EpochCompleted
+	if state == EpochTimedOut && len(nextCarry) == 0 {
+		// A deadline intent with nothing left unresolved is only an intent. The
+		// reported outcome is whatever the objects actually settled on, so a
+		// definitive Grow/Reduce failure surfaces as Degraded instead of hiding
+		// behind the timeout label.
+		if hadFailure {
+			state = EpochDegraded
+		} else {
+			state = EpochCompleted
+		}
 	}
 	if len(nextCarry) != 0 && state != EpochTimedOut && state != EpochSuperseded {
 		state = EpochDegraded
@@ -1178,6 +1186,7 @@ func (manager *BalanceEpochManager) progressDigest(
 }
 
 func (manager *BalanceEpochManager) currentInvalidation(
+	ctx context.Context,
 	runtime *rgRuntime,
 	active *activeEpoch,
 ) task.BalanceAdmissionReason {
@@ -1199,7 +1208,7 @@ func (manager *BalanceEpochManager) currentInvalidation(
 			continue
 		}
 		seen[identity] = struct{}{}
-		reason := manager.snapshotBuilder.Validate(AdmissionToken{
+		reason := manager.snapshotBuilder.Validate(ctx, AdmissionToken{
 			Snapshot:     active.token,
 			Epoch:        active.epoch,
 			CollectionID: plan.CollectionID,
@@ -1495,33 +1504,42 @@ func hashChannelRecords(detail hash.Hash64, role string, records []meta.ChannelS
 	}
 }
 
+// classifyTerminalWork decides an object's outcome from authoritative placement
+// once the task can no longer produce an unobserved remote side effect.
+//
+// Ambiguity is deliberately narrow, because an object classified ambiguous is
+// carried forward with its lock and its conservative source/target reservation
+// and cannot be replanned. Only three things keep an object ambiguous: the task
+// has not reached a terminal state, its error marks a dispatched RPC whose
+// application outcome was never observed, or the target exists but is not yet
+// serviceable. Everything else is decided by placement.
+//
+// The task's own status never overrides placement. A task reporting Succeeded
+// while the source is still resident and the target is absent has been reverted
+// by something outside this epoch, and a task cancelled without an ambiguous
+// error never reached the remote side. Both are terminal facts about where the
+// data is, so both resolve here rather than carrying forever. Treating them as
+// ambiguous instead re-observes the same state every cycle, which pins the
+// resource group in EpochDegraded and permanently reserves the charged nodes.
 func classifyTerminalWork(observation workObservation) terminalWorkClass {
 	if observation.desired() {
 		return terminalWorkCompleted
 	}
-	switch observation.status {
-	case task.TaskStatusStarted, task.TaskStatusCanceled:
+	if !observation.done || observation.status == task.TaskStatusStarted {
 		return terminalWorkAmbiguous
-	case task.TaskStatusFailed:
-		if !observation.done {
-			return terminalWorkAmbiguous
-		}
-		if task.IsAmbiguousExecutionError(observation.err) {
-			return terminalWorkAmbiguous
-		}
-		if observation.sourcePresent && !observation.targetPresent {
-			return terminalWorkGrowFailed
-		}
-		if observation.sourcePresent && observation.targetPresent {
-			return terminalWorkReduceFailed
-		}
-		if !observation.sourcePresent && !observation.targetPresent {
-			return terminalWorkLost
-		}
+	}
+	if task.IsAmbiguousExecutionError(observation.err) {
 		return terminalWorkAmbiguous
-	case task.TaskStatusSucceeded:
-		return terminalWorkAmbiguous
+	}
+	switch {
+	case observation.sourcePresent && !observation.targetPresent:
+		return terminalWorkGrowFailed
+	case observation.sourcePresent && observation.targetPresent:
+		return terminalWorkReduceFailed
+	case !observation.sourcePresent && !observation.targetPresent:
+		return terminalWorkLost
 	default:
+		// Target resident but not yet serviceable: readiness is still pending.
 		return terminalWorkAmbiguous
 	}
 }

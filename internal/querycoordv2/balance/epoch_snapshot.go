@@ -117,13 +117,13 @@ func (b *PlacementSnapshotBuilder) Build(
 	return nil, merr.WrapErrServiceUnavailableMsg("placement snapshot changed during all capture attempts")
 }
 
-func (b *PlacementSnapshotBuilder) Validate(token AdmissionToken) task.BalanceAdmissionReason {
-	if b.meta.ResourceManager.GetResourceGroup(context.Background(), token.Snapshot.ResourceGroup) == nil {
+func (b *PlacementSnapshotBuilder) Validate(ctx context.Context, token AdmissionToken) task.BalanceAdmissionReason {
+	if b.meta.ResourceManager.GetResourceGroup(ctx, token.Snapshot.ResourceGroup) == nil {
 		return task.BalanceAdmissionRGChanged
 	}
 	distribution := b.dist.Capture()
 	pending := b.capturePending()
-	current, stable, err := b.captureToken(context.Background(), token.Snapshot.ResourceGroup, distribution, pending)
+	current, stable, err := b.captureToken(ctx, token.Snapshot.ResourceGroup, distribution, pending)
 	if err != nil {
 		return task.BalanceAdmissionInternalError
 	}
@@ -479,6 +479,10 @@ func mergePendingTasks(
 	for _, pending := range merged {
 		tasks = append(tasks, pending)
 	}
+	// Anonymous carry-over entries share TaskID 0, a collection, and NilReplica, and
+	// are only distinguished by their actions, which is also what the anonymous merge
+	// key hashes. Without an action tie-break they compare equal under a non-stable
+	// sort and the order varies between builds of the same state.
 	sort.Slice(tasks, func(i, j int) bool {
 		if tasks[i].TaskID != tasks[j].TaskID {
 			return tasks[i].TaskID < tasks[j].TaskID
@@ -486,9 +490,28 @@ func mergePendingTasks(
 		if tasks[i].CollectionID != tasks[j].CollectionID {
 			return tasks[i].CollectionID < tasks[j].CollectionID
 		}
-		return tasks[i].ReplicaID < tasks[j].ReplicaID
+		if tasks[i].ReplicaID != tasks[j].ReplicaID {
+			return tasks[i].ReplicaID < tasks[j].ReplicaID
+		}
+		return pendingActionsOrder(tasks[i].Actions) < pendingActionsOrder(tasks[j].Actions)
 	})
 	return tasks
+}
+
+// pendingActionsOrder derives a stable ordering key from a pending task's actions so
+// that entries tying on identity still sort deterministically.
+func pendingActionsOrder(actions []task.PendingBalanceActionSnapshot) uint64 {
+	digest := newDigestWriter()
+	for _, action := range actions {
+		digest.writeInt64(action.NodeID)
+		digest.writeInt64(int64(action.Type))
+		digest.writeInt64(action.SegmentID)
+		digest.writeString(action.Channel)
+		digest.writeString(action.Shard)
+		digest.writeInt64(int64(action.Scope))
+		digest.writeInt64(int64(action.Workload))
+	}
+	return digest.sum64()
 }
 
 func filterPendingTask(
