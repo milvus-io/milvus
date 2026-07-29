@@ -56,6 +56,9 @@ extraConfigFiles:
         scalarField: true
         scalarIndex: true
         growingMmapEnabled: true
+    function:
+      pyUDF:
+        enabled: true
     quotaAndLimits:
       flushRate:
         collection:

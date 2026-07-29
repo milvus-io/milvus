@@ -105,6 +105,9 @@ extraConfigFiles:
         growingMmapEnabled: true
     queryCoord:
       checkNodeInReplicaInterval: 3
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true

@@ -54,6 +54,9 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    function:
+      pyUDF:
+        enabled: true
     quotaAndLimits:
       flushRate:
         collection:
