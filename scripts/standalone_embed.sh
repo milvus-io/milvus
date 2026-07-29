@@ -39,7 +39,18 @@ EOF
         echo "user.yaml file does not exist. Please try to create it in the current directory."
         exit 1
     fi
-    
+
+    # Pre-create the data volume directory with the correct ownership.
+    # The milvus container runs as a non-root user. Without this,
+    # Docker daemon creates the bind-mount directory as root, causing
+    # "permission denied" when the milvus process tries to write data.
+    MILVUS_IMAGE="milvusdb/milvus:v3.0-beta"
+    id_output=$(sudo docker run --rm --entrypoint id ${MILVUS_IMAGE})
+    MILVUS_UID=$(echo "$id_output" | cut -d'=' -f2 | cut -d'(' -f1)
+    MILVUS_GID=$(echo "$id_output" | cut -d'=' -f3 | cut -d'(' -f1)
+    mkdir -p $(pwd)/volumes/milvus
+    sudo chown -R ${MILVUS_UID}:${MILVUS_GID} $(pwd)/volumes/milvus
+
     sudo docker run -d \
         --name milvus-standalone \
         --security-opt seccomp:unconfined \
@@ -59,7 +70,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v3.0-beta \
+        ${MILVUS_IMAGE} \
         milvus run standalone  1> /dev/null
 }
 
