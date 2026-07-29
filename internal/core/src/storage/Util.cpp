@@ -1676,10 +1676,22 @@ IterateFieldDataFromManifest(
     // The window is bounded by bytes, not by batch count: a count-based cap
     // scales with the pool size and the per-batch size, so on a large pool
     // with 64MB batches it would admit gigabytes of decoded data per build
-    // (and several builds may run concurrently). The byte budget below caps
-    // the decoded-but-undelivered bytes regardless of batch size and thread
-    // count; at least two batches are always admitted so decode can still
-    // overlap with fetch when a single batch exceeds the budget.
+    // (and several builds may run concurrently). The byte budget below bounds
+    // the window regardless of batch size and thread count; at least two
+    // batches are always admitted so decode can still overlap with fetch when
+    // a single batch exceeds the budget.
+    //
+    // What is charged is each batch's *input* arrow bytes
+    // (EstimateRecordBatchBytes on the source slice), not the decoded
+    // FieldData that actually accumulates in `pending`. For internal native
+    // types the two are close, but on the external path
+    // NormalizeExternalArrowByType can inflate the decoded footprint by a
+    // type-dependent factor, so peak retained bytes can exceed
+    // kMaxInflightBytes by roughly that factor. Charging post-decode would
+    // need the decode to finish before admission, which is exactly the
+    // serialization this pipeline exists to avoid; the accounting is
+    // symmetric (deliver_front discharges what emplace_back charged), so this
+    // is a looser bound, not a leak.
     //
     // The decode tasks go to the LOW pool, not MIDDLE. Every production
     // caller of this function is an index build (DiskFileManagerImpl /
@@ -1779,7 +1791,8 @@ IterateFieldDataFromManifest(
             continue;
         }
 
-        // Estimate the decoded footprint of this slice for the byte budget.
+        // Charge this slice's arrow input bytes against the byte budget (see
+        // the note on the budget above for why input, not decoded, bytes).
         // A record batch may share a large row-group backing buffer with
         // adjacent slices, so count only the ranges this slice references.
         auto batch_bytes = EstimateRecordBatchBytes(*batch);
