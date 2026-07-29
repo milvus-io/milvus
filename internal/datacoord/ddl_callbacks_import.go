@@ -125,6 +125,17 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 	}
 
 	// Keep ordinary imports out of Milvus's own storage directories.
+	//
+	// Also not re-checked in createImportJobFromAck, but for a different reason
+	// than the gate above: this one is root-relative. It denies paths under
+	// THIS cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's
+	// storage roots together (ReplicateConfiguration carries connection params
+	// and pchannels only). With the same root on both sides -- the default, and
+	// the normal deployment -- the primary's check covers the secondary exactly;
+	// only under differing roots does the same key mean something different on
+	// each side. Recorded in the PR's Known limitations rather than guarded
+	// here, since reaching it also requires enableInReplicatingCluster=true,
+	// which defaults to false and refuses every import on a replicating cluster.
 	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
 		return err
 	}

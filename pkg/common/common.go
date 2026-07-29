@@ -218,6 +218,13 @@ const (
 	// under both minio.rootPath and localStorage.path.
 	WoodpeckerRootPath = "wp"
 
+	// LocalCacheRootPath storage path const for node-local caches (growing mmap,
+	// local chunk cache, bm25, file resources, expr cache), written under
+	// localStorage.path. Under common.storageType=local that path is also the
+	// ChunkManager root, which is why this is a top-level segment there.
+	// Layout: {localStorage.path}/cache/{nodeID}/{growing_mmap|local_chunk|...}/...
+	LocalCacheRootPath = "cache"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -251,6 +258,7 @@ var InternalStorageRootSegments = []string{
 	JSONStatsPath,
 	SnapshotRootPath,
 	WoodpeckerRootPath,
+	LocalCacheRootPath,
 }
 
 const (

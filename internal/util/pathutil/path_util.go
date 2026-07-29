@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -21,7 +22,12 @@ const (
 )
 
 const (
-	CachePathPrefix        = "cache"
+	// CachePathPrefix is the shared top-level directory for every node-local
+	// cache below. It aliases common.LocalCacheRootPath so the segment stays
+	// registered in common.InternalStorageRootSegments: under
+	// common.storageType=local this directory sits directly under the
+	// ChunkManager root, and import path validation refuses paths into it.
+	CachePathPrefix        = common.LocalCacheRootPath
 	GrowingMMapPathPrefix  = "growing_mmap"
 	LocalChunkPathPrefix   = "local_chunk"
 	BM25PathPrefix         = "bm25"

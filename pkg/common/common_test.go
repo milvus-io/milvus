@@ -766,11 +766,21 @@ func TestInternalStorageRootSegmentsIsExhaustive(t *testing.T) {
 				continue
 			}
 			for i, ident := range valueSpec.Names {
-				if i >= len(valueSpec.Values) {
+				// Fail rather than skip on anything this guard cannot read. A
+				// silently skipped constant is never classified, yet leaves
+				// checked/registered/nonTopLevelSegments balanced, so the
+				// assertion below still passes -- exactly the outcome the guard
+				// exists to prevent.
+				if !assert.Less(t, i, len(valueSpec.Values),
+					"%s has no value of its own (implicit repetition); this guard cannot classify it. "+
+						"Give it an explicit string literal.", ident.Name) {
 					continue
 				}
 				lit, ok := valueSpec.Values[i].(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
+				if !assert.True(t, ok && lit.Kind == token.STRING,
+					"%s is not a plain string literal; this guard cannot classify it. "+
+						"Use a literal, or move it out of this const block and classify it by hand.",
+					ident.Name) {
 					continue
 				}
 				value, err := strconv.Unquote(lit.Value)
