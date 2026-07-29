@@ -328,6 +328,7 @@ func (target *compactionTarget) Match(segment *SegmentInfo) bool {
 	return target.ScopeIn(segment) && target.rule != nil && target.rule.Match(segment)
 }
 
+// SegmentFilters returns the authoritative semantic match filter for the target.
 func (target *compactionTarget) SegmentFilters() []SegmentFilter {
 	return []SegmentFilter{SegmentFilterFunc(target.Match)}
 }

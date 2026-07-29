@@ -20,7 +20,10 @@ When the guard is enabled, a plain manual compaction request records one finite
 `REWRITE` target and returns the target id in the existing `compactionID`
 response field. DataCoord then drains that target through the v2
 `CompactionTriggerManager` loop and `compactionTargetReconciler` until no
-in-scope segment still matches the rewrite predicate.
+in-domain segment still matches the rewrite predicate. A request for an
+external collection remains unsupported. A request received while the
+collection has a pending snapshot or an unloaded protected snapshot RefIndex
+returns `ErrCompactionBlocked` without allocating or persisting a target.
 
 Guard disabled behavior remains the existing manual compaction flow.
 
@@ -44,29 +47,52 @@ label from live segment facts.
 
 ### Select and Execute
 
-The v2 trigger manager registers a guarded target reconciler. On each tick the
-reconciler reloads current segment facts from DataCoord meta and evaluates the
-shared finite rewrite predicate:
+The v2 trigger manager registers a guarded target reconciler. Reconciliation is
+target-first: each active target selects one complete semantic match set, asks
+the target whether that set is satisfied, and only then filters the matches for
+physical execution.
+
+The Base manual `REWRITE` universe contains healthy `Flushed` segments that are
+not importing, are neither L0 nor L2, and are not precisely protected by a
+loaded snapshot RefIndex. Known external collections are outside the universe,
+including for a cluster-wide target. Within that universe the finite rewrite
+predicate is:
 
 ```text
 ScopeIn(target, segment)
 && segment.create_ts < target.expectedTS
-&& segment.data_ts < target.expectedTS
+&& segment.data_ts <= target.expectedTS
 ```
 
 Legacy segments with `create_ts = 0` match the create timestamp gate. New data
-with `data_ts >= expectedTS` does not match, so ongoing ingest does not keep a
+with `data_ts > expectedTS` does not match, so ongoing ingest does not keep a
 finite target open forever.
 
-The reconciler uses `isNormalManualCompactionCandidate` only as an enqueue gate. A
-matched segment that is transiently ineligible remains matched and can be
-retried on a later tick. A matched segment freshened by another compaction
-inherits a newer `create_ts` and self-excludes.
+`isCompacting`, invisibility, and unsortedness are temporary execution blockers.
+They do not alter the match set or satisfaction result. When index-based
+compaction is enabled, execution uses the exact existing manual-path call:
+
+```text
+FilterInIndexedSegments(ctx, handler, meta, true, candidates...)
+```
+
+This preserves the current enabled/disabled, ready/unready, and no-index
+collection behavior. The existing `isNormalManualCompactionCandidate` helper is
+unchanged and remains the final Segment execution predicate.
+
+A collection-wide snapshot block is also an execution gate, not a semantic
+Segment filter. If the block appears after target creation, matching work stays
+pending and resumes after the block clears. For a cluster-wide target, only the
+blocked collection pauses. Compaction admission and completion both revalidate
+the collection block and precise per-Segment snapshot protection to close races
+after planning.
 
 ### Complete and Recover
 
-For this base slice, a target is satisfied when no in-scope segment matches the
-same predicate. The reconciler marks satisfied records `TARGET_STATE_INACTIVE`.
+For this base slice, a target is satisfied when no in-domain Segment matches the
+same predicate. A temporary execution blocker never makes a target satisfied.
+The reconciler marks satisfied records `TARGET_STATE_INACTIVE` after the
+target-first semantic sweep.
 
 No progress cursor is stored. Restart recovery comes from the durable target
 record plus durable segment `create_ts` values, then the v2 reconciler re-derives
@@ -85,6 +111,10 @@ the local wall clock. Replacement segments inherit the producing task
 - `OPTIMIZE`, `SIZE`, `SORT`, and `BACKFILL` target intents.
 - Tail tolerance with `tail_limit >= 1`.
 - Retiring the v1 compaction trigger path.
+- Persisted or structured execution-blocker causes, including derived invisible
+  publication causes.
+- Durable target source metadata and explicit satisfaction-cause logs.
+- Changing the existing retirement-update error contract.
 
 ## Test Plan
 
@@ -93,8 +123,20 @@ the local wall clock. Replacement segments inherit the producing task
   immediately.
 - Predicate coverage includes legacy `create_ts = 0`, newer `data_ts`, and
   self-exclusion after freshening.
-- Target reconciler enqueues only currently eligible manual candidates and marks
-  the target `TARGET_STATE_INACTIVE` when no match remains.
+- Candidate-stage coverage proves non-Flushed, importing, L0/L2, and precisely
+  snapshot-protected Segments are outside the manual match domain, while
+  compacting, invisible, unsorted, and index-rejected matches keep the target
+  active without emitting work.
+- Target-first coverage proves satisfaction uses the complete match set before
+  execution filtering and marks the target `TARGET_STATE_INACTIVE` only when no
+  match remains.
+- Snapshot coverage proves pre-existing blocks reject the manual request,
+  post-creation blocks pause and resume work, cluster-wide targets continue on
+  unblocked collections, and task admission rejects stale planned work.
+- External-collection coverage proves global targets do not match or emit work
+  for external collections.
+- Index coverage proves parity for index filtering enabled and disabled,
+  finished and unready indexes, and collections with no index.
 - Reload coverage verifies active records resume from persisted meta.
 - Build, DataCoord tests, metastore tests, static checks, and generated proto
   hygiene pass.
