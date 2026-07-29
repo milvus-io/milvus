@@ -44,6 +44,7 @@
 #include "common/Types.h"
 #include "fmt/core.h"
 #include "fmt/ranges.h"
+#include "folly/coro/BlockingWait.h"
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
@@ -659,17 +660,16 @@ ManifestGroupTranslator::get_cells_async(
         .read_window_bytes = FieldDataReadWindowBytes(),
         .load_priority = load_priority_,
     };
-    return LoadCellsAsync(
-               ctx,
-               std::move(cell_specs),
-               chunk_reader_,
-               [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                      int64_t cid) {
-                   return load_group_chunk(
-                       tables, static_cast<milvus::cachinglayer::cid_t>(cid));
-               },
-               options)
-        .get();
+    return folly::coro::blockingWait(LoadCellsAsync(
+        ctx,
+        std::move(cell_specs),
+        chunk_reader_,
+        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+               int64_t cid) {
+            return load_group_chunk(
+                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+        },
+        options));
 }
 
 std::unique_ptr<milvus::GroupChunk>
