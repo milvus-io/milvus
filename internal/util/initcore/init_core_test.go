@@ -17,8 +17,10 @@
 package initcore
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -184,6 +186,72 @@ func TestInitLoonReaderConfig(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Equal(t, before, EffectiveLoonReaderThreadPoolSize(),
 		"the reader pool must not be resized when the window is rejected")
+}
+
+// TestInitLoonReaderConfigSerialized pins the read-then-apply critical
+// section. Config-event handlers run inline on the updating goroutine with no
+// cross-handler ordering guarantee, and resizing the reader pool is not
+// idempotent, so a call that read a stale paramtable value must not be able to
+// apply after a newer one. Holding the lock must therefore block the whole
+// call, not just the C-side apply.
+func TestInitLoonReaderConfigSerialized(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	loonReaderConfigMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			loonReaderConfigMu.Unlock()
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- InitLoonReaderConfig(pt) }()
+
+	select {
+	case <-done:
+		t.Fatal("InitLoonReaderConfig completed while the config lock was held; read-then-apply is not serialized")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	loonReaderConfigMu.Unlock()
+	locked = false
+
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("InitLoonReaderConfig did not finish after the lock was released")
+	}
+}
+
+// TestInitLoonReaderConfigConcurrent exercises the same path from several
+// goroutines so `go test -race` covers the lock itself. Values stay at the
+// defaults: a non-zero pool size cannot be undone at runtime and would leak
+// into every later test in this binary.
+func TestInitLoonReaderConfigConcurrent(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
+	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = InitLoonReaderConfig(pt)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		assert.NoError(t, err, "concurrent call %d", i)
+	}
+	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
 }
 
 // TestRegisterLoonReaderConfigWatchers verifies the helper registers a handler
