@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -210,6 +211,8 @@ func (s *CommandStore) loadCache() {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
+	stale := 0
+
 	// Load configs
 	if resp, err := s.kv.Get(ctx, s.configPath, clientv3.WithPrefix()); err != nil {
 		mlog.Warn(ctx, "loadCache: failed to load configs", mlog.Err(err))
@@ -222,6 +225,21 @@ func (s *CommandStore) loadCache() {
 					mlog.String("key", string(kv.Key)))
 				continue
 			}
+			// Client-scoped configs are no longer accepted, and any that survive from
+			// before that rule are dead weight: their target client ID belongs to a
+			// process that is long gone and will never reappear under the same ID.
+			// Dropping them here doubles as the migration and as the cleanup for
+			// whatever already accumulated.
+			if strings.HasPrefix(cfg.TargetScope, "client:") {
+				if err := s.kv.Delete(ctx, string(kv.Key)); err != nil {
+					mlog.Warn(ctx, "loadCache: failed to drop stale client-scoped config",
+						mlog.Err(err),
+						mlog.String("key", string(kv.Key)))
+					// Leave it out of the cache regardless; it can never match a client.
+				}
+				stale++
+				continue
+			}
 			s.cache.configs[cfg.ConfigID] = &cfg
 		}
 	}
@@ -229,6 +247,10 @@ func (s *CommandStore) loadCache() {
 	// Calculate config hash
 	s.cache.configHash = s.computeConfigHash()
 
+	if stale > 0 {
+		mlog.Info(ctx, "loadCache: dropped stale client-scoped configs",
+			mlog.Int("dropped", stale))
+	}
 	mlog.Info(ctx, "loadCache: completed",
 		mlog.Int("commands", len(s.cache.commands)),
 		mlog.Int("configs", len(s.cache.configs)))
@@ -241,6 +263,19 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 	if req.Persistent && req.CommandType != "push_config" {
 		return "", merr.WrapErrParameterInvalid("push_config", req.CommandType,
 			"only push_config can be persistent")
+	}
+
+	// A client-scoped config must not be persistent. `client:<id>` names a running
+	// process, and client IDs are per-process: the SDK generates a fresh one on every
+	// start. A config that outlives the process it names can never match anything again,
+	// so it would sit in etcd forever while the operator believes the setting is in
+	// effect. Persistence is for scopes that outlive processes.
+	if req.Persistent && req.TargetClientId != "" {
+		return "", merr.WrapErrParameterInvalidMsg(
+			"a client-scoped config cannot be persistent: client IDs do not survive a client " +
+				"restart, so the config would never apply again. Push it as a one-time command " +
+				"(persistent=false) to configure the running client, or target a database or " +
+				"global scope for a setting that should outlive it")
 	}
 
 	cmdID := uuid.New().String()

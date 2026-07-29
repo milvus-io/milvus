@@ -377,12 +377,12 @@ func TestConfigHashConsistency(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, hash1)
 
-	// Add a config for client1 (scope: client:client1)
+	// Add a config for db1 (scope: database:db1)
 	cfgID1, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType:    "push_config",
 		Payload:        []byte(`{"a": 1}`),
 		Persistent:     true,
-		TargetClientId: "client1",
+		TargetDatabase: "db1",
 	})
 
 	_, hash2, err := store.ListConfigs(ctx)
@@ -399,7 +399,7 @@ func TestConfigHashConsistency(t *testing.T) {
 		CommandType:    "push_config",
 		Payload:        []byte(`{"b": 2}`),
 		Persistent:     true,
-		TargetClientId: "client2",
+		TargetDatabase: "db2",
 	})
 
 	_, hash4, _ := store.ListConfigs(ctx)
@@ -486,13 +486,13 @@ func TestRestartBehavior_MultipleConfigs(t *testing.T) {
 		CommandType:    "push_config",
 		Payload:        []byte(`{"setting": "value1"}`),
 		Persistent:     true,
-		TargetClientId: "client1",
+		TargetDatabase: "db1",
 	})
 	cfgID2, _ := store1.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType:    "push_config",
 		Payload:        []byte(`{"setting": "value2"}`),
 		Persistent:     true,
-		TargetClientId: "client2",
+		TargetDatabase: "db2",
 	})
 
 	_, hash1, _ := store1.ListConfigs(ctx)
@@ -666,7 +666,7 @@ func TestPayloadPreservation(t *testing.T) {
 			CommandType:    "push_config",
 			Payload:        payload,
 			Persistent:     true,
-			TargetClientId: fmt.Sprintf("client%d", i),
+			TargetDatabase: fmt.Sprintf("db%d", i),
 		})
 		require.NoError(t, err, "failed for payload %d", i)
 	}
@@ -1144,4 +1144,100 @@ func TestPushCommandAppliesDefaultTTL(t *testing.T) {
 		store.cacheMu.RUnlock()
 		assert.False(t, stillThere, "default TTL must actually reclaim the command")
 	})
+}
+
+func TestClientScopedConfigCannotBePersistent(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("rejected", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		_, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: "client-1",
+			Payload:        []byte(`{"sampling_rate":0.1}`),
+			Persistent:     true,
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "client-scoped config cannot be persistent")
+	})
+
+	t.Run("same config is fine as a one-time command", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: "client-1",
+			Payload:        []byte(`{"sampling_rate":0.1}`),
+			Persistent:     false,
+		})
+
+		require.NoError(t, err)
+		store.cacheMu.RLock()
+		cmd := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+		require.NotNil(t, cmd)
+		assert.Equal(t, "client:client-1", cmd.TargetScope)
+	})
+
+	t.Run("durable scopes still accept persistent configs", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		_, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType: "push_config",
+			Payload:     []byte(`{"sampling_rate":0.1}`),
+			Persistent:  true,
+		})
+		require.NoError(t, err, "global scope")
+
+		_, err = store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetDatabase: "db1",
+			Payload:        []byte(`{"sampling_rate":0.2}`),
+			Persistent:     true,
+		})
+		require.NoError(t, err, "database scope")
+	})
+}
+
+// TestLoadCacheDropsStaleClientScopedConfigs covers the migration: configs written before
+// the rule above are unreachable -- their client ID names a process that is gone -- so they
+// must not be loaded, and must be removed from etcd rather than left to accumulate.
+func TestLoadCacheDropsStaleClientScopedConfigs(t *testing.T) {
+	kv := newMockKV()
+
+	staleKey := "/test/configs/stale-id"
+	stale, _ := json.Marshal(storedConfig{
+		ConfigID:    "stale-id",
+		ConfigType:  "push_config",
+		Payload:     []byte(`{"sampling_rate":0.1}`),
+		CreateTime:  time.Now().UnixMilli(),
+		TargetScope: "client:long-gone-uuid",
+	})
+	require.NoError(t, kv.Put(context.Background(), staleKey, string(stale)))
+
+	liveKey := "/test/configs/live-id"
+	live, _ := json.Marshal(storedConfig{
+		ConfigID:    "live-id",
+		ConfigType:  "push_config",
+		Payload:     []byte(`{"sampling_rate":0.5}`),
+		CreateTime:  time.Now().UnixMilli(),
+		TargetScope: "database:db1",
+	})
+	require.NoError(t, kv.Put(context.Background(), liveKey, string(live)))
+
+	store := NewCommandStoreWithKV(kv, "/test/")
+
+	store.cacheMu.RLock()
+	_, staleLoaded := store.cache.configs["stale-id"]
+	_, liveLoaded := store.cache.configs["live-id"]
+	store.cacheMu.RUnlock()
+
+	assert.False(t, staleLoaded, "an unreachable client-scoped config must not be loaded")
+	assert.True(t, liveLoaded, "durable-scope configs must survive the migration")
+
+	resp, err := kv.Get(context.Background(), staleKey)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), resp.Count, "the stale config must be deleted from etcd, not just skipped")
 }

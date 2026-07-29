@@ -1300,11 +1300,14 @@
                         </div>
 
                         <div class="form-row" style="margin-top: 16px;">
-                            <div class="form-group" style="display: flex; align-items: center;">
+                            <div class="form-group" style="display: flex; align-items: center; flex-direction: column; align-items: flex-start;">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="configPersistent" checked>
-                                    Persistent (survives client restart)
+                                    Persistent (re-applied to matching clients)
                                 </label>
+                                <small id="configPersistentHint" style="color: var(--gray-400); margin-top: 4px; display: none;">
+                                    Not available for a client target: client IDs change on restart, so the config could never apply again. It will be sent once to the running client.
+                                </small>
                             </div>
                         </div>
 
@@ -2555,6 +2558,19 @@
             const scope = document.getElementById('configTargetScope').value;
             document.getElementById('configClientIdGroup').style.display = scope === 'client' ? 'block' : 'none';
             document.getElementById('configDatabaseIdGroup').style.display = scope === 'database' ? 'block' : 'none';
+
+            // A client-scoped config cannot be persistent: client IDs are per-process, so a
+            // persisted config would never match again after the client restarts. The server
+            // rejects the combination; disable it here rather than let the request fail.
+            const persistentBox = document.getElementById('configPersistent');
+            const hint = document.getElementById('configPersistentHint');
+            const clientScoped = scope === 'client';
+
+            persistentBox.disabled = clientScoped;
+            if (clientScoped) {
+                persistentBox.checked = false;
+            }
+            hint.style.display = clientScoped ? 'block' : 'none';
         }
 
         function setConfigEnabled(value) {
@@ -2636,7 +2652,8 @@
                         target_database: targetScope === 'database' ? targetDatabase : '',
                         payload: Object.keys(payload).length > 0 ? JSON.stringify(payload) : '',
                         ttl_seconds: 3600,
-                        persistent: persistent
+                        // Client-scoped configs are one-time by construction; see updateConfigTargetClient.
+                        persistent: targetScope === 'client' ? false : persistent
                     })
                 });
 
