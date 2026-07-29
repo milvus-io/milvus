@@ -324,13 +324,27 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		return nil
 	}
 
-	// Step 3: Submit all segment pairs to execution pool for parallel processing
+	// Step 3: Claim the whole batch against a concurrent Abort, then release the
+	// lock before submitting anything.
+	//
+	// The aborted check and the wg.Add must be atomic: once Abort observes
+	// aborted == false it is guaranteed to see the full counter in wg.Wait(),
+	// and once it sets aborted == true no further batch is accepted.
+	//
+	// The lock must NOT span the submit loop. GetExecPool().Submit blocks when
+	// the pool has no idle worker, and every submitted closure takes the same
+	// mutex in recordCopiedFiles. Holding it across the loop deadlocks any task
+	// with more segments than the pool has workers: the accepted closures finish
+	// copying and block on the mutex, so no worker ever frees up, so the next
+	// Submit blocks forever while still holding the mutex they are waiting on.
 	t.runtime.mu.Lock()
 	if t.runtime.aborted {
 		t.runtime.mu.Unlock()
 		return nil
 	}
 	t.runtime.wg.Add(len(sources))
+	t.runtime.mu.Unlock()
+
 	futures := make([]*conc.Future[any], 0, len(sources))
 	for i := range sources {
 		source := sources[i]
@@ -341,7 +355,6 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		})
 		futures = append(futures, future)
 	}
-	t.runtime.mu.Unlock()
 
 	return futures
 }
