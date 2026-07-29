@@ -13,6 +13,7 @@
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
+#include <folly/system/ThreadName.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
 #include <time.h>
@@ -177,8 +178,11 @@ MakeWarmupTestColumnGroups() {
 
 class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
  public:
-    explicit WarmupTestChunkReader(std::thread::id* chunk_rows_thread = nullptr)
-        : chunk_rows_thread_(chunk_rows_thread) {
+    explicit WarmupTestChunkReader(
+        std::thread::id* chunk_rows_thread = nullptr,
+        std::string* chunk_rows_thread_name = nullptr)
+        : chunk_rows_thread_(chunk_rows_thread),
+          chunk_rows_thread_name_(chunk_rows_thread_name) {
     }
 
     size_t
@@ -216,11 +220,16 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
         if (chunk_rows_thread_ != nullptr) {
             *chunk_rows_thread_ = std::this_thread::get_id();
         }
+        if (chunk_rows_thread_name_ != nullptr) {
+            *chunk_rows_thread_name_ =
+                folly::getCurrentThreadName().value_or("");
+        }
         return std::vector<uint64_t>{1};
     }
 
  private:
     std::thread::id* chunk_rows_thread_;
+    std::string* chunk_rows_thread_name_;
 };
 
 class WarmupTestReader : public milvus_storage::api::Reader {
@@ -229,11 +238,13 @@ class WarmupTestReader : public milvus_storage::api::Reader {
         std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
         bool allow_sync_open = true,
         arrow::Status async_open_status = arrow::Status::OK(),
-        std::thread::id* chunk_rows_thread = nullptr)
+        std::thread::id* chunk_rows_thread = nullptr,
+        std::string* chunk_rows_thread_name = nullptr)
         : column_groups_(std::move(column_groups)),
           allow_sync_open_(allow_sync_open),
           async_open_status_(std::move(async_open_status)),
-          chunk_rows_thread_(chunk_rows_thread) {
+          chunk_rows_thread_(chunk_rows_thread),
+          chunk_rows_thread_name_(chunk_rows_thread_name) {
     }
 
     std::shared_ptr<milvus_storage::api::ColumnGroups>
@@ -287,13 +298,15 @@ class WarmupTestReader : public milvus_storage::api::Reader {
  private:
     std::unique_ptr<milvus_storage::api::ChunkReader>
     MakeChunkReader() const {
-        return std::make_unique<WarmupTestChunkReader>(chunk_rows_thread_);
+        return std::make_unique<WarmupTestChunkReader>(chunk_rows_thread_,
+                                                       chunk_rows_thread_name_);
     }
 
     std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
     bool allow_sync_open_;
     arrow::Status async_open_status_;
     std::thread::id* chunk_rows_thread_;
+    std::string* chunk_rows_thread_name_;
 };
 
 class CancellationObservingIndexTranslator
@@ -5054,7 +5067,7 @@ TEST(SealedSegmentCowState, StagedStorageV2ColumnGroupUsesAsyncReader) {
 }
 
 TEST(SealedSegmentCowState,
-     StagedStorageV2ColumnGroupPreparesCacheSlotOffCallerThread) {
+     StagedStorageV2ColumnGroupPreparesCacheSlotOnMiddlePool) {
     auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
@@ -5070,11 +5083,13 @@ TEST(SealedSegmentCowState,
 
     const auto caller_thread = std::this_thread::get_id();
     std::thread::id chunk_rows_thread = caller_thread;
+    std::string chunk_rows_thread_name;
     auto column_groups = MakeWarmupTestColumnGroups();
     auto reader = std::make_shared<WarmupTestReader>(column_groups,
                                                      /*allow_sync_open=*/true,
                                                      arrow::Status::OK(),
-                                                     &chunk_rows_thread);
+                                                     &chunk_rows_thread,
+                                                     &chunk_rows_thread_name);
     ASSERT_NO_THROW(sealed->TestStageLoadColumnGroupWithReader(
         column_groups,
         std::make_shared<milvus_storage::api::Properties>(),
@@ -5086,6 +5101,7 @@ TEST(SealedSegmentCowState,
         /*eager_load=*/true));
 
     EXPECT_NE(chunk_rows_thread, caller_thread);
+    EXPECT_EQ(chunk_rows_thread_name, "MIDD_SEGC_POOL");
 }
 
 TEST(SealedSegmentCowState,

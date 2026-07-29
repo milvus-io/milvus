@@ -48,7 +48,9 @@ struct AsyncLoadPipelineOptions {
     int64_t read_window_bytes{0};
     milvus::proto::common::LoadPriority load_priority{
         milvus::proto::common::LoadPriority::HIGH};
-    // A custom executor must support Folly KeepAlive, or otherwise outlive the
+    // A single-priority custom executor is scheduled through add(). Executors
+    // reporting multiple priorities must implement addWithPriority(). Every
+    // custom executor must support Folly KeepAlive, or otherwise outlive the
     // returned task and all work started by it.
     folly::Executor* executor{nullptr};
 };

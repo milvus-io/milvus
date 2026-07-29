@@ -156,6 +156,23 @@ class KeepAliveRecordingExecutor : public folly::Executor {
     std::atomic<size_t> releases_{0};
 };
 
+class AddOnlyInlineExecutor final : public folly::Executor {
+ public:
+    void
+    add(folly::Func func) override {
+        calls_.fetch_add(1);
+        func();
+    }
+
+    size_t
+    Calls() const {
+        return calls_.load();
+    }
+
+ private:
+    std::atomic<size_t> calls_{0};
+};
+
 class FakeChunkReader : public milvus_storage::api::ChunkReader {
  public:
     explicit FakeChunkReader(InlineRecordingExecutor* executor)
@@ -723,6 +740,32 @@ TEST_F(AsyncLoadPipelineTest, MapsLoadPriorityToBudgetAndExecutor) {
                         priorities.end(),
                         futures::ExecutePriority::LOW),
               priorities.end());
+}
+
+TEST_F(AsyncLoadPipelineTest, SupportsSinglePriorityCustomExecutor) {
+    AddOnlyInlineExecutor executor;
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto options = Options();
+    options.executor = &executor;
+
+    auto results = folly::coro::blockingWait(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [](const std::vector<std::shared_ptr<arrow::Table>>& tables, int64_t) {
+            EXPECT_FALSE(tables.empty());
+            return std::make_unique<GroupChunk>();
+        },
+        options));
+
+    ASSERT_EQ(results.size(), 1);
+    EXPECT_EQ(reader->AsyncCalls(), 1);
+    EXPECT_GT(executor.Calls(), 0);
 }
 
 TEST_F(AsyncLoadPipelineTest, HighPriorityAdmissionPassesQueuedLowLoad) {
