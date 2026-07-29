@@ -67,10 +67,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
-		for _, segment := range matches {
-			if !isNormalManualCompactionExecutionCandidate(reconciler.meta, segment) {
-				continue
-			}
+		for _, segment := range reconciler.filterExecutable(matches) {
 			events[TriggerTypeTarget] = append(events[TriggerTypeTarget], compactionTargetView(record, segment))
 		}
 	}
@@ -85,6 +82,24 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 	sortCompactionTargetViews(events[TriggerTypeTarget])
 	return events, nil
+}
+
+func (reconciler *compactionTargetReconciler) filterExecutable(matches []*SegmentInfo) []*SegmentInfo {
+	blockedCollections := make(map[int64]bool)
+	executable := make([]*SegmentInfo, 0, len(matches))
+	for _, segment := range matches {
+		collectionID := segment.GetCollectionID()
+		blocked, checked := blockedCollections[collectionID]
+		if !checked {
+			blocked = reconciler.meta.isCollectionCompactionBlocked(collectionID)
+			blockedCollections[collectionID] = blocked
+		}
+		if blocked || !isNormalManualCompactionExecutionCandidate(reconciler.meta, segment) {
+			continue
+		}
+		executable = append(executable, segment)
+	}
+	return executable
 }
 
 func compactionTargetView(record *datapb.CompactionTarget, segment *SegmentInfo) CompactionView {

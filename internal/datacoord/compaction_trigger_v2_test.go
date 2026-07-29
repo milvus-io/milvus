@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -378,6 +379,30 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerRecordsRewriteTargetWhe
 	segmentIDs, ok := compactionTargetSegmentIDs(record)
 	s.True(ok)
 	s.Equal([]int64{10, 20}, segmentIDs)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerRejectsRewriteTargetWhenSnapshotBlocksCollection() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+	catalog, records, _, _ := newCompactionTargetTestCatalog(s.T())
+	targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.meta.compactionTargetMeta = targetMeta
+	s.meta.snapshotMeta = createTestSnapshotMetaLoaded(s.T())
+	s.meta.snapshotMeta.SetSnapshotPending(s.testLabel.CollectionID)
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
+
+	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+	})
+
+	s.ErrorIs(err, merr.ErrCompactionBlocked)
+	s.Zero(targetID)
+	s.Empty(records)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {

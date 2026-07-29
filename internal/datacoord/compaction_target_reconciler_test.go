@@ -288,6 +288,66 @@ func TestCompactionTargetReconcilerKeepsTemporarilyBlockedMatchActive(t *testing
 	}
 }
 
+func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+	)
+	meta.snapshotMeta = createTestSnapshotMetaLoaded(t)
+	meta.snapshotMeta.SetSnapshotPending(1)
+
+	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, events[TriggerTypeTarget])
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+
+	meta.snapshotMeta.ClearSnapshotPending(1)
+	events, err = newCompactionTargetReconciler(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
+func TestCompactionTargetReconcilerGlobalTargetContinuesUnblockedCollections(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:   100,
+		Intent:     datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS: 200,
+		TailLimit:  0,
+		State:      datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+		sortedTargetSegment(2, 2, 20, "ch-2", 0, 199, false),
+	)
+	meta.snapshotMeta = createTestSnapshotMetaLoaded(t)
+	meta.snapshotMeta.SetSnapshotPending(1)
+
+	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, int64(2), events[TriggerTypeTarget][0].GetGroupLabel().CollectionID)
+	require.Equal(t, []int64{2}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
 func newLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ...*datapb.CompactionTarget) *compactionTargetMeta {
 	t.Helper()
 	catalog, _, _, _ := newCompactionTargetTestCatalog(t, records...)
