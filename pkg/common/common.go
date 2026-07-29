@@ -252,7 +252,9 @@ const (
 )
 
 // InternalStorageRootSegments lists the top-level directories that Milvus
-// creates directly under the storage root path (ChunkManager.RootPath()).
+// creates directly under the storage root path (ChunkManager.RootPath())
+// regardless of storage type. Segments that are rooted at localStorage.path
+// only live in LocalOnlyStorageRootSegments below.
 //
 // Import path validation in datacoord refuses ordinary imports that point into
 // any of these, so a directory missing from this list is a directory that bulk
@@ -285,6 +287,22 @@ var InternalStorageRootSegments = []string{
 	JSONStatsPath,
 	SnapshotRootPath,
 	WoodpeckerRootPath,
+}
+
+// LocalOnlyStorageRootSegments lists top-level directories that are rooted at
+// localStorage.path rather than at the ChunkManager root.
+//
+// They coincide with the ChunkManager root only under common.storageType=local,
+// where datacoord's root IS localStorage.path. Under a remote (MinIO/S3) root
+// Milvus never writes these keys, so denying them there would reject caller
+// paths for no benefit -- notably <minio.rootPath>/tmp/..., a plausible staging
+// location. Consumers must therefore append this list only when the storage
+// type is local; see ValidateImportFilePaths.
+//
+// Woodpecker is deliberately NOT here: it writes under both minio.rootPath and
+// localStorage.path (pkg/streaming/walimpls/impls/wp/builder.go), so it belongs
+// in the unconditional list above.
+var LocalOnlyStorageRootSegments = []string{
 	LocalCacheRootPath,
 	RawDataRootPath,
 	NgramLogPath,

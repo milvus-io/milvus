@@ -820,9 +820,20 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 		return nil
 	}
 
+	// Segments rooted at localStorage.path share the ChunkManager root only when
+	// the storage type is local. Denying them on a MinIO-backed cluster would
+	// reject caller paths Milvus never writes -- <minio.rootPath>/tmp/... being
+	// the one people actually stage imports under.
+	segments := make([]string, 0,
+		len(common.InternalStorageRootSegments)+len(common.LocalOnlyStorageRootSegments))
+	segments = append(segments, common.InternalStorageRootSegments...)
+	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
+		segments = append(segments, common.LocalOnlyStorageRootSegments...)
+	}
+
 	rootPath := cm.RootPath()
-	denied := make([]string, 0, len(common.InternalStorageRootSegments))
-	for _, segment := range common.InternalStorageRootSegments {
+	denied := make([]string, 0, len(segments))
+	for _, segment := range segments {
 		denied = append(denied, normalizeStorageKey(path.Join(rootPath, segment)))
 	}
 
