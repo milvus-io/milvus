@@ -796,11 +796,11 @@ TYPED_TEST_P(HybridIndexTestInverted,
     } else {
         index_size += 1024;
     }
-    auto stream_overhead =
-        static_cast<uint64_t>(storage::EntryStreamMaxTransientBytes(
-            storage::SaturatingMultiply(index_size,
-                                        storage::kFileStreamBufferMultiplier),
-            max_task_transient_bytes));
+    auto stream_overhead = static_cast<uint64_t>(storage::SaturatingMultiply(
+        index_size, storage::kFileStreamBufferMultiplier));
+    auto bounded_stream_overhead = storage::EntryStreamMaxTransientBytes(
+        stream_overhead, max_task_transient_bytes);
+    ASSERT_GT(stream_overhead, bounded_stream_overhead);
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
@@ -957,7 +957,13 @@ TYPED_TEST_P(HybridIndexTestInverted,
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,
-             EncryptedResourceEstimateUsesCollectionId) {
+             EncryptedFileAwareResourceEstimateUsesFullOverhead) {
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto budget_cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    budget.SetCapacityBytes(1);
+
     auto collection_id = this->field_meta_.collection_id;
     auto cipher_plugin =
         std::make_shared<milvus::test::CollectionBoundPlannerCipherPlugin>(
@@ -975,6 +981,8 @@ TYPED_TEST_P(HybridIndexTestInverted,
                                  static_cast<int>(this->type_));
     auto remote_path =
         file_manager.GetRemoteIndexObjectPrefix() + "/" + file_name;
+    constexpr size_t slice_size = storage::kStreamSliceAlignment;
+    std::vector<uint8_t> entry_data(2 * slice_size, 0x5a);
 
     {
         storage::IndexEntryEncryptedLocalWriter writer(
@@ -983,7 +991,9 @@ TYPED_TEST_P(HybridIndexTestInverted,
             cipher_plugin,
             /*ez_id=*/7,
             collection_id,
-            this->chunk_manager_->GetRootPath());
+            this->chunk_manager_->GetRootPath(),
+            slice_size);
+        writer.WriteEntry("data", entry_data.data(), entry_data.size());
         writer.PutMeta(INDEX_TYPE,
                        static_cast<uint8_t>(ScalarIndexType::INVERTED));
         writer.Finish();
@@ -1009,8 +1019,15 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
     ASSERT_TRUE(stream_load_info.has_value());
     EXPECT_TRUE(stream_load_info->encrypted);
+    ASSERT_GT(stream_load_info->total_transient_bytes,
+              stream_load_info->max_task_transient_bytes);
+    ASSERT_LT(storage::EntryStreamMaxTransientBytes(
+                  stream_load_info->total_transient_bytes,
+                  stream_load_info->max_task_transient_bytes),
+              stream_load_info->total_transient_bytes);
     EXPECT_EQ(request.final_memory_cost, 0);
     EXPECT_EQ(request.final_disk_cost, index_size);
+    EXPECT_EQ(request.max_memory_cost, stream_load_info->total_transient_bytes);
 }
 
 TYPED_TEST_P(HybridIndexTestInverted, ScalarV3LoadingRequiresStreamLoadInfo) {
@@ -1257,7 +1274,7 @@ REGISTER_TYPED_TEST_SUITE_P(
     HybridIndexTestInverted,
     ResourceEstimateUsesInternalInvertedIndexType,
     ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds,
-    EncryptedResourceEstimateUsesCollectionId,
+    EncryptedFileAwareResourceEstimateUsesFullOverhead,
     ScalarV3LoadingRequiresStreamLoadInfo);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,

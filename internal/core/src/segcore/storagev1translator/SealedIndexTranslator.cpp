@@ -92,9 +92,6 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
-    // TODO: Recompute scalar V3 stream estimates when refreshable load-pool
-    // sizes grow. CacheSlot snapshots the estimate at translator construction
-    // and reuses it on reload.
     std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
     load_resource_request_ = EstimateLoadResource(&stream_load_info);
 

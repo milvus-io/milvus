@@ -116,6 +116,13 @@ ScalarIndexStreamMemoryOverhead(
             milvus::storage::kFileStreamBufferMultiplier);
     }
 
+    // File-aware scalar V3 loads bind this request-local overhead to the
+    // shared load memory Group. Report the full overhead so the Group can
+    // apply its latest Budget/Executor policy to existing CacheSlots.
+    if (stream_load_info.has_value()) {
+        return total_transient_bytes;
+    }
+
     return milvus::storage::EntryStreamMaxTransientBytes(
         total_transient_bytes, max_task_transient_bytes);
 }
