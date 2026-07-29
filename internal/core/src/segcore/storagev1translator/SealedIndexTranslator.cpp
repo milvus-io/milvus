@@ -93,7 +93,9 @@ SealedIndexTranslator::SealedIndexTranslator(
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
     std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
-    load_resource_request_ = EstimateLoadResource(&stream_load_info);
+    bool use_shared_memory_overhead_group = false;
+    load_resource_request_ = EstimateLoadResource(
+        &stream_load_info, &use_shared_memory_overhead_group);
 
     auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
@@ -102,33 +104,36 @@ SealedIndexTranslator::SealedIndexTranslator(
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
-        auto max_task_overhead =
-            stream_load_info->encrypted
-                ? stream_load_info->max_task_transient_bytes
-                : milvus::storage::SaturatingMultiply(
-                      milvus::storage::MaxEntryStreamTaskBytes(),
-                      milvus::storage::kFileStreamBufferMultiplier);
-        auto memory_group =
-            milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
-                milvus::ThreadPools::GetLoadExecutorWorkers());
-        meta_.loading_overhead_config =
-            milvus::cachinglayer::LoadingOverheadConfig{
-                milvus::cachinglayer::LoadingOverheadGroupBinding{
-                    std::move(memory_group), PolicyBytes(max_task_overhead)},
-                // FIXME: Bind scalar V3 file overhead to the executor-backed
-                // file group after every file-backed load path writes through
-                // positioned tasks on the HIGH/LOW load executors. Some paths
-                // still use FileWriter or its independent worker pool, so
-                // binding them now would under-reserve concurrent disk
-                // overhead.
-                std::nullopt};
+        if (use_shared_memory_overhead_group) {
+            auto max_task_overhead =
+                stream_load_info->encrypted
+                    ? stream_load_info->max_task_transient_bytes
+                    : milvus::storage::SaturatingMultiply(
+                          milvus::storage::MaxEntryStreamTaskBytes(),
+                          milvus::storage::kFileStreamBufferMultiplier);
+            auto memory_group =
+                milvus::storage::LoadMemoryOverheadGroup::GetInstance()
+                    .GetOrCreate(milvus::ThreadPools::GetLoadExecutorWorkers());
+            meta_.loading_overhead_config =
+                milvus::cachinglayer::LoadingOverheadConfig{
+                    milvus::cachinglayer::LoadingOverheadGroupBinding{
+                        std::move(memory_group),
+                        PolicyBytes(max_task_overhead)},
+                    // FIXME: Bind scalar V3 file overhead to the executor-backed
+                    // file group after every file-backed load path writes through
+                    // positioned tasks on the HIGH/LOW load executors. Some paths
+                    // still use FileWriter or its independent worker pool, so
+                    // binding them now would under-reserve concurrent disk
+                    // overhead.
+                    std::nullopt};
+        }
     }
 }
 
 LoadResourceRequest
 SealedIndexTranslator::EstimateLoadResource(
-    std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info)
-    const {
+    std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info,
+    bool* use_shared_memory_overhead_group) const {
     auto estimated =
         milvus::index::IndexFactory::GetInstance().IndexLoadResource(
             index_load_info_.field_type,
@@ -141,7 +146,8 @@ SealedIndexTranslator::EstimateLoadResource(
             index_load_info_.dim,
             index_load_info_.index_files,
             file_manager_context_,
-            stream_load_info);
+            stream_load_info,
+            use_shared_memory_overhead_group);
     if (index_load_info_.load_resource_request.has_value()) {
         return *index_load_info_.load_resource_request;
     }

@@ -77,6 +77,7 @@ ScalarIndexStreamMemoryOverhead(
     int32_t scalar_version,
     bool encrypted,
     bool file_stream,
+    bool use_shared_memory_overhead_group,
     const std::optional<storage::EntryStreamLoadInfo>& stream_load_info =
         std::nullopt) {
     if (index_size_in_bytes == 0) {
@@ -116,10 +117,10 @@ ScalarIndexStreamMemoryOverhead(
             milvus::storage::kFileStreamBufferMultiplier);
     }
 
-    // File-aware scalar V3 loads bind this request-local overhead to the
-    // shared load memory Group. Report the full overhead so the Group can
-    // apply its latest Budget/Executor policy to existing CacheSlots.
-    if (stream_load_info.has_value()) {
+    // Grouped scalar V3 loads report the full stream overhead so the shared
+    // Group can apply its Budget/Executor bound across CacheSlots. Request-
+    // local paths keep only the bounded runtime peak.
+    if (use_shared_memory_overhead_group && stream_load_info.has_value()) {
         return total_transient_bytes;
     }
 
@@ -438,9 +439,13 @@ IndexFactory::IndexLoadResource(
     int64_t dim,
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& file_manager_context,
-    std::optional<storage::EntryStreamLoadInfo>* stream_load_info) {
+    std::optional<storage::EntryStreamLoadInfo>* stream_load_info,
+    bool* use_shared_memory_overhead_group) {
     if (stream_load_info != nullptr) {
         stream_load_info->reset();
+    }
+    if (use_shared_memory_overhead_group != nullptr) {
+        *use_shared_memory_overhead_group = false;
     }
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
@@ -460,7 +465,8 @@ IndexFactory::IndexLoadResource(
                                    num_rows,
                                    index_files,
                                    file_manager_context,
-                                   stream_load_info);
+                                   stream_load_info,
+                                   use_shared_memory_overhead_group);
 }
 
 LoadResourceRequest
@@ -689,7 +695,8 @@ IndexFactory::ScalarIndexLoadResource(
                                        index_params,
                                        mmap_enable,
                                        num_rows,
-                                       std::nullopt);
+                                       std::nullopt,
+                                       false);
 }
 
 LoadResourceRequest
@@ -700,7 +707,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info) {
+    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
+    bool use_shared_memory_overhead_group) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -728,6 +736,7 @@ IndexFactory::ScalarIndexLoadResourceImpl(
                                         scalar_version,
                                         encrypted_stream,
                                         file_stream,
+                                        use_shared_memory_overhead_group,
                                         stream_load_info);
 
     LoadResourceRequest request{};
@@ -838,7 +847,8 @@ IndexFactory::ScalarIndexLoadResource(
     int64_t num_rows,
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& file_manager_context,
-    std::optional<storage::EntryStreamLoadInfo>* stream_load_info) {
+    std::optional<storage::EntryStreamLoadInfo>* stream_load_info,
+    bool* use_shared_memory_overhead_group) {
     auto index_type_it = index_params.find("index_type");
     AssertInfo(index_type_it != index_params.end(), "index type is empty");
     std::optional<storage::EntryStreamLoadInfo> inspected_stream_load_info;
@@ -884,13 +894,27 @@ IndexFactory::ScalarIndexLoadResource(
         }
     }
 
+    const auto& resolved_index_type = resolved_params.at("index_type");
+    // BITMAP staging and frozen-conversion buffers are allocated by the
+    // request itself, outside the entry-stream executor and transient budget.
+    // Keep their overhead request-local. An unresolved HYBRID may also select
+    // BITMAP at load time, so it must use the same conservative path.
+    auto use_shared_group =
+        scalar_version >= 3 &&
+        resolved_index_type != milvus::index::BITMAP_INDEX_TYPE &&
+        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE;
+    if (use_shared_memory_overhead_group != nullptr) {
+        *use_shared_memory_overhead_group = use_shared_group;
+    }
+
     return ScalarIndexLoadResourceImpl(field_type,
                                        index_version,
                                        index_size_in_bytes,
                                        resolved_params,
                                        mmap_enable,
                                        num_rows,
-                                       inspected_stream_load_info);
+                                       inspected_stream_load_info,
+                                       use_shared_group);
 }
 
 IndexBasePtr

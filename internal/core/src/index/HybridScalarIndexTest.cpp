@@ -667,6 +667,130 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
     EXPECT_FALSE(request.has_raw_data);
 }
 
+TYPED_TEST_P(HybridIndexTestV1,
+             BitmapResourceEstimateUsesBoundedStreamOverhead) {
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto budget_cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    budget.SetCapacityBytes(1);
+
+    auto collection_id = this->field_meta_.collection_id;
+    auto cipher_plugin =
+        std::make_shared<milvus::test::CollectionBoundPlannerCipherPlugin>(
+            collection_id);
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.addPluginForTest(cipher_plugin);
+    auto plugin_cleanup = folly::makeGuard(
+        [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+    storage::MemFileManagerImpl file_manager(ctx);
+    auto remote_path =
+        file_manager.GetRemoteIndexObjectPrefix() + "/encrypted_bitmap";
+    constexpr size_t slice_size = storage::kStreamSliceAlignment;
+    std::vector<uint8_t> entry_data(4 * slice_size, 0x5a);
+
+    {
+        storage::IndexEntryEncryptedLocalWriter writer(
+            remote_path,
+            this->fs_,
+            cipher_plugin,
+            /*ez_id=*/7,
+            collection_id,
+            this->chunk_manager_->GetRootPath(),
+            slice_size);
+        writer.WriteEntry(
+            BITMAP_INDEX_DATA, entry_data.data(), entry_data.size());
+        writer.PutMeta(INDEX_TYPE,
+                       static_cast<uint8_t>(ScalarIndexType::BITMAP));
+        writer.Finish();
+    }
+
+    auto file_info = this->fs_->GetFileInfo(remote_path).ValueOrDie();
+    auto index_size = static_cast<uint64_t>(file_info.size());
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
+
+    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+        this->type_,
+        0,
+        index_size,
+        index_params,
+        false,
+        this->nb_,
+        {remote_path},
+        ctx,
+        &stream_load_info);
+
+    ASSERT_TRUE(stream_load_info.has_value());
+    EXPECT_TRUE(stream_load_info->encrypted);
+    auto bounded_stream_overhead = storage::EntryStreamMaxTransientBytes(
+        stream_load_info->total_transient_bytes,
+        stream_load_info->max_task_transient_bytes);
+    ASSERT_LT(bounded_stream_overhead, stream_load_info->total_transient_bytes);
+    auto expected_max_memory =
+        std::max(2 * index_size,
+                 index_size + static_cast<uint64_t>(bounded_stream_overhead));
+    auto full_stream_max_memory = std::max(
+        2 * index_size,
+        index_size +
+            static_cast<uint64_t>(stream_load_info->total_transient_bytes));
+    ASSERT_LT(expected_max_memory, full_stream_max_memory);
+    EXPECT_EQ(request.final_memory_cost, index_size);
+    EXPECT_EQ(request.max_memory_cost, expected_max_memory);
+}
+
+TYPED_TEST_P(HybridIndexTestV1,
+             BitmapLoadingOverheadUsesRequestLocalPassthrough) {
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.collection_id = this->field_meta_.collection_id;
+    load_info.partition_id = this->field_meta_.partition_id;
+    load_info.segment_id = this->field_meta_.segment_id;
+    load_info.field_id = this->field_meta_.field_id;
+    load_info.field_type = this->type_;
+    load_info.element_type = DataType::NONE;
+    load_info.enable_mmap = false;
+    load_info.index_id = this->index_build_id_;
+    load_info.index_build_id = this->index_build_id_;
+    load_info.index_version = this->index_version_;
+    load_info.index_params = index_params;
+    load_info.index_files = this->index_files_;
+    load_info.index_engine_version = this->index_version_;
+    load_info.index_size = 1024;
+    load_info.num_rows = this->nb_;
+    load_info.dim = 0;
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = this->type_;
+    index_info.index_engine_version = this->index_version_;
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    Config config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator translator(
+        index_info,
+        &load_info,
+        milvus::tracer::TraceContext{},
+        ctx,
+        std::move(config));
+
+    EXPECT_FALSE(translator.meta()->loading_overhead_config.has_value());
+    auto [loaded_resource, loading_overhead] =
+        translator.estimated_byte_size_of_cell(0);
+    EXPECT_GT(loaded_resource.memory_bytes, 0);
+    EXPECT_GT(loading_overhead.memory_bytes, 0);
+}
+
 TYPED_TEST_P(HybridIndexTestV1, INFuncTest) {
     this->TestInFunc();
 }
@@ -698,6 +822,8 @@ using InvertedType = testing::Types<int16_t, int32_t, int64_t, std::string>;
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV1,
                             CountFuncTest,
                             ResourceEstimateUsesInternalIndexType,
+                            BitmapResourceEstimateUsesBoundedStreamOverhead,
+                            BitmapLoadingOverheadUsesRequestLocalPassthrough,
                             INFuncTest,
                             IsNullFuncTest,
                             IsNotNullFuncTest,

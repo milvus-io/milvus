@@ -64,18 +64,19 @@ class IndexFactory {
                       int64_t dim);
 
     LoadResourceRequest
-    IndexLoadResource(DataType field_type,
-                      DataType element_type,
-                      IndexVersion index_version,
-                      uint64_t index_size_in_bytes,
-                      const std::map<std::string, std::string>& index_params,
-                      bool mmap_enable,
-                      int64_t num_rows,
-                      int64_t dim,
-                      const std::vector<std::string>& index_files,
-                      const storage::FileManagerContext& file_manager_context,
-                      std::optional<storage::EntryStreamLoadInfo>*
-                          stream_load_info = nullptr);
+    IndexLoadResource(
+        DataType field_type,
+        DataType element_type,
+        IndexVersion index_version,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        int64_t dim,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& file_manager_context,
+        std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
+        bool* use_shared_memory_overhead_group = nullptr);
 
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
@@ -106,8 +107,8 @@ class IndexFactory {
         int64_t num_rows,
         const std::vector<std::string>& index_files,
         const storage::FileManagerContext& file_manager_context,
-        std::optional<storage::EntryStreamLoadInfo>* stream_load_info =
-            nullptr);
+        std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
+        bool* use_shared_memory_overhead_group = nullptr);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
@@ -199,7 +200,8 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows,
-        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info);
+        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
+        bool use_shared_memory_overhead_group);
 
     template <typename T>
     ScalarIndexPtr<T>
