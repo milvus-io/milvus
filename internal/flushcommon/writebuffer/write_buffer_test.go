@@ -40,6 +40,18 @@ type WriteBufferSuite struct {
 	metacache   *metacache.MockMetaCache
 }
 
+type materializeTestInsertMessage struct {
+	body *msgpb.InsertRequest
+}
+
+func (m *materializeTestInsertMessage) MustBody() *msgpb.InsertRequest {
+	return m.body
+}
+
+func (m *materializeTestInsertMessage) OverwriteBody(body *msgpb.InsertRequest) {
+	m.body = body
+}
+
 func (s *WriteBufferSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	s.collID = 100
@@ -1141,7 +1153,7 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 	}
 
 	assert.NoError(t, function.GetManager().Alloc(1, "v1", collSchema))
-	_, err := function.GetManager().Materialize(context.Background(), 1, "v1", collSchema.GetVersion(), insertMsg.InsertRequest)
+	_, err := function.GetManager().Materialize(context.Background(), 1, "v1", collSchema.GetVersion(), &materializeTestInsertMessage{body: insertMsg.InsertRequest})
 	assert.NoError(t, err)
 	defer function.GetManager().Release(1, "v1")
 
