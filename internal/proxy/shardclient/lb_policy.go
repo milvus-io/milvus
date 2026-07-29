@@ -264,6 +264,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		mlog.String("channelName", workload.Channel),
 	)
 	var lastErr error
+	var overloadErr error
 	var err error
 	var shardLeaders []NodeInfo
 	requestExcludedNodes := typeutil.NewUniqueSet()
@@ -271,6 +272,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
 		if len(shardLeaders) > 0 && requestExcludedNodes.Len() >= len(shardLeaders) {
+			if overloadErr != nil {
+				return false, overloadErr
+			}
 			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
 			if err != nil {
 				log.Warn(ctx, "failed to refresh shard leaders", mlog.Err(err))
@@ -302,6 +306,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				mlog.Int64s("excluded", excludeNodes.Collect()),
 				mlog.Err(err),
 			)
+			if overloadErr != nil {
+				return false, overloadErr
+			}
 			if lastErr != nil {
 				return true, lastErr
 			}
@@ -334,6 +341,14 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// immediately without retrying or touching the blacklist.
 			if merr.GetErrorType(err) == merr.InputError {
 				return false, err
+			}
+			// Queue saturation is a transient overload signal from a healthy
+			// QueryNode. Try each replica at most once, then return the overload
+			// to the caller instead of cycling through saturated replicas.
+			if errors.Is(err, merr.ErrServiceTooManyRequests) {
+				requestExcludedNodes.Insert(targetNode.NodeID)
+				overloadErr = err
+				return true, err
 			}
 			if merr.IsRetryableErr(err) {
 				requestExcludedNodes.Insert(targetNode.NodeID)
