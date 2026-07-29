@@ -813,12 +813,21 @@ func (manager *BalanceEpochManager) reconcileLocked(
 	runtime.carryOver = nextCarry
 
 	state := active.terminalIntent
-	if hadLostPlacement {
+	switch {
+	case state == EpochSuperseded:
+		// A superseding topology or target intent outranks the lost-placement
+		// downgrade. The generation was invalidated by something outside itself
+		// before its objects could be judged on their own, and the single event
+		// that most often loses placement, a QueryNode leaving the resource
+		// group, is exactly such an intent. Reporting those epochs as degraded
+		// would make ordinary node churn indistinguishable from balancing that
+		// actually went wrong. Nothing is hidden by the choice: a lost object
+		// still sets hadFailure, still records retry history, and still joins its
+		// error into the result.
+	case hadLostPlacement:
 		state = EpochDegraded
-	} else if state == EpochIdle {
-		if hadFailure {
-			state = EpochDegraded
-		} else if len(nextCarry) != 0 {
+	case state == EpochIdle:
+		if hadFailure || len(nextCarry) != 0 {
 			state = EpochDegraded
 		} else {
 			state = EpochCompleted

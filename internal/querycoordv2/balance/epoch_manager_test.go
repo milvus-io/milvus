@@ -3042,6 +3042,34 @@ func TestEpochManagerLostPlacementOverridesTimeout(t *testing.T) {
 	require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
 }
 
+func TestEpochManagerSupersedeOutranksLostPlacement(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+	fixture.manager.Advance(context.Background(), request)
+
+	// One QueryNode leaving the resource group produces both conditions at once:
+	// the in-flight object loses every authoritative placement, and the resource
+	// group topology change invalidates the generation. The terminal label has to
+	// name the cause rather than the symptom, otherwise ordinary node churn is
+	// indistinguishable from balancing that actually went wrong.
+	fixture.admitter.acceptedTasks()[0].Fail(errors.New("placement lost"))
+	publishEpochManagerSegments(fixture.placement, []int64{201}, nil)
+	fixture.source.setValidate(func(AdmissionToken) task.BalanceAdmissionReason {
+		return task.BalanceAdmissionRGChanged
+	})
+
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochSuperseded, result.State)
+	require.True(t, result.Terminal)
+
+	// The label is the only thing that changes. The loss itself is still reported.
+	require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
+	require.Contains(t, result.Err.Error(), "no authoritative source or target placement")
+}
+
 func TestEpochManagerFailedUnreadyChannelTargetUsesPhysicalPresence(t *testing.T) {
 	withSource := workObservation{
 		sourcePresent: true,
