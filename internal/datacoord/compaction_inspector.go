@@ -602,6 +602,11 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
+	// Revalidate input and snapshot state at admission so a protection change
+	// after planning cannot enter the task queue unchecked.
+	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
+		return nil, err
+	}
 	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())
 	if !exist {
 		return nil, merr.WrapErrIllegalCompactionPlan("segment not exist")

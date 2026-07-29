@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -573,6 +574,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Twice()
 
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	mockScheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
@@ -1175,6 +1177,7 @@ func TestGetCompactionTasksNum(t *testing.T) {
 func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionCompaction() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
 
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	mockScheduler.EXPECT().Enqueue(mock.Anything).Maybe()
@@ -1191,6 +1194,55 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionComp
 	s.NoError(err)
 	s.NotNil(compactTask)
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, compactTask.GetTaskProto().GetType())
+}
+
+func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtectedInputs() {
+	tests := []struct {
+		name  string
+		block func(*snapshotMeta)
+	}{
+		{
+			name: "collection snapshot block",
+			block: func(snapshotMeta *snapshotMeta) {
+				snapshotMeta.SetSnapshotPending(100)
+			},
+		},
+		{
+			name: "segment snapshot protection",
+			block: func(snapshotMeta *snapshotMeta) {
+				snapshotMeta.segmentProtectionUntil[1] = uint64(time.Now().Add(time.Hour).Unix())
+			},
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			snapshotMeta := createTestSnapshotMetaLoaded(s.T())
+			test.block(snapshotMeta)
+			meta := &meta{
+				segments:     NewSegmentsInfo(),
+				snapshotMeta: snapshotMeta,
+			}
+			meta.segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 100,
+				State:        commonpb.SegmentState_Flushed,
+				Level:        datapb.SegmentLevel_L1,
+			}})
+			inspector := newCompactionInspector(meta, nil, nil, nil, nil, newMockVersionManager())
+
+			compactTask, err := inspector.createCompactTask(&datapb.CompactionTask{
+				PlanID:        10,
+				CollectionID:  100,
+				Type:          datapb.CompactionType_MixCompaction,
+				InputSegments: []int64{1},
+			})
+
+			s.Nil(compactTask)
+			s.ErrorIs(err, merr.ErrCompactionBlocked)
+			s.False(meta.IsSegmentCompacting(1))
+		})
+	}
 }
 
 func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
