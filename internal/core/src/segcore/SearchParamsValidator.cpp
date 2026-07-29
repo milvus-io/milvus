@@ -51,6 +51,12 @@ void
 ValidateVectorSearchParams(SearchInfo& search_info,
                            const std::string& index_type,
                            DataType data_type) {
+    // No index loaded yet (e.g. a collection under test with no field index)
+    // → there is no knowhere owner to validate against, so skip. nprobe's
+    // range is owned by the IVF index config, which does not exist here.
+    if (index_type.empty()) {
+        return;
+    }
     // Mirror PrepareSearchParams (index/VectorIndex.h): seed metric_type and
     // topk so the validated input is byte-identical to the indexed path —
     // the two then cannot disagree because they run the same knowhere code.
