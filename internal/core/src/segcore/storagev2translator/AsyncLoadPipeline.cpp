@@ -47,7 +47,7 @@ class PriorityThreadPoolExecutor : public folly::Executor {
  public:
     void
     add(folly::Func func) override {
-        Submit(milvus::ThreadPoolPriority::MIDDLE, std::move(func));
+        Submit(milvus::ThreadPoolPriority::HIGH, std::move(func));
     }
 
     void
@@ -60,7 +60,7 @@ class PriorityThreadPoolExecutor : public folly::Executor {
 
     uint8_t
     getNumPriorities() const override {
-        return 3;
+        return 2;
     }
 
  private:
