@@ -1,5 +1,10 @@
 # QueryView State Machine Per-Node Analysis
 
+- Feature DRI: @chyezh
+- Primary Approver: @czs007
+- Independent Approver: @weiliu1031
+- Design Review: 2026-07-29
+
 > This document provides a detailed per-node, per-state analysis of the QueryView state machine.
 > For each state, it covers: entry conditions, automatic behavior, valid transitions, and possible peer states with how the current node reacts to each.
 > Reference: [Distributed Query View Design](README.md), [view.proto](../../../../pkg/proto/view.proto)
