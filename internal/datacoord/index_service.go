@@ -1027,7 +1027,19 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
+	// Snapshot segment manifests and index metadata while holding segMu so an
+	// external-refresh manifest commit cannot interleave the two reads. A stale
+	// SegmentIndex may legitimately survive a failed/crashed best-effort cleanup;
+	// DataManifest is therefore a serving fence, not only an inspector hint.
+	s.meta.segMu.RLock()
 	segmentsIndexes := s.meta.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
+	segmentManifests := make(map[int64]string, len(req.GetSegmentIDs()))
+	for _, segID := range req.GetSegmentIDs() {
+		if segment := s.meta.segments.GetSegment(segID); segment != nil {
+			segmentManifests[segID] = segment.GetManifestPath()
+		}
+	}
+	s.meta.segMu.RUnlock()
 	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := segmentsIndexes[segID]
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
@@ -1039,7 +1051,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		if len(segIdxes) != 0 {
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
-				if segIdx.IndexState == commonpb.IndexState_Finished {
+				if segIdx.IndexState == commonpb.IndexState_Finished &&
+					!segmentIndexManifestStale(segIdx, segmentManifests[segID]) {
 					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
 						segIdx.IndexStorePathVersion, segIdx.CollectionID,
 						segIdx.PartitionID, segIdx.SegmentID,

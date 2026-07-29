@@ -679,6 +679,25 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
+	s.Run("query refresh external collection task not tracked returns retry", func() {
+		// A task DataCoord believes is in flight but the worker no longer tracks
+		// (e.g. after a DataNode restart) must report Retry so DataCoord
+		// re-dispatches it, not Failed (which would fail the whole refresh job).
+		req := &workerpb.QueryTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.RefreshExternalCollection,
+				taskcommon.TaskIDKey:    "424242",
+			},
+		}
+		resp, err := s.node.QueryTask(s.ctx, req)
+		s.NoError(merr.CheckRPCCall(resp, err))
+		props := taskcommon.NewProperties(resp.GetProperties())
+		state, err := props.GetTaskState()
+		s.NoError(err)
+		s.Equal(taskcommon.Retry, state)
+	})
+
 	s.Run("query index task with cost", func() {
 		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_InProgress})
 		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
@@ -1098,7 +1117,7 @@ func (s *DataNodeServicesSuite) TestCreateTaskRefreshExternalCollection() {
 	})
 }
 
-func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUpdatedSegmentsPayload() {
+func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsSegmentAndFencePayload() {
 	s.node.UpdateStateCode(commonpb.StateCode_Healthy)
 	if s.node.externalCollectionManager != nil {
 		s.node.externalCollectionManager.Close()
@@ -1122,7 +1141,8 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 		},
 	}
 	task := external.NewRefreshExternalCollectionTask(s.ctx, req)
-	patched := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 1}
+	patched := &datapb.SegmentInfo{ID: 10, NumOfRows: 1}
+	baseManifests := map[int64]string{10: "base-manifest"}
 
 	mockNewTask := mockey.Mock(external.NewRefreshExternalCollectionTask).Return(task).Build()
 	defer mockNewTask.UnPatch()
@@ -1135,6 +1155,9 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 	mockUpdated := mockey.Mock((*external.RefreshExternalCollectionTask).GetUpdatedSegments).
 		Return([]*datapb.SegmentInfo{patched}).Build()
 	defer mockUpdated.UnPatch()
+	mockBaseManifests := mockey.Mock((*external.RefreshExternalCollectionTask).GetBaseManifests).
+		Return(baseManifests).Build()
+	defer mockBaseManifests.UnPatch()
 
 	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, "cluster", req)
 	s.NoError(err)
@@ -1150,6 +1173,19 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 	s.Equal(indexpb.JobState_JobStateFinished, info.State)
 	s.Len(info.UpdatedSegments, 1)
 	s.Equal(int64(10), info.UpdatedSegments[0].GetID())
+	s.Equal("base-manifest", info.BaseManifests[10])
+
+	queryResp, err := s.node.QueryTask(s.ctx, &workerpb.QueryTaskRequest{Properties: map[string]string{
+		taskcommon.ClusterIDKey: "cluster",
+		taskcommon.TypeKey:      taskcommon.RefreshExternalCollection,
+		taskcommon.TaskIDKey:    "200",
+	}})
+	s.NoError(merr.CheckRPCCall(queryResp, err))
+	workerResp := &datapb.RefreshExternalCollectionTaskResponse{}
+	s.NoError(proto.Unmarshal(queryResp.GetPayload(), workerResp))
+	s.Len(workerResp.GetUpdatedSegments(), 1, "field 3 is the single segment payload for every DataCoord version")
+	s.Equal(int64(10), workerResp.GetUpdatedSegments()[0].GetID())
+	s.Equal("base-manifest", workerResp.GetBaseManifests()[10])
 }
 
 func (s *DataNodeServicesSuite) TestCreateTaskCopySegment() {

@@ -1880,6 +1880,73 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
+	return m.updateSegmentsInfo(ctx, false, func(updatePack *updateSegmentPack) error {
+		segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
+		increments := lo.Values(updatePack.increments)
+		return m.catalog.AlterSegments(ctx, segments, increments...)
+	}, operators...)
+}
+
+// UpdateSegmentsInfoWithActions persists StorageV3 segment mutations together
+// with trailing catalog actions in one atomic metastore transaction. It is used
+// by external refresh to commit the collection's segment generation and the
+// Finished job marker together: either both land or neither does.
+//
+// External refresh only mutates StorageV3 segment records, so each segment
+// action expands to exactly one KV operation. Refuse an over-limit transaction
+// before any segment/catalog write instead of allowing Catalog.Update's ordered
+// chunk fallback, whose partially-written segment keys would be visible without
+// the job marker. The etcd transaction cap is a backend constraint: DataCoord
+// cannot raise it for one operation, and splitting this commit would destroy the
+// required segment-generation + Finished-marker atomicity. Failing closed before
+// the write is therefore the only safe behavior at this layer.
+func (m *meta) UpdateSegmentsInfoWithActions(
+	ctx context.Context,
+	extraActions []metastore.UpdateAction,
+	operators ...UpdateOperator,
+) error {
+	return m.updateSegmentsInfo(ctx, len(extraActions) > 0, func(updatePack *updateSegmentPack) error {
+		actions := make([]metastore.UpdateAction, 0, len(updatePack.segments)+len(extraActions))
+		for id, segment := range updatePack.segments {
+			if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifestPath() == "" {
+				return merr.WrapErrServiceInternalMsg(
+					"atomic external refresh requires StorageV3 manifest-backed segment %d", id)
+			}
+			if m.segments.GetSegment(id) == nil {
+				actions = append(actions, metastore.AddSegment(segment.SegmentInfo))
+			} else {
+				actions = append(actions, metastore.AlterSegment(segment.SegmentInfo))
+			}
+		}
+		actions = append(actions, extraActions...)
+		if err := validateExternalRefreshAtomicTxnSize(len(actions)); err != nil {
+			return err
+		}
+		return m.catalog.Update(ctx, actions...)
+	}, operators...)
+}
+
+// validateExternalRefreshAtomicTxnSize rejects a refresh commit that cannot fit
+// in one metastore transaction. MaxEtcdTxnNum reflects the etcd/backend atomic
+// transaction cap; DataCoord cannot raise that limit for an individual request.
+// Splitting the write is also not an option because it would expose a partially
+// updated segment generation without the matching Finished job marker.
+func validateExternalRefreshAtomicTxnSize(operationCount int) error {
+	limit := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if limit <= 0 || operationCount > limit {
+		return merr.WrapErrServiceInternalMsg(
+			"external refresh atomic commit needs %d operations, metastore limit is %d",
+			operationCount, limit)
+	}
+	return nil
+}
+
+func (m *meta) updateSegmentsInfo(
+	ctx context.Context,
+	persistEmpty bool,
+	persist func(*updateSegmentPack) error,
+	operators ...UpdateOperator,
+) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	updatePack := &updateSegmentPack{
@@ -1907,8 +1974,11 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 		}
 	}
 
-	// skip if all segment not exist
-	if len(updatePack.segments) == 0 {
+	// Ordinary segment updates stay a no-op when every operator made no change.
+	// Composite callers may still have non-segment actions (for example the
+	// external-refresh Finished marker) that must be persisted even when the
+	// segment generation itself is unchanged.
+	if len(updatePack.segments) == 0 && !persistEmpty {
 		return nil
 	}
 
@@ -1926,10 +1996,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	}
 	updatePack.prepareSegmentMetricUpdates()
 
-	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
-	increments := lo.Values(updatePack.increments)
-
-	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
+	if err := persist(updatePack); err != nil {
 		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
 			mlog.Err(err))
 		return err
@@ -3388,6 +3455,38 @@ func (m *meta) completeSortCompactionMutation(
 	return []*SegmentInfo{segment}, metricMutation, nil
 }
 
+// validateManifestSuccessor enforces the optimistic-concurrency rule shared by
+// every in-place manifest adoption (schema-bump compaction, external-collection
+// refresh): a result manifest may replace a segment's current manifest only when
+// it is a legal successor. It returns:
+//   - (true, nil)  when result == current: an idempotent replay, nothing changes;
+//   - (false, nil) when base == current AND result is a strictly-forward successor
+//     on the same base path (parseable, higher version) — adopt it;
+//   - (false, err) otherwise — an empty/stale base, a rollback, a different base
+//     path, or an unparsable result — reject and rebuild on the current manifest.
+//
+// Checking only base==current is not enough: a buggy, mixed-version, or corrupt
+// worker could carry the right base yet a result that points at another segment's
+// manifest or an older version, silently corrupting the segment pointer.
+func validateManifestSuccessor(base, current, result string) (isReplay bool, err error) {
+	if result == current {
+		return true, nil
+	}
+	if base == "" || base != current {
+		return false, merr.WrapErrServiceInternalMsg("base manifest %q does not match the current manifest %q", base, current)
+	}
+	cmp, err := packed.CompareManifestPath(result, current)
+	if err != nil {
+		// Preserve the inner code (CompareManifestPath returns a typed merr error)
+		// rather than flattening it into a format string.
+		return false, merr.Wrapf(err, "result manifest %q is not a comparable successor of %q", result, current)
+	}
+	if cmp <= 0 {
+		return false, merr.WrapErrServiceInternalMsg("result manifest %q does not advance the current manifest %q", result, current)
+	}
+	return false, nil
+}
+
 func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
@@ -3464,17 +3563,10 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if baseManifest == "" {
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
 	}
-	if resultManifest != currentManifest {
-		if baseManifest != currentManifest {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
-		}
-		cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
-		if err != nil {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s not comparable with current %s: %v", resultManifest, currentManifest, err)
-		}
-		if cmp <= 0 {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s does not advance current %s", resultManifest, currentManifest)
-		}
+	// Adopt only a legal successor (base==current and result strictly forward on
+	// the same base path, or an idempotent replay). See validateManifestSuccessor.
+	if _, err := validateManifestSuccessor(baseManifest, currentManifest, resultManifest); err != nil {
+		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump manifest adoption rejected: %v", err)
 	}
 
 	// Clone the segment for update

@@ -853,6 +853,25 @@ func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bo
 	return false
 }
 
+func segmentIndexManifestStale(segIndex *model.SegmentIndex, currentManifest string) bool {
+	// StorageV2 segments have no manifest pointer, so the legacy empty value is
+	// not a stale marker. For StorageV3, an empty DataManifest is a pre-field
+	// index record and is deliberately rebuilt once after upgrade.
+	return segIndex != nil && currentManifest != "" && segIndex.DataManifest != currentManifest
+}
+
+func (m *indexMeta) HasStaleSegmentIndex(collectionID, segmentID UniqueID, currentManifest string) bool {
+	if currentManifest == "" {
+		return false
+	}
+	for _, segIndex := range m.GetSegmentIndexes(collectionID, segmentID) {
+		if segmentIndexManifestStale(segIndex, currentManifest) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1007,7 +1026,9 @@ func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	return true
 }
 
-// UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.
+// UpdateVersion opens a new index-build attempt. Version, node, and InProgress
+// state are persisted together so an ambiguous CreateIndex RPC cannot leave the
+// task dispatchable while the worker may already be running it.
 func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	m.keyLock.Lock(buildID)
 	defer m.keyLock.Unlock(buildID)
@@ -1021,6 +1042,8 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexVersion++
 		segIdx.NodeID = nodeID
+		segIdx.IndexState = commonpb.IndexState_InProgress
+		segIdx.FailReason = ""
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 

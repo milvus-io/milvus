@@ -80,6 +80,26 @@ func (t *mixCompactionTask) GetTaskVersion() int64 {
 	return int64(t.GetTaskProto().GetRetryTimes())
 }
 
+// cancelAndReset returns the task to pipelining only after the worker confirms
+// the old plan was dropped (or the node is already gone). A failed drop leaves
+// the task executing on its recorded node, preventing a second plan with the
+// same ID from being dispatched concurrently.
+func (t *mixCompactionTask) cancelAndReset(cluster session.Cluster, nodeID int64) bool {
+	if err := cluster.DropCompaction(nodeID, t.GetTaskProto().GetPlanID()); err != nil &&
+		!errors.Is(err, merr.ErrNodeNotFound) {
+		mlog.Warn(context.TODO(), "failed to cancel compaction before retry",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+			mlog.Int64("nodeID", nodeID),
+			mlog.Err(err))
+		return false
+	}
+	if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
+		mlog.Warn(context.TODO(), "failed to reset canceled compaction task", mlog.Err(err))
+		return false
+	}
+	return true
+}
+
 func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
@@ -91,30 +111,38 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
+	// Read the node the Executing gauge was filed under before the reserve write
+	// below overwrites NodeID: compactionInspector.schedule increments Executing
+	// while NodeID is still NullNodeID, so the failure path below must decrement
+	// that same label, not the node just dispatched to.
+	originNodeID := t.GetTaskProto().GetNodeID()
+
+	// Reserve the attempt before the RPC. If CreateCompaction times out after the
+	// worker accepted it, the persisted executing state prevents re-dispatch until
+	// cancelAndReset successfully drops that plan.
+	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
+	if err != nil {
+		mlog.Warn(context.TODO(), "mixCompactionTask failed to persist executing state", mlog.Err(err))
+		return
+	}
+
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
 		// This is tricky, we should remove the reassignment here.
-		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-			mlog.Int64("nodeID", originNodeID),
+			mlog.Int64("nodeID", nodeID),
 			mlog.Err(err))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
-		if err != nil {
-			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
+		if !t.cancelAndReset(cluster, nodeID) {
+			return
 		}
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 		return
 	}
 	mlog.Info(context.TODO(), "mixCompactionTask notify compaction tasks to DataNode")
-
-	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
-	if err != nil {
-		mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
-	}
 }
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
@@ -123,9 +151,7 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil || result == nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to get compaction result", mlog.Err(err))
-		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
-			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
-		}
+		t.cancelAndReset(cluster, t.GetTaskProto().GetNodeID())
 		return
 	}
 	switch result.GetState() {

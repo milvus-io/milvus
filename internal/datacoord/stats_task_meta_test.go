@@ -133,23 +133,26 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		s.Run("normal case", func() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
-			s.NoError(m.UpdateVersion(1, 1180))
+			s.NoError(m.UpdateVersion(1, 1180, "manifest-v1"))
 			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(int64(1), task.GetVersion())
+			// The dispatched manifest is stamped in the same write as the version.
+			s.Equal("manifest-v1", task.GetDispatchedManifest())
+			s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
 		})
 
 		s.Run("task not exist", func() {
 			_, ok := m.tasks.Get(100)
 			s.False(ok)
 
-			s.Error(m.UpdateVersion(100, 1180))
+			s.Error(m.UpdateVersion(100, 1180, "manifest-v1"))
 		})
 
 		s.Run("failed case", func() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
-			s.Error(m.UpdateVersion(1, 1180))
+			s.Error(m.UpdateVersion(1, 1180, "manifest-v1"))
 			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			// still 1
@@ -164,7 +167,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.Error(m.UpdateBuildingTask(1))
 			task, ok := m.tasks.Get(1)
 			s.True(ok)
-			s.Equal(indexpb.JobState_JobStateInit, task.GetState())
+			s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
 			s.Equal(int64(1180), task.GetNodeID())
 		})
 

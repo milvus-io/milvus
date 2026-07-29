@@ -1446,6 +1446,9 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		err := m.UpdateVersion(buildID, nodeID)
 		assert.NoError(t, err)
+		job, ok := m.GetIndexJob(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, commonpb.IndexState_InProgress, job.IndexState)
 	})
 
 	t.Run("fail", func(t *testing.T) {
@@ -1795,6 +1798,30 @@ func TestRemoveSegmentIndex(t *testing.T) {
 		assert.Equal(t, 0, m.segmentIndexes.Len())
 		assert.Equal(t, len(m.segmentBuildInfo.List()), 0)
 	})
+}
+
+func TestSegmentIndexManifestStale(t *testing.T) {
+	assert.False(t, segmentIndexManifestStale(nil, "manifest-v2"))
+	assert.False(t, segmentIndexManifestStale(&model.SegmentIndex{DataManifest: ""}, ""),
+		"StorageV2 has no manifest fence")
+	assert.True(t, segmentIndexManifestStale(&model.SegmentIndex{DataManifest: ""}, "manifest-v2"),
+		"a pre-field StorageV3 index is rebuilt once")
+	assert.False(t, segmentIndexManifestStale(&model.SegmentIndex{DataManifest: "manifest-v2"}, "manifest-v2"))
+	assert.True(t, segmentIndexManifestStale(&model.SegmentIndex{DataManifest: "manifest-v1"}, "manifest-v2"))
+
+	m := newSegmentIndexMeta(nil)
+	m.indexes[100] = map[UniqueID]*model.Index{
+		20: {CollectionID: 100, IndexID: 20},
+	}
+	m.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: 100,
+		SegmentID:    10,
+		IndexID:      20,
+		BuildID:      30,
+		DataManifest: "manifest-v1",
+	})
+	assert.True(t, m.HasStaleSegmentIndex(100, 10, "manifest-v2"))
+	assert.False(t, m.HasStaleSegmentIndex(100, 10, ""))
 }
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {

@@ -214,18 +214,17 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
 	})
 
-	s.Run("Update Inprogress failed", func() {
+	s.Run("create failed and cancel failed stays in progress", func() {
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 		s.mt.indexMeta.catalog = catalogMock
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
-		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(fmt.Errorf("mock create error"))
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(fmt.Errorf("mock cancel error"))
 
 		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("successful creation", func() {
@@ -745,6 +744,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		it.SetState(indexpb.JobState_JobStateInProgress, "")
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(&workerpb.IndexJobResults{}, nil)
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))

@@ -101,7 +101,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	s.Require().Len(updated, 1)
 	s.Equal(int64(1), updated[0].GetID())
 	s.Equal(newManifest, updated[0].GetManifestPath())
-	s.Equal(updated, result)
+	// organizeSegments still returns the visible SegmentInfo view; the upsert
+	// payload is the result type, so compare identity by segment ID.
+	s.Require().Len(result, len(updated))
+	s.Equal(result[0].GetID(), updated[0].GetID())
 	s.Equal(int64(1), gotSegmentID)
 	s.Equal(newFragments, gotFragments)
 }
@@ -174,12 +177,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 		Return(nil, nil).Build()
 	defer mockSourceDeltas.UnPatch()
 
-	var patchedBaseManifest string
+	var patchedSegManifest string
 	var patchedFragments []packed.Fragment
 	var patchedColumns []string
 	mockPatch := mockey.Mock(mockey.GetMethod(task, "patchSegmentForMissingColumns")).
 		To(func(ctx context.Context, seg *datapb.SegmentInfo, fragments []packed.Fragment, missingColumns []string) (*datapb.SegmentInfo, error) {
-			patchedBaseManifest = seg.GetManifestPath()
+			patchedSegManifest = seg.GetManifestPath()
 			patchedFragments = append([]packed.Fragment(nil), fragments...)
 			patchedColumns = append([]string(nil), missingColumns...)
 			return &datapb.SegmentInfo{
@@ -200,8 +203,19 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	updated := task.GetUpdatedSegments()
 	s.Require().Len(updated, 1)
 	s.Equal(finalManifest, updated[0].GetManifestPath())
-	s.Equal(updated, result)
-	s.Equal(refreshedManifest, patchedBaseManifest)
+	// organizeSegments still returns the visible SegmentInfo view; the upsert
+	// payload is the result type, so compare identity by segment ID.
+	s.Require().Len(result, len(updated))
+	s.Equal(result[0].GetID(), updated[0].GetID())
+	// The column append builds on the intermediate (deltalog-refreshed) manifest...
+	s.Equal(refreshedManifest, patchedSegManifest)
+	// ...but the adoption base carried to DataCoord is the ORIGINAL dispatch-time
+	// manifest, so the CAS matches what DataCoord holds instead of an unseen
+	// intermediate manifest.
+	// The adoption base is no longer threaded through the patch helper — the
+	// caller records it and it surfaces on the result, which is the only place
+	// it belongs.
+	s.Equal(oldManifest, task.GetBaseManifests()[result[0].GetID()])
 	s.Equal(newFragments, patchedFragments)
 	s.Equal([]string{"vec"}, patchedColumns)
 }

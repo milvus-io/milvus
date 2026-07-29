@@ -176,7 +176,17 @@ func (stm *statsTaskMeta) DropStatsTask(ctx context.Context, taskID int64) error
 	return nil
 }
 
-func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
+// UpdateVersion opens a new attempt: it bumps the version, records the assigned
+// node and dispatched manifest, and marks the task InProgress in the same
+// persistent write. Once this succeeds the task is not dispatchable again until
+// the worker has accepted the attempt or DropStats confirms it was canceled.
+//
+// dispatchedManifest must be read from the same segment snapshot that fills the
+// request's ManifestPath, so the stored value is by construction the manifest the
+// worker will build on. It is the expected value of the CAS performed when the
+// result is adopted; keeping it here rather than reading it back off the result
+// is what makes the fence independent of the DataNode's version.
+func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64, dispatchedManifest string) error {
 	stm.keyLock.Lock(taskID)
 	defer stm.keyLock.Unlock(taskID)
 
@@ -188,6 +198,9 @@ func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
 	cloneT.Version++
 	cloneT.NodeID = nodeID
+	cloneT.DispatchedManifest = dispatchedManifest
+	cloneT.State = indexpb.JobState_JobStateInProgress
+	cloneT.FailReason = ""
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, cloneT); err != nil {
 		mlog.Warn(stm.ctx, "update stats task version failed",

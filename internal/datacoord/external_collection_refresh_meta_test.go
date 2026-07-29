@@ -24,17 +24,19 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ==================== Helper Functions for Meta Tests ====================
 
 func createMetaTestRefreshMeta(t *testing.T, jobs []*datapb.ExternalCollectionRefreshJob, tasks []*datapb.ExternalCollectionRefreshTask) *externalCollectionRefreshMeta {
 	catalog := &stubCatalog{
-		jobs:  jobs,
+		jobs:  committedRefreshJobsForTasks(jobs, tasks),
 		tasks: tasks,
 	}
 	meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -54,7 +56,7 @@ func TestExternalCollectionRefreshMeta_NewMeta(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, CollectionId: 100},
 		}
-		catalog := &stubCatalog{jobs: jobs, tasks: tasks}
+		catalog := &stubCatalog{jobs: committedRefreshJobsForTasks(jobs, tasks), tasks: tasks}
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
@@ -93,6 +95,53 @@ func TestExternalCollectionRefreshMeta_NewMeta(t *testing.T) {
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.Error(t, err)
 		assert.Nil(t, meta)
+	})
+}
+
+func TestExternalCollectionRefreshMeta_ReloadUsesJobTaskIDsAsCommitMarker(t *testing.T) {
+	t.Run("ignores_task_prefix_when_job_marker_did_not_land", func(t *testing.T) {
+		jobs := []*datapb.ExternalCollectionRefreshJob{{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInit,
+			TaskIds:      nil,
+		}}
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:       1001,
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateFinished,
+			ResultReady:  true,
+		}}
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), &stubCatalog{jobs: jobs, tasks: tasks})
+		require.NoError(t, err)
+		assert.Nil(t, meta.GetTask(1001))
+		state, progress := meta.AggregateJobStateFromTasks(1)
+		assert.Equal(t, indexpb.JobState_JobStateNone, state)
+		assert.Zero(t, progress)
+	})
+
+	t.Run("never_finishes_when_a_committed_task_record_is_missing", func(t *testing.T) {
+		jobs := []*datapb.ExternalCollectionRefreshJob{{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInProgress,
+			TaskIds:      []int64{1001, 1002},
+		}}
+		tasks := []*datapb.ExternalCollectionRefreshTask{{
+			TaskId:       1001,
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateFinished,
+			ResultReady:  true,
+		}}
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), &stubCatalog{jobs: jobs, tasks: tasks})
+		require.NoError(t, err)
+		state, progress := meta.AggregateJobStateFromTasks(1)
+		assert.Equal(t, indexpb.JobState_JobStateInit, state)
+		assert.Zero(t, progress)
 	})
 }
 
@@ -333,15 +382,23 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 	})
 }
 
-func TestExternalCollectionRefreshMeta_UpdateJobStateWithPreApply(t *testing.T) {
+func TestExternalCollectionRefreshMeta_FinishJobWithApply(t *testing.T) {
+	// Every sub-test needs a fully-finished task set: FinishJobWithApply re-derives
+	// the aggregate under the lock and refuses to apply unless it reads Finished.
+	finishedTasks := func() []*datapb.ExternalCollectionRefreshTask {
+		return []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+		}
+	}
+
 	t.Run("pre_apply_failure_marks_job_failed", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
 		}
 		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
 		defer mockListTasks.UnPatch()
 
 		var savedJob *datapb.ExternalCollectionRefreshJob
@@ -355,13 +412,9 @@ func TestExternalCollectionRefreshMeta_UpdateJobStateWithPreApply(t *testing.T) 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		applied, err := meta.UpdateJobStateWithPreApply(
-			1,
-			indexpb.JobState_JobStateFinished,
-			"",
-			func(*datapb.ExternalCollectionRefreshJob) error {
-				return errors.New("apply failed")
-			})
+		applied, err := meta.FinishJobWithApply(1, func(*datapb.ExternalCollectionRefreshJob, *datapb.ExternalCollectionRefreshJob) error {
+			return errors.New("apply failed")
+		})
 
 		assert.True(t, applied)
 		assert.Error(t, err)
@@ -375,11 +428,11 @@ func TestExternalCollectionRefreshMeta_UpdateJobStateWithPreApply(t *testing.T) 
 	t.Run("pre_apply_success_save_job_failure_keeps_original_job", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
 		}
 		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -389,18 +442,163 @@ func TestExternalCollectionRefreshMeta_UpdateJobStateWithPreApply(t *testing.T) 
 		defer mockSave.UnPatch()
 
 		preApplyCalled := false
-		applied, err := meta.UpdateJobStateWithPreApply(
-			1,
-			indexpb.JobState_JobStateFinished,
-			"",
-			func(*datapb.ExternalCollectionRefreshJob) error {
-				preApplyCalled = true
-				return nil
-			})
+		applied, err := meta.FinishJobWithApply(1, func(_ *datapb.ExternalCollectionRefreshJob, finishedJob *datapb.ExternalCollectionRefreshJob) error {
+			preApplyCalled = true
+			return catalog.SaveExternalCollectionRefreshJob(context.Background(), finishedJob)
+		})
 
 		assert.False(t, applied)
 		assert.Error(t, err)
 		assert.True(t, preApplyCalled)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState())
+	})
+
+	t.Run("pre_apply_success_commits_finished", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
+		}
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+		defer mockSave.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		applied, err := meta.FinishJobWithApply(1, func(_ *datapb.ExternalCollectionRefreshJob, finishedJob *datapb.ExternalCollectionRefreshJob) error {
+			return catalog.SaveExternalCollectionRefreshJob(context.Background(), finishedJob)
+		})
+
+		assert.True(t, applied)
+		assert.NoError(t, err)
+		got := meta.GetJob(1)
+		assert.Equal(t, indexpb.JobState_JobStateFinished, got.GetState())
+		assert.Equal(t, int64(100), got.GetProgress())
+		assert.NotZero(t, got.GetEndTime())
+	})
+
+	t.Run("stale_manifest_resets_tasks_and_keeps_job_running", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
+		}
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
+		defer mockListTasks.UnPatch()
+		mockUpdate := mockey.Mock((*stubCatalog).Update).Return(nil).Build()
+		defer mockUpdate.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		applied, err := meta.FinishJobWithApply(1, func(*datapb.ExternalCollectionRefreshJob, *datapb.ExternalCollectionRefreshJob) error {
+			return errExternalRefreshStaleManifest
+		})
+
+		// A manifest race is neither a completion nor a failure: nothing is owed.
+		assert.False(t, applied)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState())
+
+		// The finished task is rolled back for re-dispatch, with its stale result
+		// payload cleared so job aggregation cannot adopt it.
+		task := meta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInit, task.GetState())
+		assert.Zero(t, task.GetProgress())
+		assert.False(t, task.GetResultReady())
+		assert.Empty(t, task.GetKeptSegments())
+		assert.Empty(t, task.GetBaseManifests())
+	})
+
+	// A catalog write that failed says "this attempt did not land", not "this
+	// result is wrong". Terminalizing it would discard work every worker already
+	// finished over an etcd blip that the next tick would very likely survive.
+	t.Run("transient_commit_failure_resets_tasks_instead_of_failing_job", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
+		}
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
+		defer mockListTasks.UnPatch()
+		mockUpdate := mockey.Mock((*stubCatalog).Update).Return(nil).Build()
+		defer mockUpdate.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		applied, err := meta.FinishJobWithApply(1, func(*datapb.ExternalCollectionRefreshJob, *datapb.ExternalCollectionRefreshJob) error {
+			return errors.Mark(
+				merr.WrapErrIoFailed("segment-index", errors.New("etcd unavailable")),
+				errExternalRefreshTransientCommit)
+		})
+
+		assert.False(t, applied)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState(),
+			"a transient commit failure must not terminalize the job")
+		task := meta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInit, task.GetState())
+		assert.False(t, task.GetResultReady())
+	})
+
+	// The counterpart: a deterministic apply failure still terminalizes, so it
+	// cannot spin until the job timeout with no signal to act on.
+	t.Run("deterministic_apply_failure_still_fails_job", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, TaskIds: []int64{1001}},
+		}
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
+		defer mockListTasks.UnPatch()
+		mockUpdate := mockey.Mock((*stubCatalog).Update).Return(nil).Build()
+		defer mockUpdate.UnPatch()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		applied, err := meta.FinishJobWithApply(1, func(*datapb.ExternalCollectionRefreshJob, *datapb.ExternalCollectionRefreshJob) error {
+			return merr.WrapErrServiceInternalMsg("external refresh atomic commit needs 65 operations, metastore limit is 64")
+		})
+
+		assert.True(t, applied)
+		assert.Error(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, meta.GetJob(1).GetState())
+	})
+
+	t.Run("stale_manifest_reset_write_failure_leaves_memory_intact", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
+		}
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(finishedTasks(), nil).Build()
+		defer mockListTasks.UnPatch()
+		mockUpdate := mockey.Mock((*stubCatalog).Update).Return(errors.New("etcd down")).Build()
+		defer mockUpdate.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		applied, err := meta.FinishJobWithApply(1, func(*datapb.ExternalCollectionRefreshJob, *datapb.ExternalCollectionRefreshJob) error {
+			return errExternalRefreshStaleManifest
+		})
+
+		assert.False(t, applied)
+		assert.NoError(t, err)
+		// Memory must match what is on disk, and the job stays non-terminal so a
+		// later tick re-runs the apply and retries the reset.
+		assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetTask(1001).GetState())
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState())
 	})
 }
@@ -448,48 +646,6 @@ func TestExternalCollectionRefreshMeta_UpdateJobProgress(t *testing.T) {
 	})
 }
 
-func TestExternalCollectionRefreshMeta_AddTaskIDToJob(t *testing.T) {
-	t.Run("save_failed", func(t *testing.T) {
-		catalog := &stubCatalog{}
-		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, TaskIds: []int64{}},
-		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
-		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
-		defer mockListTasks.UnPatch()
-
-		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
-		assert.NoError(t, err)
-
-		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
-		defer mockSave.UnPatch()
-
-		err = meta.AddTaskIDToJob(1, 1001)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		jobs := []*datapb.ExternalCollectionRefreshJob{
-			{JobId: 1, CollectionId: 100, TaskIds: []int64{}},
-		}
-		meta := createMetaTestRefreshMeta(t, jobs, nil)
-
-		err := meta.AddTaskIDToJob(1, 1001)
-		assert.NoError(t, err)
-
-		job := meta.GetJob(1)
-		assert.Contains(t, job.GetTaskIds(), int64(1001))
-	})
-
-	t.Run("job_not_found", func(t *testing.T) {
-		meta := createMetaTestRefreshMeta(t, nil, nil)
-
-		err := meta.AddTaskIDToJob(999, 1001)
-		assert.Error(t, err)
-	})
-}
-
 func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 	ctx := context.Background()
 
@@ -501,7 +657,7 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, CollectionId: 100},
 		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(committedRefreshJobsForTasks(jobs, tasks), nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -526,7 +682,7 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 			{TaskId: 1001, JobId: 1, CollectionId: 100},
 			{TaskId: 1002, JobId: 1, CollectionId: 100},
 		}
-		catalog := &stubCatalog{jobs: jobs, tasks: tasks}
+		catalog := &stubCatalog{jobs: committedRefreshJobsForTasks(jobs, tasks), tasks: tasks}
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
@@ -613,6 +769,31 @@ func TestExternalCollectionRefreshMeta_AddTask(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshMeta_AddTasksToTerminalJobRejected(t *testing.T) {
+	for _, state := range []indexpb.JobState{
+		indexpb.JobState_JobStateFailed,
+		indexpb.JobState_JobStateFinished,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			catalog := &stubCatalog{jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: state,
+			}}}
+			meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+			require.NoError(t, err)
+
+			err = meta.AddTasksToJob(1, []*datapb.ExternalCollectionRefreshTask{{
+				TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit,
+			}})
+
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, errExternalRefreshJobTerminal))
+			assert.Nil(t, meta.GetTask(1001))
+			assert.Empty(t, meta.GetJob(1).GetTaskIds())
+			assert.Empty(t, catalog.updateActions)
+		})
+	}
+}
+
 func TestExternalCollectionRefreshMeta_GetTask(t *testing.T) {
 	tasks := []*datapb.ExternalCollectionRefreshTask{
 		{TaskId: 1001, JobId: 1, CollectionId: 100},
@@ -685,7 +866,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
 		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(committedRefreshJobsForTasks(nil, tasks), nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -696,7 +877,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskState(1001, indexpb.JobState_JobStateInProgress, "")
+		_, err = meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
 		assert.Equal(t, indexpb.JobState_JobStateInit, meta.GetTask(1001).GetState())
 	})
@@ -707,7 +888,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskState(1001, indexpb.JobState_JobStateInProgress, "")
+		_, err := meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateInProgress, "")
 		assert.NoError(t, err)
 
 		task := meta.GetTask(1001)
@@ -720,7 +901,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskState(1001, indexpb.JobState_JobStateFailed, "connection timeout")
+		_, err := meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateFailed, "connection timeout")
 		assert.NoError(t, err)
 
 		task := meta.GetTask(1001)
@@ -731,7 +912,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 	t.Run("task_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.UpdateTaskState(9999, indexpb.JobState_JobStateInProgress, "")
+		_, err := meta.UpdateTaskState(9999, 0, indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
 	})
 }
@@ -740,9 +921,17 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 	t.Run("persists_result_and_clones_segments", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
-			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
+			{
+				TaskId: 1001,
+				JobId:  1,
+				State:  indexpb.JobState_JobStateInProgress,
+				UpdatedSegments: []*datapb.SegmentInfo{{
+					ID: 99,
+				}},
+				BaseManifests: map[int64]string{10: "base-manifest"},
+			},
 		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(committedRefreshJobsForTasks(nil, tasks), nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -758,9 +947,10 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		updatedSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 7}
-		err = meta.UpdateTaskResult(
+		updatedSegment := &datapb.SegmentInfo{ID: 10, NumOfRows: 7}
+		_, err = meta.UpdateTaskResult(
 			1001,
+			0,
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1, 2},
@@ -775,11 +965,13 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		assert.Len(t, savedTask.GetUpdatedSegments(), 1)
 		assert.Equal(t, int64(10), savedTask.GetUpdatedSegments()[0].GetID())
 		assert.Equal(t, int64(7), savedTask.GetUpdatedSegments()[0].GetNumOfRows())
+		assert.Equal(t, "base-manifest", savedTask.GetBaseManifests()[10])
 
 		updatedSegment.NumOfRows = 99
 		task := meta.GetTask(1001)
+		assert.Len(t, task.GetUpdatedSegments(), 1)
 		assert.Equal(t, int64(7), task.GetUpdatedSegments()[0].GetNumOfRows())
-		assert.Equal(t, int64(7), savedTask.GetUpdatedSegments()[0].GetNumOfRows())
+		assert.Equal(t, "base-manifest", task.GetBaseManifests()[10])
 	})
 
 	t.Run("save_failed_keeps_original_task", func(t *testing.T) {
@@ -787,7 +979,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(committedRefreshJobsForTasks(nil, tasks), nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -798,26 +990,28 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskResult(
+		_, err = meta.UpdateTaskResult(
 			1001,
+			0,
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1},
-			[]*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+			[]*datapb.SegmentInfo{{ID: 10, NumOfRows: 7}},
 		)
 		assert.Error(t, err)
 
 		task := meta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, task.GetState())
 		assert.Empty(t, task.GetKeptSegments())
-		assert.Empty(t, task.GetUpdatedSegments())
+		assert.Empty(t, task.GetBaseManifests())
 	})
 
 	t.Run("task_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.UpdateTaskResult(
+		_, err := meta.UpdateTaskResult(
 			9999,
+			0,
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1},
@@ -827,12 +1021,19 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 	})
 }
 
-func TestExternalCollectionRefreshMeta_ClearTaskResultsByJobID_PartialFailure(t *testing.T) {
+// A failed atomic segment/Finished commit leaves every task result intact. The
+// manager then persists a Failed job marker, so operators can see the failure
+// without losing the payload needed for diagnosis or restart recovery.
+func TestExternalCollectionRefreshMeta_FinishJobWithApply_CommitFailurePreservesTaskResults(t *testing.T) {
 	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001, 1002}},
+	}
 	tasks := []*datapb.ExternalCollectionRefreshTask{
 		{
 			TaskId:          1001,
 			JobId:           1,
+			CollectionId:    100,
 			State:           indexpb.JobState_JobStateFinished,
 			ResultReady:     true,
 			KeptSegments:    []int64{1},
@@ -841,24 +1042,23 @@ func TestExternalCollectionRefreshMeta_ClearTaskResultsByJobID_PartialFailure(t 
 		{
 			TaskId:          1002,
 			JobId:           1,
+			CollectionId:    100,
 			State:           indexpb.JobState_JobStateFinished,
 			ResultReady:     true,
 			KeptSegments:    []int64{2},
 			UpdatedSegments: []*datapb.SegmentInfo{{ID: 20}},
 		},
 	}
-	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 	defer mockListJobs.UnPatch()
 	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	saveCalls := 0
-	mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
-		To(func(_ context.Context, task *datapb.ExternalCollectionRefreshTask) error {
+	mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).
+		To(func(_ *stubCatalog, _ context.Context, job *datapb.ExternalCollectionRefreshJob) error {
 			saveCalls++
-			if task.GetTaskId() == 1002 {
-				return errors.New("save error")
-			}
+			assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
 			return nil
 		}).Build()
 	defer mockSave.UnPatch()
@@ -866,13 +1066,67 @@ func TestExternalCollectionRefreshMeta_ClearTaskResultsByJobID_PartialFailure(t 
 	meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 	assert.NoError(t, err)
 
-	err = meta.ClearTaskResultsByJobID(1)
+	applied, err := meta.FinishJobWithApply(1, func(_ *datapb.ExternalCollectionRefreshJob, _ *datapb.ExternalCollectionRefreshJob) error {
+		return errors.New("etcd down")
+	})
+
+	assert.True(t, applied)
 	assert.Error(t, err)
-	assert.Equal(t, 2, saveCalls)
-	assert.Empty(t, meta.GetTask(1001).GetKeptSegments())
-	assert.Empty(t, meta.GetTask(1001).GetUpdatedSegments())
+	assert.Equal(t, 1, saveCalls)
+
+	// The atomic apply did not land; both payloads remain intact and the separate
+	// failure marker is visible.
+	assert.Equal(t, []int64{1}, meta.GetTask(1001).GetKeptSegments())
+	assert.Len(t, meta.GetTask(1001).GetUpdatedSegments(), 1)
 	assert.Equal(t, []int64{2}, meta.GetTask(1002).GetKeptSegments())
 	assert.Len(t, meta.GetTask(1002).GetUpdatedSegments(), 1)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, meta.GetJob(1).GetState())
+}
+
+// The happy path keeps task results until retention GC. They are the recovery
+// input if the Finished job write fails and do not affect a terminal job after
+// the write succeeds.
+func TestExternalCollectionRefreshMeta_FinishJobWithApply_PreservesResultsOnCommit(t *testing.T) {
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{
+			TaskId:          1001,
+			JobId:           1,
+			CollectionId:    100,
+			State:           indexpb.JobState_JobStateFinished,
+			Progress:        100,
+			ResultReady:     true,
+			KeptSegments:    []int64{1},
+			UpdatedSegments: []*datapb.SegmentInfo{{ID: 10}},
+		},
+	}
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+	defer mockSave.UnPatch()
+
+	meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+	assert.NoError(t, err)
+
+	applied, err := meta.FinishJobWithApply(1, func(_ *datapb.ExternalCollectionRefreshJob, finishedJob *datapb.ExternalCollectionRefreshJob) error {
+		return catalog.SaveExternalCollectionRefreshJob(context.Background(), finishedJob)
+	})
+
+	assert.True(t, applied)
+	assert.NoError(t, err)
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
+
+	task := meta.GetTask(1001)
+	assert.Equal(t, []int64{1}, task.GetKeptSegments())
+	assert.Len(t, task.GetUpdatedSegments(), 1)
+	assert.Equal(t, int64(10), task.GetUpdatedSegments()[0].GetID())
+	assert.Equal(t, indexpb.JobState_JobStateFinished, task.GetState())
+	assert.Equal(t, int64(100), task.GetProgress())
 }
 
 func TestExternalCollectionRefreshMeta_UpdateTaskProgress(t *testing.T) {
@@ -881,7 +1135,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskProgress(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, Progress: 0},
 		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(committedRefreshJobsForTasks(nil, tasks), nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -924,7 +1178,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskVersion(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, Version: 0, NodeId: 0},
 		}
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(committedRefreshJobsForTasks(nil, tasks), nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -935,7 +1189,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskVersion(t *testing.T) {
 		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskVersion(1001, 10)
+		err = meta.UpdateTaskVersion(1001, 10, &datapb.IDRange{Begin: 100, End: 200}, "files/insert_log/1/10", map[int64]string{1: "manifest-1"})
 		assert.Error(t, err)
 		// Version and NodeId should remain unchanged
 		task := meta.GetTask(1001)
@@ -949,18 +1203,23 @@ func TestExternalCollectionRefreshMeta_UpdateTaskVersion(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskVersion(1001, 10)
+		err := meta.UpdateTaskVersion(1001, 10, &datapb.IDRange{Begin: 100, End: 200}, "files/insert_log/1/10", map[int64]string{1: "manifest-1"})
 		assert.NoError(t, err)
 
 		task := meta.GetTask(1001)
 		assert.Equal(t, int64(1), task.GetVersion())
 		assert.Equal(t, int64(10), task.GetNodeId())
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, task.GetState())
+		assert.Equal(t, int64(100), task.GetPreallocatedSegmentIds().GetBegin())
+		assert.Equal(t, int64(200), task.GetPreallocatedSegmentIds().GetEnd())
+		assert.Equal(t, "files/insert_log/1/10", task.GetTargetSegmentBase())
+		assert.Equal(t, "manifest-1", task.GetBaseManifests()[1])
 	})
 
 	t.Run("task_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.UpdateTaskVersion(9999, 10)
+		err := meta.UpdateTaskVersion(9999, 10, &datapb.IDRange{Begin: 100, End: 200}, "files/insert_log/1/10", nil)
 		assert.Error(t, err)
 	})
 }
@@ -1044,4 +1303,49 @@ func TestExternalCollectionRefreshMeta_AggregateJobStateFromTasks(t *testing.T) 
 			assert.Equal(t, tc.expectedProgress, progress)
 		})
 	}
+}
+
+// TestExternalCollectionRefreshMeta_VersionFencedWrites verifies that
+// attempt-scoped writes are dropped when the persisted task has been
+// re-dispatched under a newer version (expectedVersion != current), while a
+// matching version and the unconditional version 0 both land. This is the
+// coordinator half of the attempt fence: a stale/late Query response from a
+// superseded attempt must not overwrite the current attempt's state.
+func TestExternalCollectionRefreshMeta_VersionFencedWrites(t *testing.T) {
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, Version: 2, State: indexpb.JobState_JobStateInProgress},
+	}
+	meta := createMetaTestRefreshMeta(t, nil, tasks)
+
+	// Stale result from attempt v1 is dropped (task is at v2).
+	applied, err := meta.UpdateTaskResult(1001, 1, indexpb.JobState_JobStateFinished, "", []int64{9}, nil)
+	assert.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+	assert.False(t, meta.GetTask(1001).GetResultReady())
+
+	// Stale state write from v1 is dropped too.
+	applied, err = meta.UpdateTaskState(1001, 1, indexpb.JobState_JobStateFailed, "stale")
+	assert.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+
+	// Stale reset from v1 is dropped.
+	applied, err = meta.ResetTaskForRetry(1001, 1, "stale reset")
+	assert.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
+
+	// The current attempt's write (v2) lands.
+	applied, err = meta.UpdateTaskResult(1001, 2, indexpb.JobState_JobStateFinished, "", []int64{9}, nil)
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetTask(1001).GetState())
+	assert.True(t, meta.GetTask(1001).GetResultReady())
+
+	// Unconditional (version 0) job-scoped write always lands (e.g. timeout).
+	applied, err = meta.UpdateTaskState(1001, 0, indexpb.JobState_JobStateFailed, "job timeout")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, meta.GetTask(1001).GetState())
 }

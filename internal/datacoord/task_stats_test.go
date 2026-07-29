@@ -227,10 +227,11 @@ func (s *statsTaskSuite) TestUpdateStateAndVersion() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		s.mt.statsTaskMeta.catalog = catalog
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
-		err := st.UpdateTaskVersion(100)
+		err := st.UpdateTaskVersion(100, "manifest-at-dispatch")
 		s.NoError(err)
 		s.Equal(int64(2), st.GetVersion())
 		s.Equal(int64(100), st.GetNodeID())
+		s.Equal("manifest-at-dispatch", st.GetDispatchedManifest())
 	})
 
 	s.Run("update version failure", func() {
@@ -238,7 +239,7 @@ func (s *statsTaskSuite) TestUpdateStateAndVersion() {
 		s.mt.statsTaskMeta.catalog = catalog
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
 			Return(errors.New("mock error"))
-		err := st.UpdateTaskVersion(200)
+		err := st.UpdateTaskVersion(200, "manifest-at-dispatch")
 		s.Error(err)
 	})
 }
@@ -403,22 +404,20 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
 	})
 
-	s.Run("update InProgress failed", func() {
+	s.Run("send job failed and cancel failed stays in progress", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
 		s.mt.segments.segments[s.segID].isCompacting = false
 		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
-		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 		st.meta.statsTaskMeta.catalog = catalog
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
-		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(errors.New("mock create error"))
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(errors.New("mock cancel error"))
 
 		st.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
 	})
 
 	s.Run("success case", func() {
@@ -433,6 +432,64 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
 	})
+}
+
+// The CAS expected value (StatsTask.dispatched_manifest) and the manifest the
+// worker is told to build on (CreateStatsRequest.manifest_path) must be the same
+// string. A stamp staler than the request rejects every result; a stamp fresher
+// than it silently adopts a stale one - the exact lost update the fence exists to
+// prevent. Both now come from one local in CreateTaskOnWorker; this pins that.
+func (s *statsTaskSuite) TestCreateTaskOnWorkerStampMatchesDispatchedRequest() {
+	const dispatchedManifest = `{"base_path":"files/insert_log/1/2/1179","ver":4}`
+
+	restore := s.installJSONStatsSegment(dispatchedManifest)
+	defer restore()
+	restoreCollection := s.installStatsTaskCollection(false)
+	defer restoreCollection()
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		},
+	}, nil)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+	s.mt.statsTaskMeta.catalog = catalog
+
+	st := newStatsTask(&indexpb.StatsTask{
+		CollectionID:    s.collID,
+		PartitionID:     s.partID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.segID,
+		InsertChannel:   "ch1",
+		TaskID:          s.taskID,
+		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		State:           indexpb.JobState_JobStateInit,
+	}, 1, s.mt, handler, nil, newIndexEngineVersionManager())
+
+	ac := allocator.NewMockAllocator(s.T())
+	ac.EXPECT().AllocN(mock.Anything).Return(1, 1000000, nil)
+	st.allocator = ac
+
+	var sentManifest string
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ int64, req *workerpb.CreateStatsRequest) error {
+			sentManifest = req.GetManifestPath()
+			return nil
+		})
+
+	st.CreateTaskOnWorker(1, cluster)
+
+	s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+	s.Equal(dispatchedManifest, sentManifest, "the worker must build on the manifest we dispatched")
+	s.Equal(dispatchedManifest, st.GetDispatchedManifest(), "the task record must stamp the same manifest")
+	s.Equal(st.GetDispatchedManifest(), sentManifest, "stamp and request must never diverge")
 }
 
 func (s *statsTaskSuite) TestCreateTaskOnWorkerDropsExternalJSONWithoutV3Manifest() {
@@ -711,12 +768,15 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			defer mockAlterSegments.UnPatch()
 			s.mt.catalog = &mockeyDataCoordCatalog{}
 
-			err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
-				TaskID:           s.taskID,
-				CollectionID:     s.collID,
-				PartitionID:      s.partID,
-				SegmentID:        s.segID,
-				Channel:          "ch1",
+			err := s.newJSONStatsTask(testCase.base).SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:       s.taskID,
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				Channel:      "ch1",
+				// Still reported by the worker, and still used to derive the paths of
+				// a rejected result's files (collectRejectedStatsResultFiles) - just no
+				// longer what the adoption CAS fences on.
 				BaseManifest:     testCase.base,
 				Manifest:         testCase.result,
 				JsonKeyStatsLogs: testCase.logs,
@@ -741,6 +801,287 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			} else {
 				s.Equal(0, alterSegmentsCount)
 			}
+		})
+	}
+}
+
+// TestSetJobInfoSortResultManifestHandling covers the shared, non-text/json manifest
+// update branch (sort sub-job). A result built on a non-empty stale base is rejected
+// instead of blindly overwriting a concurrently-committed manifest. A baseless result
+// is adopted (fail-open): sort results carry no base by design (birth commit), and
+// older DataNodes cannot report one, so the CAS is skipped for an empty base.
+func (s *statsTaskSuite) TestSetJobInfoSortResultManifestHandling() {
+	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
+	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
+	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+
+	testCases := []struct {
+		name           string
+		current        string
+		base           string
+		result         string
+		expectManifest string
+		expectCatalog  bool
+		expectErr      error
+	}{
+		{
+			name:           "stale_result_rejected",
+			current:        currentManifest,
+			base:           oldManifest,
+			result:         resultManifest,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			name:           "fresh_result_adopted",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         resultManifest,
+			expectManifest: resultManifest,
+			expectCatalog:  true,
+		},
+		{
+			// A baseless result is adopted (fail-open): birth commit / older worker.
+			name:           "baseless_adopted",
+			current:        currentManifest,
+			base:           "",
+			result:         resultManifest,
+			expectManifest: resultManifest,
+			expectCatalog:  true,
+		},
+		{
+			// True birth: the freshly allocated sort target has no manifest yet.
+			name:           "true_birth_adopted",
+			current:        "",
+			base:           "",
+			result:         resultManifest,
+			expectManifest: resultManifest,
+			expectCatalog:  true,
+		},
+		{
+			// Idempotent replay of an already adopted result: no-op, no error.
+			name:           "baseless_replay_noop",
+			current:        resultManifest,
+			base:           "",
+			result:         resultManifest,
+			expectManifest: resultManifest,
+		},
+		{
+			// Correct base, but the result points at a DIFFERENT segment's manifest.
+			// base==current alone would have adopted it (corrupting the pointer); the
+			// successor check rejects a cross-segment manifest.
+			name:           "cross_segment_result_rejected",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         `{"base_path":"files/insert_log/9/9/9999","ver":3}`,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Correct base, but the result rolls the version backwards on the same
+			// base path — reject rather than regress the segment.
+			name:           "rollback_result_rejected",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         oldManifest,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Baseless (fail-open on the missing base) but the result still moves the
+			// pointer of a materialized segment to another segment's manifest: refuse
+			// even without a base, since we can still see it is not a forward successor.
+			name:           "baseless_cross_segment_rejected",
+			current:        currentManifest,
+			base:           "",
+			result:         `{"base_path":"files/insert_log/9/9/9999","ver":3}`,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Baseless rollback on the same base path: reject.
+			name:           "baseless_rollback_rejected",
+			current:        currentManifest,
+			base:           "",
+			result:         oldManifest,
+			expectManifest: currentManifest,
+			expectErr:      errStatsResultStale,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restore := s.installJSONStatsSegment(testCase.current)
+			defer restore()
+
+			alterSegmentsCount := 0
+			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
+				func(
+					_ *mockeyDataCoordCatalog,
+					_ context.Context,
+					_ []*datapb.SegmentInfo,
+					_ ...metastore.BinlogsIncrement,
+				) error {
+					alterSegmentsCount++
+					return nil
+				}).Build()
+			defer mockAlterSegments.UnPatch()
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+
+			err := s.newSortStatsTask(testCase.base).SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:       s.taskID,
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				Channel:      "ch1",
+				Manifest:     testCase.result,
+			})
+			if testCase.expectErr != nil {
+				s.ErrorIs(err, testCase.expectErr)
+			} else {
+				s.NoError(err)
+			}
+
+			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(segment)
+			s.Equal(testCase.expectManifest, segment.GetManifestPath())
+			if testCase.expectCatalog {
+				s.Equal(1, alterSegmentsCount)
+			} else {
+				s.Equal(0, alterSegmentsCount)
+			}
+		})
+	}
+}
+
+// A real Sort writes to a freshly allocated TARGET segment while its base
+// describes the ORIGIN it read. The two manifests belong to different entities,
+// so the base fence must not compare them - doing so would reject every sort
+// result. The successor fence still applies, which is what keeps a retry from
+// rolling an already-materialized target backwards.
+//
+// Note the other sort tests use newSortStatsTask, whose TargetSegmentID equals
+// SegmentID; those exercise the same-segment path where the fence does apply.
+func (s *statsTaskSuite) TestSetJobInfoSortCrossSegmentSkipsBaseFence() {
+	const targetSegID = int64(987654)
+	originManifest := `{"base_path":"files/insert_log/1/2/1179","ver":7}`
+	targetV1 := `{"base_path":"files/insert_log/1/2/987654","ver":1}`
+	targetV2 := `{"base_path":"files/insert_log/1/2/987654","ver":2}`
+
+	testCases := []struct {
+		name           string
+		targetCurrent  string
+		base           string
+		result         string
+		expectManifest string
+		expectErr      error
+	}{
+		{
+			// The case that motivated this: base is the origin's manifest and can
+			// never equal the target's. Adopted because the adoption is a birth.
+			name:           "origin_base_on_fresh_target_adopted",
+			targetCurrent:  "",
+			base:           originManifest,
+			result:         targetV1,
+			expectManifest: targetV1,
+		},
+		{
+			// Retry after the target was already materialized: still cross-segment,
+			// so the base is still ignored, but the successor fence must advance.
+			name:           "retry_forward_on_materialized_target_adopted",
+			targetCurrent:  targetV1,
+			base:           originManifest,
+			result:         targetV2,
+			expectManifest: targetV2,
+		},
+		{
+			// Skipping the base fence must not disable the successor fence: a
+			// rollback onto a materialized target is still refused.
+			name:           "retry_rollback_on_materialized_target_rejected",
+			targetCurrent:  targetV2,
+			base:           originManifest,
+			result:         targetV1,
+			expectManifest: targetV2,
+			expectErr:      errStatsResultStale,
+		},
+		{
+			// Nor may a cross-segment adoption point the target at some third
+			// segment's manifest.
+			name:           "foreign_manifest_on_materialized_target_rejected",
+			targetCurrent:  targetV1,
+			base:           originManifest,
+			result:         `{"base_path":"files/insert_log/9/9/9999","ver":3}`,
+			expectManifest: targetV1,
+			expectErr:      errStatsResultStale,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restoreOrigin := s.installJSONStatsSegment(originManifest)
+			defer restoreOrigin()
+
+			origTarget, hadTarget := s.mt.segments.segments[targetSegID]
+			s.mt.segments.segments[targetSegID] = &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             targetSegID,
+					CollectionID:   s.collID,
+					PartitionID:    s.partID,
+					InsertChannel:  "ch1",
+					NumOfRows:      1024,
+					State:          commonpb.SegmentState_Flushed,
+					Level:          datapb.SegmentLevel_L1,
+					ManifestPath:   testCase.targetCurrent,
+					StorageVersion: 3,
+				},
+			}
+			defer func() {
+				if hadTarget {
+					s.mt.segments.segments[targetSegID] = origTarget
+					return
+				}
+				delete(s.mt.segments.segments, targetSegID)
+			}()
+
+			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).Return(nil).Build()
+			defer mockAlterSegments.UnPatch()
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+
+			st := newStatsTask(&indexpb.StatsTask{
+				CollectionID:    s.collID,
+				PartitionID:     s.partID,
+				SegmentID:       s.segID,
+				TargetSegmentID: targetSegID,
+				InsertChannel:   "ch1",
+				TaskID:          s.taskID,
+				SubJobType:      indexpb.StatsSubJob_Sort,
+				State:           indexpb.JobState_JobStateInProgress,
+				// Dispatched on the ORIGIN's manifest: the value that must not be
+				// compared against the target's.
+				DispatchedManifest: testCase.base,
+			}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+
+			err := st.SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:       s.taskID,
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				Channel:      "ch1",
+				Manifest:     testCase.result,
+			})
+			if testCase.expectErr != nil {
+				s.ErrorIs(err, testCase.expectErr)
+			} else {
+				s.NoError(err)
+			}
+
+			target := s.mt.GetHealthySegment(context.Background(), targetSegID)
+			s.Require().NotNil(target)
+			s.Equal(testCase.expectManifest, target.GetManifestPath())
+			// The origin is never touched by a cross-segment adoption.
+			origin := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(origin)
+			s.Equal(originManifest, origin.GetManifestPath())
 		})
 	}
 }
@@ -818,13 +1159,12 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			defer mockAlterSegments.UnPatch()
 			s.mt.catalog = &mockeyDataCoordCatalog{}
 
-			err := s.newTextStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+			err := s.newTextStatsTask(testCase.base).SetJobInfo(context.Background(), &workerpb.StatsResult{
 				TaskID:        s.taskID,
 				CollectionID:  s.collID,
 				PartitionID:   s.partID,
 				SegmentID:     s.segID,
 				Channel:       "ch1",
-				BaseManifest:  testCase.base,
 				Manifest:      testCase.result,
 				TextStatsLogs: testCase.logs,
 			})
@@ -856,7 +1196,6 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 	baseManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
 	s.Run("collect text and json stats files", func() {
 		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
-			BaseManifest: baseManifest,
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				101: {
 					Files: []string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"},
@@ -867,7 +1206,7 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, baseManifest)
 
 		s.NoError(err)
 		s.ElementsMatch([]string{
@@ -887,39 +1226,212 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 					},
 				},
 			},
-		})
+		}, baseManifest)
 
 		s.NoError(err)
 		s.Equal([]string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"}, files)
 	})
 
-	s.Run("json stats without manifest returns typed error", func() {
+	s.Run("json stats without trusted manifest returns typed error", func() {
+		// No manifest DataCoord vouches for => refuse to resolve any delete paths.
 		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 				102: {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, "")
 
 		s.Empty(files)
 		s.ErrorIs(err, merr.ErrServiceInternal)
-		s.Contains(err.Error(), "manifest is empty for rejected json stats result")
+		s.Contains(err.Error(), "no trusted manifest for rejected stats result")
+	})
+
+	s.Run("text stats without trusted manifest returns typed error", func() {
+		// Text keys arrive absolute, so with no trusted manifest there is nothing to
+		// check them against. Refuse rather than feed unverified keys to MultiRemove.
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					Files: []string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"},
+				},
+			},
+		}, "")
+
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Contains(err.Error(), "no trusted manifest for rejected stats result")
+	})
+
+	s.Run("text stats file outside the written segment prefix is refused", func() {
+		// A rejected result's own file list must not be able to aim MultiRemove at
+		// another segment. The whole call fails; nothing is returned for deletion,
+		// including the one legitimately-prefixed key alongside it.
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					Files: []string{
+						"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json",
+						"files/insert_log/9/9/9999/_stats/text_index.101/tokenizer.json",
+					},
+				},
+			},
+		}, baseManifest)
+
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Contains(err.Error(), "outside the written segment prefix")
+	})
+
+	s.Run("text stats prefix check is not fooled by a sibling path sharing a string prefix", func() {
+		// "…/1179extra/…" shares the literal prefix "…/1179" but is a different
+		// segment directory, so the check must compare on a path boundary.
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					Files: []string{"files/insert_log/1/2/1179extra/_stats/text_index.101/tokenizer.json"},
+				},
+			},
+		}, baseManifest)
+
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Contains(err.Error(), "outside the written segment prefix")
+	})
+
+	s.Run("text stats prefix check rejects dot-dot traversal", func() {
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					Files: []string{"files/insert_log/1/2/1179/_stats/../1180/foreign"},
+				},
+			},
+		}, baseManifest)
+
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Contains(err.Error(), "outside the written segment prefix")
+	})
+
+	s.Run("json stats path join cannot escape with dot-dot", func() {
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				102: {
+					Files: []string{"../../../1180/foreign"},
+				},
+			},
+		}, baseManifest)
+
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Contains(err.Error(), "unsafe file")
+	})
+
+	s.Run("worker supplied manifests cannot steer deletion", func() {
+		// The result echoes a foreign base AND a foreign result manifest - pointing
+		// at another segment is one of the reasons a result gets rejected. Deletion
+		// must follow the trusted manifest only.
+		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			BaseManifest: `{"base_path":"files/insert_log/9/9/9999","ver":1}`,
+			Manifest:     `{"base_path":"files/insert_log/8/8/8888","ver":1}`,
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				102: {
+					Files: []string{"shared_key_index/.managed.json_0"},
+				},
+			},
+		}, baseManifest)
+
+		s.NoError(err)
+		s.Equal([]string{
+			"files/insert_log/1/2/1179/_stats/json_stats.102/shared_key_index/.managed.json_0",
+		}, files)
 	})
 
 	s.Run("json stats with invalid manifest returns error", func() {
 		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
-			BaseManifest: "invalid",
 			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 				102: {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, "invalid")
 
 		s.Empty(files)
 		s.Error(err)
 	})
+}
+
+// The CAS base comes from the task record, so the fence no longer depends on the
+// DataNode's version: a worker too old to echo base_manifest is fenced exactly
+// like a current one. Before the base moved onto the task this same result was
+// adopted unfenced, because an empty result base had to fail open.
+func (s *statsTaskSuite) TestSetJobInfoFencesOldDataNodeViaDispatchedManifest() {
+	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
+	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
+	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+
+	testCases := []struct {
+		name               string
+		dispatchedManifest string
+		expectManifest     string
+		expectErr          error
+	}{
+		{
+			// Old DataNode: reports no base. The attempt was dispatched on a manifest
+			// a concurrent commit has since superseded, and we know that from our own
+			// task record - so reject and re-run rather than clobber that commit.
+			name:               "old_datanode_stale_attempt_rejected",
+			dispatchedManifest: oldManifest,
+			expectManifest:     currentManifest,
+			expectErr:          errStatsResultStale,
+		},
+		{
+			// Same old DataNode, but the attempt really was dispatched on what the
+			// segment still holds: adopt.
+			name:               "old_datanode_fresh_attempt_adopted",
+			dispatchedManifest: currentManifest,
+			expectManifest:     resultManifest,
+		},
+		{
+			// Attempt dispatched by a DataCoord predating the field and still in
+			// flight across the upgrade: nothing to fence with, so fail open. This
+			// window drains within one upgrade cycle.
+			name:               "attempt_from_pre_field_datacoord_adopted",
+			dispatchedManifest: "",
+			expectManifest:     resultManifest,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restore := s.installJSONStatsSegment(currentManifest)
+			defer restore()
+
+			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).Return(nil).Build()
+			defer mockAlterSegments.UnPatch()
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+
+			err := s.newTextStatsTask(testCase.dispatchedManifest).SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:       s.taskID,
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				Channel:      "ch1",
+				// An old worker sends no base at all.
+				BaseManifest:  "",
+				Manifest:      resultManifest,
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{500: {Files: []string{"f"}}},
+			})
+			if testCase.expectErr != nil {
+				s.ErrorIs(err, testCase.expectErr)
+			} else {
+				s.NoError(err)
+			}
+			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(segment)
+			s.Equal(testCase.expectManifest, segment.GetManifestPath())
+		})
+	}
 }
 
 func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
@@ -961,6 +1473,8 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 				SubJobType:      indexpb.StatsSubJob_TextIndexJob,
 				State:           indexpb.JobState_JobStateInProgress,
 				NodeID:          11,
+				// Dispatched on a manifest a concurrent commit has since superseded.
+				DispatchedManifest: oldManifest,
 			}
 			origStatsTaskMeta := s.mt.statsTaskMeta
 			droppedStatsTasks := make([]int64, 0)
@@ -1085,29 +1599,51 @@ func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
 	}
 }
 
-func (s *statsTaskSuite) newJSONStatsTask() *statsTask {
+// dispatchedManifest is the manifest DataCoord stamped on the attempt - the
+// expected value of the adoption CAS. It no longer comes off the result.
+func (s *statsTaskSuite) newJSONStatsTask(dispatchedManifest string) *statsTask {
 	return newStatsTask(&indexpb.StatsTask{
-		CollectionID:    s.collID,
-		PartitionID:     s.partID,
-		SegmentID:       s.segID,
-		TargetSegmentID: s.segID,
-		InsertChannel:   "ch1",
-		TaskID:          s.taskID,
-		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
-		State:           indexpb.JobState_JobStateInProgress,
+		CollectionID:       s.collID,
+		PartitionID:        s.partID,
+		SegmentID:          s.segID,
+		TargetSegmentID:    s.segID,
+		InsertChannel:      "ch1",
+		TaskID:             s.taskID,
+		SubJobType:         indexpb.StatsSubJob_JsonKeyIndexJob,
+		State:              indexpb.JobState_JobStateInProgress,
+		DispatchedManifest: dispatchedManifest,
 	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 }
 
-func (s *statsTaskSuite) newTextStatsTask() *statsTask {
+// dispatchedManifest is the manifest DataCoord stamped on the attempt - the
+// expected value of the adoption CAS. It no longer comes off the result.
+func (s *statsTaskSuite) newTextStatsTask(dispatchedManifest string) *statsTask {
 	return newStatsTask(&indexpb.StatsTask{
-		CollectionID:    s.collID,
-		PartitionID:     s.partID,
-		SegmentID:       s.segID,
-		TargetSegmentID: s.segID,
-		InsertChannel:   "ch1",
-		TaskID:          s.taskID,
-		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
-		State:           indexpb.JobState_JobStateInProgress,
+		CollectionID:       s.collID,
+		PartitionID:        s.partID,
+		SegmentID:          s.segID,
+		TargetSegmentID:    s.segID,
+		InsertChannel:      "ch1",
+		TaskID:             s.taskID,
+		SubJobType:         indexpb.StatsSubJob_TextIndexJob,
+		State:              indexpb.JobState_JobStateInProgress,
+		DispatchedManifest: dispatchedManifest,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+}
+
+// dispatchedManifest is the manifest DataCoord stamped on the attempt - the
+// expected value of the adoption CAS. It no longer comes off the result.
+func (s *statsTaskSuite) newSortStatsTask(dispatchedManifest string) *statsTask {
+	return newStatsTask(&indexpb.StatsTask{
+		CollectionID:       s.collID,
+		PartitionID:        s.partID,
+		SegmentID:          s.segID,
+		TargetSegmentID:    s.segID,
+		InsertChannel:      "ch1",
+		TaskID:             s.taskID,
+		SubJobType:         indexpb.StatsSubJob_Sort,
+		State:              indexpb.JobState_JobStateInProgress,
+		DispatchedManifest: dispatchedManifest,
 	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 }
 
@@ -1136,7 +1672,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(nil, errors.New("collection not found"))
 		st.handler = handler
 
-		_, err := st.prepareJobRequest(context.Background(), segment)
+		_, err := st.prepareJobRequest(context.Background(), segment, "manifest-at-dispatch")
 		s.Error(err)
 		s.Contains(err.Error(), "failed to get collection info")
 	})
@@ -1148,7 +1684,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		}, nil)
 		st.handler = handler
 
-		_, err := st.prepareJobRequest(context.Background(), segment)
+		_, err := st.prepareJobRequest(context.Background(), segment, "manifest-at-dispatch")
 		s.Error(err)
 		s.Contains(err.Error(), "collection schema is nil or has no fields")
 	})
@@ -1160,7 +1696,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		}, nil)
 		st.handler = handler
 
-		_, err := st.prepareJobRequest(context.Background(), segment)
+		_, err := st.prepareJobRequest(context.Background(), segment, "manifest-at-dispatch")
 		s.Error(err)
 		s.Contains(err.Error(), "collection schema is nil or has no fields")
 	})
@@ -1184,7 +1720,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		st.handler = handler
 		st.allocator = ac
 
-		_, err := st.prepareJobRequest(context.Background(), segment)
+		_, err := st.prepareJobRequest(context.Background(), segment, "manifest-at-dispatch")
 		s.Error(err)
 		s.Contains(err.Error(), "failed to allocate log IDs")
 	})
@@ -1217,7 +1753,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: "deltalog1"}}},
 		}
 
-		req, err := st.prepareJobRequest(context.Background(), segment)
+		req, err := st.prepareJobRequest(context.Background(), segment, "manifest-at-dispatch")
 		s.NoError(err)
 		s.NotNil(req)
 

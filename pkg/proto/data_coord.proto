@@ -1531,9 +1531,18 @@ message RefreshExternalCollectionTaskRequest {
 message RefreshExternalCollectionTaskResponse {
   common.Status status = 1;
   repeated int64 keptSegments = 2;
+  // The single segment upsert payload used by both old and new coordinators.
+  // DataCoord only consumes worker-owned result fields and materializes
+  // collection / partition / channel / state / level itself.
   repeated SegmentInfo updatedSegments = 3;
   index.JobState state = 4;
   string fail_reason = 5;
+  // Optional worker echo of the dispatch-time manifest for each in-place patch,
+  // keyed by segment ID. New DataCoord verifies an echo against its own persisted
+  // dispatch snapshot but never trusts it as the CAS expectation. Old workers
+  // may omit it; old coordinators ignore it and continue reading updatedSegments.
+  // New segments have no entry.
+  map<int64, string> base_manifests = 6;
 }
 
 // External Table Refresh Messages
@@ -1598,8 +1607,25 @@ message ExternalCollectionRefreshTask {
   int64 file_index_begin = 13;        // File range start for this task
   int64 file_index_end = 14;          // File range end for this task
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
-  repeated SegmentInfo updated_segments = 16;  // Segment upsert payload produced by this task result
+  // The single persisted segment payload. Keeping the original field lets a
+  // new DataCoord reload old tasks and an old DataCoord recover or roll back
+  // tasks written by the new version without losing updated segments.
+  repeated SegmentInfo updated_segments = 16;
   bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
+  // DataCoord-owned dispatch snapshot, keyed by existing segment ID. It stores
+  // the manifest sent in currentSegments for this exact attempt, so adoption
+  // does not trust a worker to report its own CAS expectation. Old tasks have
+  // no entries; a new coordinator fails closed and rebuilds before adopting an
+  // unverifiable existing-segment result. New segments have no entry.
+  map<int64, string> base_manifests = 19;
+  // IDs reserved by DataCoord for this exact dispatch attempt. Persisting the
+  // range binds every birth result to coordinator-owned allocation state across
+  // restart/failover; a task restored without it is rebuilt before adoption.
+  IDRange preallocated_segment_ids = 20;
+  // Coordinator-owned parent path for birth segment manifests:
+  // {root}/insert_log/{collection}/{partition}. The result's segment ID is
+  // appended and must match exactly before the birth is adopted.
+  string target_segment_base = 21;
 }
 
 message GetRefreshExternalCollectionProgressResponse {

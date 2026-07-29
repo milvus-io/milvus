@@ -27,11 +27,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
-// externalCollectionRefreshInspector handles task scheduling and recovery for external collection refresh.
+// externalCollectionRefreshInspector seeds the global task scheduler from meta.
+// That is its entire responsibility — it never mutates a task. It consults only
+// the owning job's terminal bit as a dispatch fence; the checker still owns all
+// job state transitions and reconciliation.
 //
-// This is an internal component of ExternalCollectionRefreshManager, responsible for:
-// 1. Reload InProgress/Init tasks to scheduler on DataCoord restart (idempotent recovery)
-// 2. Periodically enqueue pending tasks to the global task scheduler for execution
+// It exists because the scheduler is in-memory only and can recycle just the
+// tasks it already holds (schedule()/check() push an Init/Retry task back onto
+// their own pending queue). Two classes of task are outside it and would
+// otherwise never run again:
+//  1. after a DataCoord restart, every persisted active task — nothing else
+//     re-populates the scheduler;
+//  2. a task reset in meta by a component the scheduler is not driving. The
+//     load-bearing case is resetFinishedTasksLocked, which returns a job's
+//     already-Finished tasks to Init after a manifest CAS conflict: the
+//     scheduler dropped them when they finished, so this sweep is the only path
+//     that re-dispatches them.
 //
 // TASK STATE TRANSITIONS:
 // Init → InProgress (inspector enqueues to scheduler, scheduler dispatches to DataNode)
@@ -92,28 +103,45 @@ func (i *externalCollectionRefreshInspector) run() {
 	}
 }
 
-// inspect runs a single inspection cycle to re-enqueue any pending tasks.
+// inspect is the steady-state sweep: hand the scheduler whatever is waiting to
+// be dispatched.
 func (i *externalCollectionRefreshInspector) inspect() {
-	tasks := i.refreshMeta.GetAllTasks()
-	for _, t := range tasks {
-		switch t.GetState() {
-		case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry:
-			// Re-enqueue pending tasks (scheduler will deduplicate)
-			i.scheduler.Enqueue(i.wrapTask(t))
-		}
-	}
+	i.enqueueActiveTasks(false)
 }
 
-// reloadFromMeta reloads active tasks from metadata on startup.
+// reloadFromMeta is the startup sweep. It is the only caller that includes
+// InProgress: that re-adopts an attempt which was in flight when DataCoord went
+// down, so the scheduler resumes polling it instead of leaving it to age out. On
+// a steady-state tick an InProgress task is already held by the scheduler, so
+// sweeping it in would be a no-op at best.
 func (i *externalCollectionRefreshInspector) reloadFromMeta() {
-	tasks := i.refreshMeta.GetAllTasks()
-	for _, t := range tasks {
-		if t.GetState() != indexpb.JobState_JobStateInit &&
-			t.GetState() != indexpb.JobState_JobStateRetry &&
-			t.GetState() != indexpb.JobState_JobStateInProgress {
+	i.enqueueActiveTasks(true)
+}
+
+// enqueueActiveTasks hands every task waiting to run to the scheduler. The job
+// lookup is a dispatch fence: async explore and startup recovery can expose an
+// Init task after its owning job has already reached Failed/Finished, and such a
+// task must never consume a worker slot while waiting for checker reconciliation.
+//
+// Reach it through inspect() / reloadFromMeta() rather than directly: those name
+// what includeInProgress means at each call site.
+func (i *externalCollectionRefreshInspector) enqueueActiveTasks(includeInProgress bool) {
+	for _, t := range i.refreshMeta.GetAllTasks() {
+		job := i.refreshMeta.GetJob(t.GetJobId())
+		if job == nil || isTerminalJobState(job.GetState()) {
 			continue
 		}
-		// Enqueue active tasks for processing
+		switch t.GetState() {
+		case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry:
+		case indexpb.JobState_JobStateInProgress:
+			if !includeInProgress {
+				continue
+			}
+		default:
+			continue
+		}
+		// The scheduler dedups by taskID, so re-enqueueing one it already holds
+		// is a no-op.
 		i.scheduler.Enqueue(i.wrapTask(t))
 	}
 }

@@ -99,6 +99,11 @@ message SegmentIndex {
     // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
     // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
     IndexStorePathVersion index_store_path_version = 22;
+    // data_manifest is the StorageV3 segment manifest this index build read.
+    // DataCoord invalidates the SegmentIndex when the segment advances to a
+    // different manifest, so an in-place external refresh cannot leave an index
+    // built from superseded data attached to the same segment ID.
+    string data_manifest = 23;
 }
 
 message RegisterNodeRequest {
@@ -348,6 +353,18 @@ message StatsTask {
     index.StatsSubJob subJobType = 11;
     bool canRecycle = 12;
     repeated internal.FileResourceInfo file_resources = 13;
+    // dispatched_manifest is the segment manifest this attempt was dispatched on,
+    // stamped by DataCoord when it assigns the task (same snapshot that fills
+    // CreateStatsRequest.manifest_path). It is the expected value of the
+    // optimistic-concurrency CAS performed when the result is adopted.
+    //
+    // DataCoord deliberately keeps its own copy rather than reading the base back
+    // out of StatsResult: the value originates here, so a round trip through the
+    // worker would make the fence depend on the worker's version (a DataNode too
+    // old to echo it would have to be adopted unfenced) and would let a buggy
+    // worker misreport it. Empty only for an attempt dispatched by a DataCoord
+    // predating this field, which drains within one upgrade cycle.
+    string dispatched_manifest = 14;
 }
 
 enum StatsSubJob {

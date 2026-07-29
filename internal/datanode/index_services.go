@@ -76,6 +76,7 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		Cancel: taskCancel,
 		State:  commonpb.IndexState_InProgress,
 	}); oldInfo != nil {
+		taskCancel()
 		// Node-internal dedup of a coordinator-dispatched build task: a duplicate
 		// is a scheduling race, not the user re-creating an index.
 		err := merr.WrapErrServiceInternalMsg("building index task existed, index=%s, buildID=%d", req.GetIndexName(), req.GetBuildID())
@@ -89,12 +90,15 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			mlog.Err(err),
 		)
+		taskCancel()
 		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
+		taskCancel()
+		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		return merr.Status(err), nil
 	}
 	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
@@ -103,6 +107,8 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
 			mlog.Err(err))
 		ret = merr.Status(err)
+		taskCancel()
+		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
@@ -170,11 +176,8 @@ func (node *DataNode) DropJobs(ctx context.Context, req *workerpb.DropJobsReques
 	for _, taskID := range req.GetTaskIDs() {
 		keys = append(keys, index.Key{ClusterID: req.GetClusterID(), TaskID: taskID})
 	}
-	infos := node.taskManager.DeleteIndexTaskInfos(ctx, keys)
-	for _, info := range infos {
-		if info.Cancel != nil {
-			info.Cancel()
-		}
+	if err := node.taskManager.CancelAndDeleteIndexTaskInfos(ctx, keys); err != nil {
+		return merr.Status(err), nil
 	}
 	mlog.Info(ctx, "drop index build jobs success", mlog.String("clusterID", req.GetClusterID()),
 		mlog.Int64s("indexBuildIDs", req.GetTaskIDs()))
@@ -279,6 +282,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		State:                 commonpb.IndexState_InProgress,
 		IndexStorePathVersion: req.GetIndexStorePathVersion(),
 	}); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeIndexJob.String(),
 			fmt.Sprintf("building index task existed with %s-%d", req.GetClusterID(), req.GetBuildID()))
 		mlog.Warn(context.TODO(), "duplicated index build task", mlog.Err(err))
@@ -291,6 +295,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			mlog.Err(err),
 		)
+		taskCancel()
 		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -298,6 +303,8 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 
 	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
+		taskCancel()
+		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		return merr.Status(err), nil
 	}
 
@@ -307,6 +314,8 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
 			mlog.Err(err))
 		ret = merr.Status(err)
+		taskCancel()
+		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
@@ -342,6 +351,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		Cancel: taskCancel,
 		State:  indexpb.JobState_JobStateInProgress,
 	}); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeAnalyzeJob.String(),
 			fmt.Sprintf("analyze task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
 		mlog.Warn(context.TODO(), "duplicated analyze task", mlog.Err(err))
@@ -352,6 +362,8 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
+		taskCancel()
+		node.taskManager.DeleteAnalyzeTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		return ret, nil
 	}
 	mlog.Info(context.TODO(), "DataNode analyze job enqueued successfully")
@@ -383,6 +395,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		Cancel: taskCancel,
 		State:  indexpb.JobState_JobStateInProgress,
 	}); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(),
 			fmt.Sprintf("stats task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
 		mlog.Warn(context.TODO(), "duplicated stats task", mlog.Err(err))
@@ -394,6 +407,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			mlog.Err(err),
 		)
+		taskCancel()
 		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		return merr.Status(err), nil
 	}
@@ -403,6 +417,8 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
+		taskCancel()
+		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		return ret, nil
 	}
 	mlog.Info(context.TODO(), "DataNode stats job enqueued successfully")
@@ -544,11 +560,8 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		for _, buildID := range req.GetTaskIDs() {
 			keys = append(keys, index.Key{ClusterID: req.GetClusterID(), TaskID: buildID})
 		}
-		infos := node.taskManager.DeleteIndexTaskInfos(ctx, keys)
-		for _, info := range infos {
-			if info.Cancel != nil {
-				info.Cancel()
-			}
+		if err := node.taskManager.CancelAndDeleteIndexTaskInfos(ctx, keys); err != nil {
+			return merr.Status(err), nil
 		}
 		mlog.Info(context.TODO(), "drop index build jobs success")
 		return merr.Success(), nil
@@ -557,11 +570,8 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		for _, taskID := range req.GetTaskIDs() {
 			keys = append(keys, index.Key{ClusterID: req.GetClusterID(), TaskID: taskID})
 		}
-		infos := node.taskManager.DeleteAnalyzeTaskInfos(ctx, keys)
-		for _, info := range infos {
-			if info.Cancel != nil {
-				info.Cancel()
-			}
+		if err := node.taskManager.CancelAndDeleteAnalyzeTaskInfos(ctx, keys); err != nil {
+			return merr.Status(err), nil
 		}
 		mlog.Info(context.TODO(), "drop analyze jobs success")
 		return merr.Success(), nil
@@ -570,11 +580,8 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		for _, taskID := range req.GetTaskIDs() {
 			keys = append(keys, index.Key{ClusterID: req.GetClusterID(), TaskID: taskID})
 		}
-		infos := node.taskManager.DeleteStatsTaskInfos(ctx, keys)
-		for _, info := range infos {
-			if info.Cancel != nil {
-				info.Cancel()
-			}
+		if err := node.taskManager.CancelAndDeleteStatsTaskInfos(ctx, keys); err != nil {
+			return merr.Status(err), nil
 		}
 		mlog.Info(context.TODO(), "drop stats jobs success")
 		return merr.Success(), nil

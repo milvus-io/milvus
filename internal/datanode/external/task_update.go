@@ -100,9 +100,13 @@ type RefreshExternalCollectionTask struct {
 	milvusTableSourceDeltalogsMu sync.Mutex
 	milvusTableSourceDeltalogs   map[string][]*datapb.FieldBinlog
 
-	// Result after execution — tracked separately for correct response building
-	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
-	updatedSegments []*datapb.SegmentInfo // upsert payload: patched current segments plus newly created segments
+	// Result after execution. updatedSegments is the single upsert payload used
+	// by every coordinator version; baseManifests optionally echoes each patch's
+	// input manifest so a new coordinator can verify it against its own persisted
+	// dispatch snapshot.
+	keptSegmentIDs  []int64
+	updatedSegments []*datapb.SegmentInfo
+	baseManifests   map[int64]string
 
 	// Pre-allocated segment IDs
 	preallocatedIDRange *datapb.IDRange // pre-allocated segment ID range (begin, end)
@@ -159,6 +163,7 @@ func (t *RefreshExternalCollectionTask) Reset() {
 	t.tr = nil
 	t.keptSegmentIDs = nil
 	t.updatedSegments = nil
+	t.baseManifests = nil
 }
 
 func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
@@ -290,11 +295,23 @@ func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-// GetUpdatedSegments returns segments that DataCoord should upsert after execution.
-// This includes patched same-ID current segments and newly created segments, but
-// excludes unchanged kept segments.
+// GetUpdatedSegments returns the upsert payload DataCoord should apply after
+// execution. This includes patched same-ID current segments and newly created
+// segments, but excludes unchanged kept segments.
 func (t *RefreshExternalCollectionTask) GetUpdatedSegments() []*datapb.SegmentInfo {
-	return t.updatedSegments
+	result := make([]*datapb.SegmentInfo, 0, len(t.updatedSegments))
+	for _, segment := range t.updatedSegments {
+		if segment != nil {
+			result = append(result, proto.Clone(segment).(*datapb.SegmentInfo))
+		}
+	}
+	return result
+}
+
+// GetBaseManifests returns the dispatch-time manifest echo for each patched
+// existing segment. Newly created segments intentionally have no entry.
+func (t *RefreshExternalCollectionTask) GetBaseManifests() map[int64]string {
+	return cloneBaseManifests(t.baseManifests)
 }
 
 // GetKeptSegmentIDs returns IDs of current segments that were kept unchanged
@@ -324,6 +341,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	}
 	t.keptSegmentIDs = nil
 	t.updatedSegments = nil
+	t.baseManifests = nil
 
 	// Build new fragment map using composite key (FilePath + StartRow + EndRow)
 	// This is necessary because a single file can be split into multiple fragments
@@ -338,6 +356,10 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
 	var patchedSegments []*datapb.SegmentInfo
+	// patchedBase carries each patch's adoption base out-of-band, keyed by segment
+	// ID. It is deliberately NOT stamped onto SegmentInfo: the base belongs to
+	// this task attempt and reaches DataCoord through the response sidecar.
+	patchedBase := make(map[int64]string)
 
 	var outputColumns []string
 	if t.hasFunctions() {
@@ -398,6 +420,12 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			continue
 		}
 
+		// Capture the original dispatch-time manifest before any rewrite. It is
+		// the manifest DataCoord currently holds, so it is the correct adoption
+		// base for the CAS through every subsequent manifest transformation
+		// (deltalog refresh and/or missing-column append), even though those
+		// transforms produce new intermediate manifests DataCoord has not seen.
+		originalManifest := seg.GetManifestPath()
 		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
@@ -447,6 +475,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				mlog.Int64("segmentID", seg.GetID()))
 		} else {
 			patchedSegments = append(patchedSegments, patchedSegment)
+			patchedBase[patchedSegment.GetID()] = originalManifest
 		}
 	}
 
@@ -473,12 +502,21 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	for _, seg := range keptSegments {
 		keptSegmentIDs = append(keptSegmentIDs, seg.GetID())
 	}
-	updatedSegments := append(patchedSegments, createdSegments...)
+	upsertSegments := append(patchedSegments, createdSegments...)
 	t.keptSegmentIDs = keptSegmentIDs
-	t.updatedSegments = updatedSegments
+	t.updatedSegments = make([]*datapb.SegmentInfo, 0, len(upsertSegments))
+	for _, segment := range upsertSegments {
+		if segment != nil {
+			t.updatedSegments = append(t.updatedSegments, proto.Clone(segment).(*datapb.SegmentInfo))
+		}
+	}
+	// Only patched segments have predecessors. Keep their dispatch-time manifest
+	// in a sidecar keyed by segment ID instead of embedding task-attempt state in
+	// SegmentInfo or duplicating the complete segment payload.
+	t.baseManifests = cloneBaseManifests(patchedBase)
 
 	// Visible result contains unchanged kept segments plus upsert segments.
-	result := append(keptSegments, updatedSegments...)
+	result := append(keptSegments, upsertSegments...)
 
 	mlog.Info(context.TODO(), "Segment organization complete",
 		mlog.Int("keptSegments", len(keptSegments)),
