@@ -37,8 +37,7 @@ func TestConcreteEventsImplementEvent(t *testing.T) {
 	var _ Event = StreamingNodeReleaseResourceEvent{}
 	var _ Event = CoordPersistViewEvent{}
 	var _ Event = StreamingNodePersistViewEvent{}
-	var _ Event = CoordSyncViewBatchEvent{}
-	var _ Event = CoordSyncViewBatchFailedEvent{}
+	var _ Event = CoordSyncViewAcceptedEvent{}
 }
 
 func TestLogObserverImplementsObserver(t *testing.T) {
@@ -244,11 +243,6 @@ func TestEventLogLevel(t *testing.T) {
 			level: mlog.WarnLevel,
 		},
 		{
-			name:  "sync batch failed event",
-			event: CoordSyncViewBatchFailedEvent{},
-			level: mlog.WarnLevel,
-		},
-		{
 			name:  "segment unrecoverable event",
 			event: QueryNodeSegmentUnrecoverableEvent{},
 			level: mlog.WarnLevel,
@@ -377,10 +371,12 @@ func TestEventComponentInfo(t *testing.T) {
 	}
 }
 
-func TestCoordSyncViewBatchEventMarshalLogObject(t *testing.T) {
+func TestCoordSyncViewAcceptedEventMarshalLogObject(t *testing.T) {
 	view := testQueryViewKey()
-	event := CoordSyncViewBatchEvent{
+	node := qviews.NewQueryNode(10)
+	event := CoordSyncViewAcceptedEvent{
 		View:  view,
+		Node:  node,
 		State: qviews.QueryViewStatePreparing,
 	}
 	enc := zapcore.NewMapObjectEncoder()
@@ -389,10 +385,11 @@ func TestCoordSyncViewBatchEventMarshalLogObject(t *testing.T) {
 		t.Fatalf("marshal event: %v", err)
 	}
 
-	assertField(t, enc, "type", "CoordSyncViewBatch")
+	assertField(t, enc, "type", "CoordSyncViewAccepted")
 	assertField(t, enc, "sid", view.ShardID.String())
 	assertField(t, enc, "qv", view.QueryViewVersion.String())
 	assertField(t, enc, "dv", view.QueryViewVersion.DataVersion.String())
+	assertField(t, enc, "wn", node.String())
 	assertField(t, enc, "state", qviews.QueryViewStatePreparing.String())
 }
 
