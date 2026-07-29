@@ -3021,5 +3021,33 @@ TEST_F(FlushGrowingSegmentTest,
     }
     EXPECT_EQ(seen, N);
 
+    // The in-flight budget is a throughput/memory knob, never a correctness
+    // one: accumulating callers pass kAccumulatingInflightBytes so the window
+    // does not add half a gigabyte of pinned arrow batches on top of a column
+    // they retain anyway. A budget small enough that every batch exceeds it
+    // must still deliver every batch, in the same order — the loop keeps one
+    // batch in flight unconditionally, so it cannot stall.
+    std::vector<FieldDataPtr> tiny_window;
+    storage::IterateFieldDataFromManifest(
+        manifest_json,
+        properties,
+        field_meta,
+        DataType::INT64,
+        0,
+        DataType::NONE,
+        std::nullopt,
+        [&](FieldDataPtr fd) { tiny_window.push_back(std::move(fd)); },
+        /*max_inflight_bytes=*/1);
+
+    ASSERT_EQ(tiny_window.size(), streamed.size());
+    for (size_t b = 0; b < tiny_window.size(); ++b) {
+        ASSERT_EQ(tiny_window[b]->get_num_rows(), streamed[b]->get_num_rows());
+        for (int64_t i = 0; i < tiny_window[b]->get_num_rows(); ++i) {
+            EXPECT_EQ(*static_cast<const int64_t*>(tiny_window[b]->RawValue(i)),
+                      *static_cast<const int64_t*>(streamed[b]->RawValue(i)))
+                << "batch " << b << " row " << i;
+        }
+    }
+
     FreeFlushResult(&result);
 }
