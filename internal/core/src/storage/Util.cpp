@@ -1564,7 +1564,11 @@ IterateFieldDataFromManifest(
     int64_t dim,
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
-    const std::function<void(FieldDataPtr)>& consumer) {
+    const std::function<void(FieldDataPtr)>& consumer,
+    int64_t max_inflight_bytes) {
+    AssertInfo(max_inflight_bytes > 0,
+               "max_inflight_bytes must be positive, got {}",
+               max_inflight_bytes);
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
@@ -1687,11 +1691,22 @@ IterateFieldDataFromManifest(
     // types the two are close, but on the external path
     // NormalizeExternalArrowByType can inflate the decoded footprint by a
     // type-dependent factor, so peak retained bytes can exceed
-    // kMaxInflightBytes by roughly that factor. Charging post-decode would
+    // max_inflight_bytes by roughly that factor. Charging post-decode would
     // need the decode to finish before admission, which is exactly the
     // serialization this pipeline exists to avoid; the accounting is
     // symmetric (deliver_front discharges what emplace_back charged), so this
     // is a looser bound, not a leak.
+    //
+    // The budget is a parameter because what it buys depends on the caller.
+    // For a streaming consumer (DiskFileManagerImpl spilling to local disk)
+    // the window *replaces* full-column retention, so a large one is a net
+    // reduction. For an accumulating caller — GetFieldDatasFromManifest, and
+    // through it every storage-v3 index build that goes via
+    // MemFileManagerImpl — the whole column is retained regardless, so the
+    // window only adds the source arrow batches that in-flight futures keep
+    // alive: pure extra peak RSS, on top of a column the Go-side build memory
+    // estimate already sized without it. Those callers pass
+    // kAccumulatingInflightBytes.
     //
     // The decode tasks go to the LOW pool, not MIDDLE. Every production
     // caller of this function is an index build (DiskFileManagerImpl /
@@ -1706,7 +1721,6 @@ IterateFieldDataFromManifest(
     // so this function must not be called from a LOW-pool thread. Index
     // build tasks enter segcore from Go, so no caller does today.
     auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::LOW);
-    constexpr int64_t kMaxInflightBytes = 512LL << 20;
     const size_t max_inflight_batches =
         std::max<size_t>(2, pool.GetMaxThreadNum() * 2);
     std::deque<std::pair<std::future<FieldDataPtr>, int64_t>> pending;
@@ -1831,7 +1845,7 @@ IterateFieldDataFromManifest(
         // Backpressure: block on the oldest batch once the window is full
         // by bytes or by count. Always keep at least one in flight so a
         // single oversized batch cannot deadlock the loop.
-        while (pending.size() > 1 && (pending_bytes > kMaxInflightBytes ||
+        while (pending.size() > 1 && (pending_bytes > max_inflight_bytes ||
                                       pending.size() >= max_inflight_batches)) {
             deliver_front();
         }
@@ -1888,7 +1902,12 @@ GetFieldDatasFromManifest(
         std::move(storage_column_mapping),
         [&](FieldDataPtr field_data) {
             field_datas.push_back(std::move(field_data));
-        });
+        },
+        // Every decoded batch is retained below, so a large in-flight window
+        // would only pin extra source arrow batches on top of the full
+        // column. Keep it small; overlap still happens, the peak does not
+        // grow by half a gigabyte per concurrent build.
+        kAccumulatingInflightBytes);
     return field_datas;
 }
 
