@@ -203,7 +203,11 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 		// InitLoonReaderConfig range-checks both values before applying
 		// either, so an out-of-range update leaves the running settings
 		// untouched rather than resizing the (non-destroyable) reader pool
-		// and only then failing on the window.
+		// and only then failing on the window. It also serializes
+		// read-then-apply internally, so concurrent updates cannot land in
+		// the reverse order of the config writes; the logging below reads
+		// the paramtable again outside that critical section, so under
+		// concurrent updates the logged values may lag the applied ones.
 		if err := InitLoonReaderConfig(pt); err != nil {
 			mlog.Warn(context.TODO(),
 				"failed to reconfigure loon reader params, previous settings stay in effect",

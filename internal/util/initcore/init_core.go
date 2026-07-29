@@ -516,6 +516,17 @@ const maxStorageReaderThreadPoolSize = 1024
 // authoritative for callers that bypass this function.
 const maxIndexBuildReadWindowBytes = 4 << 30
 
+// loonReaderConfigMu serializes InitLoonReaderConfig. Config-event handlers
+// run inline on the updating goroutine and the dispatcher gives no ordering
+// guarantee across concurrent updates, so two writers (say 16 then 8) could
+// otherwise read the paramtable in one order and reach
+// C.InitLoonReaderThreadPool in the reverse one, leaving the pool at 16 while
+// the paramtable reports 8 — and the resize is not idempotent, so nothing
+// later repairs it. The lock covers read-then-apply rather than just the
+// apply, so whichever caller acquires it last also reads the newest values
+// and installs them last.
+var loonReaderConfigMu sync.Mutex
+
 // InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
@@ -527,6 +538,9 @@ const maxIndexBuildReadWindowBytes = 4 << 30
 // runtime), so applying it and only then rejecting the window would leave a
 // hot-reload half-applied with nothing but a generic failure log to show it.
 func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
+	loonReaderConfigMu.Lock()
+	defer loonReaderConfigMu.Unlock()
+
 	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
 	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
 		return merr.WrapErrParameterInvalidMsg(
