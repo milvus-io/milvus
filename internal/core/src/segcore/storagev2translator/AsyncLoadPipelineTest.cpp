@@ -22,8 +22,10 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -31,6 +33,9 @@
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
 #include "folly/Executor.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/coro/Task.h"
+#include "folly/coro/WithCancellation.h"
 #include "folly/futures/Future.h"
 #include "folly/futures/Promise.h"
 #include "futures/Executor.h"
@@ -41,6 +46,20 @@
 
 namespace milvus::segcore::storagev2translator {
 namespace {
+
+using ChunkReadResult =
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>;
+using ChunkReadFuture = folly::SemiFuture<ChunkReadResult>;
+
+using LoadCellsAsyncReturn = decltype(LoadCellsAsync(
+    std::declval<milvus::OpContext*>(),
+    std::declval<std::vector<CellSpec>>(),
+    std::declval<std::shared_ptr<milvus_storage::api::ChunkReader>>(),
+    std::declval<CellFinalizeFunc>(),
+    std::declval<AsyncLoadPipelineOptions>()));
+
+static_assert(std::is_same_v<LoadCellsAsyncReturn,
+                             folly::coro::Task<std::vector<AsyncCellResult>>>);
 
 class InlineRecordingExecutor : public folly::Executor {
  public:
@@ -61,7 +80,12 @@ class InlineRecordingExecutor : public folly::Executor {
 
     bool
     IsRunning() const {
-        return running_;
+        return running_executor_ == this;
+    }
+
+    int8_t
+    CurrentPriority() const {
+        return running_priority_;
     }
 
     std::vector<int8_t>
@@ -77,17 +101,60 @@ class InlineRecordingExecutor : public folly::Executor {
             std::lock_guard lock(mutex_);
             priorities_.push_back(priority);
         }
-        running_ = true;
-        func();
-        running_ = false;
+        auto* previous_executor = running_executor_;
+        auto previous_priority = running_priority_;
+        running_executor_ = this;
+        running_priority_ = priority;
+        try {
+            func();
+        } catch (...) {
+            running_executor_ = previous_executor;
+            running_priority_ = previous_priority;
+            throw;
+        }
+        running_executor_ = previous_executor;
+        running_priority_ = previous_priority;
     }
 
-    static thread_local bool running_;
+    static thread_local InlineRecordingExecutor* running_executor_;
+    static thread_local int8_t running_priority_;
     mutable std::mutex mutex_;
     std::vector<int8_t> priorities_;
 };
 
-thread_local bool InlineRecordingExecutor::running_ = false;
+thread_local InlineRecordingExecutor*
+    InlineRecordingExecutor::running_executor_ = nullptr;
+thread_local int8_t InlineRecordingExecutor::running_priority_ =
+    futures::ExecutePriority::NORMAL;
+
+class KeepAliveRecordingExecutor : public folly::Executor {
+ public:
+    void
+    add(folly::Func) override {
+        ADD_FAILURE() << "lazy task should not submit executor work";
+    }
+
+    size_t
+    OutstandingKeepAlives() const {
+        return acquires_.load() - releases_.load();
+    }
+
+ protected:
+    bool
+    keepAliveAcquire() noexcept override {
+        acquires_.fetch_add(1);
+        return true;
+    }
+
+    void
+    keepAliveRelease() noexcept override {
+        releases_.fetch_add(1);
+    }
+
+ private:
+    std::atomic<size_t> acquires_{0};
+    std::atomic<size_t> releases_{0};
+};
 
 class FakeChunkReader : public milvus_storage::api::ChunkReader {
  public:
@@ -118,8 +185,7 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         return MakeBatches(chunk_indices);
     }
 
-    folly::SemiFuture<
-        arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>
+    ChunkReadFuture
     get_chunks_async(const std::vector<int64_t>& chunk_indices,
                      size_t parallelism) override {
         async_calls_.fetch_add(1);
@@ -129,15 +195,26 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         if (on_async_call_) {
             on_async_call_();
         }
-        if (deferred_read_) {
-            return deferred_read_->getSemiFuture();
+        auto future = [&]() -> ChunkReadFuture {
+            if (deferred_read_) {
+                return deferred_read_->getSemiFuture();
+            }
+            if (!status_.ok()) {
+                return folly::makeSemiFuture(ChunkReadResult(status_));
+            }
+            return folly::makeSemiFuture(MakeBatches(chunk_indices));
+        }();
+        if (!observe_deferred_continuation_) {
+            return future;
         }
-        if (!status_.ok()) {
-            return folly::makeSemiFuture(
-                arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>(
-                    status_));
-        }
-        return folly::makeSemiFuture(MakeBatches(chunk_indices));
+        return std::move(future).deferValue([this](auto result) {
+            deferred_continuation_on_executor_.store(executor_ &&
+                                                     executor_->IsRunning());
+            deferred_continuation_priority_.store(
+                executor_ ? executor_->CurrentPriority()
+                          : futures::ExecutePriority::NORMAL);
+            return result;
+        });
     }
 
     arrow::Result<std::vector<uint64_t>>
@@ -173,8 +250,12 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
 
     void
     DeferNextRead() {
-        deferred_read_ = std::make_shared<folly::Promise<
-            arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>>();
+        deferred_read_ = std::make_shared<folly::Promise<ChunkReadResult>>();
+    }
+
+    void
+    ObserveDeferredContinuation() {
+        observe_deferred_continuation_ = true;
     }
 
     void
@@ -182,6 +263,12 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         ASSERT_TRUE(deferred_read_ != nullptr);
         ASSERT_FALSE(requested_indices_.empty());
         deferred_read_->setValue(MakeBatches(requested_indices_.back()));
+    }
+
+    void
+    FailDeferredRead() {
+        ASSERT_TRUE(deferred_read_ != nullptr);
+        deferred_read_->setException(std::runtime_error("read failed"));
     }
 
     size_t
@@ -192,6 +279,16 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     bool
     CalledOnExecutor() const {
         return called_on_executor_.load();
+    }
+
+    bool
+    DeferredContinuationRanOnExecutor() const {
+        return deferred_continuation_on_executor_.load();
+    }
+
+    int8_t
+    DeferredContinuationPriority() const {
+        return deferred_continuation_priority_.load();
     }
 
     size_t
@@ -219,12 +316,14 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     arrow::Status status_;
     std::atomic<size_t> async_calls_{0};
     std::atomic<bool> called_on_executor_{false};
+    std::atomic<bool> deferred_continuation_on_executor_{false};
+    std::atomic<int8_t> deferred_continuation_priority_{
+        futures::ExecutePriority::NORMAL};
     std::atomic<size_t> parallelism_{0};
+    bool observe_deferred_continuation_{false};
     std::vector<std::vector<int64_t>> requested_indices_;
     std::function<void()> on_async_call_;
-    std::shared_ptr<folly::Promise<
-        arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>>
-        deferred_read_;
+    std::shared_ptr<folly::Promise<ChunkReadResult>> deferred_read_;
 };
 
 class AsyncLoadPipelineTest : public ::testing::Test {
@@ -260,6 +359,11 @@ class AsyncLoadPipelineTest : public ::testing::Test {
             }
             return std::make_unique<GroupChunk>();
         };
+    }
+
+    folly::Future<std::vector<AsyncCellResult>>
+    Start(folly::coro::Task<std::vector<AsyncCellResult>> task) {
+        return std::move(task).semi().via(folly::getKeepAliveToken(&executor_));
     }
 
     storage::TransientMemoryBudget& budget_ =
@@ -325,10 +429,8 @@ TEST_F(AsyncLoadPipelineTest, RestoresRequestedCellOrder) {
     };
     std::vector<int64_t> finalized;
 
-    auto results =
-        LoadCellsAsync(
-            nullptr, std::move(cells), reader, Finalizer(&finalized), Options())
-            .get();
+    auto results = folly::coro::blockingWait(LoadCellsAsync(
+        nullptr, std::move(cells), reader, Finalizer(&finalized), Options()));
 
     ASSERT_EQ(results.size(), 3);
     EXPECT_EQ(results[0].first, 2);
@@ -352,17 +454,204 @@ TEST_F(AsyncLoadPipelineTest, DefaultExecutorRunsOffTheCallingThread) {
     auto options = Options();
     options.executor = nullptr;
 
-    auto results =
-        LoadCellsAsync(
-            nullptr,
-            std::move(cells),
-            reader,
-            [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
-            options)
-            .get();
+    auto results = folly::coro::blockingWait(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
+        options));
 
     EXPECT_EQ(results.size(), 1);
     EXPECT_TRUE(ran_off_caller.load());
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       BindsPendingReadContinuationToLoadExecutorAndPriority) {
+    InlineRecordingExecutor caller_executor;
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    reader->DeferNextRead();
+    reader->ObserveDeferredContinuation();
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto options = Options(milvus::proto::common::LoadPriority::LOW);
+
+    auto future =
+        std::move(LoadCellsAsync(
+                      nullptr, std::move(cells), reader, Finalizer(), options))
+            .semi()
+            .via(folly::getKeepAliveToken(&caller_executor),
+                 futures::ExecutePriority::HIGH);
+
+    ASSERT_FALSE(future.isReady());
+    ASSERT_EQ(reader->AsyncCalls(), 1);
+    reader->CompleteDeferredRead();
+    auto results = std::move(future).get();
+
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_TRUE(reader->DeferredContinuationRanOnExecutor());
+    EXPECT_EQ(reader->DeferredContinuationPriority(),
+              futures::ExecutePriority::LOW);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       ReleasesBudgetOnLoadExecutorWhenStorageFutureFails) {
+    budget_.SetCapacityBytes(1);
+    InlineRecordingExecutor caller_executor;
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    reader->DeferNextRead();
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto options = Options(milvus::proto::common::LoadPriority::LOW);
+    auto load =
+        std::move(LoadCellsAsync(
+                      nullptr, std::move(cells), reader, Finalizer(), options))
+            .semi()
+            .via(folly::getKeepAliveToken(&caller_executor),
+                 futures::ExecutePriority::HIGH);
+
+    ASSERT_FALSE(load.isReady());
+    ASSERT_EQ(reader->AsyncCalls(), 1);
+
+    bool release_on_load_executor = false;
+    bool release_on_caller_executor = false;
+    int8_t release_priority = futures::ExecutePriority::NORMAL;
+    auto release_observer =
+        budget_.AcquireAsync(1, storage::TransientBudgetPriority::High)
+            .toUnsafeFuture()
+            .thenValueInline([&](storage::TransientBudgetLease lease) {
+                release_on_load_executor = executor_.IsRunning();
+                release_on_caller_executor = caller_executor.IsRunning();
+                if (release_on_load_executor) {
+                    release_priority = executor_.CurrentPriority();
+                } else if (release_on_caller_executor) {
+                    release_priority = caller_executor.CurrentPriority();
+                }
+                lease.Release();
+            });
+    ASSERT_FALSE(release_observer.isReady());
+
+    reader->FailDeferredRead();
+
+    try {
+        std::move(load).get();
+        FAIL() << "expected read failure";
+    } catch (const std::runtime_error& error) {
+        EXPECT_STREQ(error.what(), "read failed");
+    }
+    ASSERT_TRUE(release_observer.isReady());
+    std::move(release_observer).get();
+    EXPECT_TRUE(release_on_load_executor);
+    EXPECT_FALSE(release_on_caller_executor);
+    EXPECT_EQ(release_priority, futures::ExecutePriority::LOW);
+}
+
+TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
+    KeepAliveRecordingExecutor executor;
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto options = Options();
+    options.executor = &executor;
+
+    {
+        auto task = LoadCellsAsync(
+            nullptr, std::move(cells), reader, Finalizer(), options);
+        EXPECT_EQ(executor.OutstandingKeepAlives(), 1);
+        EXPECT_EQ(reader->AsyncCalls(), 0);
+    }
+
+    EXPECT_EQ(executor.OutstandingKeepAlives(), 0);
+}
+
+TEST_F(AsyncLoadPipelineTest, CapturesContextCancellationBeforeTaskStarts) {
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto task =
+        LoadCellsAsync(&ctx, std::move(cells), reader, Finalizer(), Options());
+
+    ctx.cancellation_token = {};
+    source.requestCancellation();
+
+    try {
+        folly::coro::blockingWait(std::move(task));
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(reader->AsyncCalls(), 0);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       HonorsCallerCoroutineCancellationWhileWaitingForBudget) {
+    budget_.SetCapacityBytes(1);
+    auto blocker =
+        budget_.AcquireAsync(1, storage::TransientBudgetPriority::High).get();
+    folly::CancellationSource source;
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+
+    auto caller = [this, reader, cells = std::move(cells)]() mutable
+        -> folly::coro::Task<std::vector<AsyncCellResult>> {
+        co_return co_await LoadCellsAsync(
+            nullptr, std::move(cells), reader, Finalizer(), Options());
+    };
+    auto with_cancellation = [&source, caller = std::move(caller)]() mutable
+        -> folly::coro::Task<std::vector<AsyncCellResult>> {
+        co_return co_await folly::coro::co_withCancellation(source.getToken(),
+                                                            caller());
+    };
+    auto future = Start(with_cancellation());
+
+    EXPECT_FALSE(future.isReady());
+    source.requestCancellation();
+    auto ready_after_cancel = future.isReady();
+    blocker.Release();
+
+    EXPECT_TRUE(ready_after_cancel);
+    try {
+        std::move(future).get();
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(reader->AsyncCalls(), 0);
+}
+
+TEST_F(AsyncLoadPipelineTest, ComposesWithCallerCoroutine) {
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+
+    auto caller = [this, reader, cells = std::move(cells)]() mutable
+        -> folly::coro::Task<size_t> {
+        auto results = co_await LoadCellsAsync(
+            nullptr, std::move(cells), reader, Finalizer(), Options());
+        co_return results.size();
+    };
+
+    EXPECT_EQ(folly::coro::blockingWait(caller()), 1);
 }
 
 TEST_F(AsyncLoadPipelineTest, WaitsForAsyncBudgetBeforeReading) {
@@ -376,8 +665,8 @@ TEST_F(AsyncLoadPipelineTest, WaitsForAsyncBudgetBeforeReading) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
 
-    auto future = LoadCellsAsync(
-        nullptr, std::move(cells), reader, Finalizer(), Options());
+    auto future = Start(LoadCellsAsync(
+        nullptr, std::move(cells), reader, Finalizer(), Options()));
 
     EXPECT_FALSE(future.isReady());
     EXPECT_EQ(reader->AsyncCalls(), 0);
@@ -403,8 +692,8 @@ TEST_F(AsyncLoadPipelineTest, WaitsForStorageFutureBeforeFinalizing) {
         return std::make_unique<GroupChunk>();
     };
 
-    auto future = LoadCellsAsync(
-        nullptr, std::move(cells), reader, std::move(finalizer), Options());
+    auto future = Start(LoadCellsAsync(
+        nullptr, std::move(cells), reader, std::move(finalizer), Options()));
 
     EXPECT_FALSE(future.isReady());
     EXPECT_EQ(finalized, 0);
@@ -421,13 +710,12 @@ TEST_F(AsyncLoadPipelineTest, MapsLoadPriorityToBudgetAndExecutor) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
 
-    auto results =
+    auto results = folly::coro::blockingWait(
         LoadCellsAsync(nullptr,
                        std::move(cells),
                        reader,
                        Finalizer(),
-                       Options(milvus::proto::common::LoadPriority::LOW))
-            .get();
+                       Options(milvus::proto::common::LoadPriority::LOW)));
 
     EXPECT_EQ(results.size(), 1);
     auto priorities = executor_.Priorities();
@@ -454,18 +742,18 @@ TEST_F(AsyncLoadPipelineTest, HighPriorityAdmissionPassesQueuedLowLoad) {
                                       .memory_size = 1}};
     };
 
-    auto low =
+    auto low = Start(
         LoadCellsAsync(nullptr,
                        cell(),
                        low_reader,
                        Finalizer(),
-                       Options(milvus::proto::common::LoadPriority::LOW));
-    auto high =
+                       Options(milvus::proto::common::LoadPriority::LOW)));
+    auto high = Start(
         LoadCellsAsync(nullptr,
                        cell(),
                        high_reader,
                        Finalizer(),
-                       Options(milvus::proto::common::LoadPriority::HIGH));
+                       Options(milvus::proto::common::LoadPriority::HIGH)));
 
     blocker.Release();
     EXPECT_EQ(std::move(high).get().size(), 1);
@@ -485,8 +773,8 @@ TEST_F(AsyncLoadPipelineTest, CancelsWhileWaitingForBudget) {
                                  .local_rg_offset = 0,
                                  .rg_count = 1,
                                  .memory_size = 1}};
-    auto future =
-        LoadCellsAsync(&ctx, std::move(cells), reader, Finalizer(), Options());
+    auto future = Start(
+        LoadCellsAsync(&ctx, std::move(cells), reader, Finalizer(), Options()));
 
     source.requestCancellation();
 
@@ -519,9 +807,8 @@ TEST_F(AsyncLoadPipelineTest, CancelsAfterStorageRead) {
     };
 
     try {
-        LoadCellsAsync(
-            &ctx, std::move(cells), reader, std::move(finalizer), Options())
-            .get();
+        folly::coro::blockingWait(LoadCellsAsync(
+            &ctx, std::move(cells), reader, std::move(finalizer), Options()));
         FAIL() << "expected cancellation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -557,9 +844,8 @@ TEST_F(AsyncLoadPipelineTest, CancelsBetweenCellFinalization) {
     };
 
     try {
-        LoadCellsAsync(
-            &ctx, std::move(cells), reader, std::move(finalizer), Options())
-            .get();
+        folly::coro::blockingWait(LoadCellsAsync(
+            &ctx, std::move(cells), reader, std::move(finalizer), Options()));
         FAIL() << "expected cancellation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -577,9 +863,8 @@ TEST_F(AsyncLoadPipelineTest, PreservesTypedStorageErrors) {
                                      .rg_count = 1,
                                      .memory_size = 1}};
         try {
-            LoadCellsAsync(
-                nullptr, std::move(cells), reader, Finalizer(), Options())
-                .get();
+            folly::coro::blockingWait(LoadCellsAsync(
+                nullptr, std::move(cells), reader, Finalizer(), Options()));
             FAIL() << "expected storage error";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), expected);
