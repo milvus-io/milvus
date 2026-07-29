@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -992,6 +993,299 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 			suite.Empty(deltaResp.GetRemovedSegmentIds())
 		})
 	}
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsReopenOnlyUpdatesIndexMeta() {
+	ctx := context.Background()
+
+	for _, loadScope := range []querypb.LoadScope{
+		querypb.LoadScope_Reopen,
+		querypb.LoadScope_Stats,
+	} {
+		suite.Run(loadScope.String(), func() {
+			originalCollectionManager := suite.node.manager.Collection
+			collectionManager := segments.NewCollectionManager()
+			suite.node.manager.Collection = collectionManager
+			defer func() {
+				suite.node.manager.Collection = originalCollectionManager
+			}()
+
+			servedSchema := mock_segcore.GenTestCollectionSchema("served-schema", schemapb.DataType_Int64, false)
+			servedSchema.Version = 7
+			const servedBarrier = uint64(100)
+			err := collectionManager.PutOrRef(
+				suite.collectionID,
+				servedSchema,
+				mock_segcore.GenTestIndexMeta(suite.collectionID, servedSchema),
+				&querypb.LoadMetaInfo{
+					LoadType:        querypb.LoadType_LoadCollection,
+					CollectionID:    suite.collectionID,
+					SchemaBarrierTs: servedBarrier,
+				},
+			)
+			suite.Require().NoError(err)
+			defer collectionManager.Unref(suite.collectionID, 1)
+
+			collection := collectionManager.Get(suite.collectionID)
+			suite.Require().NotNil(collection)
+			beforeSchema, beforeLogicalVersion, beforeBarrier := collection.SchemaSnapshot()
+			beforeSchema = proto.Clone(beforeSchema).(*schemapb.CollectionSchema)
+			_, beforeSegcoreVersion := collection.SchemaAndSegcoreVersion()
+
+			requestSchema := proto.Clone(servedSchema).(*schemapb.CollectionSchema)
+			requestSchema.Description = "request payload must not replace the served schema"
+			suite.Require().False(proto.Equal(beforeSchema, requestSchema))
+
+			indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, requestSchema)
+			suite.Require().NotEmpty(indexInfos)
+			indexInfos[0].IndexName = "reopen-index-meta"
+			updatedIndexFieldID := indexInfos[0].GetFieldID()
+
+			originalLoader := suite.node.loader
+			mockLoader := segments.NewMockLoader(suite.T())
+			suite.node.loader = mockLoader
+			defer func() {
+				suite.node.loader = originalLoader
+			}()
+
+			req := &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:    rand.Int63(),
+					TargetID: suite.node.session.ServerID,
+				},
+				CollectionID: suite.collectionID,
+				DstNodeID:    suite.node.session.ServerID,
+				Infos: []*querypb.SegmentLoadInfo{
+					{
+						CollectionID: suite.collectionID,
+						SegmentID:    suite.validSegmentIDs[0],
+					},
+				},
+				Schema:        requestSchema,
+				LoadMeta:      &querypb.LoadMetaInfo{CollectionID: suite.collectionID, SchemaBarrierTs: servedBarrier + 1},
+				LoadScope:     loadScope,
+				IndexInfoList: indexInfos,
+			}
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(nil).Once()
+
+			status, err := suite.node.LoadSegments(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(status, err))
+
+			afterSchema, afterLogicalVersion, afterBarrier := collection.SchemaSnapshot()
+			_, afterSegcoreVersion := collection.SchemaAndSegcoreVersion()
+			suite.True(proto.Equal(beforeSchema, afterSchema))
+			suite.Equal(beforeLogicalVersion, afterLogicalVersion)
+			suite.Equal(beforeBarrier, afterBarrier)
+			suite.Equal(beforeSegcoreVersion, afterSegcoreVersion)
+
+			updatedIndexMeta := collection.GetCCollection().IndexMeta()
+			suite.Require().NotNil(updatedIndexMeta)
+			suite.True(lo.ContainsBy(updatedIndexMeta.GetIndexMetas(), func(meta *segcorepb.FieldIndexMeta) bool {
+				return meta.GetFieldID() == updatedIndexFieldID && meta.GetIndexName() == "reopen-index-meta"
+			}))
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsReopenAcceptsEmptyIndexMeta() {
+	ctx := context.Background()
+
+	for _, loadScope := range []querypb.LoadScope{
+		querypb.LoadScope_Reopen,
+		querypb.LoadScope_Stats,
+	} {
+		suite.Run(loadScope.String(), func() {
+			originalCollectionManager := suite.node.manager.Collection
+			collectionManager := segments.NewCollectionManager()
+			suite.node.manager.Collection = collectionManager
+			defer func() {
+				suite.node.manager.Collection = originalCollectionManager
+			}()
+
+			schema := mock_segcore.GenTestCollectionSchema("drop-last-index", schemapb.DataType_Int64, false)
+			err := collectionManager.PutOrRef(
+				suite.collectionID,
+				schema,
+				mock_segcore.GenTestIndexMeta(suite.collectionID, schema),
+				&querypb.LoadMetaInfo{CollectionID: suite.collectionID},
+			)
+			suite.Require().NoError(err)
+			defer collectionManager.Unref(suite.collectionID, 1)
+
+			collection := collectionManager.Get(suite.collectionID)
+			suite.Require().NotNil(collection)
+			suite.Require().NotEmpty(collection.GetCCollection().IndexMeta().GetIndexMetas())
+
+			originalLoader := suite.node.loader
+			mockLoader := segments.NewMockLoader(suite.T())
+			suite.node.loader = mockLoader
+			defer func() {
+				suite.node.loader = originalLoader
+			}()
+
+			req := &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:    rand.Int63(),
+					TargetID: suite.node.session.ServerID,
+				},
+				CollectionID: suite.collectionID,
+				DstNodeID:    suite.node.session.ServerID,
+				Infos: []*querypb.SegmentLoadInfo{{
+					CollectionID: suite.collectionID,
+					SegmentID:    suite.validSegmentIDs[0],
+					Level:        datapb.SegmentLevel_L1,
+				}},
+				Schema:        schema,
+				LoadScope:     loadScope,
+				IndexInfoList: nil,
+			}
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(nil).Once()
+
+			status, err := suite.node.LoadSegments(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(status, err))
+			suite.Empty(collection.GetCCollection().IndexMeta().GetIndexMetas())
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsTransferReopenAcceptsEmptyIndexMeta() {
+	ctx := context.Background()
+
+	for _, loadScope := range []querypb.LoadScope{
+		querypb.LoadScope_Reopen,
+		querypb.LoadScope_Stats,
+	} {
+		suite.Run(loadScope.String(), func() {
+			delegator := delegator.NewMockShardDelegator(suite.T())
+			suite.node.delegators.Insert(suite.vchannel, delegator)
+			defer suite.node.delegators.GetAndRemove(suite.vchannel)
+
+			delegator.EXPECT().LoadSegments(mock.Anything, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+				return req.GetLoadScope() == loadScope && !req.GetNeedTransfer() && len(req.GetIndexInfoList()) == 0
+			})).Return(nil).Once()
+
+			schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+			req := &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:    rand.Int63(),
+					TargetID: suite.node.session.ServerID,
+				},
+				CollectionID: suite.collectionID,
+				DstNodeID:    suite.node.session.ServerID,
+				Infos: []*querypb.SegmentLoadInfo{{
+					CollectionID:  suite.collectionID,
+					SegmentID:     suite.validSegmentIDs[0],
+					InsertChannel: suite.vchannel,
+					Level:         datapb.SegmentLevel_L1,
+				}},
+				Schema:        schema,
+				NeedTransfer:  true,
+				LoadScope:     loadScope,
+				IndexInfoList: nil,
+			}
+
+			status, err := suite.node.LoadSegments(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(status, err))
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsReopenMissingCollectionSkipsLoader() {
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema("missing-collection", schemapb.DataType_Int64, false)
+	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
+
+	for _, loadScope := range []querypb.LoadScope{
+		querypb.LoadScope_Reopen,
+		querypb.LoadScope_Stats,
+	} {
+		suite.Run(loadScope.String(), func() {
+			originalCollectionManager := suite.node.manager.Collection
+			suite.node.manager.Collection = segments.NewCollectionManager()
+			defer func() {
+				suite.node.manager.Collection = originalCollectionManager
+			}()
+
+			originalLoader := suite.node.loader
+			mockLoader := segments.NewMockLoader(suite.T())
+			suite.node.loader = mockLoader
+			defer func() {
+				suite.node.loader = originalLoader
+			}()
+
+			req := &querypb.LoadSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:    rand.Int63(),
+					TargetID: suite.node.session.ServerID,
+				},
+				CollectionID: suite.collectionID,
+				DstNodeID:    suite.node.session.ServerID,
+				Infos: []*querypb.SegmentLoadInfo{
+					{
+						CollectionID: suite.collectionID,
+						SegmentID:    suite.validSegmentIDs[0],
+					},
+				},
+				Schema:        schema,
+				LoadScope:     loadScope,
+				IndexInfoList: indexInfos,
+			}
+
+			status, err := suite.node.LoadSegments(ctx, req)
+			suite.Require().NoError(err)
+			suite.ErrorIs(merr.Error(status), merr.ErrCollectionNotFound)
+			mockLoader.AssertNotCalled(suite.T(), "ReopenSegments", mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestLoadSegmentsReopenIndexMetaFailureSkipsLoader() {
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema("index-meta-failure", schemapb.DataType_Int64, false)
+	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
+	suite.Require().NotEmpty(indexInfos)
+
+	collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, schema)
+	collectionManager := segments.NewMockCollectionManager(suite.T())
+	collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
+	indexMetaErr := merr.WrapErrServiceUnavailableMsg("mocked index meta update failure")
+	collectionManager.EXPECT().UpdateIndexMeta(
+		suite.collectionID,
+		mock.AnythingOfType("*segcorepb.CollectionIndexMeta"),
+	).Return(indexMetaErr).Once()
+
+	originalCollectionManager := suite.node.manager.Collection
+	suite.node.manager.Collection = collectionManager
+	defer func() {
+		suite.node.manager.Collection = originalCollectionManager
+	}()
+
+	originalLoader := suite.node.loader
+	mockLoader := segments.NewMockLoader(suite.T())
+	suite.node.loader = mockLoader
+	defer func() {
+		suite.node.loader = originalLoader
+	}()
+
+	status, err := suite.node.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		DstNodeID:    suite.node.session.ServerID,
+		Infos: []*querypb.SegmentLoadInfo{{
+			CollectionID: suite.collectionID,
+			SegmentID:    suite.validSegmentIDs[0],
+		}},
+		Schema:        schema,
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: indexInfos,
+	})
+
+	suite.Require().NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceUnavailable)
+	mockLoader.AssertNotCalled(suite.T(), "ReopenSegments", mock.Anything, mock.Anything)
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Failed() {

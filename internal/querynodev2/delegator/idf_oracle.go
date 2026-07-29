@@ -65,7 +65,12 @@ type IDFOracle interface {
 	// Internally handles: streaming download → local disk → optional parse → register.
 	// Idempotent: skips if segment already loaded.
 	LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error
+	// LoadSealedWithPaths accepts paths that were already resolved and filtered
+	// against the caller's fenced schema snapshot.
+	LoadSealedWithPaths(ctx context.Context, segmentID int64, logpaths map[int64][]string, cm storage.ChunkManager) error
 	LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager, activateIfReadable bool) error
+	// LoadSealedForReopenWithPaths is the reopen counterpart of LoadSealedWithPaths.
+	LoadSealedForReopenWithPaths(ctx context.Context, segmentID int64, logpaths map[int64][]string, cm storage.ChunkManager, activateIfReadable bool) error
 	SyncFunctions(functions []*schemapb.FunctionSchema) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
@@ -496,18 +501,25 @@ func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 // LoadSealed loads BM25 stats for a sealed segment from remote storage to local disk.
 // Idempotent: skips if segment already loaded.
 func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
+	if o.sealed.Contain(segmentID) {
+		return nil
+	}
+
+	logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+	if err != nil {
+		mlog.Warn(ctx, "load remote segment bm25 stats failed",
+			mlog.FieldSegmentID(segmentID),
+			mlog.Err(err),
+		)
+		return err
+	}
+	return o.LoadSealedWithPaths(ctx, segmentID, logpaths, cm)
+}
+
+func (o *idfOracle) LoadSealedWithPaths(ctx context.Context, segmentID int64, logpaths map[int64][]string, cm storage.ChunkManager) error {
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
 		if o.sealed.Contain(segmentID) {
 			return nil, nil
-		}
-
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
-		if err != nil {
-			mlog.Warn(ctx, "load remote segment bm25 stats failed",
-				mlog.FieldSegmentID(segmentID),
-				mlog.Err(err),
-			)
-			return nil, err
 		}
 
 		if len(logpaths) == 0 {
@@ -549,15 +561,22 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 }
 
 func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager, activateIfReadable bool) error {
+	logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+	if err != nil {
+		mlog.Warn(ctx, "load remote segment bm25 stats for reopen failed",
+			mlog.FieldSegmentID(segmentID),
+			mlog.Err(err),
+		)
+		return err
+	}
+	return o.LoadSealedForReopenWithPaths(ctx, segmentID, logpaths, cm, activateIfReadable)
+}
+
+func (o *idfOracle) LoadSealedForReopenWithPaths(ctx context.Context, segmentID int64, logpaths map[int64][]string, cm storage.ChunkManager, activateIfReadable bool) error {
 	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
 		logger := mlog.With(mlog.FieldSegmentID(segmentID))
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
-		if err != nil {
-			logger.Warn(ctx, "load remote segment bm25 stats for reopen failed", mlog.Err(err))
-			return nil, err
-		}
 		if len(logpaths) == 0 {
 			return nil, nil
 		}

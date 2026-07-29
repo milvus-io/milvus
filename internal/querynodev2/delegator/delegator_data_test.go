@@ -31,6 +31,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -109,6 +110,18 @@ func (s *DelegatorDataSuite) getIDFOracleForTest() *idfOracle {
 	oracle, ok := s.delegator.getIDFOracle().(*idfOracle)
 	s.Require().True(ok)
 	return oracle
+}
+
+func (s *DelegatorDataSuite) publishBM25SchemaWithoutOracle(outputFieldID int64) *schemapb.CollectionSchema {
+	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Functions = []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		OutputFieldIds: []int64{outputFieldID},
+	}}
+	s.delegator.schemaChangeMutex.Lock()
+	s.delegator.publishDelegatorSchemaLocked(schema)
+	s.delegator.schemaChangeMutex.Unlock()
+	return schema
 }
 
 func (s *DelegatorDataSuite) SetupSuite() {
@@ -833,7 +846,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
 	s.Empty(sealed)
 }
 
-func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegment() {
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesBeforeWorkerWithoutDoubleMerge() {
 	s.genCollectionWithFunction()
 	s.delegator.distribution.AddDistributions(SegmentEntry{
 		NodeID:      1,
@@ -857,20 +870,34 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegmen
 	data, err := stats.Serialize()
 	s.Require().NoError(err)
 
+	readErr := errors.New("mocked bm25 read failure")
 	cm := mocks.NewChunkManager(s.T())
-	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
-	s.loader.EXPECT().GetChunkManager().Return(cm)
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(nil, readErr).Once()
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm).Times(3)
 
+	workerErr := errors.New("mocked worker reopen failure")
+	var workerCalls atomic.Int32
 	worker1 := &cluster.MockWorker{}
-	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
-	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).RunAndReturn(
+		func(context.Context, *querypb.LoadSegmentsRequest) error {
+			fieldStats, err := s.getIDFOracleForTest().current.GetStats(101)
+			s.Require().NoError(err)
+			s.Equal(int64(3), fieldStats.NumRow(), "BM25 stats must be installed before worker reopen")
+			if workerCalls.Add(1) == 1 {
+				return workerErr
+			}
+			return nil
+		}).Times(2)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil).Times(3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+	req := &querypb.LoadSegmentsRequest{
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
+		Schema:       s.delegator.collection.Schema(),
 		LoadScope:    querypb.LoadScope_Reopen,
 		Infos: []*querypb.SegmentLoadInfo{
 			{
@@ -883,26 +910,42 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegmen
 				Bm25Logs:      bm25LogsForField(101, remotePath),
 			},
 		},
-	})
+	}
 
+	err = s.delegator.LoadSegments(ctx, req)
+	s.ErrorIs(err, readErr)
+	s.Zero(workerCalls.Load(), "worker must not reopen when BM25 preflight fails")
+
+	err = s.delegator.LoadSegments(ctx, req)
+	s.ErrorIs(err, workerErr)
+	s.Equal(int32(1), workerCalls.Load())
+
+	err = s.delegator.LoadSegments(ctx, req)
 	s.NoError(err)
+	s.Equal(int32(2), workerCalls.Load())
 	loadedStats := s.getIDFOracleForTest()
 	fieldStats, err := loadedStats.current.GetStats(101)
 	s.NoError(err)
 	s.Equal(int64(3), fieldStats.NumRow())
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRetry() {
+	schema := s.publishBM25SchemaWithoutOracle(101)
 	worker1 := &cluster.MockWorker{}
-	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
-	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil).Times(2)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+	remotePath := "bm25stats/reopen/segment_100/field_101/0"
+	req := &querypb.LoadSegmentsRequest{
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
+		Schema:       schema,
 		LoadScope:    querypb.LoadScope_Reopen,
 		Infos: []*querypb.SegmentLoadInfo{
 			{
@@ -912,13 +955,152 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRet
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				Level:         datapb.SegmentLevel_L1,
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
-				Bm25Logs:      bm25LogsForField(101, "bm25stats/reopen/segment_100/field_101/0"),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
 			},
 		},
+	}
+
+	err := s.delegator.LoadSegments(ctx, req)
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	worker1.AssertNotCalled(s.T(), "LoadSegments", mock.Anything, mock.Anything)
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1})
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm).Once()
+
+	idfOracle := NewIDFOracle(s.vchannelName, []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		OutputFieldIds: []int64{101},
+	}})
+	idfOracle.Start()
+	defer idfOracle.Close()
+	s.delegator.distribution.SetIDFOracle(idfOracle)
+	s.delegator.publishIDFOracle(idfOracle)
+
+	err = s.delegator.LoadSegments(ctx, req)
+	s.NoError(err)
+	worker1.AssertNumberOfCalls(s.T(), "LoadSegments", 1)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsFullBM25StatsRequiresOracleBeforeWorker() {
+	schema := s.publishBM25SchemaWithoutOracle(101)
+	worker1 := &cluster.MockWorker{}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil).Once()
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       schema,
+		LoadScope:    querypb.LoadScope_Full,
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID:     100,
+			PartitionID:   500,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			Bm25Logs:      bm25LogsForField(101, "bm25stats/full/segment_100/field_101/0"),
+		}},
 	})
 
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	worker1.AssertNotCalled(s.T(), "LoadSegments", mock.Anything, mock.Anything)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsIgnoresHistoricalBM25StatsForDroppedFields() {
+	workerErr := errors.New("mocked worker failure")
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(workerErr).Times(3)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Times(3)
+
+	schema, _ := s.delegator.delegatorSchemaSnapshot()
+	s.Require().Empty(schema.GetFunctions())
+	for _, loadScope := range []querypb.LoadScope{
+		querypb.LoadScope_Reopen,
+		querypb.LoadScope_Stats,
+		querypb.LoadScope_Full,
+	} {
+		err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Schema:       schema,
+			LoadScope:    loadScope,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     100,
+				PartitionID:   500,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, "bm25stats/dropped/segment_100/field_101/0"),
+			}},
+		})
+
+		s.ErrorIs(err, workerErr)
+		s.NotErrorIs(err, merr.ErrServiceNotReady)
+	}
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenDoesNotReinstallDroppedBM25Stats() {
+	oracle := NewIDFOracle(s.vchannelName, []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		OutputFieldIds: []int64{101},
+	}}).(*idfOracle)
+	oracle.Start()
+	defer oracle.Close()
+	s.Require().NoError(oracle.SyncFunctions(nil))
+	s.delegator.distribution.SetIDFOracle(oracle)
+	s.delegator.publishIDFOracle(oracle)
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	schema, _ := s.delegator.delegatorSchemaSnapshot()
+	s.Require().Empty(schema.GetFunctions())
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       schema,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID:     100,
+			PartitionID:   500,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			Bm25Logs:      bm25LogsForField(101, "bm25stats/dropped/segment_100/field_101/0"),
+		}},
+	})
+
+	s.NoError(err)
+	s.loader.AssertNotCalled(s.T(), "GetChunkManager")
+	s.False(oracle.sealed.Contain(100))
+	_, err = oracle.current.GetStats(101)
 	s.Error(err)
-	s.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+func TestResolveBM25StatsLoadsFiltersInactiveFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		OutputFieldIds: []int64{101},
+	}}}
+	activePath := "bm25stats/segment_100/field_101/0"
+	droppedPath := "bm25stats/segment_100/field_102/0"
+	loads, err := resolveBM25StatsLoads([]*querypb.SegmentLoadInfo{{
+		SegmentID: 100,
+		Bm25Logs: append(
+			bm25LogsForField(101, activePath),
+			bm25LogsForField(102, droppedPath)...,
+		),
+	}}, schema)
+
+	require.NoError(t, err)
+	require.Len(t, loads, 1)
+	assert.Equal(t, map[int64][]string{101: {activePath}}, loads[0].paths)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
@@ -948,6 +1130,74 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
 	s.NoError(err)
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Empty(sealed)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenIndexMetaFailureSkipsWorker() {
+	originalCollectionManager := s.delegator.collectionManager
+	collectionManager := segments.NewMockCollectionManager(s.T())
+	s.delegator.collectionManager = collectionManager
+	defer func() {
+		s.delegator.collectionManager = originalCollectionManager
+	}()
+
+	indexMetaErr := merr.WrapErrServiceUnavailableMsg("mocked index meta update failure")
+	collectionManager.EXPECT().UpdateIndexMeta(
+		s.collectionID,
+		mock.AnythingOfType("*segcorepb.CollectionIndexMeta"),
+	).Return(indexMetaErr).Once()
+
+	worker := &cluster.MockWorker{}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	schema, _ := s.delegator.delegatorSchemaSnapshot()
+	indexInfos := mock_segcore.GenTestIndexInfoList(s.collectionID, schema)
+	s.Require().NotEmpty(indexInfos)
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:          commonpbutil.NewMsgBase(),
+		DstNodeID:     1,
+		CollectionID:  s.collectionID,
+		Schema:        schema,
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: indexInfos,
+		Infos: []*querypb.SegmentLoadInfo{{
+			CollectionID: s.collectionID,
+			SegmentID:    100,
+			PartitionID:  500,
+			Level:        datapb.SegmentLevel_L1,
+		}},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	worker.AssertNotCalled(s.T(), "LoadSegments", mock.Anything, mock.Anything)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenClearsDroppedLastIndexMeta() {
+	collection := s.manager.Collection.Get(s.collectionID)
+	s.Require().NotNil(collection)
+	s.Require().NotEmpty(collection.GetCCollection().IndexMeta().GetIndexMetas())
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	schema, _ := s.delegator.delegatorSchemaSnapshot()
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:          commonpbutil.NewMsgBase(),
+		DstNodeID:     1,
+		CollectionID:  s.collectionID,
+		Schema:        schema,
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: nil,
+		Infos: []*querypb.SegmentLoadInfo{{
+			CollectionID: s.collectionID,
+			SegmentID:    100,
+			PartitionID:  500,
+			Level:        datapb.SegmentLevel_L1,
+		}},
+	})
+
+	s.NoError(err)
+	s.Empty(collection.GetCCollection().IndexMeta().GetIndexMetas())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
@@ -1244,7 +1494,50 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners() {
+func (s *DelegatorDataSuite) TestLoadSegmentsSchemaVersionGate() {
+	newSchema := typeutil.Clone(s.delegator.collection.Schema())
+	newSchema.Version = s.delegator.collection.Schema().GetVersion() + 1
+	req := &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       newSchema,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	}
+
+	err := s.delegator.LoadSegments(context.Background(), req)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	s.Require().NoError(s.delegator.UpdateSchema(context.Background(), newSchema, 100))
+	_, version := s.delegator.delegatorSchemaSnapshot()
+	s.Equal(uint64(newSchema.GetVersion()), version)
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	err = s.delegator.LoadSegments(context.Background(), req)
+	s.NoError(err)
+
+	staleSchema := typeutil.Clone(newSchema)
+	staleSchema.Version--
+	staleReq := typeutil.Clone(req)
+	staleReq.Schema = staleSchema
+	err = s.delegator.LoadSegments(context.Background(), staleReq)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+}
+
+func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaDoesNotUpdateFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
@@ -1256,11 +1549,15 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	})
 	s.Require().NoError(err)
 
-	// The load path has already advanced the collection snapshot, so the DDL
-	// event is skipped as a no-op. The function runner key must still point at
-	// the schema installed by the load path.
-	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
 	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	s.Require().NoError(err)
+	s.False(ok)
+
+	// Only the WAL UpdateSchema path advances the delegator schema/function view.
+	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
+	ok, err = function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
 		return nil
 	})
 	s.Require().NoError(err)
