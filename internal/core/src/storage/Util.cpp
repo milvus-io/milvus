@@ -1679,6 +1679,26 @@ IterateFieldDataFromManifest(
     std::deque<std::pair<std::future<FieldDataPtr>, int64_t>> pending;
     int64_t pending_bytes = 0;
 
+    // No decode task may outlive this scope, on any exit path: ReadNext
+    // failing, a decode task rethrowing out of future::get(), or `consumer`
+    // throwing (for index build it writes to local disk). Only the first of
+    // those used to drain, which is safe today solely because the decode
+    // lambda below captures everything by value; a scope guard makes the
+    // guarantee structural instead of something every future edit has to
+    // re-derive. A future already consumed by a throwing get() is invalid
+    // and is skipped.
+    struct PendingDrainGuard {
+        std::deque<std::pair<std::future<FieldDataPtr>, int64_t>>& pending;
+
+        ~PendingDrainGuard() {
+            for (auto& entry : pending) {
+                if (entry.first.valid()) {
+                    entry.first.wait();
+                }
+            }
+        }
+    } pending_drain_guard{pending};
+
     // Phase accounting for the streaming loop, reported once at the end.
     // fetch = ReadNext (network/prefetch wait), decode_wait = blocking on
     // the decode future, consume = the consumer callback (for index build:
@@ -1722,10 +1742,8 @@ IterateFieldDataFromManifest(
         fetch_ns += fetch_elapsed;
         fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
         if (!status.ok()) {
-            // Drain workers before throwing so no task outlives this scope.
-            for (auto& f : pending) {
-                f.first.wait();
-            }
+            // pending_drain_guard waits for the outstanding decode tasks
+            // while this throw unwinds.
             AssertInfo(false,
                        "Failed to read record batch: " + status.ToString());
         }

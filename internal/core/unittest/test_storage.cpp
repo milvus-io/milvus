@@ -22,6 +22,7 @@
 #include <iosfwd>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -371,6 +372,27 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
             ASSERT_EQ(streamed[i]->is_valid(r), raw_datas[i]->is_valid(r));
         }
     }
+
+    // A throwing consumer must still leave no decode task running: for index
+    // build the consumer writes to local disk and can fail mid-stream, and
+    // the tasks live on a shared pool, so one outliving this frame would run
+    // against a destroyed stack scope. The drain guard covers this exit path
+    // (previously only ReadNext failures drained).
+    EXPECT_THROW(
+        {
+            IterateFieldDataFromManifest(
+                manifest_json,
+                properties,
+                field_meta,
+                DataType::TEXT,
+                0,
+                DataType::NONE,
+                std::nullopt,
+                [](FieldDataPtr) {
+                    throw std::runtime_error("consumer failed");
+                });
+        },
+        std::runtime_error);
 
     FreeFlushResult(&result);
     cleanup();
