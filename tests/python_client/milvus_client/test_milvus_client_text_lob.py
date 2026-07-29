@@ -3,6 +3,7 @@ import io
 import json
 import os
 import random
+import tempfile
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -636,6 +637,30 @@ def read_parquet_object(minio_client, bucket, key):
         response.release_conn()
 
 
+def read_vortex_object(minio_client, bucket, key):
+    vortex_io = pytest.importorskip("vortex.io", reason="TEXT LOB Vortex layout inspection requires vortex-data")
+    response = minio_client.get_object(bucket, key)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".vortex", delete=False) as tmp:
+            tmp.write(response.read())
+            tmp_path = tmp.name
+        try:
+            return vortex_io.read_url(f"file:{tmp_path}").to_arrow_table()
+        except ValueError as e:
+            if "Registry missing encoding" in str(e):
+                pytest.skip(
+                    "installed vortex-data cannot decode Milvus StorageV3 Vortex custom encoding; "
+                    "skip instead of synthesizing TEXT LOB references"
+                )
+            raise
+    finally:
+        response.close()
+        response.release_conn()
+        if tmp_path is not None:
+            os.remove(tmp_path)
+
+
 def bytes_value(value):
     if value is None:
         return None
@@ -691,6 +716,43 @@ def text_reference_values(values):
     return None
 
 
+def text_reference_rows_from_tables(tables, content_field_id, id_field_id, expected_ids, layout):
+    id_candidates = []
+    ref_candidates = []
+    table_debug = []
+    for key, table in tables:
+        table_debug.append({"key": key, "columns": list(table.schema.names), "rows": table.num_rows})
+        id_candidates.extend(
+            (key, name, values)
+            for name, values in candidate_columns(table, column_names_for(id_field_id, ID_FIELD), int_values)
+        )
+        ref_candidates.extend(
+            (key, name, values)
+            for name, values in candidate_columns(
+                table, column_names_for(content_field_id, CONTENT_FIELD), text_reference_values
+            )
+        )
+
+    expected_id_set = set(expected_ids)
+    assert id_candidates, f"no primary-key column found in {layout} files: {table_debug}"
+    assert ref_candidates, f"no TEXT reference column found in {layout} files: {table_debug}"
+
+    id_key, id_name, ids = max(id_candidates, key=lambda candidate: len(expected_id_set & set(candidate[2])))
+    assert expected_id_set <= set(ids), (
+        f"primary-key column {id_name} from {id_key} does not contain expected ids; "
+        f"expected={expected_id_set}, actual={ids}, {layout}={table_debug}"
+    )
+
+    matching_refs = [candidate for candidate in ref_candidates if len(candidate[2]) == len(ids)]
+    assert matching_refs, (
+        f"no TEXT reference column has the same row count as primary-key column {id_name} from {id_key}; "
+        f"ref_candidates={[(key, name, len(values)) for key, name, values in ref_candidates]}, {layout}={table_debug}"
+    )
+    ref_key, ref_name, refs = matching_refs[0]
+    log.info(f"TEXT LOB {layout} reference layout: pk={id_key}:{id_name}, text={ref_key}:{ref_name}")
+    return {pk: ref for pk, ref in zip(ids, refs) if pk in expected_id_set}
+
+
 def read_text_reference_rows(
     minio_client,
     bucket,
@@ -698,9 +760,6 @@ def read_text_reference_rows(
     content_field_id,
     id_field_id,
     expected_ids,
-    expected_text_by_id=None,
-    inline_threshold=None,
-    partition_base=None,
 ):
     data_prefix = object_key(segment_base, "_data")
     data_keys = list_minio_keys(minio_client, bucket, data_prefix)
@@ -709,68 +768,13 @@ def read_text_reference_rows(
         parquet_keys = [key for key in list_minio_keys(minio_client, bucket, segment_base) if key.endswith(".parquet")]
 
     if parquet_keys:
-        id_candidates = []
-        ref_candidates = []
-        parquet_debug = []
-        for key in parquet_keys:
-            table = read_parquet_object(minio_client, bucket, key)
-            parquet_debug.append({"key": key, "columns": list(table.schema.names), "rows": table.num_rows})
-            id_candidates.extend(
-                (key, name, values)
-                for name, values in candidate_columns(table, column_names_for(id_field_id, ID_FIELD), int_values)
-            )
-            ref_candidates.extend(
-                (key, name, values)
-                for name, values in candidate_columns(
-                    table, column_names_for(content_field_id, CONTENT_FIELD), text_reference_values
-                )
-            )
-
-        expected_id_set = set(expected_ids)
-        assert id_candidates, f"no primary-key column found in parquet files: {parquet_debug}"
-        assert ref_candidates, f"no TEXT reference column found in parquet files: {parquet_debug}"
-
-        id_key, id_name, ids = max(id_candidates, key=lambda candidate: len(expected_id_set & set(candidate[2])))
-        assert expected_id_set <= set(ids), (
-            f"primary-key column {id_name} from {id_key} does not contain expected ids; "
-            f"expected={expected_id_set}, actual={ids}, parquet={parquet_debug}"
-        )
-
-        matching_refs = [candidate for candidate in ref_candidates if len(candidate[2]) == len(ids)]
-        assert matching_refs, (
-            f"no TEXT reference column has the same row count as primary-key column {id_name} from {id_key}; "
-            f"ref_candidates={[(key, name, len(values)) for key, name, values in ref_candidates]}, parquet={parquet_debug}"
-        )
-        ref_key, ref_name, refs = matching_refs[0]
-        log.info(f"TEXT LOB reference layout: pk={id_key}:{id_name}, text={ref_key}:{ref_name}")
-        return {pk: ref for pk, ref in zip(ids, refs) if pk in expected_id_set}
+        tables = [(key, read_parquet_object(minio_client, bucket, key)) for key in parquet_keys]
+        return text_reference_rows_from_tables(tables, content_field_id, id_field_id, expected_ids, "parquet")
 
     vortex_keys = [key for key in data_keys if key.endswith(".vortex")]
     assert vortex_keys, f"no parquet or vortex reference files found under segment base {segment_base}"
-    assert expected_text_by_id is not None and inline_threshold is not None and partition_base is not None, (
-        "vortex TEXT LOB layout validation requires expected_text_by_id, inline_threshold, and partition_base"
-    )
-
-    lob_prefix = object_key(partition_base, "lobs", content_field_id, "_data")
-    lob_keys = list_minio_keys(minio_client, bucket, lob_prefix)
-    lob_file_ids = []
-    for key in lob_keys:
-        name = os.path.basename(key)
-        if name.endswith(".vx"):
-            lob_file_ids.append(uuid.UUID(name.removesuffix(".vx")))
-    assert lob_file_ids, f"expected Vortex LOB objects under {lob_prefix}; data={vortex_keys}, lobs={lob_keys}"
-
-    log.info(f"TEXT LOB vortex layout: data={vortex_keys}, lobs={lob_keys}")
-    refs = {}
-    lob_file_id = lob_file_ids[0]
-    for pk in expected_ids:
-        text = expected_text_by_id[pk]
-        text_bytes = text.encode("utf-8")
-        if len(text_bytes) < inline_threshold:
-            refs[pk] = b"\x00" + text_bytes
-        else:
-            refs[pk] = b"\x01\x00\x00\x00" + lob_file_id.bytes + b"\x00" * 4
-    return refs
+    tables = [(key, read_vortex_object(minio_client, bucket, key)) for key in vortex_keys]
+    return text_reference_rows_from_tables(tables, content_field_id, id_field_id, expected_ids, "vortex")
 
 
 def classify_text_ref(ref_bytes, expected_text):
@@ -2535,9 +2539,6 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
             content_field_id,
             id_field_id,
             expected_ids=payloads.keys(),
-            expected_text_by_id=payloads,
-            inline_threshold=threshold,
-            partition_base=partition_base,
         )
         assert set(refs) == set(payloads), f"missing TEXT references: actual={set(refs)}, expected={set(payloads)}"
 
