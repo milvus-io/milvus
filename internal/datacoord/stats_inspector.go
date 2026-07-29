@@ -25,6 +25,7 @@ import (
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -366,10 +367,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if err != nil {
 		return err
 	}
-	originSegmentSize := originSegment.getSegmentSize()
-	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob {
-		originSegmentSize = originSegment.getSegmentSize() * 2
-	}
+	originSegmentSize := si.estimateStatsTaskSize(originSegment, subJobType)
 
 	taskSlot := calculateStatsTaskSlot(originSegmentSize)
 	t := &indexpb.StatsTask{
@@ -429,10 +427,76 @@ func (si *statsInspector) DropStatsTask(originSegmentID int64, subJobType indexp
 	return nil
 }
 
-func (si *statsInspector) isExternalCollection(collectionID int64) bool {
-	if si.mt == nil {
-		return false
+// statsTaskFieldIDs returns the fields the stats task reads, or nil when it is
+// not restricted to a subset of the columns.
+func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.StatsSubJob) []int64 {
+	var predicate func(field *schemapb.FieldSchema) bool
+	switch subJobType {
+	case indexpb.StatsSubJob_JsonKeyIndexJob:
+		predicate = func(field *schemapb.FieldSchema) bool {
+			return typeutil.CreateFieldSchemaHelper(field).EnableJSONKeyStatsIndex()
+		}
+	case indexpb.StatsSubJob_TextIndexJob:
+		predicate = func(field *schemapb.FieldSchema) bool {
+			return typeutil.CreateFieldSchemaHelper(field).EnableMatch()
+		}
+	default:
+		return nil
 	}
-	coll := si.mt.GetCollection(collectionID)
+
+	fieldIDs := make([]int64, 0)
+	for _, field := range schema.GetFields() {
+		if predicate(field) {
+			fieldIDs = append(fieldIDs, field.GetFieldID())
+		}
+	}
+	return fieldIDs
+}
+
+// estimateStatsTaskSize returns the data size the stats task handles, which
+// drives the task slot estimation.
+//
+// The json key index and text index tasks only read the columns they index,
+// while the segment size covers every column. This is worst for external
+// segments, which report one synthetic column group holding all of them. Any
+// other stats task reads the whole segment. The segment size is kept whenever
+// the estimation is not possible, which is the previous (over-estimating but
+// safe) behavior.
+func (si *statsInspector) estimateStatsTaskSize(segment *SegmentInfo, subJobType indexpb.StatsSubJob) int64 {
+	segmentSize := segment.getSegmentSize()
+
+	readSize := segmentSize
+	if coll := si.getCollection(segment.GetCollectionID()); coll != nil {
+		if fieldIDs := statsTaskFieldIDs(coll.Schema, subJobType); len(fieldIDs) > 0 {
+			fieldsSize, err := estimateFieldsReadSize(coll.Schema, segment, fieldIDs)
+			if err != nil {
+				mlog.Warn(si.ctx, "failed to estimate stats task field size, fallback to segment size",
+					mlog.FieldSegmentID(segment.GetID()),
+					mlog.String("subJobType", subJobType.String()),
+					mlog.Int64("segmentSize", segmentSize),
+					mlog.Err(err))
+			} else {
+				readSize = fieldsSize
+			}
+		}
+	}
+
+	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob {
+		// the json key index task also writes an index of comparable size, so
+		// it handles roughly twice the data it reads.
+		return readSize * 2
+	}
+	return readSize
+}
+
+func (si *statsInspector) getCollection(collectionID int64) *collectionInfo {
+	if si.mt == nil {
+		return nil
+	}
+	return si.mt.GetCollection(collectionID)
+}
+
+func (si *statsInspector) isExternalCollection(collectionID int64) bool {
+	coll := si.getCollection(collectionID)
 	return coll != nil && coll.IsExternal()
 }
