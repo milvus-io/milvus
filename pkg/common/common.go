@@ -225,6 +225,29 @@ const (
 	// Layout: {localStorage.path}/cache/{nodeID}/{growing_mmap|local_chunk|...}/...
 	LocalCacheRootPath = "cache"
 
+	// The four segments below are declared as string literals on the C++ side and
+	// joined onto ChunkManagerPtr->GetRootPath(). They are mirrored here so the
+	// registry below can list them; the Go guard test cannot see their real
+	// declaration sites. Keep them in sync by hand.
+	//
+	// All four resolve through LocalChunkManagerSingleton, so their root is
+	// localStorage.path. Under common.storageType=local that is also datacoord's
+	// ChunkManager root -- the same reason LocalCacheRootPath is listed.
+
+	// RawDataRootPath mirrors RAWDATA_ROOT_PATH (core/src/common/Consts.h).
+	RawDataRootPath = "raw_datas"
+
+	// NgramLogPath mirrors NGRAM_LOG_ROOT_PATH (core/src/common/Consts.h).
+	NgramLogPath = "ngram_log"
+
+	// TempRootPath mirrors TEMP (core/src/storage/Util.cpp), prefixed onto the
+	// root for is_temp index builds.
+	TempRootPath = "tmp"
+
+	// RTreeIndexPath mirrors the literal in core/src/index/RTreeIndex.cpp, which
+	// concatenates it onto GetRootPath() rather than declaring a constant.
+	RTreeIndexPath = "rtree-index"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -241,9 +264,13 @@ const (
 //
 // Scope limit, deliberately stated: the guard test enforces that every storage
 // path constant declared in THIS file is classified. It cannot see a writer in
-// another package that joins a bare string literal onto the storage root --
-// that is how the Woodpecker "wp" directory was missed (milvus#51894 review).
-// A new writer under the shared root must add its segment here by hand.
+// another package -- still less one in another language -- that joins a bare
+// string literal onto the storage root. Every omission found so far came from
+// human review, not from the guard: "wp" (Go, pkg/streaming), "cache" (Go,
+// internal/util/pathutil), and the four C++ segments below (milvus#51894
+// review). A green guard is evidence that this file is self-consistent, NOT
+// that the registry is complete; a new writer under the shared root must add
+// its segment here by hand.
 var InternalStorageRootSegments = []string{
 	SegmentInsertLogPath,
 	SegmentDeltaLogPath,
@@ -259,6 +286,10 @@ var InternalStorageRootSegments = []string{
 	SnapshotRootPath,
 	WoodpeckerRootPath,
 	LocalCacheRootPath,
+	RawDataRootPath,
+	NgramLogPath,
+	TempRootPath,
+	RTreeIndexPath,
 }
 
 const (
