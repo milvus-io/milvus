@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -573,6 +574,180 @@ func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.Ke
 		return max(defaultSlots/16, 1)
 	}
 	return max(defaultSlots/64, 1)
+}
+
+// isFixedWidthType tells whether the schema alone fully determines the size of
+// a field, i.e. the estimation cannot be off. Variable length types only get a
+// configured guess out of the schema (see typeutil.EstimateSizePerRecord), so
+// they are attributed from the measured data instead whenever possible.
+func isFixedWidthType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float,
+		schemapb.DataType_Double, schemapb.DataType_Timestamptz,
+		schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector:
+		return true
+	default:
+		return false
+	}
+}
+
+// fieldSizePerRecord returns the per row size of a field derived from the
+// schema, together with whether that size is exact.
+func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (int64, bool, error) {
+	field := typeutil.GetFieldByID(schema, fieldID)
+	if field == nil {
+		return 0, false, merr.WrapErrFieldNotFound(fieldID)
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{field},
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	if sizePerRecord <= 0 {
+		// An unrecognized data type estimates to zero, which would understate
+		// the slot usage. Let the caller keep the conservative binlog size.
+		return 0, false, merr.WrapErrParameterInvalidMsg("cannot estimate size of field %d with data type %s",
+			fieldID, field.GetDataType().String())
+	}
+	return int64(sizePerRecord), isFixedWidthType(field.GetDataType()), nil
+}
+
+// columnGroup is a set of fields stored together, which is what a binlog entry
+// describes for storage v3 segments. Storage v1 binlogs hold a single field and
+// therefore form a group of one.
+type columnGroup struct {
+	fields []int64
+	size   int64
+}
+
+// segmentColumnGroups returns the column groups of a segment, keyed by every
+// field they hold.
+func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
+	groups := make(map[int64]*columnGroup)
+	for _, fieldBinlog := range segment.GetBinlogs() {
+		fields := fieldBinlog.GetChildFields()
+		if len(fields) == 0 {
+			fields = []int64{fieldBinlog.GetFieldID()}
+		}
+		var size int64
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			size += binlog.GetMemorySize()
+		}
+		group := &columnGroup{fields: fields, size: size}
+		for _, fieldID := range fields {
+			groups[fieldID] = group
+		}
+	}
+	return groups
+}
+
+// estimateFieldsReadSize estimates how much data a task reads for fieldIDs of a
+// segment.
+//
+// Both the index build and the json/text stats tasks read a single column at a
+// time: for storage v3 the reader is built with a schema holding only the target
+// column, so parquet only touches that column inside the column group file (see
+// GetFieldDatasFromStorageV2 in internal/core/src/storage/Util.cpp). The binlog
+// size however is recorded per column group, so a field sharing a group with
+// others gets charged for all of them. This is worst for external collections,
+// whose segments carry one synthetic group holding every column at once (see
+// buildFakeBinlogs in internal/datanode/external).
+//
+// The group size is the measured truth for the group as a whole, so it is used
+// as the budget: fields whose schema gives an exact size take exactly that, and
+// the remaining bytes are shared between the variable length fields
+// proportionally to their schema estimate. That keeps a 128 dim vector at its
+// real size while a large json column still gets the bytes it actually
+// occupies, instead of the configured per row guess.
+func estimateFieldsReadSize(schema *schemapb.CollectionSchema, segment *SegmentInfo, fieldIDs []int64) (int64, error) {
+	if len(fieldIDs) == 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("no field to estimate size for")
+	}
+	numRows := segment.GetNumOfRows()
+	if numRows <= 0 {
+		return 0, nil
+	}
+
+	groups := segmentColumnGroups(segment)
+	// requested fields grouped by the column group holding them
+	requested := make(map[*columnGroup][]int64)
+	for _, fieldID := range fieldIDs {
+		group, ok := groups[fieldID]
+		if !ok {
+			return 0, merr.WrapErrFieldNotFound(fieldID, "field has no binlog in segment")
+		}
+		requested[group] = append(requested[group], fieldID)
+	}
+
+	var total int64
+	for group, groupFieldIDs := range requested {
+		size, err := estimateGroupFieldsSize(schema, group, groupFieldIDs, numRows)
+		if err != nil {
+			return 0, err
+		}
+		total += size
+	}
+	return total, nil
+}
+
+// estimateGroupFieldsSize attributes the measured size of one column group to
+// the requested fields of that group.
+func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGroup, fieldIDs []int64, numRows int64) (int64, error) {
+	if group.size <= 0 {
+		// nothing measured to attribute, e.g. binlogs written before the size
+		// was recorded. Let the caller keep its own conservative fallback.
+		return 0, merr.WrapErrParameterInvalidMsg("column group of fields %v has no recorded size", group.fields)
+	}
+	if len(group.fields) <= 1 {
+		// the group holds nothing but the requested field, its size is exact
+		return group.size, nil
+	}
+
+	type fieldEstimate struct {
+		sizePerRecord int64
+		exact         bool
+	}
+	estimates := make(map[int64]fieldEstimate, len(group.fields))
+	var fixedPerRecord, variableWeight int64
+	for _, fieldID := range group.fields {
+		size, exact, err := fieldSizePerRecord(schema, fieldID)
+		if err != nil {
+			return 0, err
+		}
+		estimates[fieldID] = fieldEstimate{sizePerRecord: size, exact: exact}
+		if exact {
+			fixedPerRecord += size
+			continue
+		}
+		variableWeight += size
+	}
+
+	// bytes the variable length fields of this group take per row, measured
+	residualPerRecord := group.size/numRows - fixedPerRecord
+	if residualPerRecord < 0 || variableWeight == 0 {
+		// the schema does not add up to the measured data, e.g. because some
+		// field of the group is not materialized in it. Fall back to the schema
+		// estimation alone, still bounded by the group size.
+		residualPerRecord = 0
+	}
+
+	var total int64
+	for _, fieldID := range fieldIDs {
+		estimate := estimates[fieldID]
+		sizePerRecord := estimate.sizePerRecord
+		if !estimate.exact && residualPerRecord > 0 {
+			sizePerRecord = residualPerRecord * sizePerRecord / variableWeight
+		}
+		total += sizePerRecord * numRows
+	}
+	if total > group.size {
+		return group.size, nil
+	}
+	return total, nil
 }
 
 func calculateStatsTaskSlot(segmentSize int64) int64 {

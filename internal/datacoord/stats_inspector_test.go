@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -858,4 +859,123 @@ func (s *statsInspectorSuite) TestEnableBM25() {
 	// Test if BM25 is enabled
 	result := s.inspector.enableBM25()
 	s.False(result, "BM25 should be disabled by default")
+}
+
+func (s *statsInspectorSuite) TestStatsTaskFieldIDs() {
+	// collection 2 declares one json field (202) and one match enabled varchar
+	// (201) among a pk.
+	coll := s.mt.GetCollection(2)
+	s.Equal([]int64{202}, statsTaskFieldIDs(coll.Schema, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.Equal([]int64{201}, statsTaskFieldIDs(coll.Schema, indexpb.StatsSubJob_TextIndexJob))
+	// a sort task reads every column
+	s.Nil(statsTaskFieldIDs(coll.Schema, indexpb.StatsSubJob_Sort))
+
+	// collection 1 has no json field at all.
+	coll = s.mt.GetCollection(1)
+	s.Empty(statsTaskFieldIDs(coll.Schema, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
+func (s *statsInspectorSuite) TestGetCollectionWithoutMeta() {
+	inspector := &statsInspector{}
+	s.Nil(inspector.getCollection(1))
+	s.False(inspector.isExternalCollection(1))
+}
+
+func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
+	const (
+		collectionID = UniqueID(4)
+		numRows      = int64(1000)
+		pkFieldID    = int64(300)
+		textFieldID  = int64(301)
+		jsonFieldID  = int64(302)
+		wholeRowSize = int64(100 * 1024 * 1024)
+	)
+
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+			{
+				FieldID:       textFieldID,
+				Name:          "var",
+				DataType:      schemapb.DataType_VarChar,
+				ExternalField: "var_col",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "1024"},
+					{Key: "enable_match", Value: "true"},
+					{Key: "enable_analyzer", Value: "true"},
+				},
+			},
+			{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
+		},
+	}
+	s.mt.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: schema})
+
+	perRecord := func(field *schemapb.FieldSchema) int64 {
+		size, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{field},
+		})
+		s.NoError(err)
+		return int64(size)
+	}
+	pkSize := perRecord(schema.Fields[0])
+	textSize := perRecord(schema.Fields[1])
+	jsonSize := perRecord(schema.Fields[2])
+	// bytes the two variable width columns really take per row
+	residual := wholeRowSize/numRows - pkSize
+
+	newSegment := func(collID UniqueID) *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           30,
+				CollectionID: collID,
+				NumOfRows:    numRows,
+				// external segments report one synthetic column group holding
+				// every column at once
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     0,
+						ChildFields: []int64{pkFieldID, textFieldID, jsonFieldID},
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, LogSize: wholeRowSize, MemorySize: wholeRowSize},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	s.Run("sort job reads the whole segment", func() {
+		segment := newSegment(collectionID)
+		s.Equal(segment.getSegmentSize(), s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_Sort))
+	})
+
+	s.Run("json job only counts json columns", func() {
+		segment := newSegment(collectionID)
+		expected := residual * jsonSize / (jsonSize + textSize) * numRows * 2
+		s.Equal(expected, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+		s.Less(expected, segment.getSegmentSize()*2)
+	})
+
+	s.Run("text job only counts match enabled columns and is not doubled", func() {
+		segment := newSegment(collectionID)
+		expected := residual * textSize / (jsonSize + textSize) * numRows
+		s.Equal(expected, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_TextIndexJob))
+	})
+
+	s.Run("collection without the indexed column falls back to segment size", func() {
+		segment := newSegment(1)
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+	})
+
+	s.Run("unresolvable collection falls back to segment size", func() {
+		segment := newSegment(999)
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+	})
+
+	s.Run("segment without the field binlog falls back to segment size", func() {
+		segment := newSegment(collectionID)
+		segment.Binlogs[0].ChildFields = []int64{pkFieldID}
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+	})
 }
