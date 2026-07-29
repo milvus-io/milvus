@@ -64,8 +64,8 @@ type collectionSchemaUpdatePlan struct {
 	// logicalSchemaVersion is schema.Version from the accepted schema payload.
 	// It is the Go-side structural schema freshness key.
 	logicalSchemaVersion uint64
-	// schemaBarrierTs fences stale load results and orders same-version schema
-	// payload refreshes such as collection property snapshots.
+	// schemaBarrierTs is retained for snapshot metadata and compatibility. It
+	// does not make a same-version schema payload fresh.
 	schemaBarrierTs uint64
 	// segcoreSchemaVersion is only passed to C++ segcore UpdateSchema. Segcore
 	// still has a single increasing version gate, so QueryNode keeps this
@@ -149,10 +149,9 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 }
 
 func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
-	// Existing collections may be reached by a later load result or by a
-	// same-version properties refresh. Keep the Go-side logical schema version
-	// separate from the barrier timestamp so stale schema payloads cannot roll
-	// back fields, while newer properties-only payloads can still refresh.
+	// Existing collections may be reached by an older load result. Only a newer
+	// schema.Version can refresh the schema payload; schemaBarrierTs is metadata,
+	// not a schema freshness key.
 	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs)
 	if err != nil {
 		return err
@@ -177,11 +176,9 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	defer m.Unref(collectionID, 1)
 
 	logicalSchemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
-	// A schema update carries two ordering domains:
-	// - schema.Version is the logical collection schema version and prevents
-	//   older schema payloads from overwriting newer fields/functions.
-	// - schemaBarrierTs is the DDL barrier timestamp and advances for
-	//   properties-only schema snapshots such as ttl_field changes.
+	// schema.Version is the only schema payload freshness key. schemaBarrierTs is
+	// still carried for compatibility and diagnostics, but it cannot advance a
+	// same-version payload.
 	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
 	return err
 }
@@ -201,16 +198,10 @@ func ShouldUpdateCollectionSchema(collection *Collection, schema *schemapb.Colle
 
 func prepareCollectionSchemaUpdate(collection *Collection, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool) {
 	_, currentVersion, currentBarrierTs, currentSegcoreSchemaVersion := collection.schemaSnapshotWithSegcoreSchemaVersion()
-	// Never allow logical schema version rollback, even if the incoming message
-	// has a larger timestamp. This preserves the fix for out-of-order schema
-	// messages across replay/channel delivery.
-	if logicalSchemaVersion < currentVersion {
-		return collectionSchemaUpdatePlan{}, false
-	}
-	// For the same logical schema version, only a newer barrier can update the
-	// payload. This is required for collection properties embedded in schema
-	// snapshots because those updates do not necessarily bump schema.Version.
-	if logicalSchemaVersion == currentVersion && schemaBarrierTs <= currentBarrierTs {
+	// Never allow logical schema version rollback or same-version payload refresh,
+	// even if the incoming message has a larger timestamp. Every schema payload
+	// change must bump schema.Version and be replayed from WAL.
+	if logicalSchemaVersion <= currentVersion {
 		return collectionSchemaUpdatePlan{}, false
 	}
 
@@ -310,7 +301,7 @@ type collectionSchemaSnapshot struct {
 	schemaBarrierTs      uint64
 	// segcoreSchemaVersion is an internal monotonic version passed to C++
 	// segcore. It is not the logical collection schema version; Go-side schema
-	// freshness is tracked by logicalSchemaVersion and schemaBarrierTs.
+	// freshness is tracked by logicalSchemaVersion.
 	segcoreSchemaVersion uint64
 }
 

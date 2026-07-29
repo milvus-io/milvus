@@ -123,20 +123,24 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
 		case common.CollectionExternalSource:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSource = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			if prop.GetValue() != coll.ExternalSource {
+				if udpates.Schema == nil {
+					udpates.Schema = &schemapb.CollectionSchema{}
+				}
+				udpates.Schema.ExternalSource = prop.GetValue()
+				if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+					header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+				}
 			}
 		case common.CollectionExternalSpec:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSpec = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			if prop.GetValue() != coll.ExternalSpec {
+				if udpates.Schema == nil {
+					udpates.Schema = &schemapb.CollectionSchema{}
+				}
+				udpates.Schema.ExternalSpec = prop.GetValue()
+				if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+					header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+				}
 			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
@@ -153,12 +157,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
 	}
 
-	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
-	// so QueryNode can refresh runtime schema properties without requiring release/load.
+	// If a property alter changes schema payload, broadcast a full schema
+	// snapshot and mark it as schema change so WAL consumers advance by
+	// schema.Version instead of relying on the broadcast timestamp.
 	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
 	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
 	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
-	if needTTLFieldSchemaRefresh {
+	needExternalSpecSchemaRefresh := funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+	if needTTLFieldSchemaRefresh || needExternalSpecSchemaRefresh {
+		schemaUpdate := udpates.Schema
 		// validate ttl field name exists in schema fields when setting it
 		if okNew {
 			found := false
@@ -178,16 +185,18 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		// Build schema snapshot with updated properties. Any schema payload
+		// change must advance schema.Version so WAL consumers can gate on it.
 		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
 		schema.Properties = newPropsKeyValuePairs
 		// Preserve ExternalSource/ExternalSpec from current collection state
 		// unless this alter is itself updating them (refresh-completion sync).
-		if udpates.Schema != nil && udpates.Schema.ExternalSource != "" {
-			schema.ExternalSource = udpates.Schema.ExternalSource
+		if schemaUpdate != nil && schemaUpdate.ExternalSource != "" {
+			schema.ExternalSource = schemaUpdate.ExternalSource
 		}
-		if udpates.Schema != nil && udpates.Schema.ExternalSpec != "" {
-			schema.ExternalSpec = udpates.Schema.ExternalSpec
+		if schemaUpdate != nil && schemaUpdate.ExternalSpec != "" {
+			schema.ExternalSpec = schemaUpdate.ExternalSpec
 		}
 		udpates.Schema = schema
 	}
@@ -199,6 +208,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// fill the put load config if rg or replica number is changed.
 	udpates.AlterLoadConfig = c.getAlterLoadConfigOfAlterCollection(coll.Properties, udpates.Properties)
+
+	if err := validateAlterCollectionSchemaPayloadVersion(coll.SchemaVersion, header, udpates); err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -212,6 +225,23 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAlterCollectionSchemaPayloadVersion(currentVersion int32, header *messagespb.AlterCollectionMessageHeader, updates *messagespb.AlterCollectionMessageUpdates) error {
+	if header == nil || header.GetUpdateMask() == nil || !funcutil.SliceContain(header.GetUpdateMask().GetPaths(), message.FieldMaskCollectionSchema) {
+		return nil
+	}
+	if updates == nil || updates.GetSchema() == nil {
+		return merr.WrapErrServiceInternalMsg("alter collection schema update mask requires schema payload")
+	}
+	if updates.GetSchema().GetVersion() <= currentVersion {
+		return merr.WrapErrServiceInternalMsg(
+			"alter collection schema payload must advance schema version, current=%d, payload=%d",
+			currentVersion,
+			updates.GetSchema().GetVersion(),
+		)
 	}
 	return nil
 }
