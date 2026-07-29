@@ -645,3 +645,58 @@ func TestMergeSortPredicateCalledOncePerRow(t *testing.T) {
 		assert.Equalf(t, 1, n, "predicate called %d times for pk %d", n, pk)
 	}
 }
+
+func TestRowHeap(t *testing.T) {
+	h := &rowHeap{less: func(x, y rowIndex) bool {
+		if x.ri != y.ri {
+			return x.ri < y.ri
+		}
+		return x.i < y.i
+	}}
+	assert.Equal(t, 0, h.len())
+
+	in := []rowIndex{{3, 1}, {1, 2}, {2, 0}, {1, 0}, {3, 0}, {2, 1}}
+	for _, v := range in {
+		h.push(v)
+	}
+	assert.Equal(t, len(in), h.len())
+
+	var got []rowIndex
+	for h.len() > 0 {
+		got = append(got, h.pop())
+	}
+	assert.Equal(t, []rowIndex{{1, 0}, {1, 2}, {2, 0}, {2, 1}, {3, 0}, {3, 1}}, got)
+}
+
+func TestRowHeapSingleElement(t *testing.T) {
+	h := &rowHeap{less: func(x, y rowIndex) bool { return x.i < y.i }}
+	h.push(rowIndex{0, 7})
+	assert.Equal(t, 1, h.len())
+	assert.Equal(t, rowIndex{0, 7}, h.pop())
+	assert.Equal(t, 0, h.len())
+}
+
+// A k-way merge relies on each input record being sorted by the merge key.
+// When that does not hold, fail explicitly rather than emitting rows out of
+// order. This is the shape reported in #48322: the last row of a record carries
+// the smallest key, and the next record is shorter.
+func TestMergeSortUnsortedInputReturnsError(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {50, 60, 1}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {70}}, nil),
+	}}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1024, schema, []RecordReader{r0}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.ErrorContains(t, err, "not sorted by the merge key")
+}
