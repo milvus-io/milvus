@@ -667,8 +667,7 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
     EXPECT_FALSE(request.has_raw_data);
 }
 
-TYPED_TEST_P(HybridIndexTestV1,
-             BitmapResourceEstimateUsesBoundedStreamOverhead) {
+TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     auto budget_cleanup = folly::makeGuard(
@@ -732,16 +731,16 @@ TYPED_TEST_P(HybridIndexTestV1,
         stream_load_info->total_transient_bytes,
         stream_load_info->max_task_transient_bytes);
     ASSERT_LT(bounded_stream_overhead, stream_load_info->total_transient_bytes);
-    auto expected_max_memory =
+    auto bounded_max_memory =
         std::max(2 * index_size,
                  index_size + static_cast<uint64_t>(bounded_stream_overhead));
     auto full_stream_max_memory = std::max(
         2 * index_size,
         index_size +
             static_cast<uint64_t>(stream_load_info->total_transient_bytes));
-    ASSERT_LT(expected_max_memory, full_stream_max_memory);
+    ASSERT_LT(bounded_max_memory, full_stream_max_memory);
     EXPECT_EQ(request.final_memory_cost, index_size);
-    EXPECT_EQ(request.max_memory_cost, expected_max_memory);
+    EXPECT_EQ(request.max_memory_cost, full_stream_max_memory);
 }
 
 TYPED_TEST_P(HybridIndexTestV1,
@@ -822,7 +821,7 @@ using InvertedType = testing::Types<int16_t, int32_t, int64_t, std::string>;
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV1,
                             CountFuncTest,
                             ResourceEstimateUsesInternalIndexType,
-                            BitmapResourceEstimateUsesBoundedStreamOverhead,
+                            BitmapResourceEstimateKeepsFullStreamOverhead,
                             BitmapLoadingOverheadUsesRequestLocalPassthrough,
                             INFuncTest,
                             IsNullFuncTest,

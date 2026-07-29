@@ -77,7 +77,6 @@ ScalarIndexStreamMemoryOverhead(
     int32_t scalar_version,
     bool encrypted,
     bool file_stream,
-    bool use_shared_memory_overhead_group,
     const std::optional<storage::EntryStreamLoadInfo>& stream_load_info =
         std::nullopt) {
     if (index_size_in_bytes == 0) {
@@ -117,10 +116,10 @@ ScalarIndexStreamMemoryOverhead(
             milvus::storage::kFileStreamBufferMultiplier);
     }
 
-    // Grouped scalar V3 loads report the full stream overhead so the shared
-    // Group can apply its Budget/Executor bound across CacheSlots. Request-
-    // local paths keep only the bounded runtime peak.
-    if (use_shared_memory_overhead_group && stream_load_info.has_value()) {
+    // File-aware estimates must remain valid when a later reload observes a
+    // larger transient budget or executor. Grouped loads are capped by the
+    // current Group policy; request-local loads reserve this stable full sum.
+    if (stream_load_info.has_value()) {
         return total_transient_bytes;
     }
 
@@ -695,8 +694,7 @@ IndexFactory::ScalarIndexLoadResource(
                                        index_params,
                                        mmap_enable,
                                        num_rows,
-                                       std::nullopt,
-                                       false);
+                                       std::nullopt);
 }
 
 LoadResourceRequest
@@ -707,8 +705,7 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
-    bool use_shared_memory_overhead_group) {
+    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -736,7 +733,6 @@ IndexFactory::ScalarIndexLoadResourceImpl(
                                         scalar_version,
                                         encrypted_stream,
                                         file_stream,
-                                        use_shared_memory_overhead_group,
                                         stream_load_info);
 
     LoadResourceRequest request{};
@@ -913,8 +909,7 @@ IndexFactory::ScalarIndexLoadResource(
                                        resolved_params,
                                        mmap_enable,
                                        num_rows,
-                                       inspected_stream_load_info,
-                                       use_shared_group);
+                                       inspected_stream_load_info);
 }
 
 IndexBasePtr

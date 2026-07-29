@@ -200,8 +200,7 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows,
-        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
-        bool use_shared_memory_overhead_group);
+        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info);
 
     template <typename T>
     ScalarIndexPtr<T>
