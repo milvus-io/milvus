@@ -294,13 +294,15 @@ func TestSnapshotExportMeta_DurableUpdatesAndDefensiveCopies(t *testing.T) {
 	assert.Equal(t, int32(5), cached.GetProgress())
 
 	catalog.beforeSave = nil
-	catalog.saveErr = errors.New("etcd unavailable")
+	saveErr := errors.New("etcd unavailable")
+	catalog.saveErr = saveErr
 	_, applied, err = meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
 		candidate.Progress = 10
 		return false, nil
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
+	assert.ErrorIs(t, err, saveErr)
 	assert.False(t, applied)
 	cached, ok = meta.GetJob(job.GetJobId())
 	require.True(t, ok)
@@ -392,15 +394,6 @@ func TestSnapshotExportMeta_LoadErrors(t *testing.T) {
 }
 
 func TestSnapshotExportMeta_ErrorAndEdgePaths(t *testing.T) {
-	t.Run("persistence error preserves cause", func(t *testing.T) {
-		cause := errors.New("catalog unavailable")
-		err := &snapshotExportJobPersistenceError{cause: cause}
-		assert.Equal(t, cause.Error(), err.Error())
-		assert.Same(t, cause, err.Unwrap())
-		assert.ErrorIs(t, err, cause)
-		assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
-	})
-
 	t.Run("duplicate jobs fail loading", func(t *testing.T) {
 		job := &datapb.ExportSnapshotJob{JobId: 9001}
 		catalog := newSnapshotExportCatalogFake()

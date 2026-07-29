@@ -2110,7 +2110,7 @@ func TestSnapshotWriter_SaveAllowsEmptyRoot(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	snapshotData := createTestSnapshotData()
 
-	metadataPath, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRoot(
+	metadataPath, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(
 		context.Background(),
 		snapshotData,
 		"",
@@ -2274,7 +2274,7 @@ func TestSnapshotReader_ReadSnapshot_RejectsSelfContainedPathOutsideRoot(t *test
 	segment.IndexFiles = nil
 
 	targetRoot := path.Join(tempDir, "bundle")
-	metadataPath, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRoot(ctx, snapshotData, targetRoot, datapb.SnapshotLayout_SnapshotLayoutSelfContained)
+	metadataPath, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, snapshotData, targetRoot, datapb.SnapshotLayout_SnapshotLayoutSelfContained)
 	assert.NoError(t, err)
 
 	readSnapshot, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, metadataPath, true)

@@ -46,6 +46,42 @@ func clearSegmentNonInsertFiles(segment *datapb.SegmentDescription) {
 	segment.JsonKeyIndexFiles = nil
 }
 
+func exportSnapshot(
+	ctx context.Context,
+	sourceCM storage.ChunkManager,
+	targetCM storage.ChunkManager,
+	copier storage.CrossBucketCopier,
+	sourceBucket string,
+	targetBucket string,
+	snapshot *snapshotstorage.SnapshotData,
+	targetPath string,
+) (string, error) {
+	plan, err := buildSnapshotExportPlan(
+		ctx,
+		sourceCM,
+		targetCM,
+		sourceBucket,
+		targetBucket,
+		snapshot,
+		targetPath,
+	)
+	if err != nil {
+		return "", err
+	}
+	if err := copySnapshotExportPlan(
+		ctx,
+		copier,
+		sourceBucket,
+		targetBucket,
+		plan.items,
+		Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt(),
+	); err != nil {
+		return "", err
+	}
+	metadataURI, _, err := publishSnapshotExportPlanWithSize(ctx, targetCM, snapshot, plan)
+	return metadataURI, err
+}
+
 func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
@@ -820,9 +856,9 @@ func TestSnapshotExporter_ValidationAndPublicationErrors(t *testing.T) {
 	})
 
 	t.Run("publication validation and write failure", func(t *testing.T) {
-		_, err := publishSnapshotExportPlan(ctx, cm, snapshot, nil)
+		_, _, err := publishSnapshotExportPlanWithSize(ctx, cm, snapshot, nil)
 		require.Error(t, err)
-		_, err = publishSnapshotExportPlan(ctx, cm, nil, &snapshotExportPlan{targetRoot: "target"})
+		_, _, err = publishSnapshotExportPlanWithSize(ctx, cm, nil, &snapshotExportPlan{targetRoot: "target"})
 		require.Error(t, err)
 
 		emptySnapshot := createTestSnapshotDataForMeta()
@@ -835,7 +871,7 @@ func TestSnapshotExporter_ValidationAndPublicationErrors(t *testing.T) {
 			Return("", int64(0), expected).
 			Build()
 		defer mockSave.UnPatch()
-		_, err = publishSnapshotExportPlan(ctx, cm, emptySnapshot, &snapshotExportPlan{
+		_, _, err = publishSnapshotExportPlanWithSize(ctx, cm, emptySnapshot, &snapshotExportPlan{
 			targetRoot:  "target",
 			metadataURI: "target/snapshots/100/metadata/1.json",
 			mappings:    map[string]string{},

@@ -3667,10 +3667,10 @@ func TestSnapshotExportManager_DoesNotPublishAfterDeadline(t *testing.T) {
 	require.NoError(t, err)
 
 	publishCalls := 0
-	mockPublish := mockey.Mock(publishSnapshotExportPlan).To(
-		func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (string, error) {
+	mockPublish := mockey.Mock(publishSnapshotExportPlanWithSize).To(
+		func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (string, int64, error) {
 			publishCalls++
-			return "metadata", nil
+			return "metadata", 0, nil
 		}).Build()
 	defer mockPublish.UnPatch()
 
@@ -3682,7 +3682,7 @@ func TestSnapshotExportManager_DoesNotPublishAfterDeadline(t *testing.T) {
 			if err := ensureSnapshotExportCanAdvance(context.Background(), latest); err != nil {
 				return err
 			}
-			_, err := publishSnapshotExportPlan(context.Background(), nil, nil, nil)
+			_, _, err := publishSnapshotExportPlanWithSize(context.Background(), nil, nil, nil)
 			return err
 		},
 		func(latest *datapb.ExportSnapshotJob) (bool, error) {

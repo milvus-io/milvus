@@ -33,20 +33,12 @@ import (
 
 var errSnapshotExportJobPersistence = errors.New("snapshot export job metadata persistence failed")
 
-type snapshotExportJobPersistenceError struct {
-	cause error
-}
+type snapshotExportJobPersistenceError struct{ error }
 
-func (e *snapshotExportJobPersistenceError) Error() string {
-	return e.cause.Error()
-}
-
-func (e *snapshotExportJobPersistenceError) Unwrap() error {
-	return e.cause
-}
+func (e *snapshotExportJobPersistenceError) Unwrap() error { return e.error }
 
 func (e *snapshotExportJobPersistenceError) Is(target error) bool {
-	return target == errSnapshotExportJobPersistence || errors.Is(e.cause, target)
+	return target == errSnapshotExportJobPersistence
 }
 
 type snapshotExportMeta struct {
@@ -186,7 +178,7 @@ func (m *snapshotExportMeta) updateJobLocked(
 	}
 	if err := m.catalog.SaveExportSnapshotJob(ctx, clone); err != nil {
 		return nil, false, &snapshotExportJobPersistenceError{
-			cause: merr.Wrap(err, "failed to update snapshot export job"),
+			error: merr.Wrap(err, "failed to update snapshot export job"),
 		}
 	}
 	// The mutator owns clone for the duration of this call. Cache a separate

@@ -1595,7 +1595,7 @@ func (sm *snapshotManager) createRestoreJob(
 		if !external {
 			segInfo := sm.meta.GetSegment(ctx, sourceSegmentID)
 			if segInfo == nil {
-				mlog.Warn(context.TODO(), "source segment not found in meta, skipping",
+				mlog.Warn(ctx, "source segment not found in meta, skipping",
 					mlog.Int64("sourceSegmentID", sourceSegmentID))
 				continue
 			}

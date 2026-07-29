@@ -514,7 +514,7 @@ func (m *snapshotExportManager) persistOrValidatePlan(
 	jobID int64,
 	plan *snapshotExportPlan,
 ) (*datapb.ExportSnapshotJob, error) {
-	updated, applied, err := m.meta.UpdateJob(ctx, jobID, func(job *datapb.ExportSnapshotJob) (bool, error) {
+	updated, _, err := m.meta.UpdateJob(ctx, jobID, func(job *datapb.ExportSnapshotJob) (bool, error) {
 		if err := ensureSnapshotExportCanAdvance(ctx, job); err != nil {
 			return false, err
 		}
@@ -542,9 +542,6 @@ func (m *snapshotExportManager) persistOrValidatePlan(
 	})
 	if err != nil {
 		return nil, err
-	}
-	if !applied {
-		return updated, nil
 	}
 	return updated, nil
 }

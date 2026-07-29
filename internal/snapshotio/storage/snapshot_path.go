@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package storage
 
 import (
@@ -18,21 +34,12 @@ type bucketChunkManager interface {
 // NormalizeSnapshotObjectPath converts snapshot URIs to chunk-manager object
 // keys so validation and copy code can compare URI and object-key references.
 func NormalizeSnapshotObjectPath(objectPath string) string {
-	if objectPath == "" {
-		return ""
+	if hasURITransportScheme(objectPath) {
+		if _, key, _, err := ParseForeignURI(objectPath); err == nil {
+			return key
+		}
 	}
-	if !hasURITransportScheme(objectPath) {
-		return objectPath
-	}
-	parsed, err := url.Parse(objectPath)
-	if err != nil || parsed.Scheme == "" {
-		return objectPath
-	}
-	_, key, _, err := ParseForeignURI(objectPath)
-	if err != nil {
-		return objectPath
-	}
-	return key
+	return objectPath
 }
 
 func validateSnapshotObjectPathShape(fieldName string, objectPath string) (string, error) {

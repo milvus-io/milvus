@@ -1092,7 +1092,7 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 	return result
 }
 
-// shortenJSONStatsPath shortens JSON stats file paths to only keep the last 2+ segments.
+// shortenJSONStatsPath shortens JSON stats file paths in place to only keep the last 2+ segments.
 //
 // In normal import flow, the C++ core returns already-shortened paths (e.g., "shared_key_index/file").
 // In copy segment flow, DataNode returns full paths after file copying.
@@ -1108,24 +1108,12 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 // Returns:
 //   - Map of field ID to JsonKeyStats with shortened paths
 func shortenJSONStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*datapb.JsonKeyStats {
-	result := make(map[int64]*datapb.JsonKeyStats)
-	for fieldID, stats := range jsonStats {
-		shortenedFiles := make([]string, 0, len(stats.GetFiles()))
-		for _, file := range stats.GetFiles() {
-			shortenedFiles = append(shortenedFiles, shortenSingleJSONStatsPath(file))
-		}
-
-		result[fieldID] = &datapb.JsonKeyStats{
-			FieldID:                stats.GetFieldID(),
-			Version:                stats.GetVersion(),
-			BuildID:                stats.GetBuildID(),
-			Files:                  shortenedFiles,
-			JsonKeyStatsDataFormat: stats.GetJsonKeyStatsDataFormat(),
-			MemorySize:             stats.GetMemorySize(),
-			LogSize:                stats.GetLogSize(),
+	for _, stats := range jsonStats {
+		for i, file := range stats.GetFiles() {
+			stats.Files[i] = shortenSingleJSONStatsPath(file)
 		}
 	}
-	return result
+	return jsonStats
 }
 
 // shortenSingleJSONStatsPath shortens a single JSON stats file path.

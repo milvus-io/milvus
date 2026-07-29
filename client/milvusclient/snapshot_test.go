@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,6 +35,10 @@ import (
 
 type SnapshotSuite struct {
 	MockSuiteBase
+}
+
+type snapshotServiceClientStub struct {
+	milvuspb.MilvusServiceClient
 }
 
 func (s *SnapshotSuite) TestCreateSnapshot() {
@@ -375,6 +381,13 @@ func (s *SnapshotSuite) TestExportSnapshot() {
 
 func (s *SnapshotSuite) TestGetExportSnapshotState() {
 	ctx := context.Background()
+	fakeService := &snapshotServiceClientStub{}
+	originalService := s.client.service
+	s.client.service = fakeService
+	defer func() {
+		s.client.service = originalService
+	}()
+
 	expected := &milvuspb.ExportSnapshotInfo{
 		JobId:               9001,
 		SnapshotName:        "snapshot-1",
@@ -385,14 +398,15 @@ func (s *SnapshotSuite) TestGetExportSnapshotState() {
 	}
 
 	s.Run("success", func() {
-		s.mock.EXPECT().GetExportSnapshotState(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, req *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+		mockGetState := mockey.Mock((*snapshotServiceClientStub).GetExportSnapshotState).To(
+			func(_ *snapshotServiceClientStub, _ context.Context, req *milvuspb.GetExportSnapshotStateRequest, _ ...grpc.CallOption) (*milvuspb.GetExportSnapshotStateResponse, error) {
 				s.Equal(int64(9001), req.GetJobId())
 				return &milvuspb.GetExportSnapshotStateResponse{
 					Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					Info:   expected,
 				}, nil
-			}).Once()
+			}).Build()
+		defer mockGetState.UnPatch()
 
 		info, err := s.client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
 		s.NoError(err)
@@ -400,8 +414,9 @@ func (s *SnapshotSuite) TestGetExportSnapshotState() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().GetExportSnapshotState(mock.Anything, mock.Anything).
-			Return((*milvuspb.GetExportSnapshotStateResponse)(nil), errors.New("mocked error")).Once()
+		mockGetState := mockey.Mock((*snapshotServiceClientStub).GetExportSnapshotState).
+			Return((*milvuspb.GetExportSnapshotStateResponse)(nil), errors.New("mocked error")).Build()
+		defer mockGetState.UnPatch()
 
 		info, err := s.client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
 		s.Error(err)
@@ -409,10 +424,11 @@ func (s *SnapshotSuite) TestGetExportSnapshotState() {
 	})
 
 	s.Run("status error", func() {
-		s.mock.EXPECT().GetExportSnapshotState(mock.Anything, mock.Anything).
+		mockGetState := mockey.Mock((*snapshotServiceClientStub).GetExportSnapshotState).
 			Return(&milvuspb.GetExportSnapshotStateResponse{
 				Status: merr.Status(merr.ErrParameterInvalid),
-			}, nil).Once()
+			}, nil).Build()
+		defer mockGetState.UnPatch()
 
 		info, err := s.client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
 		s.Error(err)

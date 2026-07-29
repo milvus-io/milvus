@@ -81,22 +81,12 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 
 // Save stores a referenced snapshot under the writer root.
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
-	metadataPath, _, err := w.save(ctx, snapshot, w.chunkManager.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
-	return metadataPath, err
-}
-
-// SaveToRoot saves snapshot data under a caller-provided root path.
-func (w *SnapshotWriter) SaveToRoot(ctx context.Context, snapshot *SnapshotData, rootPath string, layout datapb.SnapshotLayout) (string, error) {
-	metadataPath, _, err := w.save(ctx, snapshot, rootPath, layout)
+	metadataPath, _, err := w.SaveToRootWithSize(ctx, snapshot, w.chunkManager.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
 	return metadataPath, err
 }
 
 // SaveToRootWithSize saves snapshot data and returns the bytes written for manifests and metadata.
-func (w *SnapshotWriter) SaveToRootWithSize(ctx context.Context, snapshot *SnapshotData, rootPath string, layout datapb.SnapshotLayout) (string, int64, error) {
-	return w.save(ctx, snapshot, rootPath, layout)
-}
-
-func (w *SnapshotWriter) save(
+func (w *SnapshotWriter) SaveToRootWithSize(
 	ctx context.Context,
 	snapshot *SnapshotData,
 	rootPath string,
