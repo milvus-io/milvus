@@ -55,7 +55,9 @@ const (
 	DefaultSessionRetryTimes = 30
 
 	// DefaultMaxCollectionSchemaSize is the hard cap for canonical collection schemas.
-	DefaultMaxCollectionSchemaSize = 1280 * 1024
+	DefaultMaxCollectionSchemaSize       = 1280 * 1024
+	defaultMaxCollectionSchemaSizeConfig = "1.25MB"
+
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
 	DefaultPQCodeBudgetGBRatio      = 0.125
@@ -2187,17 +2189,18 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxCollectionSchemaSize = ParamItem{
 		Key:          "proxy.maxCollectionSchemaSize",
-		DefaultValue: strconv.Itoa(DefaultMaxCollectionSchemaSize),
+		DefaultValue: defaultMaxCollectionSchemaSizeConfig,
 		Version:      "2.6.0",
 		PanicIfEmpty: true,
-		Doc: "The maximum protobuf wire size in bytes of the final canonical collection schema. " +
+		Doc: "The maximum protobuf wire size of the final canonical collection schema. " +
+			"Values support bytes or K/KB, M/MB, and G/GB units, including decimals. " +
 			"The hard cap is 1.25 MiB, and schemas whose size equals the configured limit are rejected. " +
 			"Invalid, non-positive, or over-cap values fall back to 1.25 MiB.",
 		Export: true,
 		Formatter: func(v string) string {
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || n <= 0 || n > DefaultMaxCollectionSchemaSize {
-				return strconv.Itoa(DefaultMaxCollectionSchemaSize)
+			size := getAsSize(v)
+			if size <= 0 || size > int64(DefaultMaxCollectionSchemaSize) {
+				return defaultMaxCollectionSchemaSizeConfig
 			}
 			return v
 		},
