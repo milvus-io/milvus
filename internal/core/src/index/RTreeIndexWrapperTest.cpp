@@ -11,6 +11,8 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -18,6 +20,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -379,4 +382,99 @@ TEST_F(RTreeIndexWrapperTest, InsertExceptionRebuildsTreeBeforeReuse) {
         candidates);
     std::sort(candidates.begin(), candidates.end());
     EXPECT_EQ(candidates, std::vector<int64_t>({0, 1}));
+}
+
+// Pins the lock POLICY, not just the presence of a lock: rtree_mutex_ must
+// stay write-priority. add_geometry takes it exclusively once per row while
+// every concurrent search takes it shared, so under a reader-preferring lock
+// (std::shared_mutex is a glibc pthread rwlock, PREFER_READER by default) a
+// steady stream of overlapping searches barges ahead of the insert thread and
+// starves it -- in production that blocks the vchannel's flowgraph consumer
+// and freezes the channel's time-tick, i.e. read traffic taking down the write
+// path.
+//
+// The readers here are deliberately unthrottled: that is the pressure the
+// writer has to survive. The deadline is very generous (the writer's own work
+// is milliseconds) and exists only so a policy regression fails in bounded
+// time with a clear message, instead of hanging until the CI shard timeout.
+TEST_F(RTreeIndexWrapperTest, WriterIsNotStarvedByContinuousReaders) {
+    std::string index_path = test_dir_ + "/test_index_writer_priority";
+    milvus::index::RTreeIndexWrapper wrapper(index_path, true);
+
+    constexpr int kRows = 1000;
+    constexpr auto kWriterDeadline = std::chrono::seconds(120);
+
+    // Pre-generate every payload on this thread: a GEOSContextHandle_t is not
+    // shareable across threads, and it keeps the writer loop measuring lock
+    // contention rather than WKB encoding.
+    std::vector<std::string> payloads;
+    payloads.reserve(kRows + 1);
+    for (int i = 0; i <= kRows; ++i) {
+        payloads.push_back(
+            create_point_wkb(static_cast<double>(i), static_cast<double>(i)));
+    }
+
+    // Seed row 0 so the readers query a non-empty tree from the first
+    // iteration.
+    wrapper.add_geometry(reinterpret_cast<const uint8_t*>(payloads[0].data()),
+                         payloads[0].size(),
+                         0);
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> writer_progress{0};
+    std::atomic<int64_t> reader_iters{0};
+
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 4; ++t) {
+        readers.emplace_back([&]() {
+            auto ctx = GEOS_init_r();
+            // A box covering every inserted point.
+            milvus::Geometry query_geom(
+                ctx,
+                "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 "
+                "-1))");
+            std::vector<int64_t> candidates;
+            while (!stop.load(std::memory_order_relaxed)) {
+                wrapper.query_candidates(
+                    milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                    query_geom.GetGeometry(),
+                    ctx,
+                    candidates);
+                reader_iters.fetch_add(1, std::memory_order_relaxed);
+            }
+            GEOS_finish_r(ctx);
+        });
+    }
+
+    // Single writer, mirroring the per-segment serialized insert pipeline.
+    std::thread writer([&]() {
+        for (int i = 1; i <= kRows; ++i) {
+            wrapper.add_geometry(
+                reinterpret_cast<const uint8_t*>(payloads[i].data()),
+                payloads[i].size(),
+                i);
+            writer_progress.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + kWriterDeadline;
+    while (writer_progress.load(std::memory_order_relaxed) < kRows &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const int progressed = writer_progress.load(std::memory_order_relaxed);
+
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+    for (auto& th : readers) {
+        th.join();
+    }
+
+    EXPECT_EQ(progressed, kRows)
+        << "the insert thread was starved by concurrent readers: only "
+        << progressed << " of " << kRows
+        << " rows were inserted within the deadline -- is rtree_mutex_ still "
+           "write-priority?";
+    EXPECT_GT(reader_iters.load(), 0);
+    EXPECT_EQ(wrapper.count(), static_cast<int64_t>(kRows + 1));
 }

@@ -73,16 +73,18 @@ RTreeIndexWrapper::ensure_rtree_consistent_locked() const {
     }
 }
 
-std::shared_lock<std::shared_mutex>
+std::shared_lock<folly::SharedMutexWritePriority>
 RTreeIndexWrapper::lock_consistent_rtree_for_read() const {
     for (;;) {
-        std::shared_lock<std::shared_mutex> read_guard(rtree_mutex_);
+        std::shared_lock<folly::SharedMutexWritePriority> read_guard(
+            rtree_mutex_);
         if (!rtree_needs_rebuild_) {
             return read_guard;
         }
 
         read_guard.unlock();
-        std::unique_lock<std::shared_mutex> write_guard(rtree_mutex_);
+        std::unique_lock<folly::SharedMutexWritePriority> write_guard(
+            rtree_mutex_);
         ensure_rtree_consistent_locked();
     }
 }
@@ -117,7 +119,7 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
                                 size_t len,
                                 int64_t row_offset) {
     // Acquire write lock to protect rtree_
-    std::unique_lock<std::shared_mutex> guard(rtree_mutex_);
+    std::unique_lock<folly::SharedMutexWritePriority> guard(rtree_mutex_);
 
     AssertInfo(is_build_mode_, "Cannot add geometry in load mode");
     ensure_rtree_consistent_locked();
@@ -219,7 +221,7 @@ RTreeIndexWrapper::bulk_load_from_field_data(
     const std::vector<std::shared_ptr<::milvus::FieldDataBase>>& field_datas,
     bool nullable) {
     // Acquire write lock to protect rtree_ creation and modification
-    std::unique_lock<std::shared_mutex> guard(rtree_mutex_);
+    std::unique_lock<folly::SharedMutexWritePriority> guard(rtree_mutex_);
 
     AssertInfo(is_build_mode_, "Cannot bulk load in load mode");
 
@@ -324,7 +326,7 @@ RTreeIndexWrapper::finish() {
     // Guard against repeated invocations which could otherwise attempt to
     // release resources multiple times (e.g. BuildWithRawDataForUT() calls
     // finish(), and Upload() may call it again).
-    std::unique_lock<std::shared_mutex> guard(rtree_mutex_);
+    std::unique_lock<folly::SharedMutexWritePriority> guard(rtree_mutex_);
     if (finished_) {
         LOG_DEBUG("RTreeIndexWrapper::finish() called more than once, skip.");
         return;
@@ -385,7 +387,7 @@ RTreeIndexWrapper::finish() {
 void
 RTreeIndexWrapper::load() {
     // Acquire write lock to protect rtree_ initialization during loading
-    std::unique_lock<std::shared_mutex> guard(rtree_mutex_);
+    std::unique_lock<folly::SharedMutexWritePriority> guard(rtree_mutex_);
 
     AssertInfo(!is_build_mode_, "Cannot load in build mode");
 
@@ -546,7 +548,7 @@ RTreeIndexWrapper::ByteSize() const {
 
 void
 RTreeIndexWrapper::SetThrowAfterInsertForTesting(bool enabled) {
-    std::unique_lock<std::shared_mutex> guard(rtree_mutex_);
+    std::unique_lock<folly::SharedMutexWritePriority> guard(rtree_mutex_);
     throw_after_insert_for_testing_ = enabled;
 }
 

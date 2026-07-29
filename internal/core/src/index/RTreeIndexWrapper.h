@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <boost/geometry/index/rtree.hpp>
+#include <folly/SharedMutex.h>
 #include <geos_c.h>
 #include <cstddef>
 #include <cstdint>
@@ -177,7 +178,7 @@ class RTreeIndexWrapper {
     void
     ensure_rtree_consistent_locked() const;
 
-    std::shared_lock<std::shared_mutex>
+    std::shared_lock<folly::SharedMutexWritePriority>
     lock_consistent_rtree_for_read() const;
 
     mutable RTree rtree_{};
@@ -188,8 +189,19 @@ class RTreeIndexWrapper {
     // Flag to guard against repeated invocations which could otherwise attempt to release resources multiple times (e.g. BuildWithRawDataForUT() calls finish(), and Upload() may call it again).
     bool finished_ = false;
 
-    // Serialize access to rtree_
-    mutable std::shared_mutex rtree_mutex_;
+    // Serialize access to rtree_.
+    //
+    // MUST stay write-priority. On a growing segment the single insert thread
+    // takes this lock exclusively once per row (add_geometry) while every
+    // concurrent search takes it shared (query_candidates). std::shared_mutex
+    // is a pthread rwlock, which defaults to PREFER_READER on glibc: an
+    // arriving reader barges ahead of a waiting writer, so a steady stream of
+    // overlapping searches can starve the insert thread indefinitely. That
+    // stalls the vchannel's flowgraph consumer, which freezes the channel's
+    // time-tick -- a write-path outage caused by read traffic. Write priority
+    // blocks new readers once a writer is queued, bounding each insert's wait
+    // by the in-flight readers only.
+    mutable folly::SharedMutexWritePriority rtree_mutex_;
     mutable bool rtree_needs_rebuild_ = false;
 
     // Guarded by rtree_mutex_.
