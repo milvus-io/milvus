@@ -25,10 +25,28 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-const forceMergeSizeTolerance = 0.05
+const (
+	forceMergeSizeTolerance       = 0.05
+	forceMergeKnapsackLossDivisor = int64(20)
+	forceMergeKnapsackMaxSegments = int64(4096)
+
+	forceMergePackingRoundOversized    forceMergePackingRound = "oversized-singleton"
+	forceMergePackingRoundOneTarget    forceMergePackingRound = "1T"
+	forceMergePackingRoundTwoTargets   forceMergePackingRound = "2T"
+	forceMergePackingRoundThreeTargets forceMergePackingRound = "3T"
+)
+
+type forceMergePackingRound string
+
+type forceMergePackingGroup struct {
+	segments     []*SegmentView
+	residualSize int64
+	round        forceMergePackingRound
+}
 
 // static segment view, only algothrims here, no IO
 type ForceMergeSegmentView struct {
@@ -127,7 +145,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (targetSize int64, ta
 	selectedTargetSize = min(selectedTargetSize*(1+forceMergeSizeTolerance), machineSafeSize)
 	targetSize = forceMergeEffectiveSize(selectedTargetSize)
 	totalSize := v.GetTotalSize()
-	targetCount = plannedForceMergeOutputCount(totalSize, targetSize)
+	targetCount = estimatedForceMergeOutputCount(totalSize, targetSize)
 
 	queryNodeCount := int64(len(v.topology.QueryNodeMemory))
 	numReplicas := int64(v.topology.NumReplicas)
@@ -149,7 +167,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (targetSize int64, ta
 		adjustedTargetSize := totalSize / float64(desiredCount)
 		if adjustedTargetSize >= v.configMaxSize {
 			targetSize = min(targetSize, forceMergeEffectiveSize(math.Floor(adjustedTargetSize)))
-			targetCount = plannedForceMergeOutputCount(totalSize, targetSize)
+			targetCount = estimatedForceMergeOutputCount(totalSize, targetSize)
 			log.Info(context.TODO(), "adjusted target count for parallel loading per shard",
 				mlog.Int64("queryNodeCount", queryNodeCount),
 				mlog.Int64("numReplicas", numReplicas),
@@ -176,229 +194,169 @@ func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 	}
 
 	targetSize, targetCount := v.calculateTargetSizeCount()
-	threshold := paramtable.Get().DataCoordCfg.CompactionMaxFullSegmentThreshold.GetAsInt()
-
-	var plan []forceMergeTaskPlan
-	strategy := "exact DP"
-	if len(v.segments) <= threshold {
-		plan = exactForceMergePlan(v.segments, targetSize)
-	} else {
-		strategy = "bounded sequential"
-		plan = boundedSequentialForceMergePlan(v.segments, targetSize)
-	}
+	groups := groupForceMergeSegments(v.segments, targetSize)
 
 	mlog.Info(context.TODO(), "planned force merge groups",
 		mlog.Int64("triggerID", v.triggerID),
 		mlog.String("label", v.label.String()),
-		mlog.String("strategy", strategy),
+		mlog.String("strategy", "v1 multi-round knapsack"),
 		mlog.Int64("targetSegmentSize", targetSize),
 		mlog.Int64("wholePoolTargetCount", targetCount),
-		mlog.Int("taskCount", len(plan)),
-		mlog.Int64("plannedOutputCount", totalForceMergePlanOutputs(plan)),
-		mlog.Float64("peakTaskInput", peakForceMergeTaskInput(plan)))
+		mlog.Int("taskCount", len(groups)),
+		mlog.Int64("plannedOutputCount", totalForceMergeGroupOutputs(groups, targetSize)),
+		mlog.Int64("peakResidualInput", peakForceMergeGroupInput(groups)))
 
-	results := make([]CompactionView, 0, len(plan))
-	for _, task := range plan {
+	results := make([]CompactionView, 0, len(groups))
+	for _, group := range groups {
 		results = append(results, &ForceMergeSegmentView{
 			label:              v.label,
-			segments:           v.segments[task.start:task.end],
+			segments:           group.segments,
 			triggerID:          v.triggerID,
 			collectionTTL:      v.collectionTTL,
 			configMaxSize:      v.configMaxSize,
 			expectedTargetSize: v.expectedTargetSize,
 			targetSegmentSize:  float64(targetSize),
-			targetSegmentCount: task.outputCount,
+			targetSegmentCount: plannedForceMergeOutputCount(group.residualSize, targetSize),
 			topology:           v.topology,
 		})
 	}
 	return results, "force merge trigger"
 }
 
-type forceMergeTaskPlan struct {
-	start              int
-	end                int
-	inputSize          float64
-	outputCount        int64
-	oversizedSingleton bool
-}
-
-type forceMergeExactState struct {
-	valid              bool
-	outputCount        int64
-	peakInput          float64
-	previous           int
-	taskInputSize      float64
-	taskOutputCount    int64
-	oversizedSingleton bool
-}
-
-func exactForceMergePlan(
-	segments []*SegmentView,
-	targetSize int64,
-) []forceMergeTaskPlan {
-	n := len(segments)
-	if n == 0 {
-		return nil
-	}
-
-	inputCeiling := forceMergeMultiSegmentInputCeiling(targetSize)
-	// Keep one lexicographically best state per received-order prefix.
-	// Equal scores retain the first boundary visited by these ordered loops.
-	states := make([]forceMergeExactState, n+1)
-	states[0] = forceMergeExactState{valid: true, previous: -1}
-	for end := 1; end <= n; end++ {
-		groupSize := 0.0
-		for start := end - 1; start >= 0; start-- {
-			groupSize += segments[start].Size
-			segmentCount := end - start
-			oversizedSingleton := segmentCount == 1 && groupSize > inputCeiling
-			if segmentCount > 1 && groupSize > inputCeiling {
-				break
-			}
-
-			previous := states[start]
-			if !previous.valid {
-				continue
-			}
-
-			taskOutputCount := plannedForceMergeOutputCount(groupSize, targetSize)
-			outputCount := previous.outputCount + taskOutputCount
-			peakInput := previous.peakInput
-			if !oversizedSingleton {
-				peakInput = max(peakInput, groupSize)
-			}
-
-			current := states[end]
-			if current.valid && (current.outputCount < outputCount ||
-				(current.outputCount == outputCount && current.peakInput <= peakInput)) {
-				continue
-			}
-			states[end] = forceMergeExactState{
-				valid:              true,
-				outputCount:        outputCount,
-				peakInput:          peakInput,
-				previous:           start,
-				taskInputSize:      groupSize,
-				taskOutputCount:    taskOutputCount,
-				oversizedSingleton: oversizedSingleton,
-			}
-		}
-	}
-
-	if !states[n].valid {
-		return nil
-	}
-
-	plan := make([]forceMergeTaskPlan, 0, n)
-	for end := n; end > 0; {
-		state := states[end]
-		plan = append(plan, forceMergeTaskPlan{
-			start:              state.previous,
-			end:                end,
-			inputSize:          state.taskInputSize,
-			outputCount:        state.taskOutputCount,
-			oversizedSingleton: state.oversizedSingleton,
-		})
-		end = state.previous
-	}
-	reverseForceMergePlan(plan)
-	return plan
-}
-
-func boundedSequentialForceMergePlan(
-	segments []*SegmentView,
-	targetSize int64,
-) []forceMergeTaskPlan {
-	if len(segments) == 0 {
-		return nil
-	}
-
-	inputCeiling := forceMergeMultiSegmentInputCeiling(targetSize)
-	plan := make([]forceMergeTaskPlan, 0, len(segments))
-	for start := 0; start < len(segments); {
-		end := start + 1
-		groupSize := segments[start].Size
-		if groupSize > inputCeiling {
-			plan = append(plan, forceMergeTaskPlan{
-				start:              start,
-				end:                end,
-				inputSize:          groupSize,
-				outputCount:        plannedForceMergeOutputCount(groupSize, targetSize),
-				oversizedSingleton: true,
+func groupForceMergeSegments(segments []*SegmentView, targetSize int64) []forceMergePackingGroup {
+	threeTargetCapacity := forceMergeRoundCapacity(targetSize, 3)
+	groups := make([]forceMergePackingGroup, 0, len(segments))
+	packable := make([]*SegmentInfo, 0, len(segments))
+	segmentByCandidate := make(map[*SegmentInfo]*SegmentView, len(segments))
+	for _, segment := range segments {
+		candidate := forceMergeKnapsackCandidate(segment)
+		residualSize := candidate.GetResidualSegmentSize()
+		if residualSize > threeTargetCapacity {
+			groups = append(groups, forceMergePackingGroup{
+				segments:     []*SegmentView{segment},
+				residualSize: residualSize,
+				round:        forceMergePackingRoundOversized,
 			})
-			start = end
 			continue
 		}
-
-		for end < len(segments) {
-			nextSize := segments[end].Size
-			if groupSize+nextSize > inputCeiling {
-				break
-			}
-
-			currentFullOutputs := math.Floor(groupSize / float64(targetSize))
-			nextFullOutputs := math.Floor((groupSize + nextSize) / float64(targetSize))
-			if currentFullOutputs > 0 &&
-				math.Mod(groupSize, float64(targetSize)) < forceMergeSizeTolerance*float64(targetSize) &&
-				nextFullOutputs == currentFullOutputs {
-				break
-			}
-
-			groupSize += nextSize
-			end++
-		}
-
-		plan = append(plan, forceMergeTaskPlan{
-			start:       start,
-			end:         end,
-			inputSize:   groupSize,
-			outputCount: plannedForceMergeOutputCount(groupSize, targetSize),
-		})
-		start = end
+		packable = append(packable, candidate)
+		segmentByCandidate[candidate] = segment
 	}
-	return plan
+
+	packer := newSegmentPacker("force-merge-v1-multi-round", packable, nil)
+	lossAllowance := targetSize / forceMergeKnapsackLossDivisor
+	rounds := []struct {
+		capacity    int64
+		maxLeftSize int64
+		round       forceMergePackingRound
+	}{
+		{capacity: targetSize, maxLeftSize: lossAllowance, round: forceMergePackingRoundOneTarget},
+		{capacity: forceMergeRoundCapacity(targetSize, 2), maxLeftSize: lossAllowance, round: forceMergePackingRoundTwoTargets},
+		{capacity: threeTargetCapacity, maxLeftSize: math.MaxInt64, round: forceMergePackingRoundThreeTargets},
+	}
+
+	for _, packingRound := range rounds {
+		for {
+			packed, left := packer.pack(
+				packingRound.capacity,
+				packingRound.maxLeftSize,
+				0,
+				forceMergeKnapsackMaxSegments,
+			)
+			if len(packed) == 0 {
+				break
+			}
+
+			groupSegments := make([]*SegmentView, 0, len(packed))
+			for _, candidate := range packed {
+				groupSegments = append(groupSegments, segmentByCandidate[candidate])
+			}
+			groups = append(groups, forceMergePackingGroup{
+				segments:     groupSegments,
+				residualSize: packingRound.capacity - left,
+				round:        packingRound.round,
+			})
+		}
+	}
+
+	if len(packer.candidates) != 0 {
+		panic("3T force-merge packing round did not drain candidates")
+	}
+	return groups
 }
 
-func plannedForceMergeOutputCount(inputSize float64, targetSize int64) int64 {
+func forceMergeKnapsackCandidate(segment *SegmentView) *SegmentInfo {
+	return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:        segment.ID,
+		NumOfRows: segment.NumOfRows,
+		Stats: &datapb.Statistics{
+			InsertBinlogSize: forceMergeWholeBytes(segment.Size),
+			DeltaBinlogSize:  forceMergeWholeBytes(segment.DeltaSize),
+			DeleteNumRows:    int64(segment.DeltaRowCount),
+		},
+	}}
+}
+
+func forceMergeWholeBytes(size float64) int64 {
+	if size <= 0 || math.IsNaN(size) {
+		return 0
+	}
+	if size >= float64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	return int64(size)
+}
+
+func plannedForceMergeOutputCount(residualSize, targetSize int64) int64 {
+	if residualSize <= 0 || targetSize <= 0 {
+		return 1
+	}
+	return 1 + (residualSize-1)/targetSize
+}
+
+func estimatedForceMergeOutputCount(inputSize float64, targetSize int64) int64 {
 	if inputSize <= 0 || math.IsNaN(inputSize) || targetSize <= 0 {
 		return 1
 	}
 	return max(int64(math.Ceil(inputSize/float64(targetSize))), 1)
 }
 
-func forceMergeMultiSegmentInputCeiling(targetSize int64) float64 {
-	return 3 * float64(targetSize)
+func forceMergeRoundCapacity(targetSize, multiplier int64) int64 {
+	if targetSize <= 0 || multiplier <= 0 {
+		return 0
+	}
+	if targetSize > math.MaxInt64/multiplier {
+		return math.MaxInt64
+	}
+	return targetSize * multiplier
 }
 
 func forceMergeEffectiveSize(size float64) int64 {
 	if size < 1 || math.IsNaN(size) {
 		return 1
 	}
+	if size >= float64(math.MaxInt64) {
+		return math.MaxInt64
+	}
 	return int64(size)
 }
 
-func totalForceMergePlanOutputs(plan []forceMergeTaskPlan) int64 {
+func totalForceMergeGroupOutputs(groups []forceMergePackingGroup, targetSize int64) int64 {
 	total := int64(0)
-	for _, task := range plan {
-		total += task.outputCount
+	for _, group := range groups {
+		total += plannedForceMergeOutputCount(group.residualSize, targetSize)
 	}
 	return total
 }
 
-func peakForceMergeTaskInput(plan []forceMergeTaskPlan) float64 {
-	peak := 0.0
-	for _, task := range plan {
-		if !task.oversizedSingleton {
-			peak = max(peak, task.inputSize)
+func peakForceMergeGroupInput(groups []forceMergePackingGroup) int64 {
+	peak := int64(0)
+	for _, group := range groups {
+		if group.round != forceMergePackingRoundOversized {
+			peak = max(peak, group.residualSize)
 		}
 	}
 	return peak
-}
-
-func reverseForceMergePlan(plan []forceMergeTaskPlan) {
-	for left, right := 0, len(plan)-1; left < right; left, right = left+1, right-1 {
-		plan[left], plan[right] = plan[right], plan[left]
-	}
 }
 
 func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {

@@ -163,235 +163,148 @@ func TestForceMergeSegmentView_Complete(t *testing.T) {
 	assert.NotEmpty(t, r3)
 }
 
-func TestForceMergeSegmentView_ForceTriggerAllExactPlanning(t *testing.T) {
-	setForceMergePlanningThreshold(t, "100")
+func TestForceMergeSegmentView_ForceTriggerAllUsesMultiRoundKnapsack(t *testing.T) {
+	t.Run("commits a qualifying 1T singleton", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1}, []float64{100}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
 
-	t.Run("minimizes planned outputs", func(t *testing.T) {
-		view := newForceMergePlanningView(
-			[]int64{1, 2, 3, 4},
-			[]float64{60, 60, 60, 60},
-			100,
-		)
-		targetSize, targetCount := view.calculateTargetSizeCount()
-
-		children := forceMergePlanningChildren(t, view)
-
-		assert.Equal(t, int64(3), totalForceMergeChildOutputs(children))
-		assert.Equal(t, targetCount, totalForceMergeChildOutputs(children))
-		assertForceMergeChildContract(t, view, children, targetSize, targetCount)
+		require.Len(t, groups, 1)
+		requireForceMergePackingGroupContract(t, groups[0], targetSize)
+		assert.Equal(t, forceMergePackingRoundOneTarget, groups[0].round)
 	})
 
-	t.Run("prefers lower peak input for equal output count", func(t *testing.T) {
-		view := newForceMergePlanningView(
-			[]int64{1, 2, 3},
-			[]float64{10, 60, 150},
-			100,
-		)
-		targetSize, targetCount := view.calculateTargetSizeCount()
+	t.Run("commits three near 0.7T inputs in the 2T round", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1, 2, 3}, []float64{70, 70, 70}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
 
-		children := forceMergePlanningChildren(t, view)
-
-		assert.Equal(t, [][]int64{{1, 2}, {3}}, forceMergeChildIDs(children))
-		assert.Equal(t, int64(3), totalForceMergeChildOutputs(children))
-		assertForceMergeChildContract(t, view, children, targetSize, targetCount)
+		require.Len(t, groups, 1)
+		requireForceMergePackingGroupContract(t, groups[0], targetSize)
+		assert.Equal(t, forceMergePackingRoundTwoTargets, groups[0].round)
+		assert.Equal(t, int64(2), plannedForceMergeOutputCount(groups[0].residualSize, targetSize))
 	})
 
-	t.Run("uses one pool-wide writer size", func(t *testing.T) {
-		view := newForceMergePlanningView(
-			[]int64{1, 2},
-			[]float64{201, 99},
-			100,
-		)
-		targetSize, targetCount := view.calculateTargetSizeCount()
+	t.Run("uses an absolute 0.05T loss allowance in the 2T round", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1, 2, 3, 4}, []float64{80, 60, 60, 50}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
 
-		children := forceMergePlanningChildren(t, view)
+		require.Len(t, groups, 1)
+		requireForceMergePackingGroupContract(t, groups[0], targetSize)
+		assert.Equal(t, forceMergePackingRoundThreeTargets, groups[0].round)
+		assert.Equal(t, int64(250), groups[0].residualSize)
+	})
 
-		require.Len(t, children, 1)
-		assert.Equal(t, float64(targetSize), children[0].GetTargetSegmentSize())
-		assert.Equal(t, int64(3), totalForceMergeChildOutputs(children))
-		assertForceMergeChildContract(t, view, children, targetSize, targetCount)
+	t.Run("drains a non-full remainder in the 3T round", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1}, []float64{40}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
+
+		require.Len(t, groups, 1)
+		requireForceMergePackingGroupContract(t, groups[0], targetSize)
+		assert.Equal(t, forceMergePackingRoundThreeTargets, groups[0].round)
 	})
 }
 
-func TestForceMergeSegmentView_ForceTriggerAllExactMatchesOracle(t *testing.T) {
-	setForceMergePlanningThreshold(t, "100")
-	candidateSizes := []float64{30, 70, 120, 350}
-	caseCount := 0
+func TestForceMergeSegmentView_ForceTriggerAllUsesResidualSize(t *testing.T) {
+	view := newForceMergePlanningView([]int64{1, 2}, []float64{160, 10}, 100)
+	view.segments[0].DeltaSize = 20
+	view.segments[0].NumOfRows = 100
+	view.segments[0].DeltaRowCount = 50
+	view.segments[1].NumOfRows = 100
+	targetSize, _ := view.calculateTargetSizeCount()
 
-	for segmentCount := 1; segmentCount <= 5; segmentCount++ {
-		combinationCount := 1
-		for range segmentCount {
-			combinationCount *= len(candidateSizes)
-		}
-
-		for combination := 0; combination < combinationCount; combination++ {
-			ids := make([]int64, segmentCount)
-			sizes := make([]float64, segmentCount)
-			value := combination
-			for i := range segmentCount {
-				ids[i] = int64(i + 1)
-				sizes[i] = candidateSizes[value%len(candidateSizes)]
-				value /= len(candidateSizes)
-			}
-
-			view := newForceMergePlanningView(ids, sizes, 100)
-			children := forceMergePlanningChildren(t, view)
-			expectedOutputs, expectedPeak := exactForceMergeOracleScore(sizes, 100)
-
-			assert.Equalf(t, expectedOutputs, totalForceMergeChildOutputs(children), "sizes=%v", sizes)
-			assert.Equalf(t, expectedPeak, peakForceMergeChildInput(children, 100), "sizes=%v", sizes)
-			caseCount++
-		}
-	}
-
-	assert.Equal(t, 1364, caseCount)
-}
-
-func TestForceMergeSegmentView_ForceTriggerAllPreservesFloorOnBothPaths(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		threshold string
-	}{
-		{name: "exact", threshold: "2"},
-		{name: "sequential", threshold: "1"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			setForceMergePlanningThreshold(t, test.threshold)
-			view := newForceMergePlanningView(
-				[]int64{1, 2},
-				[]float64{315, 315},
-				100,
-			)
-			targetSize, targetCount := view.calculateTargetSizeCount()
-
-			children := forceMergePlanningChildren(t, view)
-
-			require.Len(t, children, 2)
-			assert.Equal(t, int64(7), targetCount)
-			assert.Equal(t, int64(8), totalForceMergeChildOutputs(children))
-			assertForceMergeChildContract(t, view, children, targetSize, targetCount)
-		})
-	}
-}
-
-func TestForceMergeSegmentView_ForceTriggerAllBoundsInputOnBothPaths(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		threshold string
-	}{
-		{name: "exact", threshold: "100"},
-		{name: "sequential", threshold: "3"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			setForceMergePlanningThreshold(t, test.threshold)
-			view := newForceMergePlanningView(
-				[]int64{1, 2, 3, 4, 5, 6, 7},
-				[]float64{100, 100, 100, 100, 100, 100, 100},
-				100,
-			)
-			targetSize, targetCount := view.calculateTargetSizeCount()
-
-			children := forceMergePlanningChildren(t, view)
-
-			assert.Greater(t, len(children), 1)
-			assertForceMergeChildContract(t, view, children, targetSize, targetCount)
-		})
-	}
-}
-
-func TestForceMergeSegmentView_ForceTriggerAllSequentialPacking(t *testing.T) {
-	t.Run("packs consecutive small segments", func(t *testing.T) {
-		setForceMergePlanningThreshold(t, "3")
-		view := newForceMergePlanningView(
-			[]int64{1, 2, 3, 4, 5, 6},
-			[]float64{60, 60, 60, 60, 60, 60},
-			100,
-		)
-		targetSize, targetCount := view.calculateTargetSizeCount()
-
-		children := forceMergePlanningChildren(t, view)
-
-		require.Len(t, children, 2)
-		assert.Len(t, children[0].GetSegmentsView(), 5)
-		assert.Len(t, children[1].GetSegmentsView(), 1)
-		assertForceMergeChildContract(t, view, children, targetSize, targetCount)
-	})
-
-	t.Run("keeps near-full cut separate from input ceiling", func(t *testing.T) {
-		setForceMergePlanningThreshold(t, "2")
-		view := newForceMergePlanningView(
-			[]int64{1, 2, 3},
-			[]float64{99, 1, 50},
-			100,
-		)
-		targetSize, targetCount := view.calculateTargetSizeCount()
-
-		children := forceMergePlanningChildren(t, view)
-
-		assert.Equal(t, [][]int64{{1, 2}, {3}}, forceMergeChildIDs(children))
-		assert.Less(t, children[0].GetTotalSize()+children[1].GetTotalSize(), 3*float64(targetSize))
-		assertForceMergeChildContract(t, view, children, targetSize, targetCount)
-	})
-}
-
-func TestForceMergeSegmentView_ForceTriggerAllKeepsOversizedSingleton(t *testing.T) {
-	setForceMergePlanningThreshold(t, "100")
-	view := newForceMergePlanningView(
-		[]int64{1, 2, 3},
-		[]float64{350, 40, 60},
-		100,
-	)
-	targetSize, targetCount := view.calculateTargetSizeCount()
+	groups := groupForceMergeSegments(view.segments, targetSize)
+	require.Len(t, groups, 1)
+	requireForceMergePackingGroupContract(t, groups[0], targetSize)
+	assert.Equal(t, forceMergePackingRoundOneTarget, groups[0].round)
+	assert.Equal(t, int64(100), groups[0].residualSize)
 
 	children := forceMergePlanningChildren(t, view)
-
-	assert.Equal(t, [][]int64{{1}, {2, 3}}, forceMergeChildIDs(children))
-	assert.Greater(t, children[0].GetTotalSize(), 3*float64(targetSize))
-	assertForceMergeChildContract(t, view, children, targetSize, targetCount)
+	require.Len(t, children, 1)
+	assert.Equal(t, int64(1), children[0].GetTargetSegmentCount())
+	assertForceMergeChildContract(t, view, children, targetSize)
 }
 
-func TestForceMergeSegmentView_ForceTriggerAllPreservesInputOrder(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		threshold string
-	}{
-		{name: "exact", threshold: "4"},
-		{name: "sequential", threshold: "1"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			setForceMergePlanningThreshold(t, test.threshold)
-			view := newForceMergePlanningView(
-				[]int64{4, 3, 2, 1},
-				[]float64{30, 30, 30, 30},
-				100,
-			)
-			targetSize, targetCount := view.calculateTargetSizeCount()
+func TestForceMergeSegmentView_ForceTriggerAllExtractsOversizedFirst(t *testing.T) {
+	view := newForceMergePlanningView([]int64{1, 2}, []float64{400, 100}, 100)
+	targetSize, _ := view.calculateTargetSizeCount()
+	groups := groupForceMergeSegments(view.segments, targetSize)
 
-			children := forceMergePlanningChildren(t, view)
-
-			assert.Equal(t, []int64{4, 3, 2, 1}, flattenForceMergeChildIDs(children))
-			assertForceMergeChildContract(t, view, children, targetSize, targetCount)
-		})
+	require.Len(t, groups, 2)
+	for _, group := range groups {
+		requireForceMergePackingGroupContract(t, group, targetSize)
 	}
+	assert.Equal(t, forceMergePackingRoundOversized, groups[0].round)
+	assert.Equal(t, []int64{1}, forceMergeSegmentIDs(groups[0].segments))
+	assert.Equal(t, forceMergePackingRoundOneTarget, groups[1].round)
+	assert.Equal(t, []int64{2}, forceMergeSegmentIDs(groups[1].segments))
 }
 
-func TestForceMergeSegmentView_ForceTriggerAllExactIsDeterministic(t *testing.T) {
-	setForceMergePlanningThreshold(t, "100")
+func TestForceMergeSegmentView_ForceTriggerAllAssignsEveryInputExactlyOnce(t *testing.T) {
 	view := newForceMergePlanningView(
-		[]int64{1, 2, 3, 4, 5},
-		[]float64{50, 50, 50, 50, 50},
+		[]int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+		[]float64{400, 100, 80, 70, 70, 70, 60, 60, 50},
 		100,
 	)
+	targetSize, _ := view.calculateTargetSizeCount()
+	groups := groupForceMergeSegments(view.segments, targetSize)
 
-	var expected [][]int64
-	for i := 0; i < 100; i++ {
-		children := forceMergePlanningChildren(t, view)
-		if i == 0 {
-			expected = forceMergeChildIDs(children)
-			continue
+	rounds := make(map[forceMergePackingRound]bool)
+	seen := make(map[*SegmentView]int, len(view.segments))
+	for _, group := range groups {
+		requireForceMergePackingGroupContract(t, group, targetSize)
+		rounds[group.round] = true
+		for _, segment := range group.segments {
+			seen[segment]++
 		}
-		assert.Equal(t, expected, forceMergeChildIDs(children))
 	}
+	assert.Equal(t, map[forceMergePackingRound]bool{
+		forceMergePackingRoundOversized:    true,
+		forceMergePackingRoundOneTarget:    true,
+		forceMergePackingRoundTwoTargets:   true,
+		forceMergePackingRoundThreeTargets: true,
+	}, rounds)
+	for _, segment := range view.segments {
+		assert.Equal(t, 1, seen[segment], "segment %d assignment count", segment.ID)
+	}
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllMayReorderInputs(t *testing.T) {
+	view := newForceMergePlanningView(
+		[]int64{4, 3, 2, 1},
+		[]float64{30, 30, 30, 30},
+		100,
+	)
+	targetSize, _ := view.calculateTargetSizeCount()
+	children := forceMergePlanningChildren(t, view)
+	flattened := flattenForceMergeChildIDs(children)
+
+	assert.NotEqual(t, []int64{4, 3, 2, 1}, flattened)
+	assert.ElementsMatch(t, []int64{4, 3, 2, 1}, flattened)
+	assertForceMergeChildContract(t, view, children, targetSize)
+}
+
+func TestGroupForceMergeSegmentsCapsEachPackAt4096Inputs(t *testing.T) {
+	segments := make([]*SegmentView, 4097)
+	for i := range segments {
+		segments[i] = &SegmentView{ID: int64(i + 1), Size: 1, NumOfRows: 1}
+	}
+
+	groups := groupForceMergeSegments(segments, 5000)
+	require.Len(t, groups, 2)
+	for _, group := range groups {
+		assert.LessOrEqual(t, len(group.segments), int(forceMergeKnapsackMaxSegments))
+		requireForceMergePackingGroupContract(t, group, 5000)
+	}
+}
+
+func TestForceMergePlanningArithmetic(t *testing.T) {
+	largeResidualSize := int64(1<<53) + 1
+	assert.Equal(t, largeResidualSize, plannedForceMergeOutputCount(largeResidualSize, 1))
+	assert.Equal(t, int64(math.MaxInt64), forceMergeEffectiveSize(float64(math.MaxInt64)))
+	assert.Equal(t, int64(math.MaxInt64), forceMergeRoundCapacity(math.MaxInt64, 2))
 }
 
 func TestForceMergeSegmentView_ForceTriggerAllRecoveredScenarios(t *testing.T) {
@@ -413,8 +326,8 @@ func TestForceMergeSegmentView_ForceTriggerAllRecoveredScenarios(t *testing.T) {
 		expectedTarget  int64
 		expectedFinals  int64
 	}{
-		{name: "01_production_at_threshold", sizes: productionSizes, requestedTarget: 4 * gib, threshold: "100", expectedTarget: 4509715660, expectedFinals: 15},
-		{name: "02_production_above_threshold", sizes: productionSizes, requestedTarget: 4 * gib, threshold: "20", expectedTarget: 4509715660, expectedFinals: 15},
+		{name: "01_production_at_threshold", sizes: productionSizes, requestedTarget: 4 * gib, threshold: "100", expectedTarget: 4509715660, expectedFinals: 14},
+		{name: "02_production_above_threshold", sizes: productionSizes, requestedTarget: 4 * gib, threshold: "20", expectedTarget: 4509715660, expectedFinals: 14},
 		{name: "03_six_equal_at_threshold", sizes: repeatForceMergeSizes(6, 70), requestedTarget: 100, threshold: "6", expectedTarget: 105, expectedFinals: 4},
 		{name: "04_six_equal_above_threshold", sizes: repeatForceMergeSizes(6, 70), requestedTarget: 100, threshold: "5", expectedTarget: 105, expectedFinals: 4},
 		{name: "05_uniform_1gib_at_threshold", sizes: repeatForceMergeSizes(12, gib), requestedTarget: 3 * gib, threshold: "12", expectedTarget: 3382286745, expectedFinals: 4},
@@ -422,7 +335,7 @@ func TestForceMergeSegmentView_ForceTriggerAllRecoveredScenarios(t *testing.T) {
 		{name: "07_oversized_pair_at_threshold", sizes: []float64{315, 315}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 6},
 		{name: "08_uniform_130_at_threshold", sizes: repeatForceMergeSizes(10, 130), requestedTarget: 100, threshold: "10", expectedTarget: 105, expectedFinals: 15},
 		{name: "09_mixed_at_threshold", sizes: []float64{37, 162, 23, 276, 31, 249, 162}, requestedTarget: 100, threshold: "7", expectedTarget: 105, expectedFinals: 10},
-		{name: "10_mixed_above_threshold", sizes: []float64{37, 162, 23, 276, 31, 249, 162}, requestedTarget: 100, threshold: "6", expectedTarget: 105, expectedFinals: 11},
+		{name: "10_mixed_above_threshold", sizes: []float64{37, 162, 23, 276, 31, 249, 162}, requestedTarget: 100, threshold: "6", expectedTarget: 105, expectedFinals: 10},
 		{name: "11_three_target_pair_at_threshold", sizes: []float64{150, 150}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 3},
 		{name: "12_three_target_pair_plus_one_at_threshold", sizes: []float64{150, 151}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 3},
 		{name: "13_equal_total_boundary_at_threshold", sizes: []float64{210, 190}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 4},
@@ -449,7 +362,7 @@ func TestForceMergeSegmentView_ForceTriggerAllRecoveredScenarios(t *testing.T) {
 			}
 			segments := make([]*SegmentView, len(test.sizes))
 			for i, size := range test.sizes {
-				segments[i] = &SegmentView{ID: ids[i], Size: size}
+				segments[i] = &SegmentView{ID: ids[i], Size: size, NumOfRows: 1}
 			}
 
 			queryNodeCount := max(test.queryNodeCount, 1)
@@ -476,8 +389,7 @@ func TestForceMergeSegmentView_ForceTriggerAllRecoveredScenarios(t *testing.T) {
 			}
 
 			children := forceMergePlanningChildren(t, view)
-			wholePoolFinals := max(int64(math.Ceil(view.GetTotalSize()/float64(test.expectedTarget))), 1)
-			assertForceMergeChildContract(t, view, children, test.expectedTarget, wholePoolFinals)
+			assertForceMergeChildContract(t, view, children, test.expectedTarget)
 			assert.Equal(t, test.expectedFinals, totalForceMergeChildOutputs(children))
 		})
 	}
@@ -512,7 +424,7 @@ func setForceMergePlanningThreshold(t *testing.T, threshold string) {
 func newForceMergePlanningView(ids []int64, sizes []float64, targetSize int64) *ForceMergeSegmentView {
 	segments := make([]*SegmentView, 0, len(sizes))
 	for i, size := range sizes {
-		segments = append(segments, &SegmentView{ID: ids[i], Size: size})
+		segments = append(segments, &SegmentView{ID: ids[i], Size: size, NumOfRows: 1})
 	}
 	return &ForceMergeSegmentView{
 		label: &CompactionGroupLabel{
@@ -522,9 +434,14 @@ func newForceMergePlanningView(ids []int64, sizes []float64, targetSize int64) *
 		},
 		segments:           segments,
 		triggerID:          100,
-		configMaxSize:      float64(targetSize),
+		configMaxSize:      1,
 		expectedTargetSize: float64(targetSize),
-		topology:           &CollectionTopology{},
+		topology: &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{1: math.MaxUint64},
+			DataNodeMemory:  map[int64]uint64{1: math.MaxUint64},
+			NumReplicas:     1,
+			NumShards:       1,
+		},
 	}
 }
 
@@ -546,44 +463,60 @@ func assertForceMergeChildContract(
 	view *ForceMergeSegmentView,
 	children []*ForceMergeSegmentView,
 	targetSize int64,
-	targetCount int64,
 ) {
 	t.Helper()
-	flattened := make([]*SegmentView, 0, len(view.GetSegmentsView()))
-	inputCeiling := 3 * float64(targetSize)
+	seen := make(map[*SegmentView]int, len(view.GetSegmentsView()))
+	inputCeiling := forceMergeRoundCapacity(targetSize, 3)
 	for _, child := range children {
 		require.NotEmpty(t, child.GetSegmentsView())
 		childTargetSize := int64(child.GetTargetSegmentSize())
 		assert.Equal(t, float64(childTargetSize), child.GetTargetSegmentSize())
 		assert.Equal(t, targetSize, childTargetSize)
-		if child.GetTotalSize() > inputCeiling {
+		residualSize := forceMergeResidualSize(child.GetSegmentsView())
+		if residualSize > inputCeiling {
 			assert.Len(t, child.GetSegmentsView(), 1)
-		} else if len(child.GetSegmentsView()) > 1 {
-			assert.LessOrEqual(t, child.GetTotalSize(), inputCeiling)
+		} else {
+			assert.LessOrEqual(t, residualSize, inputCeiling)
 		}
-		plannedOutputCount := max(int64(math.Ceil(child.GetTotalSize()/float64(targetSize))), 1)
+		plannedOutputCount := expectedForceMergeOutputCount(residualSize, targetSize)
 		assert.Equal(t, plannedOutputCount, child.GetTargetSegmentCount())
-		flattened = append(flattened, child.GetSegmentsView()...)
+		for _, segment := range child.GetSegmentsView() {
+			seen[segment]++
+		}
 	}
-	require.Len(t, flattened, len(view.GetSegmentsView()))
-	for i, segment := range view.GetSegmentsView() {
-		assert.Same(t, segment, flattened[i])
+	require.Len(t, seen, len(view.GetSegmentsView()))
+	for _, segment := range view.GetSegmentsView() {
+		assert.Equal(t, 1, seen[segment], "segment %d assignment count", segment.ID)
 	}
-	assert.GreaterOrEqual(t, totalForceMergeChildOutputs(children), targetCount)
+}
+
+func requireForceMergePackingGroupContract(t *testing.T, group forceMergePackingGroup, targetSize int64) {
+	t.Helper()
+	require.NotEmpty(t, group.segments)
+	require.Equal(t, forceMergeResidualSize(group.segments), group.residualSize)
+
+	switch group.round {
+	case forceMergePackingRoundOversized:
+		require.Len(t, group.segments, 1)
+		require.Greater(t, group.residualSize, forceMergeRoundCapacity(targetSize, 3))
+	case forceMergePackingRoundOneTarget:
+		require.LessOrEqual(t, group.residualSize, targetSize)
+		require.LessOrEqual(t, targetSize-group.residualSize, targetSize/forceMergeKnapsackLossDivisor)
+	case forceMergePackingRoundTwoTargets:
+		capacity := forceMergeRoundCapacity(targetSize, 2)
+		require.LessOrEqual(t, group.residualSize, capacity)
+		require.LessOrEqual(t, capacity-group.residualSize, targetSize/forceMergeKnapsackLossDivisor)
+	case forceMergePackingRoundThreeTargets:
+		require.LessOrEqual(t, group.residualSize, forceMergeRoundCapacity(targetSize, 3))
+	default:
+		require.FailNow(t, "unknown force-merge packing round", "%q", group.round)
+	}
 }
 
 func forceMergeSegmentIDs(segments []*SegmentView) []int64 {
 	ids := make([]int64, 0, len(segments))
 	for _, segment := range segments {
 		ids = append(ids, segment.ID)
-	}
-	return ids
-}
-
-func forceMergeChildIDs(children []*ForceMergeSegmentView) [][]int64 {
-	ids := make([][]int64, 0, len(children))
-	for _, child := range children {
-		ids = append(ids, forceMergeSegmentIDs(child.GetSegmentsView()))
 	}
 	return ids
 }
@@ -604,52 +537,23 @@ func totalForceMergeChildOutputs(children []*ForceMergeSegmentView) int64 {
 	return total
 }
 
-func peakForceMergeChildInput(children []*ForceMergeSegmentView, targetSize int64) float64 {
-	peak := 0.0
-	inputCeiling := 3 * float64(targetSize)
-	for _, child := range children {
-		if len(child.GetSegmentsView()) == 1 && child.GetTotalSize() > inputCeiling {
-			continue
-		}
-		peak = max(peak, child.GetTotalSize())
+func forceMergeResidualSize(segments []*SegmentView) int64 {
+	var total int64
+	for _, segment := range segments {
+		total += forceMergeKnapsackCandidate(segment).GetResidualSegmentSize()
 	}
-	return peak
+	return total
 }
 
-func exactForceMergeOracleScore(sizes []float64, targetSize int64) (int64, float64) {
-	type score struct {
-		valid       bool
-		outputCount int64
-		peakInput   float64
+func expectedForceMergeOutputCount(residualSize, targetSize int64) int64 {
+	if residualSize <= 0 || targetSize <= 0 {
+		return 1
 	}
-
-	inputCeiling := 3 * float64(targetSize)
-	best := make([]score, len(sizes)+1)
-	best[len(sizes)] = score{valid: true}
-	for start := len(sizes) - 1; start >= 0; start-- {
-		groupSize := 0.0
-		for end := start + 1; end <= len(sizes); end++ {
-			groupSize += sizes[end-1]
-			segmentCount := end - start
-			oversizedSingleton := segmentCount == 1 && groupSize > inputCeiling
-			if segmentCount > 1 && groupSize > inputCeiling {
-				break
-			}
-
-			suffix := best[end]
-			outputCount := suffix.outputCount + max(int64(math.Ceil(groupSize/float64(targetSize))), 1)
-			peakInput := suffix.peakInput
-			if !oversizedSingleton {
-				peakInput = max(peakInput, groupSize)
-			}
-			current := best[start]
-			if !current.valid || outputCount < current.outputCount ||
-				(outputCount == current.outputCount && peakInput < current.peakInput) {
-				best[start] = score{valid: true, outputCount: outputCount, peakInput: peakInput}
-			}
-		}
+	count := residualSize / targetSize
+	if residualSize%targetSize != 0 {
+		count++
 	}
-	return best[0].outputCount, best[0].peakInput
+	return max(count, 1)
 }
 
 func TestSumSegmentSize(t *testing.T) {
