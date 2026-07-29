@@ -55,7 +55,6 @@
 #include "pb/common.pb.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
-#include "storage/MmapManager.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -377,17 +376,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     if (disk_valid_data.found) {
         auto offset_mapping_options = GetOffsetMappingMmapOptions(load_config);
-        if (NeedOffsetMappingMmap(offset_mapping_options,
-                                  disk_valid_data.total_count,
-                                  disk_valid_data.valid_count)) {
-            const auto& mmap_config =
-                storage::MmapManager::GetInstance().GetMmapConfig();
-            offset_mapping_options.mmap_chunk_manager =
-                std::make_shared<storage::MmapChunkManager>(
-                    GetOffsetMappingMmapDir(local_index_path_prefix),
-                    mmap_config.disk_limit,
-                    mmap_config.fix_file_size);
-        }
+        offset_mapping_options.mmap_dir_path =
+            GetOffsetMappingMmapDir(local_index_path_prefix);
         BuildValidDataFromBitmap(this,
                                  disk_valid_data.total_count,
                                  disk_valid_data.bitmap.data(),

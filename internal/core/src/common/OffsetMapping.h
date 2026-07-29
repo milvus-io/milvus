@@ -20,12 +20,12 @@
 #include <cstdint>
 #include <memory>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "common/BitsetView.h"
 #include "common/Types.h"
-#include "storage/MmapChunkManager.h"
 
 namespace milvus {
 
@@ -34,9 +34,7 @@ struct OffsetMappingBuildOptions {
     bool enable_mmap_i2o_map{false};
     // o2i: original/logical offset -> index/internal id.
     bool enable_mmap_o2i_map{false};
-    storage::MmapChunkManagerPtr mmap_chunk_manager{nullptr};
-    storage::MmapChunkDescriptorPtr i2o_mmap_descriptor{nullptr};
-    storage::MmapChunkDescriptorPtr o2i_mmap_descriptor{nullptr};
+    std::string mmap_dir_path;
 };
 
 // Bidirectional offset mapping for nullable vector storage
@@ -99,12 +97,14 @@ class OffsetMapping {
 
 class OffsetMappingArray {
  public:
+    OffsetMappingArray() = default;
+    ~OffsetMappingArray();
+    OffsetMappingArray(const OffsetMappingArray&) = delete;
+    OffsetMappingArray&
+    operator=(const OffsetMappingArray&) = delete;
+
     void
-    Resize(size_t size,
-           int32_t value,
-           bool enable_mmap,
-           const storage::MmapChunkManagerPtr& mmap_chunk_manager,
-           const storage::MmapChunkDescriptorPtr& mmap_descriptor);
+    Resize(size_t size, int32_t value, bool enable_mmap, std::string filepath);
 
     void
     Clear();
@@ -133,8 +133,8 @@ class OffsetMappingArray {
     size_t size_{0};
     std::vector<int32_t> vec_;
     int32_t* mmap_data_{nullptr};
-    storage::MmapChunkManagerPtr mmap_chunk_manager_{nullptr};
-    storage::MmapChunkDescriptorPtr mmap_descriptor_{nullptr};
+    size_t mmap_size_{0};
+    std::string mmap_filepath_;
 };
 
 class SealedOffsetMapping final : public OffsetMapping {
