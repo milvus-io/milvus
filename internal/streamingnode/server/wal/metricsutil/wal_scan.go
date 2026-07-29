@@ -1,6 +1,8 @@
 package metricsutil
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -24,6 +26,7 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 	return &ScanMetrics{
 		constLabel:    constLabel,
 		scannerTotal:  metrics.WALScannerTotal.MustCurryWith(constLabel),
+		activeReaders: metrics.WALActiveReaders.MustCurryWith(constLabel),
 		scannerPaused: metrics.WALScannerPauseConsumption.With(constLabel),
 		tailing: underlyingScannerMetrics{
 			messageBytes:           metrics.WALScanMessageBytes.With(tailingLabel),
@@ -49,6 +52,7 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 type ScanMetrics struct {
 	constLabel       prometheus.Labels
 	scannerTotal     *prometheus.GaugeVec
+	activeReaders    *prometheus.GaugeVec
 	scannerPaused    prometheus.Gauge
 	catchup          underlyingScannerMetrics
 	tailing          underlyingScannerMetrics
@@ -101,6 +105,7 @@ func (m *ScanMetrics) NewScannerMetrics() *ScannerMetrics {
 // Close closes the metrics.
 func (m *ScanMetrics) Close() {
 	metrics.WALScannerTotal.DeletePartialMatch(m.constLabel)
+	metrics.WALActiveReaders.DeletePartialMatch(m.constLabel)
 	metrics.WALScannerPauseConsumption.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanPassMessageBytes.DeletePartialMatch(m.constLabel)
@@ -115,10 +120,43 @@ func (m *ScanMetrics) Close() {
 
 type ScannerMetrics struct {
 	*ScanMetrics
+	readerMu                 sync.Mutex
+	readerWALName            message.WALName
+	readerRole               string
+	readerTracked            bool
 	scannerModel             string
 	previousTxnBufSize       int
 	previousTimeTickBufSize  int
 	previousPendingQueueSize int
+}
+
+// SetReaderInfo starts tracking the WAL backend and role used by this reader.
+func (m *ScannerMetrics) SetReaderInfo(walName message.WALName, role string) {
+	m.readerMu.Lock()
+	defer m.readerMu.Unlock()
+	if m.readerTracked {
+		panic("reader info has already been set")
+	}
+	m.readerWALName = walName
+	m.readerRole = role
+	m.readerTracked = true
+	m.activeReaders.WithLabelValues(walName.String(), role).Inc()
+}
+
+// SwitchReaderInfo updates the WAL backend and role used by this reader.
+func (m *ScannerMetrics) SwitchReaderInfo(walName message.WALName, role string) {
+	m.readerMu.Lock()
+	defer m.readerMu.Unlock()
+	if !m.readerTracked {
+		panic("reader info has not been set")
+	}
+	if m.readerWALName == walName && m.readerRole == role {
+		return
+	}
+	m.activeReaders.WithLabelValues(m.readerWALName.String(), m.readerRole).Dec()
+	m.readerWALName = walName
+	m.readerRole = role
+	m.activeReaders.WithLabelValues(walName.String(), role).Inc()
 }
 
 // SwitchModel switches the scanner model.
@@ -186,6 +224,12 @@ func (m *ScannerMetrics) UpdateTimeTickBufSize(size int) {
 }
 
 func (m *ScannerMetrics) Close() {
+	m.readerMu.Lock()
+	if m.readerTracked {
+		m.activeReaders.WithLabelValues(m.readerWALName.String(), m.readerRole).Dec()
+		m.readerTracked = false
+	}
+	m.readerMu.Unlock()
 	m.UpdatePendingQueueSize(0)
 	m.UpdateTimeTickBufSize(0)
 	m.UpdateTxnBufSize(0)

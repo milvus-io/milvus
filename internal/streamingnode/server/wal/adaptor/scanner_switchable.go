@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -20,25 +21,37 @@ import (
 var (
 	_ switchableScanner = (*tailingScanner)(nil)
 	_ switchableScanner = (*catchupScanner)(nil)
+	_ switchableScanner = (*historicalScanner)(nil)
 )
 
 // newSwitchableScanner creates a new switchable scanner.
 func newSwithableScanner(
 	scannerName string,
 	logger *mlog.Logger,
-	innerWAL walimpls.ROWALImpls,
+	currentWAL walimpls.ROWALImpls,
+	initialWAL walimpls.ROWALImpls,
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
+	onWALSwitch func(message.WALName),
 ) switchableScanner {
+	impl := switchableScannerImpl{
+		scannerName:      scannerName,
+		logger:           logger,
+		innerWAL:         currentWAL,
+		msgChan:          msgChan,
+		writeAheadBuffer: writeAheadBuffer,
+		onWALSwitch:      onWALSwitch,
+	}
+	if initialWAL.WALName() != currentWAL.WALName() {
+		return &historicalScanner{
+			switchableScannerImpl: impl,
+			historicalWAL:         initialWAL,
+			deliverPolicy:         deliverPolicy,
+		}
+	}
 	return &catchupScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName:      scannerName,
-			logger:           logger,
-			innerWAL:         innerWAL,
-			msgChan:          msgChan,
-			writeAheadBuffer: writeAheadBuffer,
-		},
+		switchableScannerImpl:  impl,
 		deliverPolicy:          deliverPolicy,
 		exclusiveStartTimeTick: 0,
 	}
@@ -58,6 +71,7 @@ type switchableScannerImpl struct {
 	innerWAL         walimpls.ROWALImpls
 	msgChan          chan<- message.ImmutableMessage
 	writeAheadBuffer wab.ROWriteAheadBuffer
+	onWALSwitch      func(message.WALName)
 }
 
 func (s *switchableScannerImpl) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
@@ -107,6 +121,119 @@ func (t *oldVersionLastConfirmedTracker) Track(msgID message.MessageID) message.
 	return t.window[0]
 }
 
+// historicalScanner consumes from the WAL backend encoded in an existing
+// consumer position. It switches to the current WAL only after the AlterWAL
+// message is covered by a TimeTick visibility barrier.
+type historicalScanner struct {
+	switchableScannerImpl
+	historicalWAL                  walimpls.ROWALImpls
+	deliverPolicy                  options.DeliverPolicy
+	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
+}
+
+func (s *historicalScanner) Do(ctx context.Context) (switchableScanner, error) {
+	defer s.historicalWAL.Close()
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		scanner, err := s.createReaderWithBackoff(ctx, s.historicalWAL, s.deliverPolicy)
+		if err != nil {
+			return nil, err
+		}
+		switchedScanner, fatal, err := s.consumeWithScanner(ctx, scanner)
+		if err != nil {
+			if fatal {
+				return nil, err
+			}
+			s.logger.Warn(ctx, "historical scanner consumption was interrupted, retrying", mlog.Err(err))
+			continue
+		}
+		return switchedScanner, nil
+	}
+}
+
+func (s *historicalScanner) consumeWithScanner(
+	ctx context.Context,
+	scanner walimpls.ScannerImpls,
+) (switchableScanner, bool, error) {
+	defer scanner.Close()
+	var alterWALTimeTick uint64
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case msg, ok := <-scanner.Chan():
+			if !ok {
+				return nil, false, scanner.Error()
+			}
+
+			if msg.Version() == message.VersionOld {
+				if s.oldVersionLastConfirmedTracker == nil {
+					windowSize := paramtable.Get().StreamingCfg.OldVersionLastConfirmedWindowSize.GetAsInt()
+					s.oldVersionLastConfirmedTracker = newOldVersionLastConfirmedTracker(windowSize)
+				}
+				lastConfirmedMessageID := s.oldVersionLastConfirmedTracker.Track(msg.MessageID())
+				messageID := msg.MessageID()
+				var err error
+				msg, err = newOldVersionImmutableMessage(ctx, s.historicalWAL.Channel().Name, lastConfirmedMessageID, msg)
+				if errors.Is(err, vchantempstore.ErrNotFound) {
+					s.logger.Info(ctx, "skip the old version message because vchannel not found", mlog.Stringer("messageID", messageID))
+					continue
+				}
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+					return nil, false, err
+				}
+				if err != nil {
+					panic("unreachable: unexpected error found: " + err.Error())
+				}
+			}
+
+			if shouldStartConsumeSpan(msg) {
+				startConsumeSpanForMessage(ctx, msg)
+			}
+			if err := s.HandleMessage(ctx, msg); err != nil {
+				return nil, false, err
+			}
+
+			if msg.MessageType() == message.MessageTypeAlterWAL {
+				alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
+				targetWALName := message.WALName(alterWAL.Header().TargetWalName)
+				if targetWALName != s.innerWAL.WALName() {
+					return nil, true, status.NewInner(
+						"unsupported WAL migration chain for channel %s: historical WAL %s targets %s, current WAL is %s",
+						s.innerWAL.Channel().Name,
+						s.historicalWAL.WALName(),
+						targetWALName,
+						s.innerWAL.WALName(),
+					)
+				}
+				alterWALTimeTick = msg.TimeTick()
+				s.logger.Info(ctx, "historical reader found AlterWAL boundary",
+					mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+					mlog.Stringer("targetWALName", targetWALName),
+					mlog.Uint64("timeTick", alterWALTimeTick))
+				continue
+			}
+
+			if alterWALTimeTick != 0 && msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() >= alterWALTimeTick {
+				s.logger.Info(ctx, "historical reader reached AlterWAL visibility barrier",
+					mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+					mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+					mlog.Uint64("timeTick", alterWALTimeTick))
+				if s.onWALSwitch != nil {
+					s.onWALSwitch(s.innerWAL.WALName())
+				}
+				return &catchupScanner{
+					switchableScannerImpl:  s.switchableScannerImpl,
+					deliverPolicy:          options.DeliverPolicyAll(),
+					exclusiveStartTimeTick: alterWALTimeTick,
+				}, false, nil
+			}
+		}
+	}
+}
+
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
 type catchupScanner struct {
 	switchableScannerImpl
@@ -120,7 +247,7 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		scanner, err := s.createReaderWithBackoff(ctx, s.deliverPolicy)
+		scanner, err := s.createReaderWithBackoff(ctx, s.innerWAL, s.deliverPolicy)
 		if err != nil {
 			// Only the cancellation error will be returned, other error will keep backoff.
 			return nil, err
@@ -204,7 +331,11 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 	}
 }
 
-func (s *catchupScanner) createReaderWithBackoff(ctx context.Context, deliverPolicy options.DeliverPolicy) (walimpls.ScannerImpls, error) {
+func (s *switchableScannerImpl) createReaderWithBackoff(
+	ctx context.Context,
+	readWAL walimpls.ROWALImpls,
+	deliverPolicy options.DeliverPolicy,
+) (walimpls.ScannerImpls, error) {
 	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: 5 * time.Second,
 		Backoff: typeutil.BackoffConfig{
@@ -219,7 +350,7 @@ func (s *catchupScanner) createReaderWithBackoff(ctx context.Context, deliverPol
 		if bufSize < 0 {
 			bufSize = 0
 		}
-		innerScanner, err := s.innerWAL.Read(ctx, walimpls.ReadOption{
+		innerScanner, err := readWAL.Read(ctx, walimpls.ReadOption{
 			Name:                s.scannerName,
 			DeliverPolicy:       deliverPolicy,
 			ReadAheadBufferSize: bufSize,

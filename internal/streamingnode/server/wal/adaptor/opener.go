@@ -184,12 +184,27 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 	return opener, nil
 }
 
+// openHistoricalWAL opens a previous WAL backend in read-only mode for an
+// existing consumer that still holds a position from that backend.
+func (o *openerAdaptorImpl) openHistoricalWAL(
+	ctx context.Context,
+	walName message.WALName,
+	channel types.PChannelInfo,
+) (walimpls.ROWALImpls, error) {
+	openerImpl, err := o.getOrCreateOpenerImpl(ctx, walName)
+	if err != nil {
+		return nil, err
+	}
+	channel.AccessMode = types.AccessModeRO
+	return openerImpl.Open(ctx, &walimpls.OpenOption{Channel: channel})
+}
+
 // openRWWAL opens a read write wal instance for the channel.
 func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, opt *wal.OpenOption) (wal.WAL, error) {
 	id := o.idAllocator.Allocate()
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	})
+	}, o.openHistoricalWAL)
 	resources := &walOpenResources{roWAL: roWAL}
 	defer resources.Close()
 
@@ -502,7 +517,7 @@ func (o *openerAdaptorImpl) openROWAL(l walimpls.WALImpls) (wal.WAL, error) {
 	id := o.idAllocator.Allocate()
 	wal := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	})
+	}, o.openHistoricalWAL)
 	o.walInstances.Insert(id, wal)
 	return wal, nil
 }
