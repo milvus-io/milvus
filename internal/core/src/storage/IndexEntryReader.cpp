@@ -206,6 +206,7 @@ ReadOrderedEntryStream(
                     rememberError(std::current_exception());
                 }
             }
+            std::vector<uint8_t>{}.swap(task.result->data);
             budget.Release(task.slice_transient_bytes);
         }
     };
@@ -310,6 +311,7 @@ ReadOrderedEntryStream(
             deliverSlice(task.result);
         }
 
+        std::vector<uint8_t>{}.swap(task.result->data);
         budget.Release(task.slice_transient_bytes);
 
         if (first_error) {
