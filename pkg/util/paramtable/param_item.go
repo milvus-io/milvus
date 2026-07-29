@@ -434,7 +434,8 @@ func getAsFloat(v string) float64 {
 
 func getAsSize(value string) int64 {
 	number, multiplier := splitSizeUnit(value)
-	if integer, err := strconv.ParseInt(number, 10, 64); err == nil {
+	integer, err := strconv.ParseInt(number, 10, 64)
+	if err == nil {
 		const (
 			maxInt64 = int64(^uint64(0) >> 1)
 			minInt64 = -maxInt64 - 1
@@ -443,6 +444,9 @@ func getAsSize(value string) int64 {
 			return 0
 		}
 		return integer * multiplier
+	}
+	if numErr, ok := err.(*strconv.NumError); !ok || numErr.Err != strconv.ErrSyntax {
+		return 0
 	}
 
 	decimal, err := strconv.ParseFloat(number, 64)

@@ -141,6 +141,7 @@ func TestParamItemGetAsSize(t *testing.T) {
 		{name: "infinity", value: "InfMB", expected: 0},
 		{name: "decimal overflow", value: "1e100GB", expected: 0},
 		{name: "integer multiplication overflow", value: "9223372036854775807KB", expected: 0},
+		{name: "negative integer underflow", value: "-9223372036854775809", expected: 0},
 		{name: "max int64 bytes", value: "9223372036854775807", expected: 9223372036854775807},
 	}
 
