@@ -348,9 +348,35 @@ Manages pending commands, with different storage for the two kinds:
 
 **Command targeting** (`TargetScope`, built server-side from the push request):
 
-- `global` — all clients
-- `client:<clientID>` — one client, exact match
-- `database:<dbName>` — clients that have accessed that database
+| Scope | Selects | Lifetime | Persistent config allowed |
+|-------|---------|----------|---------------------------|
+| `global` | every client | durable | yes |
+| `database:<db>` | clients that have accessed the database | durable | yes |
+| `label:<k>=<v>` | clients declaring that label | durable | yes |
+| `client:<id>` | one client process, exact match | **ephemeral** | **no** |
+
+Scope lifetime is what decides whether a config may be persistent. A `client:` scope names
+a *process* — client IDs are generated per process — so a config targeted at one stops
+applying as soon as that client restarts, and could never match again. A `label:` scope
+names a *workload*, so it keeps matching across restarts. `PushCommand` rejects
+`persistent=true` with a client target for that reason.
+
+Clients declare labels through the existing `ClientInfo.Reserved` map, as `label.<key>`
+entries; the Go SDK populates them from `TelemetryConfig.Labels`:
+
+```go
+client.New(ctx, &milvusclient.ClientConfig{
+    TelemetryConfig: &milvusclient.TelemetryConfig{
+        Labels: map[string]string{"app": "ingest-worker"},
+    },
+})
+```
+
+An operator then pushes with `target_label: "app=ingest-worker"`. A selector matches a
+single `key=value` pair; a client matches if it declared exactly that value.
+
+If more than one target field is set, the most specific wins: client, then label, then
+database.
 
 **TTL.** `ttl_seconds` is a field of `PushClientCommandRequest`, not of `ClientCommand`, so
 clients never see it. It is resolved once at push time:

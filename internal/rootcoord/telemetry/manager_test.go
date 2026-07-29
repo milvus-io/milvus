@@ -3763,3 +3763,41 @@ func TestProcessCommandRepliesPayloadFormat(t *testing.T) {
 	assert.Contains(t, jsonStr, `"payload":"{\"user_config\"`)
 	assert.NotContains(t, jsonStr, "eyJ1c2VyX2NvbmZpZyI") // base64 prefix
 }
+
+func TestMatchesLabel(t *testing.T) {
+	info := &commonpb.ClientInfo{
+		Reserved: map[string]string{
+			"client_id":  "some-uuid",
+			"label.app":  "ingest-worker",
+			"label.env":  "prod",
+			"label.tier": "",
+		},
+	}
+
+	cases := []struct {
+		name     string
+		selector string
+		expected bool
+	}{
+		{"matching label", "app=ingest-worker", true},
+		{"second label", "env=prod", true},
+		{"wrong value", "app=query-worker", false},
+		{"unknown key", "region=us-east", false},
+		{"empty value matches empty label", "tier=", true},
+		{"empty value does not match a set label", "app=", false},
+		{"malformed selector", "app", false},
+		{"empty key", "=ingest-worker", false},
+		{"whitespace is trimmed", " app = ingest-worker ", true},
+		{"client_id is not a label", "client_id=some-uuid", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, matchesLabel(tc.selector, info))
+		})
+	}
+
+	t.Run("client with no labels matches nothing", func(t *testing.T) {
+		assert.False(t, matchesLabel("app=ingest-worker", &commonpb.ClientInfo{}))
+	})
+}

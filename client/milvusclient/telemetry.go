@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +51,16 @@ type TelemetryConfig struct {
 	SamplingRate float64
 	// ErrorMaxCount is the maximum number of errors to keep
 	ErrorMaxCount int
+	// Labels describe the workload this client belongs to, e.g. {"app": "ingest-worker"}.
+	//
+	// The server can target commands at a label instead of a client ID. That matters for
+	// configuration meant to stick: a client ID names this process and dies with it, so a
+	// config targeted at one stops applying after a restart, whereas a label keeps
+	// matching every process that declares it. Several clients may share a label.
+	//
+	// Keys must be non-empty and free of "=". Sent as ClientInfo.Reserved["label.<key>"].
+	Labels map[string]string
+
 	// ClientID identifies this client to the server across process restarts.
 	//
 	// When empty, a random UUID is generated per Client, which means the server sees a
@@ -59,6 +70,10 @@ type TelemetryConfig struct {
 	// reusing one value across processes collapses them into a single server-side entry.
 	ClientID string
 }
+
+// labelReservedPrefix is how a label is published in ClientInfo.Reserved; the server
+// reads the same prefix when matching a label: scope.
+const labelReservedPrefix = "label."
 
 // DefaultTelemetryConfig returns the default telemetry configuration
 func DefaultTelemetryConfig() *TelemetryConfig {
@@ -579,6 +594,18 @@ func (m *ClientTelemetryManager) buildClientInfo() *commonpb.ClientInfo {
 			"client_id": m.clientID, // Always send stable UUID to prevent ID collisions
 		},
 	}
+	m.configMu.RLock()
+	labels := m.config.Labels
+	m.configMu.RUnlock()
+	for key, value := range labels {
+		// A key containing "=" could not be addressed by a label:key=value scope, and an
+		// empty key addresses nothing; drop rather than emit something unmatchable.
+		if key == "" || strings.Contains(key, "=") {
+			continue
+		}
+		clientInfo.Reserved[labelReservedPrefix+key] = value
+	}
+
 	if m.client != nil {
 		if m.client.config != nil {
 			clientInfo.User = m.client.config.Username

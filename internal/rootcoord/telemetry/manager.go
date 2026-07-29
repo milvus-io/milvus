@@ -607,7 +607,34 @@ func (m *TelemetryManager) matchesScope(scope, clientID string, info *commonpb.C
 		}
 		return false
 	}
+	if strings.HasPrefix(scope, labelScopePrefix) {
+		return matchesLabel(strings.TrimPrefix(scope, labelScopePrefix), info)
+	}
 	return false
+}
+
+// matchesLabel reports whether the client declared the "key=value" label in selector.
+//
+// Labels are read from ClientInfo.Reserved, where a client publishes them as
+// "label.<key>" entries. Unlike a client ID, a label names a workload rather than a
+// process, so it keeps matching after the client restarts -- which is what makes it a
+// valid target for persistent config.
+func matchesLabel(selector string, info *commonpb.ClientInfo) bool {
+	key, value, ok := strings.Cut(selector, "=")
+	if !ok {
+		return false
+	}
+	key = strings.TrimSpace(key)
+	value = strings.TrimSpace(value)
+	if key == "" {
+		return false
+	}
+
+	declared, present := info.GetReserved()[labelReservedPrefix+key]
+	if !present {
+		return false
+	}
+	return declared == value
 }
 
 // computeClientConfigHash computes hash over configs that a specific client will receive

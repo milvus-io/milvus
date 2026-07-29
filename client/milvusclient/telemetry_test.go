@@ -3456,3 +3456,38 @@ func TestHeartbeatLoopExitsWhenUnsupported(t *testing.T) {
 		t.Fatal("heartbeat loop did not exit after telemetry was marked unsupported")
 	}
 }
+
+func TestClientInfoLabels(t *testing.T) {
+	t.Run("labels are published under the label prefix", func(t *testing.T) {
+		cfg := DefaultTelemetryConfig()
+		cfg.Labels = map[string]string{"app": "ingest-worker", "env": "prod"}
+
+		reserved := NewClientTelemetryManager(nil, cfg).buildClientInfo().GetReserved()
+
+		assert.Equal(t, "ingest-worker", reserved["label.app"])
+		assert.Equal(t, "prod", reserved["label.env"])
+		// The existing reserved entries must survive alongside them.
+		assert.NotEmpty(t, reserved["client_id"])
+	})
+
+	t.Run("no labels means no label entries", func(t *testing.T) {
+		reserved := NewClientTelemetryManager(nil, DefaultTelemetryConfig()).buildClientInfo().GetReserved()
+
+		for key := range reserved {
+			assert.NotContains(t, key, "label.")
+		}
+	})
+
+	t.Run("unaddressable keys are dropped", func(t *testing.T) {
+		cfg := DefaultTelemetryConfig()
+		// A key containing "=" could never be selected by a label:key=value scope, and an
+		// empty key addresses nothing.
+		cfg.Labels = map[string]string{"": "x", "a=b": "y", "ok": "z"}
+
+		reserved := NewClientTelemetryManager(nil, cfg).buildClientInfo().GetReserved()
+
+		assert.Equal(t, "z", reserved["label.ok"])
+		assert.NotContains(t, reserved, "label.")
+		assert.NotContains(t, reserved, "label.a=b")
+	})
+}

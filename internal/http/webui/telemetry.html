@@ -1248,6 +1248,7 @@
                                 <label>Target</label>
                                 <select id="configTargetScope" onchange="updateConfigTargetClient()">
                                     <option value="global">All Clients</option>
+                                    <option value="label">Workload (label)</option>
                                     <option value="client">Specific Client</option>
                                     <option value="database">Specific Database</option>
                                 </select>
@@ -1259,6 +1260,10 @@
                             <div class="form-group" id="configDatabaseIdGroup" style="display: none;">
                                 <label>Database Name</label>
                                 <input type="text" id="configTargetDatabase" class="form-input" placeholder="Enter database name">
+                            </div>
+                            <div class="form-group" id="configLabelGroup" style="display: none;">
+                                <label>Label</label>
+                                <input type="text" id="configTargetLabel" class="form-input" placeholder="key=value, e.g. app=ingest-worker">
                             </div>
                         </div>
 
@@ -2558,6 +2563,7 @@
             const scope = document.getElementById('configTargetScope').value;
             document.getElementById('configClientIdGroup').style.display = scope === 'client' ? 'block' : 'none';
             document.getElementById('configDatabaseIdGroup').style.display = scope === 'database' ? 'block' : 'none';
+            document.getElementById('configLabelGroup').style.display = scope === 'label' ? 'block' : 'none';
 
             // A client-scoped config cannot be persistent: client IDs are per-process, so a
             // persisted config would never match again after the client restarts. The server
@@ -2595,6 +2601,7 @@
             const targetScope = document.getElementById('configTargetScope').value;
             const targetClient = document.getElementById('configTargetClient').value;
             const targetDatabase = document.getElementById('configTargetDatabase').value;
+            const targetLabel = document.getElementById('configTargetLabel').value;
 
             if (targetScope === 'client' && !targetClient) {
                 showToast('Please enter a client ID', 'error');
@@ -2603,6 +2610,13 @@
             if (targetScope === 'database' && !targetDatabase) {
                 showToast('Please enter a database name', 'error');
                 return;
+            }
+            if (targetScope === 'label') {
+                const eq = targetLabel.indexOf('=');
+                if (eq <= 0) {
+                    showToast('Please enter a label as key=value', 'error');
+                    return;
+                }
             }
 
             // Build config payload
@@ -2650,6 +2664,7 @@
                         command_type: 'push_config',
                         target_client_id: targetScope === 'client' ? targetClient : '',
                         target_database: targetScope === 'database' ? targetDatabase : '',
+                        target_label: targetScope === 'label' ? targetLabel : '',
                         payload: Object.keys(payload).length > 0 ? JSON.stringify(payload) : '',
                         ttl_seconds: 3600,
                         // Client-scoped configs are one-time by construction; see updateConfigTargetClient.

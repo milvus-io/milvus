@@ -305,7 +305,9 @@ func getTelemetryClientMetrics(node *Proxy) gin.HandlerFunc {
 //	{
 //	  "command_type": "show_errors|collection_metrics|debug_log|push_config",
 //	  "target_client_id": "client-123" or "" for global,
-//	  "target_database": "db_name" or "" for global (mutually exclusive with target_client_id),
+//	  "target_database": "db_name" or "" for global,
+//	  "target_label": "key=value" to target a workload; durable across client restarts,
+//	  // the three target fields are mutually exclusive
 //	  "payload": {...},
 //	  "ttl_seconds": 3600,   // optional; omit for the default (10 heartbeat cycles), negative to never expire
 //	  "persistent": false
@@ -334,6 +336,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			CommandType    string          `json:"command_type"`
 			TargetClientID string          `json:"target_client_id"`
 			TargetDatabase string          `json:"target_database"`
+			TargetLabel    string          `json:"target_label"`
 			Payload        json.RawMessage `json:"payload"`
 			TTLSeconds     int64           `json:"ttl_seconds"`
 			Persistent     bool            `json:"persistent"`
@@ -376,6 +379,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			CommandType:    cmdReq.CommandType,
 			TargetClientId: cmdReq.TargetClientID,
 			TargetDatabase: cmdReq.TargetDatabase,
+			TargetLabel:    cmdReq.TargetLabel,
 			Payload:        payloadBytes,
 			TtlSeconds:     cmdReq.TTLSeconds,
 			Persistent:     cmdReq.Persistent,

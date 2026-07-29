@@ -108,6 +108,16 @@ func (w *etcdKVWrapper) Delete(ctx context.Context, key string, opts ...clientv3
 }
 
 const (
+	// labelScopePrefix marks a target scope that selects clients by a declared label,
+	// written as "label:<key>=<value>".
+	labelScopePrefix = "label:"
+
+	// labelReservedPrefix is how a client publishes a label in ClientInfo.Reserved:
+	// Reserved["label.app"] = "ingest-worker" declares app=ingest-worker.
+	labelReservedPrefix = "label."
+)
+
+const (
 	// defaultHeartbeatIntervalSeconds mirrors the SDK's default heartbeat interval
 	// (client/milvusclient/telemetry.go). The server cannot know a given client's actual
 	// interval -- it is client-side config that the server may or may not have overridden
@@ -123,6 +133,37 @@ const (
 	// "never expire" for the rare caller that genuinely wants that.
 	defaultCommandTTLSeconds = 10 * defaultHeartbeatIntervalSeconds
 )
+
+// resolveTargetScope turns the targeting fields of a push request into the scope string
+// stored with the command.
+//
+// Scopes differ in lifetime, which is what decides whether a config may be persistent:
+//
+//	global            durable   -- every client
+//	database:<db>     durable   -- clients that have accessed the database
+//	label:<k>=<v>     durable   -- clients declaring the label; names a workload
+//	client:<id>       ephemeral -- one process; the ID dies with it
+//
+// Setting more than one target field is resolved by precedence rather than rejected, which
+// is the behavior callers have always had: most specific wins, so client beats label beats
+// database. No target set means global.
+func resolveTargetScope(req *milvuspb.PushClientCommandRequest) (string, error) {
+	switch {
+	case req.GetTargetClientId() != "":
+		return "client:" + req.GetTargetClientId(), nil
+	case req.GetTargetLabel() != "":
+		key, value, ok := strings.Cut(req.GetTargetLabel(), "=")
+		if !ok || strings.TrimSpace(key) == "" {
+			return "", merr.WrapErrParameterInvalid("key=value", req.GetTargetLabel(),
+				"target_label must be of the form key=value")
+		}
+		return labelScopePrefix + strings.TrimSpace(key) + "=" + strings.TrimSpace(value), nil
+	case req.GetTargetDatabase() != "":
+		return "database:" + req.GetTargetDatabase(), nil
+	default:
+		return "global", nil
+	}
+}
 
 // resolveCommandTTL maps a requested TTL onto the value stored with the command.
 //
@@ -278,13 +319,12 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 				"global scope for a setting that should outlive it")
 	}
 
-	cmdID := uuid.New().String()
-	scope := "global"
-	if req.TargetClientId != "" {
-		scope = "client:" + req.TargetClientId
-	} else if req.TargetDatabase != "" {
-		scope = "database:" + req.TargetDatabase
+	scope, err := resolveTargetScope(req)
+	if err != nil {
+		return "", err
 	}
+
+	cmdID := uuid.New().String()
 	createTime := time.Now().UnixMilli()
 
 	if req.Persistent {

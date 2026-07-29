@@ -1241,3 +1241,84 @@ func TestLoadCacheDropsStaleClientScopedConfigs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), resp.Count, "the stale config must be deleted from etcd, not just skipped")
 }
+
+func TestResolveTargetScope(t *testing.T) {
+	cases := []struct {
+		name    string
+		req     *milvuspb.PushClientCommandRequest
+		want    string
+		wantErr string
+	}{
+		{"no target is global", &milvuspb.PushClientCommandRequest{}, "global", ""},
+		{"client", &milvuspb.PushClientCommandRequest{TargetClientId: "c1"}, "client:c1", ""},
+		{"database", &milvuspb.PushClientCommandRequest{TargetDatabase: "db1"}, "database:db1", ""},
+		{"label", &milvuspb.PushClientCommandRequest{TargetLabel: "app=ingest"}, "label:app=ingest", ""},
+		{"label is trimmed", &milvuspb.PushClientCommandRequest{TargetLabel: " app = ingest "}, "label:app=ingest", ""},
+		{"label with empty value", &milvuspb.PushClientCommandRequest{TargetLabel: "app="}, "label:app=", ""},
+		{"label without =", &milvuspb.PushClientCommandRequest{TargetLabel: "app"}, "", "key=value"},
+		{"label with empty key", &milvuspb.PushClientCommandRequest{TargetLabel: "=ingest"}, "", "key=value"},
+		{"label wins over database", &milvuspb.PushClientCommandRequest{TargetLabel: "app=ingest", TargetDatabase: "db1"}, "label:app=ingest", ""},
+		{
+			"client wins over label",
+			&milvuspb.PushClientCommandRequest{TargetClientId: "c1", TargetLabel: "app=ingest"},
+			"client:c1", "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveTargetScope(tc.req)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestLabelScopedConfigMayBePersistent is the point of the label scope: it is durable, so
+// unlike a client scope it is a legitimate target for config that must survive restarts.
+func TestLabelScopedConfigMayBePersistent(t *testing.T) {
+	ctx := context.Background()
+	store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+	_, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+		CommandType: "push_config",
+		TargetLabel: "app=ingest",
+		Payload:     []byte(`{"sampling_rate":0.1}`),
+		Persistent:  true,
+	})
+	require.NoError(t, err)
+
+	configs, _, err := store.ListConfigs(ctx)
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	assert.Equal(t, "label:app=ingest", configs[0].TargetScope)
+}
+
+// TestLabelScopedConfigSurvivesReload is the restart behavior that a client-scoped config
+// could never provide: the config is still there, and still addressable, afterwards.
+func TestLabelScopedConfigSurvivesReload(t *testing.T) {
+	ctx := context.Background()
+	sharedKV := newMockKV()
+
+	store1 := NewCommandStoreWithKV(sharedKV, "/test/")
+	_, err := store1.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+		CommandType: "push_config",
+		TargetLabel: "app=ingest",
+		Payload:     []byte(`{"sampling_rate":0.1}`),
+		Persistent:  true,
+	})
+	require.NoError(t, err)
+
+	// Simulate a RootCoord restart.
+	store2 := NewCommandStoreWithKV(sharedKV, "/test/")
+
+	configs, _, err := store2.ListConfigs(ctx)
+	require.NoError(t, err)
+	require.Len(t, configs, 1, "a label-scoped config must survive reload")
+	assert.Equal(t, "label:app=ingest", configs[0].TargetScope)
+}
