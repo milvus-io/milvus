@@ -337,20 +337,20 @@ func TestCollectionAddFieldExceedMaxFieldNumber(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString("addfield", 6)
-	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
-	common.CheckErr(t, err, true)
-
-	// add fields until reaching max field number (64)
-	for i := 0; i < 62; i++ {
-		newField := entity.NewField().WithName(fmt.Sprintf("%s_%d", common.DefaultNewField, i)).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
-		err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, newField))
-		common.CheckErr(t, err, true)
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
+	for i := 0; i < common.MaxFieldNum-2; i++ {
+		field := entity.NewField().WithName(fmt.Sprintf("%s_%d", common.DefaultNewField, i)).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
+		schema.WithField(field)
 	}
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
 
 	// try to add one more field to exceed max field number
 	newField := entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
 	err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, newField))
-	common.CheckErr(t, err, false, "The number of fields has reached the maximum value 64: invalid parameter")
+	common.CheckErr(t, err, false, fmt.Sprintf("The number of fields has reached the maximum value %d: invalid parameter", common.MaxFieldNum))
 }
 
 // create Inverted index for added field and drop index

@@ -1809,20 +1809,16 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         dim, field_name = 8, default_new_field_name
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "The number of fields has reached the maximum value 64: invalid parameter",
+            ct.err_msg: f"The number of fields has reached the maximum value {ct.max_field_num}: invalid parameter",
         }
-        self.create_collection(client, collection_name, dim)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        for i in range(ct.max_field_num - 2):
+            schema.add_field(f"{field_name}_{i}", DataType.VARCHAR, nullable=True, max_length=64)
+        self.create_collection(client, collection_name, schema=schema)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        for i in range(62):
-            self.add_collection_field(
-                client,
-                collection_name,
-                field_name=f"{field_name}_{i}",
-                data_type=DataType.VARCHAR,
-                nullable=True,
-                max_length=64,
-            )
         self.add_collection_field(
             client,
             collection_name,
