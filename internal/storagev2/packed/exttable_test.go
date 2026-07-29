@@ -1553,6 +1553,32 @@ func TestMakePropertiesFromStorageConfig_AllFields(t *testing.T) {
 	assert.Equal(t, "237", loonPropertyString(props, PropertyFSMaxConnections))
 }
 
+// An unset MaxConnections must leave the key absent, not emit "0".
+// milvus-storage only falls back to its registered default (100) when the key
+// is missing; an explicit "0" survives into s3_client_builder, which takes
+// max(max(io_capacity, 25), max_connections), lowering the connection cap.
+// It also feeds ArrowFileSystemConfig's cache key, so a "0" producer and a
+// "100" producer would resolve to two different cached filesystems.
+func TestMakePropertiesFromStorageConfig_MaxConnectionsUnsetOmitsKey(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		Address:          "localhost:9000",
+		BucketName:       "test-bucket",
+		StorageType:      "minio",
+		RequestTimeoutMs: 5000,
+		// MaxConnections deliberately left at its zero value.
+	}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, props)
+	defer FreeProperties(props)
+
+	assert.Empty(t, loonPropertyString(props, PropertyFSMaxConnections),
+		"unset MaxConnections must not be emitted as \"0\"")
+	// The neighboring integer field is still emitted, so this is a targeted
+	// guard rather than the whole block going missing.
+	assert.Equal(t, "5000", loonPropertyString(props, PropertyFSRequestTimeoutMS))
+}
+
 // ==================== FetchFragmentsFromExternalSourceWithRange Tests ====================
 
 func TestFetchFragmentsFromExternalSourceWithRange_HappyPath(t *testing.T) {

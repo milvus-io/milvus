@@ -589,6 +589,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
