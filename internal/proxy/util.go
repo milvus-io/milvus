@@ -2987,8 +2987,8 @@ func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
 // while preserving the request name (which may be an alias) for business
 // behavior and public responses.
 func metricCollectionName(schema *schemaInfo, requested string) string {
-	if schema != nil && schema.CollectionSchema != nil && schema.CollectionSchema.GetName() != "" {
-		return schema.CollectionSchema.GetName()
+	if schema != nil && schema.GetName() != "" {
+		return schema.GetName()
 	}
 	return requested
 }
