@@ -237,7 +237,9 @@ export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 arch=$(uname -m)
 PY_UDF_PYTHON_CMAKE_ARGS=""
-if [[ -n "${PY_UDF_PYTHON_ROOT}" ]]; then
+if [[ -n "${PYTHON}" ]]; then
+    PY_UDF_PYTHON_CMAKE_ARGS="-DPython3_EXECUTABLE=$(command -v "${PYTHON}")"
+elif [[ -n "${PY_UDF_PYTHON_ROOT}" ]]; then
     PY_UDF_PYTHON_CMAKE_ARGS="-DPython3_ROOT_DIR=${PY_UDF_PYTHON_ROOT}"
 fi
 CMAKE_CMD="cmake \

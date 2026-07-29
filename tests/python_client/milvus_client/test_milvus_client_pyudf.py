@@ -86,12 +86,6 @@ def create_udf(context):
                 )
             except Exception as exc:
                 message = str(exc)
-                unavailable = (
-                    "function.pyUDF.enabled is false" in message
-                    or "does not support embedded PyUDF" in message
-                )
-                if unavailable:
-                    pytest.skip(f"PyUDF runtime is unavailable: {message}")
                 transient = (
                     "file resource snapshot is not ready" in message
                     or "file resource" in message
@@ -129,12 +123,6 @@ def create_udf(context):
                 )
             except Exception as exc:
                 message = str(exc)
-                unavailable = (
-                    "function.pyUDF.enabled is false" in message
-                    or "does not support embedded PyUDF" in message
-                )
-                if unavailable:
-                    pytest.skip(f"PyUDF runtime is unavailable: {message}")
                 if (
                     "py_udf: file resource" in message
                     and resource_name in message

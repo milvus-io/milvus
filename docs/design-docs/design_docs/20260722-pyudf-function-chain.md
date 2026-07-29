@@ -174,7 +174,7 @@ The runtime:
 - requires exactly one `milvus.pudf` entry point;
 - caches the created UDF instances with the loaded resource;
 - rejects conflicting top-level Python packages between loaded wheels;
-- expects shared dependencies such as PyArrow to be provided by the Milvus runtime image.
+- expects shared dependencies such as PyArrow 23.0.1 to be provided by the Milvus runtime image.
 
 Private model and configuration files should be packaged inside the user wheel.
 
@@ -205,7 +205,7 @@ The package provides:
 - `transform_query` execution and return validation;
 - optional instance close handling.
 
-The wrapper requires `pyarrow>=17`.
+The wrapper requires exactly `pyarrow==23.0.1`. The version is pinned in the trusted wheel metadata so installing the wheel resolves the same runtime dependency in every image.
 
 ## Python UDF interface
 
@@ -488,7 +488,7 @@ make PYTHON=/path/to/cmake-selected-python install-pyudf-runtime-wheel
 
 The build and test targets do not modify system site-packages. The explicit install target does, and must use the same interpreter selected by CMake for embedded runtime tests.
 
-`MILVUS_ENABLE_PY_UDF=ON` requires Python 3.10+ with `Interpreter` and `Development.Embed`. An exact major/minor may be selected for a release image. The official image still needs to package matching CPython, libpython, the trusted wheel, and PyArrow.
+`MILVUS_ENABLE_PY_UDF=ON` requires Python 3.10+ with `Interpreter` and `Development.Embed`. Official builder and runtime Dockerfiles use a named uv 0.11.23 stage and independently run `uv python install 3.12.13`. Builders select `python3.12` for CMake and trusted-wheel construction; runtime images install the trusted wheel with uv, which resolves the metadata-pinned `pyarrow==23.0.1`, and register that Python distribution's `libpython` directory with the dynamic linker. The Python installations are recreated from the same pinned uv and Python versions rather than copied between images.
 
 ## Verification completed for the current slice
 

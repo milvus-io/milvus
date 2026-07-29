@@ -495,12 +495,12 @@ codecov-cpp: build-cpp-with-coverage
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 # Build each component and install binary to $GOPATH/bin.
-install: milvus
+install: milvus build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."
 
-gpu-install: milvus-gpu
+gpu-install: milvus-gpu build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."

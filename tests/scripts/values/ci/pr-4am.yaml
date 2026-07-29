@@ -9,6 +9,9 @@ extraConfigFiles:
     indexCoord:
       scheduler:
         interval: 100
+    function:
+      pyUDF:
+        enabled: true
 
 affinity:
   nodeAffinity:
