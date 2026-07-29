@@ -116,6 +116,19 @@ func isNormalManualCompactionCandidate(meta *meta, segment *SegmentInfo) bool {
 		!meta.isSegmentCompactionProtected(segment.GetID())
 }
 
+func isNormalManualCompactionMatchCandidate(meta *meta, segment *SegmentInfo) bool {
+	return isSegmentHealthy(segment) &&
+		isFlushed(segment) &&
+		!segment.GetIsImporting() &&
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetLevel() != datapb.SegmentLevel_L2 &&
+		!meta.isSegmentCompactionProtected(segment.GetID())
+}
+
+func isNormalManualCompactionExecutionCandidate(meta *meta, segment *SegmentInfo) bool {
+	return isNormalManualCompactionCandidate(meta, segment)
+}
+
 // isCompactionTaskFinished returns true if the task has reached a terminal state
 // (timeout, completed, cleaned, or unknown) and requires no further processing.
 func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
