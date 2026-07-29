@@ -28,7 +28,7 @@ namespace milvus::segcore {
 // `data_type` must be a concrete vector element type; VECTOR_ARRAY callers
 // must pass the element type themselves.
 void
-ValidateVectorSearchParams(query::SearchInfo& search_info,
+ValidateVectorSearchParams(SearchInfo& search_info,
                            const std::string& index_type,
                            DataType data_type);
 

@@ -32,7 +32,7 @@ ThrewWith(const std::string& index_type,
           DataType dt,
           const std::string& params_json,
           const std::string& substr) {
-    query::SearchInfo info;
+    SearchInfo info;
     info.metric_type_ = knowhere::metric::L2;
     info.topk_ = 10;
     info.search_params_ = knowhere::Json::parse(params_json);
@@ -48,7 +48,7 @@ void
 NoThrow(const std::string& index_type,
         DataType dt,
         const std::string& params_json) {
-    query::SearchInfo info;
+    SearchInfo info;
     info.metric_type_ = knowhere::metric::L2;
     info.topk_ = 10;
     info.search_params_ = knowhere::Json::parse(params_json);

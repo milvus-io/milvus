@@ -48,7 +48,7 @@ LoadAndCheck(const std::string& index_type, const knowhere::Json& params) {
 }  // namespace
 
 void
-ValidateVectorSearchParams(query::SearchInfo& search_info,
+ValidateVectorSearchParams(SearchInfo& search_info,
                            const std::string& index_type,
                            DataType data_type) {
     // Mirror PrepareSearchParams (index/VectorIndex.h): seed metric_type and

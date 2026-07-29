@@ -75,11 +75,12 @@ CreateSearchPlanByExpr(CCollection c_col,
         // binlog index), which all originate from this plan. See #47729.
         auto& plan_field = (*schema)[milvus::FieldId(field_id)];
         auto plan_data_type = plan_field.get_data_type();
-        ValidateVectorSearchParams(search_info,
-                                   field_index_meta.GetIndexType(),
-                                   plan_data_type == DataType::VECTOR_ARRAY
-                                       ? plan_field.get_element_type()
-                                       : plan_data_type);
+        milvus::segcore::ValidateVectorSearchParams(
+            search_info,
+            field_index_meta.GetIndexType(),
+            plan_data_type == milvus::DataType::VECTOR_ARRAY
+                ? plan_field.get_element_type()
+                : plan_data_type);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
