@@ -224,7 +224,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         TC-L0-03: Drop BM25 function and verify output field/index cascade.
 
         target: verify dropping BM25 function removes function output field and its index
-        method: create BM25 function from text to sparse, reject detach-only drop, then cascade-drop function field
+        method: create BM25 function from text to sparse, reject the deprecated drop API, then cascade-drop function field
         expected: function and sparse output field disappear; text and vec remain usable
         """
         client = self._client()
@@ -292,7 +292,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         assert len(bm25_res[0]) > 0
         assert "text" in bm25_res[0][0]["entity"]
 
-        # Step 4: BM25 cannot be detached from its output field through the legacy SDK API.
+        # Step 4: The deprecated detach API is rejected without mutating the schema.
         self.drop_collection_function(
             client,
             collection_name,
@@ -301,9 +301,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "detaching a function without dropping its output field is not supported; "
-                    "drop_function always removes the function together with its output field: "
-                    "bm25: invalid parameter"
+                    "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field"
                 ),
             },
         )
@@ -1321,9 +1319,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         """
         TC-L1-07: Drop Function negative constraints.
 
-        target: verify Drop Function rejects invalid requests and preserves schema on failure
-        method: test empty name, missing function, detach-only BM25 rejection, repeated drop, and last-vector cascade rejection
-        expected: errors are clear; failed drops do not partially mutate schema
+        target: verify deprecated and cascade Drop Function requests preserve schema on failure
+        method: reject deprecated API requests, then test repeated cascade and last-vector rejection
+        expected: unsupported or invalid requests do not partially mutate schema
         """
         client = self._client()
         collection_name = f"{cf.gen_collection_name_by_testcase_name()}_function_negative"
@@ -1350,7 +1348,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             consistency_level="Strong",
         )
 
-        # Step 2: Reject empty and missing function names before any successful drop.
+        # Step 2: Reject deprecated API calls with empty and missing function names.
         self.drop_collection_function(
             client,
             collection_name,
@@ -1358,7 +1356,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_task=ct.CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
-                ct.err_msg: "Must specify exactly one valid Drop identifier (drop_field_name/drop_field_id/drop_function_name)",
+                ct.err_msg: (
+                    "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field"
+                ),
             },
         )
 
@@ -1367,14 +1367,19 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             collection_name,
             "missing_function",
             check_task=ct.CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "function not found: missing_function: invalid parameter"},
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: (
+                    "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field"
+                ),
+            },
         )
 
         desc = client.describe_collection(collection_name)
         assert "bm25" in [func["name"] for func in desc.get("functions", [])]
         assert "sparse" in [field["name"] for field in desc["fields"]]
 
-        # Step 3: Reject detach-only BM25 drop and verify schema stays unchanged.
+        # Step 3: Reject the deprecated API for an existing function and preserve its schema.
         self.drop_collection_function(
             client,
             collection_name,
@@ -1383,9 +1388,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "detaching a function without dropping its output field is not supported; "
-                    "drop_function always removes the function together with its output field: "
-                    "bm25: invalid parameter"
+                    "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field"
                 ),
             },
         )
@@ -1461,9 +1464,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         """
         TC-L1-07a: Drop Function detach vs cascade semantics for MinHash.
 
-        target: verify MinHash detach-only drop is rejected and cascade-output-field drop works
-        method: drop_collection_function (detach) is rejected; drop_function_field removes function + output field/index
-        expected: detach rejected (function/field unchanged); cascade removes function, output field, and output index
+        target: verify the deprecated MinHash drop API is rejected and cascade-output-field drop works
+        method: drop_collection_function is rejected; drop_function_field removes function + output field/index
+        expected: deprecated API rejected (function/field unchanged); cascade removes function, output field, and output index
         """
         client = self._client()
         detach_collection_name = f"{cf.gen_collection_name_by_testcase_name()}_detach"
@@ -1527,7 +1530,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             assert len(search_res[0]) > 0
             assert "doc" in search_res[0][0]["entity"]
 
-        # Step 1: Detach-only MinHash drop is rejected; the function keeps its output field.
+        # Step 1: The deprecated MinHash drop API is rejected; the function keeps its output field.
         create_minhash_collection(detach_collection_name)
         self.drop_collection_function(
             client,
@@ -1537,9 +1540,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "detaching a function without dropping its output field is not supported; "
-                    "drop_function always removes the function together with its output field: "
-                    "text_to_minhash: invalid parameter"
+                    "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field"
                 ),
             },
         )

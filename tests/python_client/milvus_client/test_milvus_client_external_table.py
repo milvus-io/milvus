@@ -2965,7 +2965,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
 
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "alter collection schema operation is not supported for external collection",
+            ct.err_msg: "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field",
         }
         self.drop_collection_function(
             client,
