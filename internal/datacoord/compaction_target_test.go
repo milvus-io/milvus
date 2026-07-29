@@ -375,7 +375,13 @@ func mustNewCompactionTarget(t testing.TB, record *datapb.CompactionTarget) *com
 }
 
 func targetSatisfied(target *compactionTarget, segments ...*SegmentInfo) bool {
-	return target.Satisfied(groupCompactionTargetSegmentsByLabel(target.SegmentsInScope(segments)))
+	matches := make([]*SegmentInfo, 0, len(segments))
+	for _, segment := range segments {
+		if target.Match(segment) {
+			matches = append(matches, segment)
+		}
+	}
+	return target.Satisfied(matches)
 }
 
 type compactionTargetCatalogUpdate struct {

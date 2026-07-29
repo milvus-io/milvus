@@ -55,35 +55,27 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		return events, nil
 	}
 
-	candidateSegments := reconciler.selectCompactionTargetCandidates(ctx, targets)
-	segmentsByLabel := groupCompactionTargetSegmentsByLabel(candidateSegments)
-	segmentsInScope := make(map[int64]map[CompactionGroupLabel][]*SegmentInfo, len(targets))
-	for _, label := range sortedCompactionTargetLabels(segmentsByLabel) {
-		groupSegments := segmentsByLabel[label]
-		for _, target := range targets {
-			record := target.Clone()
-			scopedSegments := target.SegmentsInScope(groupSegments)
-			if len(scopedSegments) == 0 {
+	matchCandidateFilter := SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return isNormalManualCompactionMatchCandidate(reconciler.meta, segment)
+	})
+	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
+	for _, target := range targets {
+		record := target.Clone()
+		filters := append([]SegmentFilter{matchCandidateFilter}, target.SegmentFilters()...)
+		matches := reconciler.meta.SelectSegments(ctx, filters...)
+		if target.Satisfied(matches) {
+			satisfiedTargets = append(satisfiedTargets, record)
+			continue
+		}
+		for _, segment := range matches {
+			if !isNormalManualCompactionExecutionCandidate(reconciler.meta, segment) {
 				continue
 			}
-			if _, ok := segmentsInScope[record.GetTargetID()]; !ok {
-				segmentsInScope[record.GetTargetID()] = make(map[CompactionGroupLabel][]*SegmentInfo)
-			}
-			segmentsInScope[record.GetTargetID()][label] = append(segmentsInScope[record.GetTargetID()][label], scopedSegments...)
-			for _, segment := range scopedSegments {
-				if !target.Match(segment) || !isNormalManualCompactionCandidate(reconciler.meta, segment) {
-					continue
-				}
-				events[TriggerTypeTarget] = append(events[TriggerTypeTarget], compactionTargetView(record, segment))
-			}
+			events[TriggerTypeTarget] = append(events[TriggerTypeTarget], compactionTargetView(record, segment))
 		}
 	}
 
-	for _, target := range targets {
-		record := target.Clone()
-		if !target.Satisfied(segmentsInScope[record.GetTargetID()]) {
-			continue
-		}
+	for _, record := range satisfiedTargets {
 		if err := targetMeta.UpdateCompactionTargetState(ctx, record.GetTargetID(), datapb.TargetState_TARGET_STATE_INACTIVE); err != nil {
 			return events, err
 		}
@@ -93,50 +85,6 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 	sortCompactionTargetViews(events[TriggerTypeTarget])
 	return events, nil
-}
-
-func (reconciler *compactionTargetReconciler) selectCompactionTargetCandidates(ctx context.Context, targets []*compactionTarget) []*SegmentInfo {
-	return reconciler.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		if !isSegmentHealthy(segment) {
-			return false
-		}
-		for _, target := range targets {
-			if target.ScopeIn(segment) {
-				return true
-			}
-		}
-		return false
-	}))
-}
-
-func groupCompactionTargetSegmentsByLabel(segments []*SegmentInfo) map[CompactionGroupLabel][]*SegmentInfo {
-	segmentsByLabel := make(map[CompactionGroupLabel][]*SegmentInfo)
-	for _, segment := range segments {
-		label := CompactionGroupLabel{
-			CollectionID: segment.GetCollectionID(),
-			PartitionID:  segment.GetPartitionID(),
-			Channel:      segment.GetInsertChannel(),
-		}
-		segmentsByLabel[label] = append(segmentsByLabel[label], segment)
-	}
-	return segmentsByLabel
-}
-
-func sortedCompactionTargetLabels(segmentsByLabel map[CompactionGroupLabel][]*SegmentInfo) []CompactionGroupLabel {
-	labels := make([]CompactionGroupLabel, 0, len(segmentsByLabel))
-	for label := range segmentsByLabel {
-		labels = append(labels, label)
-	}
-	sort.Slice(labels, func(i, j int) bool {
-		if labels[i].CollectionID != labels[j].CollectionID {
-			return labels[i].CollectionID < labels[j].CollectionID
-		}
-		if labels[i].PartitionID != labels[j].PartitionID {
-			return labels[i].PartitionID < labels[j].PartitionID
-		}
-		return labels[i].Channel < labels[j].Channel
-	})
-	return labels
 }
 
 func compactionTargetView(record *datapb.CompactionTarget, segment *SegmentInfo) CompactionView {

@@ -328,33 +328,28 @@ func (target *compactionTarget) Match(segment *SegmentInfo) bool {
 	return target.ScopeIn(segment) && target.rule != nil && target.rule.Match(segment)
 }
 
-func (target *compactionTarget) Satisfied(inScopeByLabel map[CompactionGroupLabel][]*SegmentInfo) bool {
+func (target *compactionTarget) SegmentFilters() []SegmentFilter {
+	return []SegmentFilter{SegmentFilterFunc(target.Match)}
+}
+
+func (target *compactionTarget) Satisfied(matches []*SegmentInfo) bool {
 	tail := target.GetTailLimit()
 	if tail < 0 {
 		return false
 	}
-	for _, segments := range inScopeByLabel {
-		matched := int64(0)
-		for _, segment := range segments {
-			if target.Match(segment) {
-				matched++
-			}
+	matchedByLabel := make(map[CompactionGroupLabel]int64)
+	for _, segment := range matches {
+		label := CompactionGroupLabel{
+			CollectionID: segment.GetCollectionID(),
+			PartitionID:  segment.GetPartitionID(),
+			Channel:      segment.GetInsertChannel(),
 		}
-		if matched > int64(tail) {
+		matchedByLabel[label]++
+		if matchedByLabel[label] > int64(tail) {
 			return false
 		}
 	}
 	return true
-}
-
-func (target *compactionTarget) SegmentsInScope(candidates []*SegmentInfo) []*SegmentInfo {
-	segments := make([]*SegmentInfo, 0, len(candidates))
-	for _, segment := range candidates {
-		if target.ScopeIn(segment) {
-			segments = append(segments, segment)
-		}
-	}
-	return segments
 }
 
 func allocCompactionTargetIdentity(ctx context.Context, alloc allocator.Allocator) (int64, uint64, error) {
