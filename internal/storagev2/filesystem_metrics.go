@@ -162,8 +162,13 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 
 	keys = append(keys, propRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
-	keys = append(keys, propMaxConnections)
-	values = append(values, strconv.FormatUint(uint64(storageConfig.GetMaxConnections()), 10))
+	// Absent when unset, so milvus-storage's registered default applies. See
+	// the same guard in packed.MakePropertiesFromStorageConfig for why an
+	// explicit "0" is not equivalent.
+	if maxConns := storageConfig.GetMaxConnections(); maxConns > 0 {
+		keys = append(keys, propMaxConnections)
+		values = append(values, strconv.FormatUint(uint64(maxConns), 10))
+	}
 
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
 		keys = append(keys, propTLSMinVersion)
