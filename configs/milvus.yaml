@@ -635,13 +635,13 @@ queryNode:
     nqMergeRatio: 16 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
+  standaloneMigrateDataTimeout: 10s # Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
   delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
-  standaloneMigrateDataTimeout: 3m # Duration string (e.g. 3m, 180s). In standalone mode, if no other active query node is available to accept migrated data within this duration during graceful stop, the node will stop waiting and proceed with shutdown.
   exprCache:
     enabled: false # enable expression result cache
     mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)

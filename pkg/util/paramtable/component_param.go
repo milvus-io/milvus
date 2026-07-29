@@ -4784,8 +4784,8 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.StandaloneMigrateDataTimeout = ParamItem{
 		Key:          "queryNode.standaloneMigrateDataTimeout",
 		Version:      "2.6.16",
-		DefaultValue: "3m",
-		Doc:          "Duration string (e.g. 3m, 180s). In standalone mode, if no other active query node is available to accept migrated data within this duration during graceful stop, the node will stop waiting and proceed with shutdown.",
+		DefaultValue: "10s",
+		Doc:          "Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.",
 		Export:       true,
 	}
 	p.StandaloneMigrateDataTimeout.Init(base.mgr)
