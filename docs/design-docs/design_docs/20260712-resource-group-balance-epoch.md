@@ -8,7 +8,7 @@
 - **Related Issues:** [milvus-io/milvus#51244](https://github.com/milvus-io/milvus/issues/51244)
 - **Related Pull Requests:** [milvus-io/milvus#49861](https://github.com/milvus-io/milvus/pull/49861), [milvus-io/milvus#50774](https://github.com/milvus-io/milvus/pull/50774)
 - **Implementation Baseline:** `milvus-io/milvus@8286b0e52c8332d9290a669caf19f75984c9503a`
-- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `e77f5fa584f941dd87e544f51457f56b34941b3b`
+- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `5fe5e6de3e5a8759e43a430fee02a1d6b0fc8862`
 - **Implementation Pull Request:** [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431)
 - **Released:** Not released
 
@@ -42,7 +42,7 @@ This MEP changes the orchestration and correctness boundary of balancing. It doe
 
 ## Implementation Status
 
-The MVP described by this MEP is implemented and reviewed on the Milvus feature branch, and is open for review as [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431). Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `e77f5fa584f941dd87e544f51457f56b34941b3b` contains 24 commits and changes 39 files, including 38 Go files. Its exact tree is `f0b4492eb07d9318d368c3b2b6d9fd553d62042a`. Active rollout remains disabled by default.
+The MVP described by this MEP is implemented and reviewed on the Milvus feature branch, and is open for review as [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431). Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `5fe5e6de3e5a8759e43a430fee02a1d6b0fc8862` contains 26 commits and changes 39 files, including 38 Go files. Its exact tree is `de34174ea561750bbb0cacd793e6f52596e8351b`. Active rollout remains disabled by default.
 
 The commit references in this section track a live branch and are refreshed when it is rebased or extended; the last refresh followed the rebase onto the baseline above. A reader who finds them behind the branch should treat that as ordinary drift rather than an inconsistency, and should trust the baseline and the pull request link over any individual SHA. Nothing in the design depends on these identifiers; they exist so a reviewer can map each design layer onto the commit that implements it.
 
@@ -64,6 +64,7 @@ The commit references in this section track a live branch and are refreshed when
 | Unused server snapshot-builder wiring removal | Review cleanup; manager-owned builder unchanged | `34cc194d01` | `server.go`, `server_test.go` |
 | Delta distribution publication atomicity | Rebase follow-up; delta route joins the shared publish lock | `edd4ad5900` | `meta/dist_manager.go`, `meta/dist_manager_test.go` |
 | Per-RG runtime retention invariant | Documentation only; no behavior change | `e77f5fa584` | `balance/epoch_manager.go` |
+| Review findings: terminal classification, pending snapshot copy, ctx threading, ordering | Review fixes; behavior change is scoped to reporting and to reverted work | `b4070fe9b2`, `5fe5e6de3e` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `task/scheduler.go` |
 
 Commit `d32d15e9bb` synchronizes only the dist controller test start loops so the validation fixture waits for both goroutines; it does not change production distribution behavior. Commit `51ee307e0d` replaces 21 branch-originated raw production errors with typed `merr` origins: 17 invariant/protocol failures use the `ErrServiceInternal` family, while four transient cases use retriable `ErrServiceUnavailable`; the unresolved-ambiguity path preserves the prior cause as an `errors.Join` sibling. Commit `34cc194d01` removes the unused server-owned snapshot-builder field, construction, and assertion while leaving the manager-owned builder unchanged. These review fixes refine diagnostics and construction ownership without changing the epoch protocol described by this MEP.
 
@@ -1002,7 +1003,15 @@ When the deadline expires:
 5. carry unresolved safe-settle tasks and their locks into the next snapshot; and
 6. normally finish as `TimedOut`.
 
-Terminal precedence is based on final observed state. If a deadline intent exists but every object reaches desired placement with no known failure or carry, reconciliation upgrades the result to `Completed`. Lost placement always forces `Degraded`. Otherwise unresolved carry retains `TimedOut`, while a superseding topology/target intent remains `Superseded`.
+Terminal precedence is based on final observed state, and the terminal state is a reporting label: it feeds the epoch result metric and `EpochAdvanceResult.State`, and no control flow branches on it. The order is:
+
+1. A superseding topology or target intent wins. The generation was invalidated from outside before its objects could be judged on their own, and the event that most often loses placement, a QueryNode leaving the resource group, is itself such an intent. Reporting those epochs as `Degraded` would make ordinary node churn indistinguishable from balancing that actually went wrong, and would erode the signal value of `Degraded` for real Grow and Reduce failures.
+2. Otherwise lost placement forces `Degraded`.
+3. Otherwise, with no terminal intent, a known failure or unresolved carry gives `Degraded` and a clean settle gives `Completed`.
+
+A deadline intent with nothing left unresolved is only an intent, so reconciliation reports what the objects actually settled on: `Completed` when no object failed definitively, `Degraded` when one did. Unresolved carry otherwise retains `TimedOut`.
+
+Choosing `Superseded` over `Degraded` in the first rule hides nothing. A lost object still sets the epoch's failure flag, still records object retry history toward quarantine, and still joins its error into the epoch result.
 
 An in-flight Grow is not followed by Reduce unless target presence is confirmed. Only a definitive terminal Reduce failure can be classified as a redundant copy. A cancelled task or raw post-dispatch deadline, unavailable, or lost-response Reduce remains ambiguous and carries its lock/reservation until later distribution proves the result. A pre-dispatch `RPCNotSentError` or explicit non-OK response remains definitive. The next epoch may plan unrelated objects while this object remains locked.
 
@@ -1357,7 +1366,7 @@ Mixed-version QueryNode deployments are supported because the first version of t
 
 ### Verified implementation evidence
 
-Verification targets final implementation commit `e77f5fa584f941dd87e544f51457f56b34941b3b`, tree `f0b4492eb07d9318d368c3b2b6d9fd553d62042a`, relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`. The range contains 24 commits, changes 39 files including 38 Go files, and passes the 24/24 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
+Verification targets final implementation commit `5fe5e6de3e5a8759e43a430fee02a1d6b0fc8862`, tree `de34174ea561750bbb0cacd793e6f52596e8351b`, relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`. The range contains 26 commits, changes 39 files including 38 Go files, and passes the 26/26 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
 
 Added-line scans over branch-modified non-test Go code and direct scans of `epoch_manager.go`, `epoch_snapshot.go`, and `epoch_wave.go` found zero production origins using `fmt.Errorf`, `errors.New`, `errors.Newf`, or `errors.Errorf`. The repository-configured scoped lint command reached the affected balance package and produced:
 
