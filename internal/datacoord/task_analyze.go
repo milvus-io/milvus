@@ -172,7 +172,11 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		if info == nil {
 			log.Warn("analyze task is processing, but segment is nil, fail the task",
 				zap.Int64("segmentID", segID))
-			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
+			if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFailed,
+				fmt.Sprintf("segmentInfo with ID: %d is nil", segID)); err != nil {
+				// State is left untouched, so the scheduler re-enqueues the task and retries.
+				log.Warn("failed to persist the failed state of the analyze task", zap.Error(err))
+			}
 			return
 		}
 		totalSegmentsRows += info.GetNumOfRows()
@@ -203,7 +207,10 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 						zap.Float64("raw data size", totalSegmentsRawDataSize),
 						zap.Int64("num clusters", numClusters),
 						zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					at.SetState(indexpb.JobState_JobStateFinished, "")
+					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
+						// State is left untouched, so the scheduler re-enqueues the task and retries.
+						log.Warn("failed to persist the finished state of the analyze task", zap.Error(err))
+					}
 					return
 				}
 				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {

@@ -1363,7 +1363,8 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 				// process canceled.
 				return
 			}
-			removePrefix := prefix + fmt.Sprintf("%d/", task.Version)
+			// analyze stats files are laid out as analyze_stats/{taskID}/{version}/...
+			removePrefix := prefix + fmt.Sprintf("%d/%d/", taskID, i)
 			if err := gc.option.cli.RemoveWithPrefix(ctx, removePrefix); err != nil {
 				log.Warn("garbageCollector recycleUnusedAnalyzeFiles remove files with prefix failed",
 					zap.Int64("taskID", taskID), zap.String("removePrefix", removePrefix))
