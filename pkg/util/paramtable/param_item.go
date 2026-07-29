@@ -19,7 +19,7 @@ package paramtable
 import (
 	"context"
 	"fmt"
-	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -434,34 +434,29 @@ func getAsFloat(v string) float64 {
 
 func getAsSize(value string) int64 {
 	number, multiplier := splitSizeUnit(value)
+	const (
+		maxInt64 = int64(^uint64(0) >> 1)
+		minInt64 = -maxInt64 - 1
+	)
 	integer, err := strconv.ParseInt(number, 10, 64)
 	if err == nil {
-		const (
-			maxInt64 = int64(^uint64(0) >> 1)
-			minInt64 = -maxInt64 - 1
-		)
 		if integer > maxInt64/multiplier || integer < minInt64/multiplier {
 			return 0
 		}
 		return integer * multiplier
 	}
-	if numErr, ok := err.(*strconv.NumError); !ok || numErr.Err != strconv.ErrSyntax {
+	if strings.Contains(number, "/") {
 		return 0
 	}
-
-	decimal, err := strconv.ParseFloat(number, 64)
-	if err != nil || math.IsNaN(decimal) || math.IsInf(decimal, 0) {
+	decimal, ok := new(big.Rat).SetString(number)
+	if !ok {
 		return 0
 	}
-	size := decimal * float64(multiplier)
-	const (
-		minInt64Float = -float64(1 << 63)
-		maxInt64Float = float64(1 << 63)
-	)
-	if math.IsInf(size, 0) || size < minInt64Float || size >= maxInt64Float {
+	size := decimal.Mul(decimal, big.NewRat(multiplier, 1))
+	if size.Cmp(big.NewRat(minInt64, 1)) < 0 || size.Cmp(big.NewRat(maxInt64, 1)) > 0 {
 		return 0
 	}
-	return int64(size)
+	return new(big.Int).Quo(size.Num(), size.Denom()).Int64()
 }
 
 func splitSizeUnit(value string) (string, int64) {

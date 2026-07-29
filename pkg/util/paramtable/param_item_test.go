@@ -133,6 +133,7 @@ func TestParamItemGetAsSize(t *testing.T) {
 		{name: "decimal kilobytes", value: "1.5KB", expected: 1536},
 		{name: "decimal megabytes", value: "1.25MB", expected: 1280 * 1024},
 		{name: "decimal gigabytes", value: "0.5GB", expected: 512 * 1024 * 1024},
+		{name: "scientific notation", value: "1.5e3KB", expected: 1500 * 1024},
 		{name: "truncate fractional bytes", value: "0.1KB", expected: 102},
 		{name: "case insensitive unit", value: "2Mb", expected: 2 * 1024 * 1024},
 		{name: "negative decimal", value: "-1.5KB", expected: -1536},
@@ -142,6 +143,9 @@ func TestParamItemGetAsSize(t *testing.T) {
 		{name: "decimal overflow", value: "1e100GB", expected: 0},
 		{name: "integer multiplication overflow", value: "9223372036854775807KB", expected: 0},
 		{name: "negative integer underflow", value: "-9223372036854775809", expected: 0},
+		{name: "positive decimal overflow", value: "9223372036854775808.0", expected: 0},
+		{name: "negative decimal underflow", value: "-9223372036854775809.0", expected: 0},
+		{name: "negative decimal unit underflow", value: "-9007199254740992.1KB", expected: 0},
 		{name: "max int64 bytes", value: "9223372036854775807", expected: 9223372036854775807},
 	}
 
