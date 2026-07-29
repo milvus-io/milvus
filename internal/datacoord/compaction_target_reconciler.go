@@ -60,7 +60,11 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 
 	matchCandidateFilter := SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isNormalManualCompactionMatchCandidate(reconciler.meta, segment)
+		if !isNormalManualCompactionMatchCandidate(reconciler.meta, segment) {
+			return false
+		}
+		collection := reconciler.meta.GetCollection(segment.GetCollectionID())
+		return collection == nil || !collection.IsExternal()
 	})
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
 	for _, target := range targets {

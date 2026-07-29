@@ -350,6 +350,34 @@ func TestCompactionTargetReconcilerGlobalTargetContinuesUnblockedCollections(t *
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
+func TestCompactionTargetReconcilerGlobalTargetExcludesExternalCollections(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:   100,
+		Intent:     datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS: 200,
+		TailLimit:  0,
+		State:      datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+	)
+	meta.collections.Insert(1, &collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, ExternalField: "external_vector"},
+		}},
+	})
+
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, events[TriggerTypeTarget])
+	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
 func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) {
 	enableCompactionTargetReconciler(t)
 	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "true")
