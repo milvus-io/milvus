@@ -234,6 +234,16 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	defer broadcaster.Close()
 
+	// Re-check the replication state now that the broadcast holds the shared-cluster
+	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
+	// change the replication topology while this lock is held. The pre-lock check in
+	// validateImportRequest can go stale during the sizing I/O above: if CDC was enabled
+	// in that window, an auto_commit / non-enableInReplicatingCluster import would
+	// otherwise be broadcast into a replicating topology and diverge.
+	if err := s.validateImportReplication(ctx, options); err != nil {
+		return merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+	}
+
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return err
