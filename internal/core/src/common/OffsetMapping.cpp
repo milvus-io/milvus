@@ -1,15 +1,50 @@
 #include "common/OffsetMapping.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
+#include <limits>
 #include <mutex>
 #include <shared_mutex>
 #include <utility>
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include "common/EasyAssert.h"
-#include "storage/MmapManager.h"
 
 namespace milvus {
 namespace {
+
+constexpr const char* O2I_MMAP_FILE = "o2i";
+constexpr const char* I2O_MMAP_FILE = "i2o";
+
+class FileDescriptorGuard {
+ public:
+    explicit FileDescriptorGuard(int fd) : fd_(fd) {
+    }
+
+    ~FileDescriptorGuard() {
+        if (fd_ >= 0) {
+            close(fd_);
+        }
+    }
+
+    int
+    Get() const {
+        return fd_;
+    }
+
+ private:
+    int fd_;
+};
+
+std::string
+GetMmapFilePath(const std::string& mmap_dir_path, const char* filename) {
+    return (std::filesystem::path(mmap_dir_path) / filename).string();
+}
 
 bool
 ShouldSkipBitsetTransform(const BitsetView& bitset,
@@ -34,30 +69,70 @@ ShouldSkipBitsetTransform(const BitsetView& bitset,
 
 }  // namespace
 
+OffsetMappingArray::~OffsetMappingArray() {
+    Clear();
+}
+
 void
-OffsetMappingArray::Resize(
-    size_t size,
-    int32_t value,
-    bool enable_mmap,
-    const storage::MmapChunkManagerPtr& mmap_chunk_manager,
-    const storage::MmapChunkDescriptorPtr& mmap_descriptor) {
+OffsetMappingArray::Resize(size_t size,
+                           int32_t value,
+                           bool enable_mmap,
+                           std::string filepath) {
     Clear();
     if (size == 0) {
         return;
     }
 
     if (enable_mmap) {
-        AssertInfo(mmap_chunk_manager != nullptr,
-                   "offset mapping mmap chunk manager is null");
-        AssertInfo(mmap_descriptor != nullptr,
-                   "offset mapping mmap descriptor is null");
-        mmap_chunk_manager_ = mmap_chunk_manager;
-        mmap_descriptor_ = mmap_descriptor;
-        mmap_data_ = static_cast<int32_t*>(mmap_chunk_manager_->Allocate(
-            mmap_descriptor_, sizeof(int32_t) * size));
+        AssertInfo(!filepath.empty(), "offset mapping mmap filepath is empty");
+        AssertInfo(size <= std::numeric_limits<size_t>::max() / sizeof(int32_t),
+                   "offset mapping mmap buffer is too large");
+
+        const auto mmap_size = sizeof(int32_t) * size;
+        std::filesystem::create_directories(
+            std::filesystem::path(filepath).parent_path());
+
+        const int fd = open(filepath.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+        if (fd < 0) {
+            ThrowInfo(MmapError,
+                      "failed to create offset mapping mmap file {}: {}",
+                      filepath,
+                      std::strerror(errno));
+        }
+        FileDescriptorGuard fd_guard(fd);
+
+        if (ftruncate(fd_guard.Get(), mmap_size) != 0) {
+            const auto err = errno;
+            unlink(filepath.c_str());
+            ThrowInfo(MmapError,
+                      "failed to resize offset mapping mmap file {} to {} "
+                      "bytes: {}",
+                      filepath,
+                      mmap_size,
+                      std::strerror(err));
+        }
+
+        auto* data = mmap(nullptr,
+                          mmap_size,
+                          PROT_READ | PROT_WRITE,
+                          MAP_SHARED,
+                          fd_guard.Get(),
+                          0);
+        if (data == MAP_FAILED) {
+            const auto err = errno;
+            unlink(filepath.c_str());
+            ThrowInfo(MmapError,
+                      "failed to mmap offset mapping file {}: {}",
+                      filepath,
+                      std::strerror(err));
+        }
+
+        mmap_data_ = static_cast<int32_t*>(data);
+        mmap_size_ = mmap_size;
+        mmap_filepath_ = std::move(filepath);
         AssertInfo(mmap_data_ != nullptr,
                    "failed to allocate offset mapping mmap buffer, size: {}",
-                   sizeof(int32_t) * size);
+                   mmap_size_);
         size_ = size;
         std::fill_n(mmap_data_, size_, value);
         return;
@@ -69,11 +144,17 @@ OffsetMappingArray::Resize(
 
 void
 OffsetMappingArray::Clear() {
+    if (mmap_data_ != nullptr) {
+        munmap(mmap_data_, mmap_size_);
+    }
+    if (!mmap_filepath_.empty()) {
+        unlink(mmap_filepath_.c_str());
+    }
     size_ = 0;
     vec_.clear();
     mmap_data_ = nullptr;
-    mmap_descriptor_ = nullptr;
-    mmap_chunk_manager_ = nullptr;
+    mmap_size_ = 0;
+    mmap_filepath_.clear();
 }
 
 int64_t
@@ -184,47 +265,31 @@ SealedOffsetMapping::Build(const bool* valid_data,
     const int64_t required_size = start_logical + total_count;
     const int64_t required_p2l_size = start_physical + valid_count;
 
-    auto build_options = options;
     const bool need_o2i_mmap =
-        !use_o2i_map_ && build_options.enable_mmap_o2i_map && required_size > 0;
-    const bool need_i2o_mmap = !use_i2o_map_ &&
-                               build_options.enable_mmap_i2o_map &&
-                               required_p2l_size > 0;
+        !use_o2i_map_ && options.enable_mmap_o2i_map && required_size > 0;
+    const bool need_i2o_mmap =
+        !use_i2o_map_ && options.enable_mmap_i2o_map && required_p2l_size > 0;
     if (need_i2o_mmap || need_o2i_mmap) {
-        if (build_options.mmap_chunk_manager == nullptr) {
-            build_options.mmap_chunk_manager =
-                storage::MmapManager::GetInstance().GetMmapChunkManager();
-        }
-    }
-    if (need_o2i_mmap && build_options.o2i_mmap_descriptor == nullptr) {
-        build_options.o2i_mmap_descriptor =
-            build_options.mmap_chunk_manager->Register();
-    }
-    if (need_i2o_mmap && build_options.i2o_mmap_descriptor == nullptr) {
-        build_options.i2o_mmap_descriptor =
-            build_options.mmap_chunk_manager->Register();
-    }
-    if (need_i2o_mmap && need_o2i_mmap) {
-        AssertInfo(build_options.i2o_mmap_descriptor !=
-                       build_options.o2i_mmap_descriptor,
-                   "offset mapping i2o and o2i mmap descriptors must be "
-                   "different");
+        AssertInfo(!options.mmap_dir_path.empty(),
+                   "offset mapping mmap dir path is empty");
     }
 
     if (!use_o2i_map_) {
         l2p_vec_.Resize(required_size,
                         -1,
-                        build_options.enable_mmap_o2i_map,
-                        build_options.mmap_chunk_manager,
-                        build_options.o2i_mmap_descriptor);
+                        options.enable_mmap_o2i_map,
+                        need_o2i_mmap ? GetMmapFilePath(options.mmap_dir_path,
+                                                        O2I_MMAP_FILE)
+                                      : "");
     }
 
     if (!use_i2o_map_) {
         p2l_vec_.Resize(required_p2l_size,
                         -1,
-                        build_options.enable_mmap_i2o_map,
-                        build_options.mmap_chunk_manager,
-                        build_options.i2o_mmap_descriptor);
+                        options.enable_mmap_i2o_map,
+                        need_i2o_mmap ? GetMmapFilePath(options.mmap_dir_path,
+                                                        I2O_MMAP_FILE)
+                                      : "");
     }
 
     int64_t physical_idx = start_physical;

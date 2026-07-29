@@ -61,13 +61,13 @@ MakeMmapChunkManager(const std::filesystem::path& mmap_root) {
 }
 
 OffsetMappingBuildOptions
-MmapOptions(const storage::MmapChunkManagerPtr& mmap_chunk_manager,
+MmapOptions(const std::filesystem::path& mmap_dir,
             bool enable_i2o = true,
             bool enable_o2i = true) {
     OffsetMappingBuildOptions options;
     options.enable_mmap_i2o_map = enable_i2o;
     options.enable_mmap_o2i_map = enable_o2i;
-    options.mmap_chunk_manager = mmap_chunk_manager;
+    options.mmap_dir_path = mmap_dir.string();
     return options;
 }
 
@@ -281,11 +281,11 @@ TEST(OffsetMapping, BuildBasicVecMode) {
 
     {
         const auto mmap_root = MakeMmapRoot("basic_both");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       5,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, true, true, false, false);
         ExpectMmapBlockFiles(mmap_root,
@@ -300,11 +300,11 @@ TEST(OffsetMapping, BuildBasicVecModeMapsDirectionsIndependently) {
 
     {
         const auto mmap_root = MakeMmapRoot("basic_i2o");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       5,
-                      MmapOptions(mmap_chunk_manager, true, false));
+                      MmapOptions(mmap_dir, true, false));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, true, false, false, false);
         ExpectMmapBlockFiles(mmap_root, {3 * sizeof(int32_t)});
@@ -312,11 +312,11 @@ TEST(OffsetMapping, BuildBasicVecModeMapsDirectionsIndependently) {
 
     {
         const auto mmap_root = MakeMmapRoot("basic_o2i");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       5,
-                      MmapOptions(mmap_chunk_manager, false, true));
+                      MmapOptions(mmap_dir, false, true));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, false, true, false, false);
         ExpectMmapBlockFiles(mmap_root, {5 * sizeof(int32_t)});
@@ -341,11 +341,11 @@ TEST(OffsetMapping, BuildMapModeOnSparse) {
 
     {
         const auto mmap_root = MakeMmapRoot("sparse_both");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       100,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, true, true, false, false);
         ExpectMmapBlockFiles(mmap_root,
@@ -354,11 +354,11 @@ TEST(OffsetMapping, BuildMapModeOnSparse) {
 
     {
         const auto mmap_root = MakeMmapRoot("sparse_i2o");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       100,
-                      MmapOptions(mmap_chunk_manager, true, false));
+                      MmapOptions(mmap_dir, true, false));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, true, false, false, true);
         ExpectMmapBlockFiles(mmap_root, {2 * sizeof(int32_t)});
@@ -366,11 +366,11 @@ TEST(OffsetMapping, BuildMapModeOnSparse) {
 
     {
         const auto mmap_root = MakeMmapRoot("sparse_o2i");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       100,
-                      MmapOptions(mmap_chunk_manager, false, true));
+                      MmapOptions(mmap_dir, false, true));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, false, true, true, false);
         ExpectMmapBlockFiles(mmap_root, {100 * sizeof(int32_t)});
@@ -390,11 +390,11 @@ TEST(OffsetMapping, BuildAllValid) {
 
     {
         const auto mmap_root = MakeMmapRoot("all_valid");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       4,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         ExpectMappingValues(mapping, expected, expected);
         ExpectStorageMode(mapping, true, true, false, false);
         ExpectMmapBlockFiles(mmap_root,
@@ -417,11 +417,11 @@ TEST(OffsetMapping, BuildAllNull) {
 
     {
         const auto mmap_root = MakeMmapRoot("all_null");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       4,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         ExpectMappingValues(mapping, expected_l2p, expected_p2l);
         ExpectStorageMode(mapping, false, true, false, false);
         EXPECT_EQ(mapping.GetLogicalOffset(0), -1);
@@ -440,11 +440,11 @@ TEST(OffsetMapping, TransformOperationsMatchBuildMode) {
 
     {
         const auto mmap_root = MakeMmapRoot("transform");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       5,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         ExpectTransformOperations(mapping);
     }
 }
@@ -462,17 +462,17 @@ TEST(OffsetMapping, BuildNoopOnNullOrZero) {
 
     {
         const auto mmap_root = MakeMmapRoot("noop");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
         auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
 
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       5,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         EXPECT_TRUE(mapping.IsEnabled());
         EXPECT_TRUE(mapping.IsMmap());
 
-        mapping.Build(nullptr, 100, MmapOptions(mmap_chunk_manager));
+        mapping.Build(nullptr, 100, MmapOptions(mmap_dir));
         EXPECT_FALSE(mapping.IsEnabled());
         EXPECT_FALSE(mapping.IsMmap());
         EXPECT_FALSE(mapping.IsUsingMap());
@@ -480,7 +480,7 @@ TEST(OffsetMapping, BuildNoopOnNullOrZero) {
 
         mapping.Build(reinterpret_cast<const bool*>(valid.data()),
                       0,
-                      MmapOptions(mmap_chunk_manager));
+                      MmapOptions(mmap_dir));
         EXPECT_FALSE(mapping.IsEnabled());
         EXPECT_FALSE(mapping.IsMmap());
         EXPECT_FALSE(mapping.IsUsingMap());
@@ -508,11 +508,10 @@ TEST(OffsetMapping, BuildTwiceResetsState) {
 
     {
         const auto mmap_root = MakeMmapRoot("build_twice");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(v1.data()),
-                      5,
-                      MmapOptions(mmap_chunk_manager));
+        mapping.Build(
+            reinterpret_cast<const bool*>(v1.data()), 5, MmapOptions(mmap_dir));
         EXPECT_TRUE(mapping.IsMmap());
 
         mapping.Build(reinterpret_cast<const bool*>(v2.data()), 3);
@@ -562,6 +561,31 @@ TEST(OffsetMapping, OffsetMappingMmapDirUsesDedicatedIndexSubdirectory) {
               std::filesystem::path(local_index_prefix));
 }
 
+TEST(OffsetMapping, FileBackedMmapDoesNotResetMmapChunkManagerAccounting) {
+    const auto manager_root = MakeMmapRoot("accounting_manager");
+    auto mmap_chunk_manager = MakeMmapChunkManager(manager_root);
+    auto descriptor = mmap_chunk_manager->Register();
+    mmap_chunk_manager->Allocate(descriptor, sizeof(int32_t));
+    const auto allocated_size = mmap_chunk_manager->GetDiskAllocSize();
+    ASSERT_GT(allocated_size, 0);
+
+    auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
+    const auto mmap_root = MakeMmapRoot("accounting_mapping");
+    auto mmap_dir = mmap_root;
+    {
+        SealedOffsetMapping mapping;
+        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
+                      5,
+                      MmapOptions(mmap_dir));
+        EXPECT_TRUE(mapping.IsMmap());
+        ExpectMmapBlockFiles(mmap_root,
+                             {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+        EXPECT_EQ(mmap_chunk_manager->GetDiskAllocSize(), allocated_size);
+    }
+
+    EXPECT_EQ(mmap_chunk_manager->GetDiskAllocSize(), allocated_size);
+}
+
 TEST(OffsetMapping, NeedOffsetMappingMmapMatchesDirectionSizes) {
     OffsetMappingBuildOptions options;
     EXPECT_FALSE(index::NeedOffsetMappingMmap(options, 10, 5));
@@ -593,10 +617,10 @@ TEST(OffsetMapping, ValidDataHelpersPreserveMappingValuesWithMmapOptions) {
 
     {
         const auto mmap_root = MakeMmapRoot("bitmap_helper");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         TestVectorIndex vector_index;
         index::BuildValidDataFromBitmap(
-            &vector_index, 5, bitmap.data(), MmapOptions(mmap_chunk_manager));
+            &vector_index, 5, bitmap.data(), MmapOptions(mmap_dir));
         const auto* mapping = dynamic_cast<const SealedOffsetMapping*>(
             &vector_index.GetOffsetMapping());
         ASSERT_NE(mapping, nullptr);
@@ -627,10 +651,10 @@ TEST(OffsetMapping, LoadValidDataFromBinarySetUsesProvidedMmapOptions) {
 
     {
         const auto mmap_root = MakeMmapRoot("binary_set_helper");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         TestVectorIndex vector_index;
         ASSERT_TRUE(index::LoadValidDataFromBinarySet(
-            binary_set, &vector_index, MmapOptions(mmap_chunk_manager)));
+            binary_set, &vector_index, MmapOptions(mmap_dir)));
         const auto* mapping = dynamic_cast<const SealedOffsetMapping*>(
             &vector_index.GetOffsetMapping());
         ASSERT_NE(mapping, nullptr);
@@ -702,11 +726,10 @@ TEST(OffsetMapping, IsValidMatchesPhysicalOffsetSign) {
 
     {
         const auto mmap_root = MakeMmapRoot("is_valid");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(v.data()),
-                      4,
-                      MmapOptions(mmap_chunk_manager));
+        mapping.Build(
+            reinterpret_cast<const bool*>(v.data()), 4, MmapOptions(mmap_dir));
         EXPECT_TRUE(mapping.IsValid(0));
         EXPECT_FALSE(mapping.IsValid(1));
         EXPECT_TRUE(mapping.IsValid(2));
@@ -728,11 +751,10 @@ TEST(OffsetMapping, OutOfBoundsReturnsMinusOne) {
 
     {
         const auto mmap_root = MakeMmapRoot("out_of_bounds");
-        auto mmap_chunk_manager = MakeMmapChunkManager(mmap_root);
+        auto mmap_dir = mmap_root;
         SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(v.data()),
-                      3,
-                      MmapOptions(mmap_chunk_manager));
+        mapping.Build(
+            reinterpret_cast<const bool*>(v.data()), 3, MmapOptions(mmap_dir));
         EXPECT_EQ(mapping.GetPhysicalOffset(99), -1);
         EXPECT_EQ(mapping.GetLogicalOffset(99), -1);
     }

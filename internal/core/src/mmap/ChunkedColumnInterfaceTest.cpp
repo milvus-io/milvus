@@ -32,7 +32,6 @@
 #include "common/GroupChunk.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnGroup.h"
-#include "storage/MmapChunkManager.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 namespace milvus {
@@ -50,12 +49,6 @@ MakeMmapRoot(const std::string& test_name) {
            ("milvus_chunked_column_" + test_name + "_" +
             std::to_string(
                 std::chrono::steady_clock::now().time_since_epoch().count()));
-}
-
-storage::MmapChunkManagerPtr
-MakeMmapChunkManager(const std::filesystem::path& mmap_root) {
-    return std::make_shared<storage::MmapChunkManager>(
-        mmap_root.string(), 64 * 1024 * 1024, 4 * 1024);
 }
 
 struct ColumnFixture {
@@ -383,11 +376,8 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
         OffsetMappingBuildOptions options;
         options.enable_mmap_i2o_map = enable_mmap;
         options.enable_mmap_o2i_map = enable_mmap;
-        storage::MmapChunkManagerPtr mmap_chunk_manager;
         if (enable_mmap) {
-            mmap_chunk_manager =
-                MakeMmapChunkManager(MakeMmapRoot("valid_row_ids"));
-            options.mmap_chunk_manager = mmap_chunk_manager;
+            options.mmap_dir_path = MakeMmapRoot("valid_row_ids").string();
         }
         fx.column->BuildValidRowIds(nullptr, options);
         EXPECT_EQ(fx.fetched->size(), 3u);
