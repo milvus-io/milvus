@@ -7,8 +7,8 @@
 - **Component:** Coordinator
 - **Related Issues:** [milvus-io/milvus#51244](https://github.com/milvus-io/milvus/issues/51244)
 - **Related Pull Requests:** [milvus-io/milvus#49861](https://github.com/milvus-io/milvus/pull/49861), [milvus-io/milvus#50774](https://github.com/milvus-io/milvus/pull/50774)
-- **Implementation Baseline:** `milvus-io/milvus@8286b0e52c8332d9290a669caf19f75984c9503a`
-- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `5fe5e6de3e5a8759e43a430fee02a1d6b0fc8862`
+- **Implementation Baseline:** `milvus-io/milvus@55b6f546176f7367f8a251559780a3ffe79cad05`
+- **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `53d89e00661cb07a79f1a87a0f643712b25e2a80`
 - **Implementation Pull Request:** [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431)
 - **Released:** Not released
 
@@ -42,31 +42,31 @@ This MEP changes the orchestration and correctness boundary of balancing. It doe
 
 ## Implementation Status
 
-The MVP described by this MEP is implemented and reviewed on the Milvus feature branch, and is open for review as [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431). Relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`, final implementation commit `5fe5e6de3e5a8759e43a430fee02a1d6b0fc8862` contains 26 commits and changes 39 files, including 38 Go files. Its exact tree is `de34174ea561750bbb0cacd793e6f52596e8351b`. Active rollout remains disabled by default.
+The MVP described by this MEP is implemented and reviewed on the Milvus feature branch, and is open for review as [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431). Relative to baseline `55b6f546176f7367f8a251559780a3ffe79cad05`, final implementation commit `53d89e00661cb07a79f1a87a0f643712b25e2a80` contains 26 commits and changes 39 files, including 38 Go files. Its exact tree is `82342c5e45183596651541f60e7e1c96e08d0774`. Active rollout remains disabled by default.
 
 The commit references in this section track a live branch and are refreshed when it is rebased or extended; the last refresh followed the rebase onto the baseline above. A reader who finds them behind the branch should treat that as ordinary drift rather than an inconsistency, and should trust the baseline and the pull request link over any individual SHA. Nothing in the design depends on these identifiers; they exist so a reviewer can map each design layer onto the commit that implements it.
 
 | Layer | Status | Milvus commits | Main files |
 |---|---|---|---|
-| Task completion and distribution-aware pending effects | Implemented and reviewed | `1e5e1f380e` | `task/task.go`, `task/scheduler.go` |
-| Typed and generation-aware held admission | Implemented and reviewed | `92f97622a4`, `c25d443269` | `task/balance_admission.go`, `task/scheduler.go` |
-| Atomic distribution publication and immutable RG snapshots | Implemented and reviewed | `316b33aacb` through `9ed6095576` | `meta/dist_manager.go`, `dist/dist_handler.go`, `balance/epoch_types.go`, `balance/epoch_snapshot.go` |
-| Hard wave budgets, immutable reservations, and projected placement | Implemented and reviewed | `1b442030ed`, `bc938a3450` | `balance/epoch_wave.go` |
-| Snapshot-only ScoreBased and ChannelLevel policy | Implemented and reviewed | `eced826c86` | `balance/epoch_score_policy.go`, `balance/balancer_factory.go` |
-| Tick-driven per-RG epoch state machine | Implemented and reviewed | `7cd947b9db` through `460bdd6c1b` | `balance/epoch_manager.go` |
-| `BalanceChecker` integration | Implemented and reviewed | `b536e110ae` | `checkers/balance_checker.go` |
-| Dynamic rollout configuration | Implemented and reviewed | `603aaa9fd1` | `configs/milvus.yaml`, `pkg/util/paramtable/component_param.go` |
-| Metrics, shadow mode, and retained-state observation | Implemented and reviewed | `4955e35daf`, `0fb3cd75c9` | `pkg/metrics/querycoord_metrics.go`, checker and manager files |
-| #51244 convergence and failure fixtures | Implemented and reviewed | `912bcffa96` | `balance/epoch_manager_test.go` |
-| Ambiguous balance RPC outcome preservation | Implemented and reviewed | `de43e4a9d2` | `session/rpc_outcome.go`, `session/cluster.go`, `task/execution_outcome.go`, `task/executor.go`, `balance/epoch_manager.go` |
-| Dist controller start-loop synchronization | Test-only validation stabilization | `d32d15e9bb` | `dist/dist_controller_test.go` |
-| Typed balance-epoch error classification | Review fix; no new control-loop architecture | `51ee307e0d` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `epoch_wave.go`, and focused tests |
-| Unused server snapshot-builder wiring removal | Review cleanup; manager-owned builder unchanged | `34cc194d01` | `server.go`, `server_test.go` |
-| Delta distribution publication atomicity | Rebase follow-up; delta route joins the shared publish lock | `edd4ad5900` | `meta/dist_manager.go`, `meta/dist_manager_test.go` |
-| Per-RG runtime retention invariant | Documentation only; no behavior change | `e77f5fa584` | `balance/epoch_manager.go` |
-| Review findings: terminal classification, pending snapshot copy, ctx threading, ordering | Review fixes; behavior change is scoped to reporting and to reverted work | `b4070fe9b2`, `5fe5e6de3e` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `task/scheduler.go` |
+| Task completion and distribution-aware pending effects | Implemented and reviewed | `de9f29b903` | `task/task.go`, `task/scheduler.go` |
+| Typed and generation-aware held admission | Implemented and reviewed | `58c98ddafe`, `2655a7b57d` | `task/balance_admission.go`, `task/scheduler.go` |
+| Atomic distribution publication and immutable RG snapshots | Implemented and reviewed | `633b64f2fd` through `314aae3c9b` | `meta/dist_manager.go`, `dist/dist_handler.go`, `balance/epoch_types.go`, `balance/epoch_snapshot.go` |
+| Hard wave budgets, immutable reservations, and projected placement | Implemented and reviewed | `0fdce42b99`, `ffecb35647` | `balance/epoch_wave.go` |
+| Snapshot-only ScoreBased and ChannelLevel policy | Implemented and reviewed | `f3af03f5c5` | `balance/epoch_score_policy.go`, `balance/balancer_factory.go` |
+| Tick-driven per-RG epoch state machine | Implemented and reviewed | `25318da81b` through `61713214c0` | `balance/epoch_manager.go` |
+| `BalanceChecker` integration | Implemented and reviewed | `acfe3e44e6` | `checkers/balance_checker.go` |
+| Dynamic rollout configuration | Implemented and reviewed | `7d11b2a538` | `configs/milvus.yaml`, `pkg/util/paramtable/component_param.go` |
+| Metrics, shadow mode, and retained-state observation | Implemented and reviewed | `9efe9b3c06`, `d34cae0267` | `pkg/metrics/querycoord_metrics.go`, checker and manager files |
+| #51244 convergence and failure fixtures | Implemented and reviewed | `4543e1f772` | `balance/epoch_manager_test.go` |
+| Ambiguous balance RPC outcome preservation | Implemented and reviewed | `21e3cc610d` | `session/rpc_outcome.go`, `session/cluster.go`, `task/execution_outcome.go`, `task/executor.go`, `balance/epoch_manager.go` |
+| Dist controller start-loop synchronization | Test-only validation stabilization | `d7d1c49296` | `dist/dist_controller_test.go` |
+| Typed balance-epoch error classification | Review fix; no new control-loop architecture | `2d222dface` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `epoch_wave.go`, and focused tests |
+| Unused server snapshot-builder wiring removal | Review cleanup; manager-owned builder unchanged | `1754701ad7` | `server.go`, `server_test.go` |
+| Delta distribution publication atomicity | Rebase follow-up; delta route joins the shared publish lock | `00dd17e1cd` | `meta/dist_manager.go`, `meta/dist_manager_test.go` |
+| Per-RG runtime retention invariant | Documentation only; no behavior change | `99b5f4a4cd` | `balance/epoch_manager.go` |
+| Review findings: terminal classification, pending snapshot copy, ctx threading, ordering | Review fixes; behavior change is scoped to reporting and to reverted work | `24df6a7549`, `53d89e0066` | `balance/epoch_manager.go`, `epoch_snapshot.go`, `task/scheduler.go` |
 
-Commit `d32d15e9bb` synchronizes only the dist controller test start loops so the validation fixture waits for both goroutines; it does not change production distribution behavior. Commit `51ee307e0d` replaces 21 branch-originated raw production errors with typed `merr` origins: 17 invariant/protocol failures use the `ErrServiceInternal` family, while four transient cases use retriable `ErrServiceUnavailable`; the unresolved-ambiguity path preserves the prior cause as an `errors.Join` sibling. Commit `34cc194d01` removes the unused server-owned snapshot-builder field, construction, and assertion while leaving the manager-owned builder unchanged. These review fixes refine diagnostics and construction ownership without changing the epoch protocol described by this MEP.
+Commit `d7d1c49296` synchronizes only the dist controller test start loops so the validation fixture waits for both goroutines; it does not change production distribution behavior. Commit `2d222dface` replaces 21 branch-originated raw production errors with typed `merr` origins: 17 invariant/protocol failures use the `ErrServiceInternal` family, while four transient cases use retriable `ErrServiceUnavailable`; the unresolved-ambiguity path preserves the prior cause as an `errors.Join` sibling. Commit `1754701ad7` removes the unused server-owned snapshot-builder field, construction, and assertion while leaving the manager-owned builder unchanged. These review fixes refine diagnostics and construction ownership without changing the epoch protocol described by this MEP.
 
 The final focused, race, and complete `internal/querycoordv2/...` behavioral runs are green on the approved `mini` macOS development host with the repository native-library RPATH and isolated temporary etcd. The final re-review reported zero Critical, Important, or Minor findings. Branch-added raw-constructor scans found zero production origins, and the scoped balance-package ruleguard run reported `rawmerrerror: 0`. Repository-wide `make static-check` is not claimed green: it stops during core-package typechecking, before ruleguard, because this checkout lacks the unchanged generated package `cmd/tools/migration/legacy/legacypb`.
 
@@ -74,7 +74,7 @@ The final focused, race, and complete `internal/querycoordv2/...` behavioral run
 
 ### Current behavior
 
-The implementation was rebased from Milvus master commit `8286b0e52c8332d9290a669caf19f75984c9503a`:
+The implementation was rebased from Milvus master commit `55b6f546176f7367f8a251559780a3ffe79cad05`:
 
 - `BalanceChecker` periodically selects collections and replicas, invokes the configured balancer, converts plans to tasks, and calls `Scheduler.Add` directly.
 - Stopping balance has priority over normal balance.
@@ -1366,7 +1366,7 @@ Mixed-version QueryNode deployments are supported because the first version of t
 
 ### Verified implementation evidence
 
-Verification targets final implementation commit `5fe5e6de3e5a8759e43a430fee02a1d6b0fc8862`, tree `de34174ea561750bbb0cacd793e6f52596e8351b`, relative to baseline `8286b0e52c8332d9290a669caf19f75984c9503a`. The range contains 26 commits, changes 39 files including 38 Go files, and passes the 26/26 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
+Verification targets final implementation commit `53d89e00661cb07a79f1a87a0f643712b25e2a80`, tree `82342c5e45183596651541f60e7e1c96e08d0774`, relative to baseline `55b6f546176f7367f8a251559780a3ffe79cad05`. The range contains 26 commits, changes 39 files including 38 Go files, and passes the 26/26 final-trailer DCO audit. NUL-safe `gofmt -d` over the changed Go files emitted no diff, and `git diff --check` exited `0`.
 
 Added-line scans over branch-modified non-test Go code and direct scans of `epoch_manager.go`, `epoch_snapshot.go`, and `epoch_wave.go` found zero production origins using `fmt.Errorf`, `errors.New`, `errors.Newf`, or `errors.Errorf`. The repository-configured scoped lint command reached the affected balance package and produced:
 
@@ -1615,15 +1615,15 @@ Focused task, balance, checker, dist, configuration, and metric tests ran first 
 
 ```bash
 git diff --name-only -z \
-  8286b0e52c8332d9290a669caf19f75984c9503a...HEAD -- '*.go' |
+  55b6f546176f7367f8a251559780a3ffe79cad05...HEAD -- '*.go' |
   xargs -0 gofmt -d
 
 git diff --check \
-  8286b0e52c8332d9290a669caf19f75984c9503a...HEAD
+  55b6f546176f7367f8a251559780a3ffe79cad05...HEAD
 
 # No branch-added production raw constructors are expected.
 ! git diff -U0 \
-  8286b0e52c8332d9290a669caf19f75984c9503a...HEAD -- \
+  55b6f546176f7367f8a251559780a3ffe79cad05...HEAD -- \
   '*.go' ':(exclude)**/*_test.go' |
   rg '^\+[^+].*(fmt\.Errorf|errors\.(New|Newf|Errorf))'
 
