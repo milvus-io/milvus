@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -702,6 +703,325 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorSkipsBlacklist() {
 	s.Equal(1, execCount)
 	// serving node not blacklisted for the request's own fault
 	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsStopsAfterReplicaSweep() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 5
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Twice()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execCount := 0
+	start := time.Now()
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.Equal(1, execCount)
+	s.Less(time.Since(start), 200*time.Millisecond, "the final saturated replica should not incur another retry backoff")
+	s.Empty(s.lbPolicy.blacklist.GetBlacklistedNodes(channel))
+	status := merr.Status(err)
+	s.Equal(int32(4), status.GetCode())
+	s.True(status.GetRetriable())
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsHonorsBlacklistWhenCheckingExhaustion() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+	s.lbPolicy.blacklist.Add(channel, 1)
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Twice()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Once()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil).Once()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Once()
+
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			s.Equal(int64(2), nodeID)
+			return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.Equal(1, execCount)
+	s.Contains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel)
+	status := merr.Status(err)
+	s.Equal(int32(4), status.GetCode())
+	s.True(status.GetRetriable())
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsDoesNotUseUncachedRetry() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	initialNodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	nodesAfterQueueFull := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+	cachedNodes := initialNodes
+	getShardCalls := 0
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).RunAndReturn(
+		func(context.Context, bool, string, string, int64, string) ([]NodeInfo, error) {
+			getShardCalls++
+			return cachedNodes, nil
+		})
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Twice()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Twice()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			if lo.Contains(availableNodes, int64(1)) {
+				return 1, nil
+			}
+			return 2, nil
+		}).Twice()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Twice()
+
+	executedNodes := make([]int64, 0, len(initialNodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if nodeID == 1 {
+				cachedNodes = nodesAfterQueueFull
+				return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+			}
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Equal([]int64{1, 2}, executedNodes)
+	s.Equal(2, getShardCalls)
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsUsesSelectionSnapshotAfterCacheExpansion() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	initialNodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+	}
+	expandedNodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 1
+	getShardCalls := 0
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).RunAndReturn(
+		func(context.Context, bool, string, string, int64, string) ([]NodeInfo, error) {
+			getShardCalls++
+			if getShardCalls == 1 {
+				return initialNodes, nil
+			}
+			return expandedNodes, nil
+		})
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Twice()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Twice()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			if lo.Contains(availableNodes, int64(1)) {
+				return 1, nil
+			}
+			return 2, nil
+		}).Twice()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Twice()
+
+	executedNodes := make([]int64, 0, len(expandedNodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if nodeID == 1 {
+				return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+			}
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Equal([]int64{1, 2}, executedNodes)
+	s.Equal(2, getShardCalls)
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsFailsOverToAnotherReplica() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Twice()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			return availableNodes[0], nil
+		})
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, len(nodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if len(executedNodes) == 1 {
+				return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+			}
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Len(executedNodes, 2)
+	s.NotEqual(executedNodes[0], executedNodes[1])
+	s.Empty(s.lbPolicy.blacklist.GetBlacklistedNodes(channel))
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsIgnoresStaleBlacklistForExhaustion() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+	s.lbPolicy.blacklist.Add(channel, 99)
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Twice()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Twice()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Twice()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			if lo.Contains(availableNodes, int64(1)) {
+				return 1, nil
+			}
+			return 2, nil
+		}).Twice()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Twice()
+
+	executedNodes := make([]int64, 0, len(nodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if nodeID == 1 {
+				return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+			}
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Equal([]int64{1, 2}, executedNodes)
+	s.Contains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(99))
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTooManyRequestsTriesEachReplicaOnce() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 5
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Twice()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+			return availableNodes[0], nil
+		})
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, len(nodes))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			return errors.Wrapf(merr.WrapErrTooManyRequests(1024), "queue full on QueryNode %d", nodeID)
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.Len(executedNodes, len(nodes))
+	s.ElementsMatch([]int64{1, 2}, executedNodes)
+	s.Empty(s.lbPolicy.blacklist.GetBlacklistedNodes(channel))
+	status := merr.Status(err)
+	s.Equal(int32(4), status.GetCode())
+	s.True(status.GetRetriable())
 }
 
 func (s *LBPolicySuite) TestExecuteOneChannel() {

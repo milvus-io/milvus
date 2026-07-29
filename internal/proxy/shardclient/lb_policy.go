@@ -151,110 +151,127 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	return nodeID
 }
 
+func allShardLeadersExcluded(shardLeaders []NodeInfo, excludeNodes typeutil.UniqueSet) bool {
+	if len(shardLeaders) == 0 {
+		return false
+	}
+	for _, node := range shardLeaders {
+		if !excludeNodes.Contain(node.NodeID) {
+			return false
+		}
+	}
+	return true
+}
+
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
+	targetNode, selectedByBalancer, _, err := lb.selectNodeWithUncachedRetry(ctx, balancer, workload, excludeNodes)
+	return targetNode, selectedByBalancer, err
+}
+
+func (lb *LBPolicyImpl) selectNodeFromShardLeaders(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, shardLeaders []NodeInfo, excludeNodes *typeutil.UniqueSet) (targetNode NodeInfo, selectedByBalancer bool, err error) {
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
 		mlog.String("channelName", workload.Channel),
 	)
-	// Select node using specified nodes
-	trySelectNode := func(withCache bool) (NodeInfo, bool, error) {
+
+	candidateNodes := make(map[int64]NodeInfo)
+	serviceableNodes := make(map[int64]NodeInfo)
+	defer func() {
+		if err != nil {
+			candidatesInStr := lo.Map(shardLeaders, func(node NodeInfo, _ int) string {
+				return node.String()
+			})
+			serviceableNodesInStr := lo.Map(lo.Values(serviceableNodes), func(node NodeInfo, _ int) string {
+				return node.String()
+			})
+			log.Warn(ctx, "failed to select shard",
+				mlog.Int64s("excluded", excludeNodes.Collect()),
+				mlog.String("candidates", strings.Join(candidatesInStr, ", ")),
+				mlog.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
+				mlog.Err(err))
+		}
+	}()
+
+	// Filter nodes based on excludeNodes
+	for _, node := range shardLeaders {
+		if !excludeNodes.Contain(node.NodeID) {
+			if node.Serviceable {
+				serviceableNodes[node.NodeID] = node
+			}
+			candidateNodes[node.NodeID] = node
+		}
+	}
+	if len(candidateNodes) == 0 {
+		err = merr.WrapErrChannelNotAvailable(workload.Channel, "no available shard leaders")
+		return NodeInfo{}, false, err
+	}
+
+	if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
+		recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
+		return preferredNode, false, nil
+	} else if workload.PreferredNodeID != 0 {
+		recordPreferredNodeSelection(metrics.PreferredNodeUnavailableLabel)
+	}
+
+	balancer.RegisterNodeInfo(lo.Values(candidateNodes))
+
+	// prefer serviceable nodes
+	var targetNodeID int64
+	if len(serviceableNodes) > 0 {
+		targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.Nq)
+	} else {
+		targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
+	}
+	if err != nil {
+		return NodeInfo{}, false, err
+	}
+
+	if _, ok := candidateNodes[targetNodeID]; !ok {
+		err = merr.WrapErrNodeNotAvailable(targetNodeID)
+		return NodeInfo{}, false, err
+	}
+
+	return candidateNodes[targetNodeID], true, nil
+}
+
+func (lb *LBPolicyImpl) selectNodeWithUncachedRetry(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, []NodeInfo, error) {
+	log := mlog.With(
+		mlog.Int64("collectionID", workload.CollectionID),
+		mlog.String("channelName", workload.Channel),
+	)
+	trySelectNode := func(withCache bool) (NodeInfo, bool, []NodeInfo, error) {
 		shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, withCache)
 		if err != nil {
 			log.Warn(ctx, "failed to get shard delegator",
 				mlog.Err(err))
-			return NodeInfo{}, false, err
+			return NodeInfo{}, false, nil, err
 		}
 
 		// if all available delegator has been excluded even after refresh shard leader cache
 		// we should clear excludeNodes and try to select node again instead of failing the request at selectNode
-		if !withCache && len(shardLeaders) > 0 && len(shardLeaders) <= excludeNodes.Len() {
-			allReplicaExcluded := true
-			for _, node := range shardLeaders {
-				if !excludeNodes.Contain(node.NodeID) {
-					allReplicaExcluded = false
-					break
-				}
-			}
-			if allReplicaExcluded {
-				log.Warn(ctx, "all replicas are excluded after refresh shard leader cache, clear it and try to select node")
-				excludeNodes.Clear()
-			}
+		if !withCache && allShardLeadersExcluded(shardLeaders, *excludeNodes) {
+			log.Warn(ctx, "all replicas are excluded after refresh shard leader cache, clear it and try to select node")
+			excludeNodes.Clear()
 		}
 
-		candidateNodes := make(map[int64]NodeInfo)
-		serviceableNodes := make(map[int64]NodeInfo)
-		defer func() {
-			if err != nil {
-				candidatesInStr := lo.Map(shardLeaders, func(node NodeInfo, _ int) string {
-					return node.String()
-				})
-				serviceableNodesInStr := lo.Map(lo.Values(serviceableNodes), func(node NodeInfo, _ int) string {
-					return node.String()
-				})
-				log.Warn(ctx, "failed to select shard",
-					mlog.Int64s("excluded", excludeNodes.Collect()),
-					mlog.String("candidates", strings.Join(candidatesInStr, ", ")),
-					mlog.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
-					mlog.Err(err))
-			}
-		}()
-
-		// Filter nodes based on excludeNodes
-		for _, node := range shardLeaders {
-			if !excludeNodes.Contain(node.NodeID) {
-				if node.Serviceable {
-					serviceableNodes[node.NodeID] = node
-				}
-				candidateNodes[node.NodeID] = node
-			}
-		}
-		if len(candidateNodes) == 0 {
-			err = merr.WrapErrChannelNotAvailable(workload.Channel, "no available shard leaders")
-			return NodeInfo{}, false, err
-		}
-
-		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
-			recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
-			return preferredNode, false, nil
-		} else if workload.PreferredNodeID != 0 {
-			recordPreferredNodeSelection(metrics.PreferredNodeUnavailableLabel)
-		}
-
-		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
-
-		// prefer serviceable nodes
-		var targetNodeID int64
-		if len(serviceableNodes) > 0 {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.Nq)
-		} else {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
-		}
-		if err != nil {
-			return NodeInfo{}, false, err
-		}
-
-		if _, ok := candidateNodes[targetNodeID]; !ok {
-			err = merr.WrapErrNodeNotAvailable(targetNodeID)
-			return NodeInfo{}, false, err
-		}
-
-		return candidateNodes[targetNodeID], true, nil
+		targetNode, selectedByBalancer, err := lb.selectNodeFromShardLeaders(ctx, balancer, workload, shardLeaders, excludeNodes)
+		return targetNode, selectedByBalancer, shardLeaders, err
 	}
 
 	// First attempt with current shard leaders cache
 	withShardLeaderCache := true
-	targetNode, selectedByBalancer, err := trySelectNode(withShardLeaderCache)
+	targetNode, selectedByBalancer, shardLeaders, err := trySelectNode(withShardLeaderCache)
 	if err != nil {
 		// Second attempt with fresh shard leaders
 		withShardLeaderCache = false
-		targetNode, selectedByBalancer, err = trySelectNode(withShardLeaderCache)
+		targetNode, selectedByBalancer, shardLeaders, err = trySelectNode(withShardLeaderCache)
 		if err != nil {
-			return NodeInfo{}, false, err
+			return NodeInfo{}, false, shardLeaders, err
 		}
 	}
 
-	return targetNode, selectedByBalancer, nil
+	return targetNode, selectedByBalancer, shardLeaders, err
 }
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
@@ -264,44 +281,59 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		mlog.String("channelName", workload.Channel),
 	)
 	var lastErr error
+	var overloadErr error
 	var err error
 	var shardLeaders []NodeInfo
+	// Keep overload selection and exhaustion accounting on the exact leader
+	// snapshot that selected the first saturated replica.
+	var overloadShardLeaders []NodeInfo
 	requestExcludedNodes := typeutil.NewUniqueSet()
 	tryExecute := func() (bool, error) {
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
-		if len(shardLeaders) > 0 && requestExcludedNodes.Len() >= len(shardLeaders) {
-			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
-			if err != nil {
-				log.Warn(ctx, "failed to refresh shard leaders", mlog.Err(err))
-				if lastErr != nil {
-					return true, lastErr
-				}
-				return true, err
-			}
-
-			allReplicaExcluded := len(shardLeaders) > 0
-			for _, node := range shardLeaders {
-				if !requestExcludedNodes.Contain(node.NodeID) {
-					allReplicaExcluded = false
-					break
-				}
-			}
-			if allReplicaExcluded {
-				log.Warn(ctx, "all replicas are request-level excluded after refresh, clear it and retry")
-				requestExcludedNodes.Clear()
-			}
-		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
 		excludeNodes.Insert(requestExcludedNodes.Collect()...)
 		balancer := lb.getBalancer()
-		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		var targetNode NodeInfo
+		var selectedByBalancer bool
+		var selectedShardLeaders []NodeInfo
+		if overloadErr != nil {
+			// Do not re-read or refresh shard leaders while sweeping overloaded
+			// replicas; a changing cache would make selection and exhaustion use
+			// different node sets.
+			if allShardLeadersExcluded(overloadShardLeaders, excludeNodes) {
+				return false, overloadErr
+			}
+			targetNode, selectedByBalancer, err = lb.selectNodeFromShardLeaders(ctx, balancer, workload, overloadShardLeaders, &excludeNodes)
+		} else {
+			if allShardLeadersExcluded(shardLeaders, requestExcludedNodes) {
+				shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
+				if err != nil {
+					log.Warn(ctx, "failed to refresh shard leaders", mlog.Err(err))
+					if lastErr != nil {
+						return true, lastErr
+					}
+					return true, err
+				}
+
+				if allShardLeadersExcluded(shardLeaders, requestExcludedNodes) {
+					log.Warn(ctx, "all replicas are request-level excluded after refresh, clear it and retry")
+					requestExcludedNodes.Clear()
+				}
+				excludeNodes = typeutil.NewUniqueSet(blacklist...)
+				excludeNodes.Insert(requestExcludedNodes.Collect()...)
+			}
+			targetNode, selectedByBalancer, selectedShardLeaders, err = lb.selectNodeWithUncachedRetry(ctx, balancer, workload, &excludeNodes)
+		}
 		if err != nil {
 			log.Warn(ctx, "failed to select node for shard",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Int64s("excluded", excludeNodes.Collect()),
 				mlog.Err(err),
 			)
+			if overloadErr != nil {
+				return false, overloadErr
+			}
 			if lastErr != nil {
 				return true, lastErr
 			}
@@ -334,6 +366,21 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// immediately without retrying or touching the blacklist.
 			if merr.GetErrorType(err) == merr.InputError {
 				return false, err
+			}
+			// Queue saturation is a transient overload signal from a healthy
+			// QueryNode. Try each replica at most once, then return the overload
+			// to the caller instead of cycling through saturated replicas.
+			if errors.Is(err, merr.ErrServiceTooManyRequests) {
+				if overloadErr == nil {
+					overloadShardLeaders = append([]NodeInfo(nil), selectedShardLeaders...)
+				}
+				requestExcludedNodes.Insert(targetNode.NodeID)
+				excludeNodes.Insert(targetNode.NodeID)
+				overloadErr = err
+				if allShardLeadersExcluded(overloadShardLeaders, excludeNodes) {
+					return false, overloadErr
+				}
+				return true, err
 			}
 			if merr.IsRetryableErr(err) {
 				requestExcludedNodes.Insert(targetNode.NodeID)
