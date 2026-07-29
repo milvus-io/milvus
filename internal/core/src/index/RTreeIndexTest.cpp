@@ -17,6 +17,7 @@
 #include <nlohmann/json_fwd.hpp>
 #include <stddef.h>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -1621,6 +1622,13 @@ TEST_F(RTreeIndexTest, QueryBadAllocIsClassifiedAsMemAllocateFailed) {
 // regression only once it corrupts memory -- e.g. reading wrapper_ or the
 // vectors while another thread reallocates them. Unsanitized, the test still
 // must not crash and must converge to the expected final count.
+//
+// The writer runs on its own thread behind a deadline. It used to run inline
+// on the test thread, which meant that if the readers ever managed to keep the
+// index lock continuously busy the test simply never returned: it took ~96
+// minutes in the plain C++ UT run and blew the coverage shard's 30 minute
+// budget outright, where it was reported as a shard crash rather than as this
+// test. A starved writer must fail here, quickly and by name.
 TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
     milvus::storage::FileManagerContext ctx_build(
         field_meta_, index_meta_, chunk_manager_, fs_);
@@ -1630,9 +1638,13 @@ TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
     // (QueryCandidates asserts a non-null wrapper).
     rtree.AddGeometry(CreatePointWKB(0.0, 0.0), 0, true);
 
-    constexpr int kRows = 4000;
+    constexpr int kRows = 1000;
+    // Generous: the writer's own work is milliseconds, so this only bounds how
+    // long a lock-policy regression takes to surface.
+    constexpr auto kWriterDeadline = std::chrono::seconds(120);
     std::atomic<bool> stop{false};
     std::atomic<int> reader_iters{0};
+    std::atomic<int> writer_progress{0};
 
     auto reader = [&]() {
         auto ctx = GEOS_init_r();
@@ -1659,23 +1671,38 @@ TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
     }
 
     // Single writer, mirroring the per-segment serialized insert pipeline.
-    for (int i = 1; i <= kRows; ++i) {
-        if (i % 7 == 0) {
-            // Interleave null geometries (exercises the null_offset_ path).
-            rtree.AddGeometry(std::string(), i, false);
-        } else {
-            rtree.AddGeometry(
-                CreatePointWKB(static_cast<double>(i), static_cast<double>(i)),
-                i,
-                true);
+    std::thread writer([&]() {
+        for (int i = 1; i <= kRows; ++i) {
+            if (i % 7 == 0) {
+                // Interleave null geometries (exercises the null_offset_ path).
+                rtree.AddGeometry(std::string(), i, false);
+            } else {
+                rtree.AddGeometry(CreatePointWKB(static_cast<double>(i),
+                                                 static_cast<double>(i)),
+                                  i,
+                                  true);
+            }
+            writer_progress.fetch_add(1, std::memory_order_relaxed);
         }
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + kWriterDeadline;
+    while (writer_progress.load(std::memory_order_relaxed) < kRows &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+    const int progressed = writer_progress.load(std::memory_order_relaxed);
 
     stop.store(true, std::memory_order_relaxed);
+    writer.join();
     for (auto& th : readers) {
         th.join();
     }
 
+    ASSERT_EQ(progressed, kRows)
+        << "the insert thread was starved by concurrent readers: only "
+        << progressed << " of " << kRows
+        << " rows were inserted within the deadline";
     EXPECT_GT(reader_iters.load(), 0);
     // Final count = seeded row 0 plus kRows incremental rows.
     EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kRows + 1));
