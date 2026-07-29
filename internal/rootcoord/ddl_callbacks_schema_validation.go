@@ -29,8 +29,8 @@ import (
 )
 
 func validateCollectionSchemaPayloadSize(schema *schemapb.CollectionSchema) error {
-	actual := proto.Size(schema)
-	limit := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.GetAsInt()
+	actual := int64(proto.Size(schema))
+	limit := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.GetAsSize()
 	if actual < limit {
 		return nil
 	}
