@@ -296,10 +296,12 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 // invoking `consumer` on the calling thread in batch order. Batch decoding
 // (external-type normalization + FieldData materialization) runs in
 // parallel on the LOW (background) thread pool and overlaps with the next
-// prefetch round. Decoded-but-undelivered batches are bounded by a byte
-// budget, so this caps the decode window only — the reader's own prefetch
+// prefetch round. The number of undelivered batches is bounded by a byte
+// budget charged on each batch's *input* arrow bytes, so it caps the decode
+// window only, and only in input terms: normalization can inflate the
+// decoded FieldData beyond its arrow source, and the reader's own prefetch
 // window, arrow's buffers and the consumer's own retention are additional
-// and concurrent builds multiply all of them. Prefer this over
+// on top. Concurrent builds multiply all of them. Prefer this over
 // GetFieldDatasFromManifest when the caller can process batches
 // incrementally (e.g. spilling to a local file) instead of holding the
 // whole column in memory.
