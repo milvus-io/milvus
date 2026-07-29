@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -123,6 +124,211 @@ func (suite *UtilSuite) TestVerifyResponse() {
 
 func TestUtil(t *testing.T) {
 	suite.Run(t, new(UtilSuite))
+}
+
+func (suite *UtilSuite) TestEstimateFieldsReadSize() {
+	const (
+		numRows      = int64(1000)
+		pkField      = int64(100)
+		vecField     = int64(101)
+		jsonField    = int64(102)
+		varcharField = int64(103)
+		badField     = int64(104)
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  vecField,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			{FieldID: jsonField, Name: "json", DataType: schemapb.DataType_JSON},
+			{
+				FieldID:  varcharField,
+				Name:     "var",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			// VarChar without max_length cannot be estimated
+			{FieldID: badField, Name: "bad", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	// per row schema estimates
+	vecSize := int64(128 * 4)
+	pkSize := int64(8)
+	jsonEstimate, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{schema.Fields[2]},
+	})
+	suite.NoError(err)
+	jsonSize := int64(jsonEstimate)
+	varcharEstimate, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{schema.Fields[3]},
+	})
+	suite.NoError(err)
+	varcharSize := int64(varcharEstimate)
+
+	newSegment := func(groups ...*datapb.FieldBinlog) *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        1,
+				NumOfRows: numRows,
+				Binlogs:   groups,
+			},
+		}
+	}
+	group := func(size int64, fields ...int64) *datapb.FieldBinlog {
+		fieldBinlog := &datapb.FieldBinlog{
+			FieldID: fields[0],
+			Binlogs: []*datapb.Binlog{{EntriesNum: numRows, MemorySize: size}},
+		}
+		if len(fields) > 1 {
+			fieldBinlog.FieldID = 0
+			fieldBinlog.ChildFields = fields
+		}
+		return fieldBinlog
+	}
+
+	suite.Run("single field group is measured", func() {
+		// a field owning its column group, e.g. a vector in storage v3
+		segment := newSegment(group(vecSize*numRows, vecField))
+		size, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal(vecSize*numRows, size)
+	})
+
+	suite.Run("fixed width field of a shared group takes its exact size", func() {
+		groupSize := (pkSize + vecSize + jsonSize) * numRows
+		segment := newSegment(group(groupSize, pkField, vecField, jsonField))
+
+		size, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal(vecSize*numRows, size)
+		suite.Less(size, groupSize)
+	})
+
+	suite.Run("variable width field takes the residual of the group", func() {
+		// json rows are 10x bigger than the schema guesses, the residual of the
+		// measured group size must land on the json column, not on the vector
+		measuredJSONSize := jsonSize * 10
+		groupSize := (pkSize + vecSize + measuredJSONSize) * numRows
+		segment := newSegment(group(groupSize, pkField, vecField, jsonField))
+
+		size, err := estimateFieldsReadSize(schema, segment, []int64{jsonField})
+		suite.NoError(err)
+		suite.Equal(measuredJSONSize*numRows, size)
+
+		size, err = estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal(vecSize*numRows, size)
+	})
+
+	suite.Run("residual is shared between variable width fields", func() {
+		residualPerRow := (jsonSize + varcharSize) * 4
+		groupSize := (pkSize + residualPerRow) * numRows
+		segment := newSegment(group(groupSize, pkField, jsonField, varcharField))
+
+		jsonRead, err := estimateFieldsReadSize(schema, segment, []int64{jsonField})
+		suite.NoError(err)
+		varcharRead, err := estimateFieldsReadSize(schema, segment, []int64{varcharField})
+		suite.NoError(err)
+
+		// proportional to the schema estimates, summing up to the residual
+		suite.Equal(residualPerRow*jsonSize/(jsonSize+varcharSize)*numRows, jsonRead)
+		suite.Equal(residualPerRow*varcharSize/(jsonSize+varcharSize)*numRows, varcharRead)
+		suite.Less(jsonRead+varcharRead, groupSize)
+	})
+
+	suite.Run("schema estimate is used when the group has no residual", func() {
+		// measured data smaller than the fixed width fields alone
+		segment := newSegment(group(pkSize*numRows/2, pkField, jsonField))
+		size, err := estimateFieldsReadSize(schema, segment, []int64{jsonField})
+		suite.NoError(err)
+		// bounded by the group size
+		suite.Equal(pkSize*numRows/2, size)
+	})
+
+	suite.Run("fields of several groups are summed", func() {
+		segment := newSegment(
+			group(vecSize*numRows, vecField),
+			group((pkSize+jsonSize)*numRows, pkField, jsonField),
+		)
+		size, err := estimateFieldsReadSize(schema, segment, []int64{vecField, pkField})
+		suite.NoError(err)
+		suite.Equal((vecSize+pkSize)*numRows, size)
+	})
+
+	suite.Run("empty segment", func() {
+		segment := newSegment(group(vecSize*numRows, vecField))
+		segment.NumOfRows = 0
+		size, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal(int64(0), size)
+	})
+
+	suite.Run("column group without recorded size", func() {
+		segment := newSegment(group(0, vecField))
+		_, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.Error(err)
+	})
+
+	suite.Run("no field requested", func() {
+		segment := newSegment(group(vecSize*numRows, vecField))
+		_, err := estimateFieldsReadSize(schema, segment, nil)
+		suite.Error(err)
+	})
+
+	suite.Run("field without binlog", func() {
+		segment := newSegment(group(vecSize*numRows, vecField))
+		_, err := estimateFieldsReadSize(schema, segment, []int64{pkField})
+		suite.Error(err)
+	})
+
+	suite.Run("field missing from schema", func() {
+		segment := newSegment(group(vecSize*numRows, vecField, 999))
+		_, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.Error(err)
+	})
+
+	suite.Run("field size not estimable", func() {
+		segment := newSegment(group(vecSize*numRows, vecField, badField))
+		_, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.Error(err)
+	})
+
+	suite.Run("unrecognized data type", func() {
+		unknownSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: vecField, Name: "unknown", DataType: schemapb.DataType_None},
+			},
+		}
+		segment := newSegment(group(pkSize*numRows, pkField, vecField))
+		_, err := estimateFieldsReadSize(unknownSchema, segment, []int64{pkField})
+		suite.Error(err)
+	})
+}
+
+func (suite *UtilSuite) TestIsFixedWidthType() {
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_Bool, schemapb.DataType_Int64, schemapb.DataType_Double,
+		schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector,
+	} {
+		suite.True(isFixedWidthType(dataType), dataType.String())
+	}
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_JSON,
+		schemapb.DataType_Array, schemapb.DataType_Geometry,
+		schemapb.DataType_SparseFloatVector, schemapb.DataType_ArrayOfVector,
+	} {
+		suite.False(isFixedWidthType(dataType), dataType.String())
+	}
 }
 
 type fixedTSOAllocator struct {
