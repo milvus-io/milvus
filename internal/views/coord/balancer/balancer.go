@@ -151,6 +151,8 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 	if plan == nil {
 		return nil
 	}
+	batch := b.viewRegistry.Begin()
+	defer batch.Commit()
 	var errs []error
 	for _, shardID := range plan.Releases {
 		mgr := b.viewRegistry.Get(shardID)

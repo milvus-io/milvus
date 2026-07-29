@@ -125,7 +125,7 @@ func Observe(ctx context.Context, event Event) {
 
 Event type is split by cardinality. Each event payload carries the identity of
 the observed object. The supported cardinalities are `node`, `view`,
-`segment`, `view-segments`, `resource`, `persist`, and `sync-batch`.
+`segment`, `view-segments`, `resource`, `persist`, and `sync-accepted`.
 
 ## Shared Types
 
@@ -383,8 +383,8 @@ Persist events observe one persisted QueryView state write.
 #### Coord
 
 ```go
-// CoordPersistViewEvent is emitted when ShardViewManager.flush persists a view
-// state.
+// CoordPersistViewEvent is emitted after DirtyViewFlushScheduler successfully
+// persists one QueryView state.
 type CoordPersistViewEvent struct {
     baseEvent
     View  qviews.QueryViewKey
@@ -404,34 +404,34 @@ type StreamingNodePersistViewEvent struct {
 }
 ```
 
-### Sync-Batch
+### Sync-Accepted
 
-Sync-batch events observe one QueryView sync to one worker-node batch.
+Sync-accepted events observe ReliableSyncer accepting one QueryView state for
+delivery to one worker node. Acceptance does not mean the worker has applied
+the state; worker application is observed through report events.
 
 #### Coord
 
 ```go
-// CoordSyncViewBatchEvent is emitted when ShardViewManager.flush syncs a view
-// state to one worker-node batch.
-type CoordSyncViewBatchEvent struct {
+// CoordSyncViewAcceptedEvent is emitted after ReliableSyncer accepts one
+// QueryView state for delivery to a worker node. It does not mean the worker
+// has applied the state.
+type CoordSyncViewAcceptedEvent struct {
     baseEvent
     View  qviews.QueryViewKey
+    Node  qviews.WorkNode
     State qviews.QueryViewState
-}
-
-// CoordSyncViewBatchFailedEvent is emitted when ShardViewManager.flush fails to
-// sync a view state to one worker-node batch.
-type CoordSyncViewBatchFailedEvent struct {
-    baseEvent
-    View  qviews.QueryViewKey
-    State qviews.QueryViewState
-    Err   error
 }
 ```
 
 ## Emission Semantics
 
 Event emission runs in the owner layer that observes the action.
+
+`ShardViewManager` observes state transitions and only creates dirty effects.
+`DirtyViewFlushScheduler` emits `CoordPersistViewEvent` after Catalog success
+and `CoordSyncViewAcceptedEvent` after ReliableSyncer accepts the per-node
+group. Shutdown cancellation errors do not produce failure events.
 
 Transition-carrying events are emitted in the same critical section that
 observes the state transition. `From` and `To` must match the owner-visible

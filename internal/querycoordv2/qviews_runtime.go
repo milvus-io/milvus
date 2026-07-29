@@ -180,6 +180,9 @@ func (r *qviewsRuntime) start(ctx context.Context) {
 
 func (r *qviewsRuntime) stop() {
 	r.balancer.Stop()
+	if r.shardViewRegistry != nil {
+		r.shardViewRegistry.Close()
+	}
 	_ = r.syncer.Close()
 	if r.queryNodeManager != nil {
 		r.queryNodeManager.Close()
