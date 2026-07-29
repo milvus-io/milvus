@@ -106,6 +106,35 @@ func (w *etcdKVWrapper) Delete(ctx context.Context, key string, opts ...clientv3
 	return err
 }
 
+const (
+	// defaultHeartbeatIntervalSeconds mirrors the SDK's default heartbeat interval
+	// (client/milvusclient/telemetry.go). The server cannot know a given client's actual
+	// interval -- it is client-side config that the server may or may not have overridden
+	// -- so command lifetimes are expressed against this nominal value.
+	defaultHeartbeatIntervalSeconds = 30
+
+	// defaultCommandTTLSeconds is how long an unspecified-TTL one-time command survives:
+	// ten heartbeat cycles. A command that has not been collected within ten chances is
+	// not going to be, and keeping it forever leaks memory for every client that was
+	// restarted, crashed, or otherwise never came back to answer.
+	//
+	// Applied when a caller leaves ttl_seconds unset. A negative ttl_seconds still means
+	// "never expire" for the rare caller that genuinely wants that.
+	defaultCommandTTLSeconds = 10 * defaultHeartbeatIntervalSeconds
+)
+
+// resolveCommandTTL maps a requested TTL onto the value stored with the command.
+//
+//	0  -> unspecified, use the default
+//	<0 -> never expire (explicit opt-in; every expiry check treats <=0 as immortal)
+//	>0 -> honor the caller
+func resolveCommandTTL(requested int64) int64 {
+	if requested == 0 {
+		return defaultCommandTTLSeconds
+	}
+	return requested
+}
+
 // cache holds in-memory cache of all commands and configs
 // Loaded at initialization and kept in sync with etcd on writes
 type cache struct {
@@ -278,7 +307,9 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 			Payload:     req.Payload,
 			CreateTime:  createTime,
 			TargetScope: scope,
-			TTLSeconds:  req.TtlSeconds,
+			// Resolved once, at push time, so every downstream expiry check and the
+			// remaining-time shown in the WebUI operate on the effective value.
+			TTLSeconds: resolveCommandTTL(req.TtlSeconds),
 		}
 		// Update cache
 		s.cacheMu.Lock()

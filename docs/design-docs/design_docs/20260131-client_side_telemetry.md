@@ -353,9 +353,21 @@ Manages pending commands, with different storage for the two kinds:
 - `database:<dbName>` — clients that have accessed that database
 
 **TTL.** `ttl_seconds` is a field of `PushClientCommandRequest`, not of `ClientCommand`, so
-clients never see it. `0` means never expire — the command lives until a reply deletes it.
-Both `get_config` and `show_latency_history` are pushed with `ttl_seconds: 0`, so a client
-that never replies leaks them.
+clients never see it. It is resolved once at push time:
+
+| Requested | Stored | Meaning |
+|-----------|--------|---------|
+| unset (`0`) | `300` | Default: ten heartbeat cycles at the nominal 30s interval |
+| `> 0` | as given | Honoured verbatim |
+| `< 0` | as given | Never expires (every expiry check treats `<= 0` as immortal) |
+
+A one-time command that has not been collected within ten heartbeat cycles is not going to
+be, so it is dropped. Without a default, a client that restarted, crashed, or simply never
+answered would leave the command in RootCoord memory indefinitely — and clients are
+expected to be ephemeral, since the SDK generates a fresh client ID per process.
+
+Replying still deletes a command immediately; the TTL is the backstop for when no reply
+ever arrives. Persistent configs ignore TTL entirely.
 
 #### 3. HTTP Handlers (Proxy)
 
@@ -454,8 +466,8 @@ fails to execute it, because the client has already advanced its watermark past 
 #### Replies
 
 Any reply with a non-empty `command_id` — **whether or not `success` is true** — deletes the
-corresponding non-persistent command server-side. Replies are the garbage-collection
-mechanism; a client that never replies leaks commands with `ttl_seconds: 0`.
+corresponding non-persistent command server-side. Replies are the fast path for reclaiming
+a command; the TTL above is the backstop for clients that never answer.
 
 The client queues replies and clears them **only after a successful heartbeat**, so replies
 survive a failed heartbeat and are retried on the next one. Commands already executed still

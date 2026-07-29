@@ -1061,3 +1061,87 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveCommandTTL(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested int64
+		expected  int64
+	}{
+		{"unset gets the default", 0, defaultCommandTTLSeconds},
+		{"explicit value is honored", 3600, 3600},
+		{"negative means never expire", -1, -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, resolveCommandTTL(tc.requested))
+		})
+	}
+
+	// Ten heartbeat cycles at the nominal interval; a command nobody collected in that
+	// many chances is not going to be collected.
+	assert.Equal(t, int64(300), int64(defaultCommandTTLSeconds))
+}
+
+func TestPushCommandAppliesDefaultTTL(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("one-time command with unset ttl expires", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "show_errors",
+			TargetClientId: "client-1",
+			TtlSeconds:     0,
+		})
+		require.NoError(t, err)
+
+		store.cacheMu.RLock()
+		cmd := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+
+		require.NotNil(t, cmd)
+		assert.Equal(t, int64(defaultCommandTTLSeconds), cmd.TTLSeconds,
+			"an uncollected command must not live forever")
+	})
+
+	t.Run("negative ttl still means never expire", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType: "show_errors",
+			TtlSeconds:  -1,
+		})
+		require.NoError(t, err)
+
+		store.cacheMu.RLock()
+		cmd := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+
+		require.NotNil(t, cmd)
+		assert.Equal(t, int64(-1), cmd.TTLSeconds)
+	})
+
+	t.Run("expired default-ttl command is swept", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType: "show_errors",
+			TtlSeconds:  0,
+		})
+		require.NoError(t, err)
+
+		// Backdate past the default TTL, as if the client never answered.
+		store.cacheMu.Lock()
+		store.cache.commands[id].CreateTime = time.Now().UnixMilli() - (defaultCommandTTLSeconds+1)*1000
+		store.cacheMu.Unlock()
+
+		store.CleanupExpiredCommands(ctx)
+
+		store.cacheMu.RLock()
+		_, stillThere := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+		assert.False(t, stillThere, "default TTL must actually reclaim the command")
+	})
+}

@@ -307,7 +307,7 @@ func getTelemetryClientMetrics(node *Proxy) gin.HandlerFunc {
 //	  "target_client_id": "client-123" or "" for global,
 //	  "target_database": "db_name" or "" for global (mutually exclusive with target_client_id),
 //	  "payload": {...},
-//	  "ttl_seconds": 3600,
+//	  "ttl_seconds": 3600,   // optional; omit for the default (10 heartbeat cycles), negative to never expire
 //	  "persistent": false
 //	}
 func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
@@ -520,7 +520,7 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 			CommandType:    "show_latency_history",
 			TargetClientId: clientID,
 			Payload:        payloadBytes,
-			TtlSeconds:     0, // Keep until client replies; server deletes on reply
+			TtlSeconds:     0, // Unset: the store applies the default TTL. Deleted earlier if the client replies.
 			Persistent:     false,
 		}
 
@@ -580,7 +580,7 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 		pushReq := &milvuspb.PushClientCommandRequest{
 			CommandType:    "get_config",
 			TargetClientId: clientID,
-			TtlSeconds:     0, // Keep until client replies; server deletes on reply
+			TtlSeconds:     0, // Unset: the store applies the default TTL. Deleted earlier if the client replies.
 			Persistent:     false,
 		}
 
