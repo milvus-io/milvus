@@ -222,9 +222,13 @@ class RTreeIndex : public ScalarIndex<T> {
      * @param query_geom Query geometry in WKB format
      * @param candidate_offsets Output vector of candidate row offsets
      */
+    // Takes the query geometry by reference: by value it deep-cloned the whole
+    // GEOS geometry on every call (once per query per segment), and each clone
+    // is an allocation that can fail under memory pressure. The callee only
+    // reads it.
     void
     QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
-                    const Geometry query_geometry,
+                    const Geometry& query_geometry,
                     std::vector<int64_t>& candidate_offsets);
 
     const TargetBitmap

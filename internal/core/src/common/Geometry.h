@@ -105,6 +105,57 @@ InitGEOSContext(const char* purpose) {
 }
 
 /**
+ * Test-only one-shot fault injection for the clone path below.
+ *
+ * The only realistic failure of GEOSGeom_clone_r() is allocation failure,
+ * which a unit test cannot provoke, so the classification of that failure
+ * would otherwise be untestable. Lives next to the call site so both share one
+ * flag; production code never sets it.
+ */
+inline std::atomic<bool>&
+GeometryCloneFailureForTesting() {
+    static std::atomic<bool> flag{false};
+    return flag;
+}
+
+/**
+ * Deep-clone a geometry into `ctx`, translating clone failure into a retriable
+ * system error.
+ *
+ * GEOSGeom_clone_r() runs inside the capi execute() guard, which catches
+ * std::exception -- std::bad_alloc included -- and returns nullptr rather than
+ * propagating it (geos_ts_c.cpp). So an OOM on this path NEVER surfaces as an
+ * exception that a `catch (const std::bad_alloc&)` net could translate, and
+ * reporting the nullptr with a plain AssertInfo would classify a textbook
+ * transient failure as a non-retryable UnexpectedError (2001).
+ *
+ * On the search path that is worse than just losing the retry: 2001 is not
+ * retriable in merr's segcore table, and lb_policy treats a non-retriable
+ * failure by BLACKLISTING the serving node for the channel
+ * (shardclient/lb_policy.go) instead of merely excluding it from this one
+ * request and failing over to another replica. Memory pressure would then
+ * evict healthy nodes from routing.
+ *
+ * Callers clone geometries that already parsed and validated, so a nullptr
+ * here is attributable to resource failure -- there is none of the bad-data /
+ * OOM ambiguity that TryParseFromWkb documents as a KNOWN LIMIT. Same
+ * reasoning as InitGEOSContext above. See PR #50951 review.
+ */
+inline GEOSGeometry*
+CloneGeometryOrThrow(GEOSContextHandle_t ctx, const GEOSGeometry* geom) {
+    GEOSGeometry* cloned = GEOSGeom_clone_r(ctx, geom);
+    if (GeometryCloneFailureForTesting().exchange(false) && cloned != nullptr) {
+        GEOSGeom_destroy_r(ctx, cloned);
+        cloned = nullptr;
+    }
+    if (cloned == nullptr) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory cloning geometry");
+    }
+    return cloned;
+}
+
+/**
  * RAII holder for a GEOS context and the reader/geometry commonly held with
  * it. Any code path that can throw between GEOS_init_r and GEOS_finish_r --
  * a std::bad_alloc from a container op (now translated to a retriable error
@@ -281,10 +332,7 @@ class Geometry {
             }
             ctx_ = other.ctx_;
             if (other.IsValid()) {
-                GEOSGeometry* cloned =
-                    GEOSGeom_clone_r(other.ctx_, other.geometry_);
-                AssertInfo(cloned != nullptr, "Failed to clone geometry");
-                geometry_ = cloned;
+                geometry_ = CloneGeometryOrThrow(other.ctx_, other.geometry_);
             }
         }
         return *this;
@@ -293,13 +341,13 @@ class Geometry {
     // Copy constructor (deep clone). Same CONSTRAINT as copy assignment above:
     // never copy a cache-owned Geometry from a query thread; use Clone(ctx).
     Geometry(const Geometry& other) : ctx_(other.ctx_) {
+        // nullptr first: CloneGeometryOrThrow can throw, and an unset
+        // geometry_ would be read by nothing (the object never completes
+        // construction) but leaves the member indeterminate for any future
+        // catch-and-inspect caller.
+        geometry_ = nullptr;
         if (other.IsValid()) {
-            GEOSGeometry* cloned =
-                GEOSGeom_clone_r(other.ctx_, other.geometry_);
-            AssertInfo(cloned != nullptr, "Failed to clone geometry");
-            geometry_ = cloned;
-        } else {
-            geometry_ = nullptr;
+            geometry_ = CloneGeometryOrThrow(other.ctx_, other.geometry_);
         }
     }
 
@@ -321,9 +369,7 @@ class Geometry {
         Geometry cloned;
         cloned.ctx_ = ctx;
         if (IsValid()) {
-            GEOSGeometry* geom = GEOSGeom_clone_r(ctx, geometry_);
-            AssertInfo(geom != nullptr, "Failed to clone geometry");
-            cloned.geometry_ = geom;
+            cloned.geometry_ = CloneGeometryOrThrow(ctx, geometry_);
         }
         return cloned;
     }

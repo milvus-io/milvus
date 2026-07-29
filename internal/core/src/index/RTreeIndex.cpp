@@ -559,7 +559,7 @@ RTreeIndex<T>::Range(const T& lower_bound_value,
 template <typename T>
 void
 RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
-                               const Geometry query_geometry,
+                               const Geometry& query_geometry,
                                std::vector<int64_t>& candidate_offsets) {
     // Snapshot wrapper_ under the shared lock: on a growing segment it is
     // published lazily by InitForBuildIndex() under the write lock, so an

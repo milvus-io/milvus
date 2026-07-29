@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <functional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -208,6 +209,50 @@ TEST_F(GeometryValueSemanticsTest,
     } catch (const milvus::SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::MemAllocateFailed);
     }
+}
+
+// Same transient/permanent classification, applied to the clone paths.
+// GEOSGeom_clone_r() reports allocation failure by RETURNING nullptr -- the
+// capi execute() guard catches std::bad_alloc and swallows it -- so no
+// `catch (const std::bad_alloc&)` net upstream can ever see it, and the three
+// clone sites have to classify it themselves. Reporting it with a plain
+// AssertInfo yields UnexpectedError(2001), which merr does not mark retriable;
+// on the search path lb_policy then blacklists the serving node for the
+// channel instead of failing over to another replica, so memory pressure would
+// evict healthy nodes from routing. Pin the retriable code at every site.
+TEST_F(GeometryValueSemanticsTest, CloneFailureIsClassifiedAsRetriableOOM) {
+    Geometry src(ctx_, "POINT (1 2)");
+    ASSERT_TRUE(src.IsValid());
+
+    auto expect_mem_allocate_failed = [](const char* what,
+                                         std::function<void()> clone) {
+        milvus::GeometryCloneFailureForTesting().store(true);
+        try {
+            clone();
+            milvus::GeometryCloneFailureForTesting().store(false);
+            FAIL() << what << " must throw when the clone fails";
+        } catch (const milvus::SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::MemAllocateFailed)
+                << what << " must report the retriable OOM code";
+        }
+    };
+
+    expect_mem_allocate_failed("copy construction",
+                               [&]() { Geometry copy(src); });
+    expect_mem_allocate_failed("copy assignment", [&]() {
+        Geometry dst;
+        dst = src;
+    });
+    expect_mem_allocate_failed("Clone(ctx)",
+                               [&]() { auto c = src.Clone(ctx_); });
+
+    // The hook is one-shot, so the fault injection cannot leak into unrelated
+    // tests -- and cloning still works normally afterwards.
+    ASSERT_FALSE(milvus::GeometryCloneFailureForTesting().load());
+    Geometry copy(src);
+    ASSERT_TRUE(copy.IsValid());
+    EXPECT_NE(copy.GetRawGeometry(), src.GetRawGeometry());
+    EXPECT_EQ(copy.to_wkb_string(), src.to_wkb_string());
 }
 
 }  // namespace
