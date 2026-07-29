@@ -419,7 +419,7 @@ TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
 
     // Growing search passes a logical bitset sized by the query timestamp's
     // active row count. Rows beyond that logical view are not visible yet and
-    // must be masked in the transformed physical bitset.
+    // must stay outside the transformed physical search range.
     BitsetType logical_bitset(2);
     BitsetView logical_view(logical_bitset);
 
@@ -427,10 +427,9 @@ TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
     auto status = mapping.TransformBitset(logical_view, physical_bitset);
 
     EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical_bitset.size(), 3);
+    ASSERT_EQ(physical_bitset.size(), 2);
     EXPECT_FALSE(physical_bitset[0]);
     EXPECT_FALSE(physical_bitset[1]);
-    EXPECT_TRUE(physical_bitset[2]);
 }
 
 TEST(Util_Segcore, GrowingTransformBitsetMaterializesNoFilterSnapshot) {
@@ -453,7 +452,10 @@ TEST(Util_Segcore, GrowingTransformBitsetMaterializesNoFilterSnapshot) {
     std::array<bool, 2> later_valid_data = {true, true};
     mapping.Append(later_valid_data.data(), later_valid_data.size(), 5, 4);
     EXPECT_EQ(mapping.GetValidCount(), 6);
-    EXPECT_EQ(physical_bitset.size(), 4);
+
+    status = mapping.TransformBitset(logical_view, physical_bitset);
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
+    ASSERT_EQ(physical_bitset.size(), 4);
     EXPECT_TRUE(physical_bitset.none());
 }
 

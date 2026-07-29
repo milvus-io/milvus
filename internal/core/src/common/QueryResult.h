@@ -307,6 +307,7 @@ struct SearchResult {
 
     BitsetView
     PinBitset(TargetBitmap&& bitset) {
+        pinned_bitsets_.clear();
         auto pinned = std::make_unique<TargetBitmap>(std::move(bitset));
         auto view = BitsetView(*pinned);
         pinned_bitsets_.emplace_back(std::move(pinned));

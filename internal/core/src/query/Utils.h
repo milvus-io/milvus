@@ -28,6 +28,7 @@
 namespace milvus::query {
 inline void
 FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
+    result.pinned_bitsets_.clear();
     auto total_num = num_queries * topk;
     result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
     result.distances_.resize(total_num, 0.0f);

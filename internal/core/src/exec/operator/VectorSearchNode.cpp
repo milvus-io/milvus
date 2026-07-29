@@ -111,9 +111,13 @@ PhyVectorSearchNode::GetOutput() {
         search_info_.array_offsets_ = array_offsets;
     }
 
+    // Single search + metrics path
+    milvus::SearchResult search_result;
+
     // Prepare BitsetView for search.
-    // Fast path: all_rows_visible + non-element-level → empty BitsetView
-    //            (IDSelectorAll in Knowhere, skips per-vector bit test).
+    // Fast path: sealed all_rows_visible + non-element-level leaves an empty
+    // BitsetView (IDSelectorAll in Knowhere). Growing keeps the logical
+    // snapshot bound by materializing an all-visible bitset.
     // Normal path: build BitsetView from the bitmap produced upstream.
     milvus::BitsetView search_view;
     int64_t data_cnt = active_count_;
@@ -126,7 +130,10 @@ PhyVectorSearchNode::GetOutput() {
     }
 
     if (query_context_->get_all_rows_visible() && !ph.element_level_) {
-        // search_view stays default-constructed (empty)
+        if (segment_->type() == SegmentType::Growing) {
+            TargetBitmap all_visible(active_count_, false);
+            search_view = search_result.PinBitset(std::move(all_visible));
+        }
     } else {
         // There are two types of execution: pre-filter and iterative filter
         // For **pre-filter**: FilterBitsNode -> MvccNode -> ElementFilterBitsNode -> VectorSearchNode -> ...
@@ -176,8 +183,6 @@ PhyVectorSearchNode::GetOutput() {
         data_cnt = search_view.size();
     }
 
-    // Single search + metrics path
-    milvus::SearchResult search_result;
     auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,
