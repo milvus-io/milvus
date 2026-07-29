@@ -121,3 +121,40 @@ func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 		assert.Equal(t, 42, result)
 	})
 }
+
+func TestParamItemGetAsSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected int64
+	}{
+		{name: "bytes", value: "128", expected: 128},
+		{name: "integer kilobytes", value: "1KB", expected: 1024},
+		{name: "decimal kilobytes", value: "1.5KB", expected: 1536},
+		{name: "decimal megabytes", value: "1.25MB", expected: 1280 * 1024},
+		{name: "decimal gigabytes", value: "0.5GB", expected: 512 * 1024 * 1024},
+		{name: "truncate fractional bytes", value: "0.1KB", expected: 102},
+		{name: "case insensitive unit", value: "2Mb", expected: 2 * 1024 * 1024},
+		{name: "negative decimal", value: "-1.5KB", expected: -1536},
+		{name: "invalid", value: "invalid", expected: 0},
+		{name: "not a number", value: "NaNMB", expected: 0},
+		{name: "infinity", value: "InfMB", expected: 0},
+		{name: "decimal overflow", value: "1e100GB", expected: 0},
+		{name: "integer multiplication overflow", value: "9223372036854775807KB", expected: 0},
+		{name: "max int64 bytes", value: "9223372036854775807", expected: 9223372036854775807},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := config.NewManager()
+			manager.SetConfig("test.size", test.value)
+			param := &ParamItem{
+				Key:          "test.size",
+				DefaultValue: "0",
+			}
+			param.Init(manager)
+
+			assert.Equal(t, test.expected, param.GetAsSize())
+		})
+	}
+}
