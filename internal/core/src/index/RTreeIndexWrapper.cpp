@@ -50,6 +50,7 @@ RTreeIndexWrapper::RTreeIndexWrapper(std::string& path, bool is_build_mode)
         }
         // Start with an empty rtree for dynamic insertions
         rtree_ = RTree();
+        entry_count_.store(0, std::memory_order_release);
     }
 }
 
@@ -112,6 +113,10 @@ RTreeIndexWrapper::insert_value_locked(const Box& box, int64_t row_offset) {
         rtree_needs_rebuild_ = true;
         throw;
     }
+    // Published last: the row is only committed once both structures accepted
+    // it, so a lock-free count() never reports a row that was rolled back.
+    entry_count_.store(static_cast<int64_t>(values_.size()),
+                       std::memory_order_release);
 }
 
 void
@@ -316,6 +321,8 @@ RTreeIndexWrapper::bulk_load_from_field_data(
     values_.swap(local_values);
     rtree_.swap(new_tree);
     rtree_needs_rebuild_ = false;
+    entry_count_.store(static_cast<int64_t>(values_.size()),
+                       std::memory_order_release);
     LOG_INFO("R-Tree bulk load (Boost) completed with {} entries",
              values_.size());
 }
@@ -426,6 +433,10 @@ RTreeIndexWrapper::load() {
         }
         rtree_.swap(loaded);
         rtree_needs_rebuild_ = false;
+        // The load path deserializes straight into the tree and never fills
+        // values_, so the tree is the only row-count source here.
+        entry_count_.store(static_cast<int64_t>(rtree_.size()),
+                           std::memory_order_release);
 
         LOG_INFO("R-Tree index (Boost) loaded from {}", index_path_);
     } catch (const SegcoreError&) {
@@ -451,9 +462,17 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
         throw std::bad_alloc();
     }
 
-    auto tree_guard = lock_consistent_rtree_for_read();
     candidate_offsets.clear();
 
+    // The shared lock below is taken ONLY around the statements that touch
+    // rtree_. Everything else here -- the envelope of the caller's query
+    // geometry, and copying offsets out of the local `results` -- is
+    // thread-private, and holding the lock across it would stretch the read
+    // critical section (the copy is proportional to the candidate count, so on
+    // a large growing segment it is the dominant part) for no benefit. Readers
+    // that hold the lock longer than necessary are exactly what makes the
+    // per-row insert lock hard to acquire.
+    //
     // Get bounding box of query geometry. An empty/degenerate query geometry
     // has no envelope. For the spatial predicates (Intersects / Within /
     // Contains / Touches / Overlaps / Crosses) it intersects nothing, so there
@@ -472,6 +491,7 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
     double minX, minY, maxX, maxY;
     if (!get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY)) {
         if (op == proto::plan::GISFunctionFilterExpr_GISOp_Equals) {
+            auto tree_guard = lock_consistent_rtree_for_read();
             candidate_offsets.reserve(rtree_.size());
             for (const auto& v : rtree_) {
                 candidate_offsets.push_back(v.second);
@@ -485,8 +505,11 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
 
     // Perform coarse intersection query
     std::vector<Value> results;
-    rtree_.query(boost::geometry::index::intersects(query_box),
-                 std::back_inserter(results));
+    {
+        auto tree_guard = lock_consistent_rtree_for_read();
+        rtree_.query(boost::geometry::index::intersects(query_box),
+                     std::back_inserter(results));
+    }
     candidate_offsets.reserve(results.size());
     for (const auto& v : results) {
         candidate_offsets.push_back(v.second);
@@ -521,11 +544,15 @@ RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
 
 int64_t
 RTreeIndexWrapper::count() const {
-    // rtree_ is mutated by add_geometry()/bulk_load_from_field_data() under a
-    // write lock; reading its size concurrently must take the shared lock too,
-    // otherwise a growing-segment search races with incremental inserts.
-    auto guard = lock_consistent_rtree_for_read();
-    return static_cast<int64_t>(rtree_.size());
+    // Deliberately lock-free. rtree_ is mutated by add_geometry() /
+    // bulk_load_from_field_data() / load() under the exclusive lock, so
+    // reading rtree_.size() would need the shared lock -- and every
+    // growing-segment search calls this once (RTreeIndex::Query sizes its
+    // bitmap by Count()), so that acquisition lands squarely on the search
+    // path and adds to the read pressure the insert thread has to push
+    // through. entry_count_ is published by each of those mutation points
+    // while they hold the lock, which is all a row count needs.
+    return entry_count_.load(std::memory_order_acquire);
 }
 
 int64_t

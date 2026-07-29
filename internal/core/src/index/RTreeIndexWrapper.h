@@ -103,6 +103,12 @@ class RTreeIndexWrapper {
     /**
      * @brief Get the total number of geometries in the index
      * @return Number of geometries
+     *
+     * Lock-free: served from entry_count_, which every mutation point
+     * publishes under rtree_mutex_. Reading rtree_.size() instead would put a
+     * shared-lock acquisition on the search path for a single integer -- and
+     * would have to rebuild a poisoned tree first (see
+     * lock_consistent_rtree_for_read) just to read its size.
      */
     int64_t
     count() const;
@@ -183,6 +189,14 @@ class RTreeIndexWrapper {
 
     mutable RTree rtree_{};
     std::vector<Value> values_;
+
+    // Number of indexed entries, mirroring values_ on the build path and
+    // rtree_.size() on the load path (load() populates only the tree). Every
+    // store below happens under an exclusive rtree_mutex_, so count() can read
+    // it without taking the lock at all. It tracks the COMMITTED set: a failed
+    // insert rolls values_ back and leaves this counter untouched, so it stays
+    // correct while rtree_ is still awaiting its rebuild.
+    std::atomic<int64_t> entry_count_{0};
     std::string index_path_;
     bool is_build_mode_;
 

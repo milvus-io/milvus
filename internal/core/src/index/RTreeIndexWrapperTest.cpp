@@ -384,6 +384,39 @@ TEST_F(RTreeIndexWrapperTest, InsertExceptionRebuildsTreeBeforeReuse) {
     EXPECT_EQ(candidates, std::vector<int64_t>({0, 1}));
 }
 
+// count() is served from entry_count_ instead of rtree_.size(), so it must be
+// published by every path that changes the committed row set. The build path
+// (incremental inserts) and the load path (which deserializes straight into
+// the tree and never fills values_) publish it from different sources, so pin
+// both here at the wrapper boundary -- the index-level tests only reach them
+// through RTreeIndex::Count()'s max() of its own row counter.
+TEST_F(RTreeIndexWrapperTest, CountTracksCommittedRowsOnBuildAndLoadPaths) {
+    std::string index_path = test_dir_ + "/test_index_count_paths";
+    constexpr int kRows = 3;
+
+    {
+        milvus::index::RTreeIndexWrapper wrapper(index_path, true);
+        EXPECT_EQ(wrapper.count(), 0);
+
+        for (int i = 0; i < kRows; ++i) {
+            auto wkb = create_point_wkb(static_cast<double>(i),
+                                        static_cast<double>(i));
+            wrapper.add_geometry(
+                reinterpret_cast<const uint8_t*>(wkb.data()), wkb.size(), i);
+            EXPECT_EQ(wrapper.count(), static_cast<int64_t>(i + 1));
+        }
+        wrapper.finish();
+    }
+
+    {
+        milvus::index::RTreeIndexWrapper wrapper(index_path, false);
+        // Nothing is published before load(): a load-mode wrapper starts empty.
+        EXPECT_EQ(wrapper.count(), 0);
+        wrapper.load();
+        EXPECT_EQ(wrapper.count(), static_cast<int64_t>(kRows));
+    }
+}
+
 // Pins the lock POLICY, not just the presence of a lock: rtree_mutex_ must
 // stay write-priority. add_geometry takes it exclusively once per row while
 // every concurrent search takes it shared, so under a reader-preferring lock
