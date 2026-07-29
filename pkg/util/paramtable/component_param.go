@@ -60,6 +60,9 @@ const (
 	// placeholders and the rest of the internal request retain ample headroom.
 	DefaultMaxBloomFilterPlanSize = 128 * 1024 * 1024
 
+	// DefaultMaxCollectionSchemaSize is the hard cap for canonical collection schemas.
+	DefaultMaxCollectionSchemaSize = 1280 * 1024
+
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
 	DefaultPQCodeBudgetGBRatio      = 0.125
@@ -2080,6 +2083,7 @@ type proxyConfig struct {
 	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
 	MaxNameLength                     ParamItem `refreshable:"true"`
 	MaxCollectionDescriptionLength    ParamItem `refreshable:"true"`
+	MaxCollectionSchemaSize           ParamItem `refreshable:"true"`
 	MaxUsernameLength                 ParamItem `refreshable:"true"`
 	MaxUserDescriptionLength          ParamItem `refreshable:"true"`
 	MinPasswordLength                 ParamItem `refreshable:"true"`
@@ -2189,6 +2193,25 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxCollectionDescriptionLength.Init(base.mgr)
+
+	p.MaxCollectionSchemaSize = ParamItem{
+		Key:          "proxy.maxCollectionSchemaSize",
+		DefaultValue: strconv.Itoa(DefaultMaxCollectionSchemaSize),
+		Version:      "2.6.0",
+		PanicIfEmpty: true,
+		Doc: "The maximum protobuf wire size in bytes of the final canonical collection schema. " +
+			"The hard cap is 1.25 MiB, and schemas whose size equals the configured limit are rejected. " +
+			"Invalid, non-positive, or over-cap values fall back to 1.25 MiB.",
+		Export: true,
+		Formatter: func(v string) string {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n <= 0 || n > DefaultMaxCollectionSchemaSize {
+				return strconv.Itoa(DefaultMaxCollectionSchemaSize)
+			}
+			return v
+		},
+	}
+	p.MaxCollectionSchemaSize.Init(base.mgr)
 
 	p.MinPasswordLength = ParamItem{
 		Key:          "proxy.minPasswordLength",

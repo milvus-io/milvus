@@ -17,15 +17,37 @@
 package rootcoord
 
 import (
+	"fmt"
+
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func validateCollectionSchemaPayloadSize(schema *schemapb.CollectionSchema) error {
+	actual := proto.Size(schema)
+	limit := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.GetAsInt()
+	if actual < limit {
+		return nil
+	}
+	return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+		"collection schema payload size is %d bytes, limit is %d bytes",
+		actual,
+		limit,
+	))
+}
 
 func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema) error {
 	var oldSchema *schemapb.CollectionSchema
 	if oldColl != nil {
 		oldSchema = oldColl.ToCollectionSchemaPB()
 	}
-	return schemautil.ValidateSchemaEvolution(oldSchema, newSchema)
+	if err := schemautil.ValidateSchemaEvolution(oldSchema, newSchema); err != nil {
+		return err
+	}
+	return validateCollectionSchemaPayloadSize(newSchema)
 }

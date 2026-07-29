@@ -240,6 +240,14 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("MaxNameLength: %d", Params.MaxNameLength.GetAsInt64())
 		assert.Equal(t, 1024, Params.MaxUserDescriptionLength.GetAsInt())
+		assert.Equal(t, int64(DefaultMaxCollectionSchemaSize), Params.MaxCollectionSchemaSize.GetAsInt64())
+		params.Save(Params.MaxCollectionSchemaSize.Key, "65536")
+		assert.Equal(t, int64(65536), Params.MaxCollectionSchemaSize.GetAsInt64())
+		for _, invalid := range []string{"0", "-1", "invalid", "1310721"} {
+			params.Save(Params.MaxCollectionSchemaSize.Key, invalid)
+			assert.Equal(t, int64(DefaultMaxCollectionSchemaSize), Params.MaxCollectionSchemaSize.GetAsInt64(), invalid)
+		}
+		params.Reset(Params.MaxCollectionSchemaSize.Key)
 
 		t.Logf("MaxFieldNum: %d", Params.MaxFieldNum.GetAsInt64())
 		assert.Equal(t, int64(256), Params.MaxFieldNum.GetAsInt64())
