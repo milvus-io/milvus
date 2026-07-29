@@ -2,13 +2,13 @@ package metautil
 
 import (
 	"encoding/json"
-	"fmt"
 	"path"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -124,7 +124,7 @@ func ReplaceSegmentIDsInPath(sourcePath string, collectionID, partitionID, segme
 	}
 
 	if logTypeIndex < 0 || logTypeIndex+3 >= len(parts) {
-		return "", fmt.Errorf("invalid binlog path structure: %s (expected log_type at a valid position)", sourcePath)
+		return "", merr.WrapErrParameterInvalidMsg("invalid binlog path structure: %s (expected log_type at a valid position)", sourcePath)
 	}
 
 	parts[logTypeIndex+1] = strconv.FormatInt(collectionID, 10)

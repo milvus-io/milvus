@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -213,6 +214,11 @@ func TestReplaceSegmentIDsInPath(t *testing.T) {
 			if test.wantErr {
 				if err == nil {
 					t.Fatal("expected an error")
+				}
+				// pkg/ errors must originate through merr so callers and the
+				// gRPC layer can classify them; a raw fmt.Errorf carries no code.
+				if got := merr.Code(err); got != merr.Code(merr.ErrParameterInvalid) {
+					t.Fatalf("error must be a merr ErrParameterInvalid, got code %d for %v", got, err)
 				}
 				return
 			}
