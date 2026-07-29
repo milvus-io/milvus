@@ -17,11 +17,16 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -149,27 +154,180 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	suite.Nil(out)
 }
 
-func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotPanic() {
+func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotAdvanceTSafe() {
 	manager := &segments.Manager{
 		Collection: segments.NewMockCollectionManager(suite.T()),
 		Segment:    segments.NewMockSegmentManager(suite.T()),
 	}
 	delegator := delegator.NewMockShardDelegator(suite.T())
 	schema := &schemapb.CollectionSchema{Version: 2}
-	expectedErr := merr.WrapErrServiceUnavailableMsg("delegator is not ready")
-	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
-	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
+	updateSchemaStarted := make(chan struct{})
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).RunAndReturn(func(ctx context.Context, _ *schemapb.CollectionSchema, _ uint64) error {
+		close(updateSchemaStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	}).Once()
 
 	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
-	suite.NotPanics(func() {
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 		suite.Nil(node.Operate(&deleteNodeMsg{
 			schema:          schema,
 			schemaBarrierTs: 10,
 			timeRange:       TimeRange{timestampMax: 10},
 		}))
+	}()
+
+	select {
+	case <-updateSchemaStarted:
+	case <-time.After(time.Second):
+		suite.FailNow("schema update did not start")
+	}
+	node.Close()
+	suite.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetriesBeforeTSafe() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	expectedErr := merr.WrapErrServiceInternal("transient worker fanout failure")
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(nil).Once()
+	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldInterval := deleteNodeUpdateSchemaRetryInterval
+	deleteNodeUpdateSchemaRetryInterval = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaRetryInterval = oldInterval
+	})
+
+	suite.Nil(node.Operate(&deleteNodeMsg{
+		schema:          schema,
+		schemaBarrierTs: 10,
+		timeRange:       TimeRange{timestampMax: 10},
+	}))
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetriesRawTransportError() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(grpcstatus.Error(codes.Unavailable, "transport unavailable")).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(nil).Once()
+	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldInterval := deleteNodeUpdateSchemaRetryInterval
+	deleteNodeUpdateSchemaRetryInterval = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaRetryInterval = oldInterval
+	})
+
+	suite.Nil(node.Operate(&deleteNodeMsg{
+		schema:          schema,
+		schemaBarrierTs: 10,
+		timeRange:       TimeRange{timestampMax: 10},
+	}))
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetriesNodeNotAvailable() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(merr.WrapErrNodeNotAvailable(1)).Once()
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(nil).Once()
+	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldInterval := deleteNodeUpdateSchemaRetryInterval
+	deleteNodeUpdateSchemaRetryInterval = time.Millisecond
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaRetryInterval = oldInterval
+	})
+
+	suite.Nil(node.Operate(&deleteNodeMsg{
+		schema:          schema,
+		schemaBarrierTs: 10,
+		timeRange:       TimeRange{timestampMax: 10},
+	}))
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaNonRetryableErrorPanicsWithoutTSafe() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	expectedErr := merr.WrapErrOperationNotSupportedMsg("unsupported incompatible schema change")
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	suite.Panics(func() {
+		node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		})
+	})
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaRetryLimitPanicsWithoutTSafe() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	expectedErr := merr.WrapErrNodeNotAvailable(1)
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	oldMaxRetryDuration := deleteNodeUpdateSchemaMaxRetryDuration
+	deleteNodeUpdateSchemaMaxRetryDuration = 0
+	suite.T().Cleanup(func() {
+		deleteNodeUpdateSchemaMaxRetryDuration = oldMaxRetryDuration
+	})
+
+	suite.Panics(func() {
+		node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		})
 	})
 }
 
 func TestDeleteNode(t *testing.T) {
 	suite.Run(t, new(DeleteNodeSuite))
+}
+
+func TestSchemaUpdateRetryClassification(t *testing.T) {
+	assert.True(t, isRetryableSchemaUpdateError(grpcstatus.Error(codes.FailedPrecondition, "worker not ready")))
+	assert.True(t, isRetryableSchemaUpdateError(merr.WrapErrServiceInternal("transient fanout failure")))
+	assert.True(t, isRetryableSchemaUpdateError(merr.SegcoreError(2018, "transient object storage failure")))
+	assert.False(t, isRetryableSchemaUpdateError(grpcstatus.Error(codes.InvalidArgument, "invalid schema")))
+	assert.False(t, isRetryableSchemaUpdateError(merr.WrapErrOperationNotSupportedMsg("unsupported schema")))
+	assert.False(t, isRetryableSchemaUpdateError(merr.SegcoreError(2001, "invalid schema")))
+	assert.False(t, isRetryableSchemaUpdateError(merr.SegcoreError(2020, "invalid field")))
 }

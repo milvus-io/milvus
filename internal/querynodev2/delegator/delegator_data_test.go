@@ -225,6 +225,10 @@ func (s *DelegatorDataSuite) genTextCollection() {
 }
 
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
+	s.genCollectionWithFunctionContext(context.Background())
+}
+
+func (s *DelegatorDataSuite) genCollectionWithFunctionContext(ctx context.Context) {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 		Name:    "TestCollection",
 		Version: 1,
@@ -259,7 +263,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		}},
 	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(ctx, s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 	s.allocFunctionRunnersForTest()
@@ -918,7 +922,215 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRet
 	})
 
 	s.Error(err)
-	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.ErrorIs(err, merr.ErrCollectionRuntimeNotReady)
+	s.True(merr.IsRetryableErr(err))
+}
+
+func (s *DelegatorDataSuite) TestFullLoadBM25StatsRequiresOracleForRetry() {
+	info := &querypb.SegmentLoadInfo{
+		SegmentID: 100,
+		Bm25Logs:  bm25LogsForField(101, "bm25stats/full/segment_100/field_101/0"),
+	}
+	req := &querypb.LoadSegmentsRequest{CollectionID: s.collectionID, Infos: []*querypb.SegmentLoadInfo{info}}
+
+	err := s.delegator.loadBM25Stats(context.Background(), req.GetInfos(), req)
+	s.ErrorIs(err, merr.ErrCollectionRuntimeNotReady)
+	s.True(merr.IsRetryableErr(err))
+}
+
+func (s *DelegatorDataSuite) TestStatsLoadBM25StatsRequiresRuntimeRetry() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil).Once()
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Stats,
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID: 100,
+			Level:     datapb.SegmentLevel_L1,
+			Bm25Logs:  bm25LogsForField(101, "bm25stats/stats/segment_100/field_101/0"),
+		}},
+	})
+	s.ErrorIs(err, merr.ErrCollectionRuntimeNotReady)
+	s.True(merr.IsRetryableErr(err))
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesAfterRepairFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-retry/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1})
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	ioErr := merr.WrapErrIoTooManyRequests(remotePath, errors.New("throttled"))
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(nil, ioErr).Once()
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm).Twice()
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Twice()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil).Twice()
+
+	req := &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Schema:       typeutil.Clone(s.delegator.collection.Schema()),
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID:     100,
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			Bm25Logs:      bm25LogsForField(101, remotePath),
+		}},
+	}
+
+	err = s.delegator.LoadSegments(context.Background(), req)
+	s.ErrorIs(err, merr.ErrCollectionRuntimeNotReady)
+	s.ErrorIs(err, merr.ErrIoTooManyRequests)
+	s.True(merr.IsRetryableErr(err))
+
+	err = s.delegator.LoadSegments(context.Background(), req)
+	s.NoError(err)
+	segStats, ok := s.getIDFOracleForTest().sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+}
+
+func (s *DelegatorDataSuite) TestReopenBM25RepairHoldsSchemaReadLease() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-lease/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1})
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	readerStarted := make(chan struct{})
+	releaseReader := make(chan struct{})
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).RunAndReturn(func(context.Context, string) (storage.FileReader, error) {
+		close(readerStarted)
+		<-releaseReader
+		return &bytesFileReader{bytes.NewReader(data)}, nil
+	}).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm).Once()
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil).Once()
+
+	req := &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Schema:       typeutil.Clone(s.delegator.collection.Schema()),
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID: 100,
+			Level:     datapb.SegmentLevel_L1,
+			Bm25Logs:  bm25LogsForField(101, remotePath),
+		}},
+	}
+
+	loadDone := make(chan error, 1)
+	go func() {
+		loadDone <- s.delegator.LoadSegments(context.Background(), req)
+	}()
+	select {
+	case <-readerStarted:
+	case <-time.After(5 * time.Second):
+		s.FailNow("reopen BM25 reader did not start")
+	}
+
+	writerAcquired := make(chan struct{})
+	go func() {
+		s.delegator.schemaChangeMutex.Lock()
+		close(writerAcquired)
+		s.delegator.schemaChangeMutex.Unlock()
+	}()
+	select {
+	case <-writerAcquired:
+		s.FailNow("schema writer acquired while reopen IDF repair was in progress")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseReader)
+	select {
+	case err := <-loadDone:
+		s.NoError(err)
+	case <-time.After(5 * time.Second):
+		s.FailNow("reopen BM25 load did not finish")
+	}
+	select {
+	case <-writerAcquired:
+	case <-time.After(5 * time.Second):
+		s.FailNow("schema writer did not acquire after IDF repair finished")
+	}
+}
+
+func (s *DelegatorDataSuite) TestFullLoadBM25RetryRepairsAfterSchemaEpochChange() {
+	s.genCollectionWithFunction()
+
+	oldPath := "bm25stats/full-retry/segment_100/field_101/0"
+	newPath := "bm25stats/full-retry/segment_100/field_103/0"
+	oldStats := storage.NewBM25Stats()
+	oldStats.Append(map[uint32]float32{1: 1})
+	oldData, err := oldStats.Serialize()
+	s.Require().NoError(err)
+	newStats := storage.NewBM25Stats()
+	newStats.Append(map[uint32]float32{2: 1})
+	newData, err := newStats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, oldPath).Return(&bytesFileReader{bytes.NewReader(oldData)}, nil).Once()
+	cm.EXPECT().Reader(mock.Anything, newPath).Return(&bytesFileReader{bytes.NewReader(newData)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm).Twice()
+
+	schemaV1 := typeutil.Clone(s.delegator.collection.Schema())
+	infoV1 := &querypb.SegmentLoadInfo{SegmentID: 100, Bm25Logs: bm25LogsForField(101, oldPath)}
+	reqV1 := &querypb.LoadSegmentsRequest{CollectionID: s.collectionID, Schema: schemaV1, Infos: []*querypb.SegmentLoadInfo{infoV1}}
+	s.NoError(s.delegator.withLoadSchemaReadLease(context.Background(), reqV1, func() error {
+		return s.delegator.loadBM25Stats(context.Background(), reqV1.GetInfos(), reqV1)
+	}))
+
+	schemaV2 := typeutil.Clone(schemaV1)
+	schemaV2.Version = schemaV1.GetVersion() + 1
+	schemaV2.Functions = append(schemaV2.Functions, &schemapb.FunctionSchema{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{104},
+		OutputFieldIds: []int64{103},
+	})
+	s.delegator.schemaChangeMutex.Lock()
+	s.NoError(s.getIDFOracleForTest().SyncFunctions(schemaV2.GetFunctions()))
+	s.delegator.publishDelegatorSchemaLocked(schemaV2)
+	s.delegator.schemaChangeMutex.Unlock()
+
+	err = s.delegator.addDistributionIfLoadSchemaOK(context.Background(), reqV1, SegmentEntry{NodeID: 1, SegmentID: 100})
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	infoV2 := typeutil.Clone(infoV1)
+	infoV2.Bm25Logs = append(infoV2.Bm25Logs, bm25LogsForField(103, newPath)...)
+	reqV2 := &querypb.LoadSegmentsRequest{CollectionID: s.collectionID, Schema: schemaV2, Infos: []*querypb.SegmentLoadInfo{infoV2}}
+	s.NoError(s.delegator.withLoadSchemaReadLease(context.Background(), reqV2, func() error {
+		return s.delegator.loadBM25Stats(context.Background(), reqV2.GetInfos(), reqV2)
+	}))
+	s.NoError(s.delegator.addDistributionIfLoadSchemaOK(context.Background(), reqV2, SegmentEntry{NodeID: 1, SegmentID: 100}))
+
+	segStats, ok := s.getIDFOracleForTest().sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+	s.True(segStats.HasField(103))
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
@@ -1244,7 +1456,50 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners() {
+func (s *DelegatorDataSuite) TestLoadSegmentsSchemaVersionGate() {
+	newSchema := typeutil.Clone(s.delegator.collection.Schema())
+	newSchema.Version = s.delegator.collection.Schema().GetVersion() + 1
+	req := &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       newSchema,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	}
+
+	err := s.delegator.LoadSegments(context.Background(), req)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	s.Require().NoError(s.delegator.UpdateSchema(context.Background(), newSchema, 100))
+	_, version := s.delegator.delegatorSchemaSnapshot()
+	s.Equal(uint64(newSchema.GetVersion()), version)
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	err = s.delegator.LoadSegments(context.Background(), req)
+	s.NoError(err)
+
+	staleSchema := typeutil.Clone(newSchema)
+	staleSchema.Version--
+	staleReq := typeutil.Clone(req)
+	staleReq.Schema = staleSchema
+	err = s.delegator.LoadSegments(context.Background(), staleReq)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+}
+
+func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaDoesNotUpdateFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
@@ -1256,11 +1511,15 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	})
 	s.Require().NoError(err)
 
-	// The load path has already advanced the collection snapshot, so the DDL
-	// event is skipped as a no-op. The function runner key must still point at
-	// the schema installed by the load path.
-	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
 	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	s.Require().NoError(err)
+	s.False(ok)
+
+	// Only the WAL UpdateSchema path advances the delegator schema/function view.
+	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
+	ok, err = function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
 		return nil
 	})
 	s.Require().NoError(err)

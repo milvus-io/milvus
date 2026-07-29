@@ -1282,36 +1282,37 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
 	defer s.ptrLock.Unpin()
 
-	// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
-	// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
-	// the full-load path injects; otherwise segcore asserts on load. See #51249.
-	if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
-		return err
-	}
+	return s.collection.withReopenSchema(schema, func(effectiveSchema *schemapb.CollectionSchema, segcoreSchemaVersion uint64) error {
+		// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
+		// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
+		// the full-load path injects; otherwise segcore asserts on load. See #51249.
+		if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
+			return err
+		}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
-	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo:      newLoadInfo,
-		Schema:        schema,
-		SchemaVersion: schemaVersion,
+		err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
+			LoadInfo:      newLoadInfo,
+			Schema:        effectiveSchema,
+			SchemaVersion: segcoreSchemaVersion,
+		})
+		if err != nil {
+			return err
+		}
+		s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
+		if s.relatedDataSize != nil {
+			s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
+		}
+		s.loadInfo.Store(newLoadInfo)
+		s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
+		s.compactLoadInfoForRuntime()
+		return nil
 	})
-	if err != nil {
-		return err
-	}
-	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
-	if s.relatedDataSize != nil {
-		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
-	}
-	s.loadInfo.Store(newLoadInfo)
-	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
-	s.compactLoadInfoForRuntime()
-	return nil
 }
 
 type ReleaseScope int

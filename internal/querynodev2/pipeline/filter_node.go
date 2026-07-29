@@ -95,7 +95,16 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 				mlog.Err(err),
 			)
 		} else {
-			out.append(msg)
+			if err := out.append(msg); err != nil {
+				wrapped := merr.WrapErrDataIntegrity(err, "invalid WAL message type %s", msg.Type().String())
+				mlog.Error(ctx, "invalid WAL message, stop process before advancing tsafe",
+					mlog.String("messageType", msg.Type().String()),
+					mlog.FieldVChannel(fNode.channel),
+					mlog.FieldCollectionID(fNode.collectionID),
+					mlog.Err(wrapped),
+				)
+				panic(wrapped)
+			}
 		}
 	}
 	fNode.delegator.TryCleanExcludedSegments(streamMsgPack.EndTs)

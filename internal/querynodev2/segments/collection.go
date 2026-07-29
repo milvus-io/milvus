@@ -455,6 +455,32 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	return plan, shouldUpdate, nil
 }
 
+func (c *Collection) applyIndexMetaUpdate(requiredSchemaVersion uint64, meta *segcorepb.CollectionIndexMeta) error {
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	schema, currentSchemaVersion, _, _ := c.schemaSnapshotWithSegcoreSchemaVersion()
+	if currentSchemaVersion != requiredSchemaVersion {
+		collection := any(c.ID())
+		if schema != nil && schema.GetName() != "" {
+			collection = schema.GetName()
+		}
+		return merr.WrapErrCollectionSchemaVersionNotReadyWithVersion(collection, currentSchemaVersion, requiredSchemaVersion)
+	}
+
+	return c.updateIndexMeta(meta)
+}
+
+// UpdateCollectionIndexMeta refreshes only collection-wide native index
+// metadata. The caller must hold a CollectionManager reference for the whole
+// operation. The logical schema check and index update are serialized with DDL.
+func UpdateCollectionIndexMeta(collection *Collection, requiredSchemaVersion uint64, meta *segcorepb.CollectionIndexMeta) error {
+	if collection == nil {
+		return merr.WrapErrCollectionNotFound(0, "collection not found while updating index meta")
+	}
+	return collection.applyIndexMetaUpdate(requiredSchemaVersion, meta)
+}
+
 func (c *Collection) applySchemaUpdateLocked(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
 	plan, shouldUpdate := prepareCollectionSchemaUpdate(c, logicalSchemaVersion, schemaBarrierTs)
 	if !shouldUpdate {
@@ -483,6 +509,34 @@ func (c *Collection) WithInsertSchemaTransition(fn func(schema *schemapb.Collect
 	defer c.schemaTransitionMu.RUnlock()
 
 	fn(c.Schema())
+}
+
+// withReopenSchema keeps a segment reopen in one worker collection schema
+// epoch. UpdateSchema cannot advance the collection between the logical
+// version check, the native segment reopen, and the Go-side segment metadata
+// commit performed by fn.
+func (c *Collection) withReopenSchema(requiredSchema *schemapb.CollectionSchema, fn func(schema *schemapb.CollectionSchema, segcoreSchemaVersion uint64) error) error {
+	c.schemaTransitionMu.RLock()
+	defer c.schemaTransitionMu.RUnlock()
+
+	servedSchema, currentSchemaVersion, _, segcoreSchemaVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
+	if requiredSchema == nil {
+		requiredSchema = servedSchema
+	} else {
+		requiredSchemaVersion := uint64(requiredSchema.GetVersion())
+		if currentSchemaVersion != requiredSchemaVersion {
+			collection := any(c.ID())
+			if requiredSchema.GetName() != "" {
+				collection = requiredSchema.GetName()
+			}
+			return merr.WrapErrCollectionSchemaVersionNotReadyWithVersion(collection, currentSchemaVersion, requiredSchemaVersion)
+		}
+	}
+	if requiredSchema == nil {
+		return merr.WrapErrServiceInternal("reopen segment has no collection schema")
+	}
+
+	return fn(requiredSchema, segcoreSchemaVersion)
 }
 
 func (c *Collection) setSchema(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64, segcoreSchemaVersion uint64) {

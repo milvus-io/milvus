@@ -82,6 +82,7 @@ var (
 	ErrCollectionReplicateMode         = newMilvusError("can't operate on the collection under standby mode", 108, false, WithErrorType(InputError))
 	ErrCollectionSchemaMismatch        = newMilvusError("collection schema mismatch", 109, false, WithErrorType(InputError))
 	ErrCollectionSchemaVersionNotReady = newMilvusError("collection schema version not ready", 110, true)
+	ErrCollectionRuntimeNotReady       = newMilvusError("collection runtime not ready", 111, true)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.

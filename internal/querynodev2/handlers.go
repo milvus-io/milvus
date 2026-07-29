@@ -148,7 +148,7 @@ func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegm
 	)
 
 	log.Info(ctx, "start to reopen segments")
-	err := node.loader.ReopenSegments(ctx, req.GetInfos())
+	err := node.loader.ReopenSegments(ctx, req.GetInfos(), req.GetSchema())
 	if err != nil {
 		log.Warn(ctx, "failed to reopen segments", mlog.Err(err))
 		return merr.Status(err)

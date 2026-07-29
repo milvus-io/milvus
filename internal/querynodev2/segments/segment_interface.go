@@ -94,7 +94,9 @@ type Segment interface {
 	LastDeltaTimestamp() uint64
 	Load(ctx context.Context) error
 	Release(ctx context.Context, opts ...releaseOption)
-	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
+	// Reopen applies the request's effective schema to segment-local state. The
+	// collection's current logical version and segcore epoch remain authoritative.
+	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) error
 
 	// PK candidate related (BloomFilterSet for regular segments, ExternalSegmentCandidate for external)
 	// Segment implements pkoracle.Candidate: MayPkExist, BatchPkExist, ID, Partition, Type,
