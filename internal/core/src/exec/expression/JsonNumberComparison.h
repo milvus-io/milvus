@@ -270,6 +270,19 @@ CompareJsonNumberToBound(const simdjson::ondemand::number& number,
     return CompareJsonNumberToBound(number.get_double(), bound);
 }
 
+// JSON stats and typed JSON indexes store uint64 values as double. Preserve
+// that established behavior while comparing int64 JSON values exactly.
+inline std::optional<int>
+CompareJsonNumberToBoundWithUint64DoubleFallback(
+    const simdjson::ondemand::number& number,
+    const proto::plan::GenericValue& bound) {
+    if (number.is_uint64()) {
+        return CompareJsonNumberToBound(
+            static_cast<double>(number.get_uint64()), bound);
+    }
+    return CompareJsonNumberToBound(number, bound);
+}
+
 inline bool
 JsonNumberMatchesOp(int comparison, proto::plan::OpType op) {
     switch (op) {

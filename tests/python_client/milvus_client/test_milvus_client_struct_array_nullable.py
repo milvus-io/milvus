@@ -1284,7 +1284,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 f"array_contains_all({STRUCT_TAG_FIELD}, [])",
                 False,
                 False,
-                marks=pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51416", strict=True),
                 id="contains_all_empty_list",
             ),
         ],

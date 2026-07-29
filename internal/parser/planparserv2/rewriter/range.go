@@ -69,6 +69,9 @@ func resolveJSONEffectiveType(v *planpb.GenericValue) (schemapb.DataType, bool) 
 	case *planpb.GenericValue_Int64Val:
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_FloatVal:
+		if math.IsNaN(v.GetFloatVal()) {
+			return schemapb.DataType_None, false
+		}
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_StringVal:
 		return schemapb.DataType_VarChar, true
@@ -94,7 +97,9 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		// For float columns, accept both float and int literal values
 		switch v.GetVal().(type) {
-		case *planpb.GenericValue_FloatVal, *planpb.GenericValue_Int64Val:
+		case *planpb.GenericValue_FloatVal:
+			return !math.IsNaN(v.GetFloatVal())
+		case *planpb.GenericValue_Int64Val:
 			return true
 		default:
 			return false
@@ -109,6 +114,27 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 	default:
 		return false
 	}
+}
+
+func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planpb.GenericValue) (schemapb.DataType, bool) {
+	effDt, ok := resolveEffectiveType(col)
+	if !ok {
+		return schemapb.DataType_None, false
+	}
+
+	if effDt != schemapb.DataType_JSON {
+		if !valueMatchesType(effDt, lower) || !valueMatchesType(effDt, upper) {
+			return schemapb.DataType_None, false
+		}
+		return effDt, true
+	}
+
+	lowerType, lowerOK := resolveJSONEffectiveType(lower)
+	upperType, upperOK := resolveJSONEffectiveType(upper)
+	if !lowerOK || !upperOK || lowerType != upperType {
+		return schemapb.DataType_None, false
+	}
+	return lowerType, true
 }
 
 func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
@@ -380,12 +406,10 @@ func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclus
 	}
 }
 
-// compareInt64ToFloat64 compares an int64 and float64 without converting the
-// integer to float64. The boundary checks also avoid an out-of-range float to
-// int conversion. This mirrors segcore's JSON numeric comparison semantics.
+// compareInt64ToFloat64 compares an int64 and float64 without lossy integer
+// promotion. Callers must reject NaN before relying on the result.
 func compareInt64ToFloat64(lhs int64, rhs float64) int {
 	if math.IsNaN(rhs) {
-		// Preserve cmpGeneric's existing deterministic handling for NaN.
 		return 0
 	}
 	const (
@@ -415,6 +439,16 @@ func compareInt64ToFloat64(lhs int64, rhs float64) int {
 		return 1
 	}
 	return 0
+}
+
+// CompareRangeValues compares two supported range literals exactly.
+func CompareRangeValues(a, b *planpb.GenericValue) (int, bool) {
+	aType, aOK := resolveJSONEffectiveType(a)
+	bType, bOK := resolveJSONEffectiveType(b)
+	if !aOK || !bOK || aType != bType {
+		return 0, false
+	}
+	return cmpGeneric(aType, a, b), true
 }
 
 // -1 means a < b, 0 means a == b, 1 means a > b
@@ -508,19 +542,10 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				others = append(others, idx)
 				continue
 			}
-			effDt, ok := resolveEffectiveType(col)
+			effDt, ok := resolveBinaryRangeEffectiveType(col, bre.GetLowerValue(), bre.GetUpperValue())
 			if !ok {
 				others = append(others, idx)
 				continue
-			}
-			// For JSON, determine actual type from lower value
-			if effDt == schemapb.DataType_JSON {
-				var typeOk bool
-				effDt, typeOk = resolveJSONEffectiveType(bre.GetLowerValue())
-				if !typeOk {
-					others = append(others, idx)
-					continue
-				}
 			}
 			key := columnKey(col) + fmt.Sprintf("|%d", effDt)
 			g, exists := groups[key]
@@ -731,18 +756,10 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				others = append(others, idx)
 				continue
 			}
-			effDt, ok := resolveEffectiveType(col)
+			effDt, ok := resolveBinaryRangeEffectiveType(col, bre.GetLowerValue(), bre.GetUpperValue())
 			if !ok {
 				others = append(others, idx)
 				continue
-			}
-			if effDt == schemapb.DataType_JSON {
-				var typeOk bool
-				effDt, typeOk = resolveJSONEffectiveType(bre.GetLowerValue())
-				if !typeOk {
-					others = append(others, idx)
-					continue
-				}
 			}
 			key := columnKey(col) + fmt.Sprintf("|%d", effDt)
 			g, exists := groups[key]
