@@ -149,6 +149,7 @@ func (s *MultiSegmentWriterSuite) SetupSuite() {
 
 func (s *MultiSegmentWriterSuite) SetupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -174,6 +175,7 @@ func (s *MultiSegmentWriterSuite) SetupTest() {
 
 func (s *MultiSegmentWriterSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 
 // genSimpleSchema generates a simple collection schema for testing

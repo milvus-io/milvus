@@ -41,7 +41,8 @@ const (
 
 func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
-		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED ||
+		indexType == IndexNGRAM
 }
 
 func IsGpuIndex(indexType IndexType) bool {

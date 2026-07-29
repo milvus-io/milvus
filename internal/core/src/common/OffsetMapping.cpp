@@ -396,9 +396,15 @@ GrowingOffsetMapping::TransformBitset(const BitsetView& bitset,
     }
     const auto valid_count = valid_count_;
     const auto total_count = total_count_;
-    BitsetTransformStatus status;
-    if (ShouldSkipBitsetTransform(bitset, total_count, result, status)) {
-        return status;
+
+    result.clear();
+    if (bitset.all()) {
+        return BitsetTransformStatus::AllFiltered;
+    }
+
+    if (static_cast<int64_t>(bitset.size()) >= total_count && bitset.none()) {
+        result.resize(valid_count, false);
+        return BitsetTransformStatus::Transformed;
     }
 
     result.resize(valid_count, true);

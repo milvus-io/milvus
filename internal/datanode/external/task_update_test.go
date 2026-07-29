@@ -65,9 +65,14 @@ type fakeRecordReader struct {
 	records []storage.Record
 	errs    []error
 	idx     int
+	current storage.Record
 }
 
 func (r *fakeRecordReader) Next() (storage.Record, error) {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	if r.idx < len(r.errs) && r.errs[r.idx] != nil {
 		err := r.errs[r.idx]
 		r.idx++
@@ -78,10 +83,15 @@ func (r *fakeRecordReader) Next() (storage.Record, error) {
 	}
 	record := r.records[r.idx]
 	r.idx++
+	r.current = record
 	return record, nil
 }
 
 func (r *fakeRecordReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	return nil
 }
 

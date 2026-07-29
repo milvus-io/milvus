@@ -573,7 +573,16 @@ DataGen(SchemaPtr schema,
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
         bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
-#pragma omp parallel for
+        // Deliberately serial. The VECTOR_ARRAY generator calls this once per
+        // row with N == array_len (typically 3), so an OpenMP region here is
+        // entered once per row: a 10k-row fixture opened 10k parallel regions,
+        // each forking a team sized to the host's core count to run three
+        // iterations. On a 128-core machine the fork/join and barrier cost
+        // dwarfs the work by orders of magnitude and the fixture never
+        // finishes -- ElementFilter.GrowingSegmentArrayOffsets hung
+        // indefinitely there while passing on smaller CI hosts. The loop is
+        // cheap RNG arithmetic; generating it serially costs milliseconds even
+        // for the largest fixtures.
         for (int n = 0; n < N; ++n) {
             vector<float> data(dim);
             float sum = 0;

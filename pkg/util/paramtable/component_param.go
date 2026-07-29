@@ -2231,10 +2231,10 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxFieldNum = ParamItem{
 		Key:          "proxy.maxFieldNum",
-		DefaultValue: "64",
+		DefaultValue: "256",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
-		Doc:          "The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.",
+		Doc:          "The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.",
 		Export:       true,
 	}
 	p.MaxFieldNum.Init(base.mgr)
@@ -5231,7 +5231,7 @@ user-task-polling:
 		Key:          "queryNode.externalCollection.rawDataFactor",
 		Version:      "3.0.0",
 		DefaultValue: "2.0",
-		Doc:          "Peak memory amplification factor for external segment loading. External tables always download, decompress, and deserialize entire row groups into Arrow buffers regardless of mmap/eviction settings, so peak transient memory = rawDataSize * this factor.",
+		Doc:          "Peak memory amplification factor for external segment loading when tiered eviction is disabled. With tiered eviction enabled, the caching layer accounts for transient loading overhead.",
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)

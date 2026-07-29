@@ -885,7 +885,10 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             assert False, "Expected exception: drop_collection_function is no longer supported"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert "not supported" in str(e)
+            assert (
+                "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field"
+                in str(e)
+            )
 
     # ==================== alter_collection_function tests ====================
 

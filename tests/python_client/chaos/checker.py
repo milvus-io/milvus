@@ -1769,7 +1769,7 @@ class FlushChecker(Checker):
 class AddFieldChecker(Checker):
     """check add field operations in a dependent thread"""
 
-    MAX_FIELDS = 64
+    MAX_FIELDS = ct.max_field_num
 
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:

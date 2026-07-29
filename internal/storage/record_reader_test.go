@@ -20,8 +20,14 @@ import (
 	"io"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // exhaustedChunkReader is a minimal RecordReader that is already at EOF and
@@ -98,5 +104,40 @@ func TestPackedRecordReader_CloseNilReceiverDoesNotPanic(t *testing.T) {
 	var rr RecordReader = pr
 	assert.NotPanics(t, func() {
 		assert.NoError(t, rr.Close())
+	})
+}
+
+func TestCompositeBinlogRecordReaderOwnsCurrentRecord(t *testing.T) {
+	newCurrent := func(allocator *memory.CheckedAllocator) Record {
+		builder := array.NewInt64Builder(allocator)
+		builder.Append(1)
+		column := builder.NewArray()
+		builder.Release()
+		return &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{column},
+		}
+	}
+
+	t.Run("next releases previous current", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		reader := &CompositeBinlogRecordReader{
+			fields:  map[FieldID]*schemapb.FieldSchema{},
+			index:   map[FieldID]int16{},
+			current: newCurrent(allocator),
+		}
+
+		_, err := reader.Next()
+		require.NoError(t, err)
+		allocator.AssertSize(t, 0)
+		require.NoError(t, reader.Close())
+	})
+
+	t.Run("close releases current", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		reader := &CompositeBinlogRecordReader{current: newCurrent(allocator)}
+
+		require.NoError(t, reader.Close())
+		allocator.AssertSize(t, 0)
 	})
 }
