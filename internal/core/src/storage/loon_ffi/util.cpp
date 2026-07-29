@@ -18,11 +18,14 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "arrow/result.h"
@@ -325,7 +328,58 @@ static const std::vector<std::pair<std::string, bool /*is_bool*/>>
         {"use_iam", true},
         {"use_virtual_host", true},
         {"anonymous", true},
+        // Not derived from the external source or its spec — mirrored from
+        // the process-level fs.max_connections. See kExtfsInheritedFsFields.
+        {"max_connections", false},
 };
+
+// kExtfsInheritedFsFields lists fs.* properties that extfs.{collectionID}.*
+// inherits verbatim from the process-level storage config.
+//
+// milvus-storage builds each external filesystem purely from its own
+// extfs.<name>.* keys (ExtractExternalFsProperties) — there is no fallback to
+// fs.*, and a missing key silently takes the library's built-in default. So
+// anything that is server-side capacity/tuning config rather than part of the
+// external source's identity has to be copied across explicitly, or it is a
+// no-op on every external read.
+//
+// These are deliberately NOT in kAllowedExtfsSpecKeys: they come from
+// milvus.yaml, not from a user-supplied external_spec.
+static const std::vector<
+    std::pair<const char* /*fs key*/, const char* /*extfs suffix*/>>
+    kExtfsInheritedFsFields = {
+        {PROPERTY_FS_MAX_CONNECTIONS, "max_connections"},
+};
+
+// PropertyValueAsString renders a PropertyVariant back to the string form
+// SetValue accepts. Both variant shapes reach here: the C++ index-build path
+// goes through SetValue, which stores registry-typed values (max_connections
+// is UINT32), while loon_properties_inject_external_spec rebuilds the map
+// from a flat LoonProperties and stores everything as std::string.
+static std::optional<std::string>
+PropertyValueAsString(const milvus_storage::api::Properties& properties,
+                      const char* key) {
+    auto it = properties.find(key);
+    if (it == properties.end()) {
+        return std::nullopt;
+    }
+    return std::visit(
+        [](const auto& v) -> std::optional<std::string> {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+                return v.empty() ? std::nullopt : std::optional<std::string>(v);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return std::optional<std::string>(v ? "true" : "false");
+            } else if constexpr (std::is_integral_v<T>) {
+                return std::optional<std::string>(std::to_string(v));
+            } else {
+                // vector<string> / nullptr_t: no scalar rendering, and no
+                // inherited field uses them.
+                return std::nullopt;
+            }
+        },
+        it->second);
+}
 
 static std::string
 DeriveUseSSLFromScheme(const std::string& scheme) {
@@ -476,6 +530,19 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     for (const auto& [name, is_bool] : kExtfsFields) {
         if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
+        }
+    }
+
+    // Layer 0b: inherit process-level fs.* tuning. Position relative to the
+    // later layers is arbitrary — none of these keys is in
+    // kAllowedExtfsSpecKeys nor derived from the URI, so no other layer
+    // writes them; it sits next to Layer 0 because both are defaults rather
+    // than external-source-derived values.
+    for (const auto& [fs_key, extfs_suffix] : kExtfsInheritedFsFields) {
+        if (auto value = PropertyValueAsString(properties, fs_key)) {
+            milvus_storage::api::SetValue(properties,
+                                          (extfs_prefix + extfs_suffix).c_str(),
+                                          value->c_str());
         }
     }
 
