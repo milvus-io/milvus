@@ -3119,8 +3119,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.enabled",
 		Version:      "2.7.0",
 		DefaultValue: "false",
-		Doc:          "whether to enable resource-group balance epochs",
-		Export:       false,
+		Doc:          "Whether to enable resource-group balance epochs.",
+		Export:       true,
 	}
 	p.BalanceEpochEnabled.Init(base.mgr)
 
@@ -3128,8 +3128,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.shadowMode",
 		Version:      "2.7.0",
 		DefaultValue: "false",
-		Doc:          "whether to plan resource-group balance epochs without admitting tasks",
-		Export:       false,
+		Doc:          "Whether to plan resource-group balance epochs without admitting tasks.",
+		Export:       true,
 	}
 	p.BalanceEpochShadowMode.Init(base.mgr)
 
@@ -3137,8 +3137,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.deadline",
 		Version:      "2.7.0",
 		DefaultValue: "120000",
-		Doc:          "maximum balance epoch duration in milliseconds",
-		Export:       false,
+		Doc:          "Maximum balance epoch duration in milliseconds.",
+		Export:       true,
 	}
 	p.BalanceEpochDeadline.Init(base.mgr)
 
@@ -3146,8 +3146,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.noProgressDeadline",
 		Version:      "2.7.0",
 		DefaultValue: "30000",
-		Doc:          "maximum balance epoch duration without progress in milliseconds",
-		Export:       false,
+		Doc:          "Maximum balance epoch duration without progress in milliseconds.",
+		Export:       true,
 	}
 	p.BalanceEpochNoProgressDeadline.Init(base.mgr)
 
@@ -3159,8 +3159,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		},
 		Version:      "2.7.0",
 		DefaultValue: "5",
-		Doc:          "maximum segment tasks admitted by one balance epoch wave",
-		Export:       false,
+		Doc:          "Maximum segment tasks admitted by one balance epoch wave.",
+		Export:       true,
 	}
 	p.BalanceEpochMaxSegmentTasks.Init(base.mgr)
 
@@ -3172,8 +3172,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		},
 		Version:      "2.7.0",
 		DefaultValue: "1",
-		Doc:          "maximum channel tasks admitted by one balance epoch wave",
-		Export:       false,
+		Doc:          "Maximum channel tasks admitted by one balance epoch wave.",
+		Export:       true,
 	}
 	p.BalanceEpochMaxChannelTasks.Init(base.mgr)
 
@@ -3181,8 +3181,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.maxTasksPerNode",
 		Version:      "2.7.0",
 		DefaultValue: "5",
-		Doc:          "maximum balance epoch tasks charged to one node",
-		Export:       false,
+		Doc:          "Maximum balance epoch tasks charged to one node.",
+		Export:       true,
 	}
 	p.BalanceEpochMaxTasksPerNode.Init(base.mgr)
 
@@ -3190,8 +3190,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.maxTasksPerCollection",
 		Version:      "2.7.0",
 		DefaultValue: "5",
-		Doc:          "maximum balance epoch tasks admitted for one collection",
-		Export:       false,
+		Doc:          "Maximum balance epoch tasks admitted for one collection.",
+		Export:       true,
 	}
 	p.BalanceEpochMaxTasksPerCollection.Init(base.mgr)
 
@@ -3199,8 +3199,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.maxObjectRetries",
 		Version:      "2.7.0",
 		DefaultValue: "3",
-		Doc:          "maximum failed balance epoch attempts before quarantining an object",
-		Export:       false,
+		Doc:          "Maximum failed attempts before quarantining a balance object.",
+		Export:       true,
 	}
 	p.BalanceEpochMaxObjectRetries.Init(base.mgr)
 
@@ -3208,8 +3208,8 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.balanceEpoch.quarantineBackoff",
 		Version:      "2.7.0",
 		DefaultValue: "60000",
-		Doc:          "balance epoch object quarantine duration in milliseconds",
-		Export:       false,
+		Doc:          "Balance object quarantine duration in milliseconds.",
+		Export:       true,
 	}
 	p.BalanceEpochQuarantineBackoff.Init(base.mgr)
 
