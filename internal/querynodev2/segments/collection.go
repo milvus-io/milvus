@@ -43,6 +43,12 @@ type CollectionManager interface {
 	ListWithName() map[int64]string
 	Get(collectionID int64) *Collection
 	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error
+	// ReserveAppliedSchemaForReopen refreshes index meta and reserves an APPLIED
+	// (segment-facing) segcore version for reopened segments WITHOUT advancing the
+	// served schema. It mirrors PutOrRef's existing-collection lease/ref semantics
+	// (returns with a caller-visible Ref(1) held, like applyLoadUpdate). If the
+	// collection is not loaded yet it falls back to PutOrRef to bootstrap it.
+	ReserveAppliedSchemaForReopen(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error
 	Ref(collectionID int64, count uint32) bool
 	// unref the collection,
 	// returns true if the collection ref count goes 0, or the collection not exists,
@@ -166,6 +172,64 @@ func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Col
 			mlog.Any("schema", schema),
 		)
 	}
+	return nil
+}
+
+// ReserveAppliedSchemaForReopen handles the LoadScope_Reopen path. Unlike
+// PutOrRef it does NOT advance the served collection schema: it refreshes index
+// meta (KEEP — the stream carries no index meta; dropping it reintroduces #51366)
+// and reserves an APPLIED segcore version for the reopened segments, whose per-
+// segment schema lives in segcore. The stream UpdateSchema remains the sole owner
+// of the served schema advance and its atomic derived-state rebuild.
+//
+// It mirrors PutOrRef's lease/lock/ref handling on the existing-collection path;
+// like applyLoadUpdate it returns holding a caller-visible Ref(1). If the
+// collection is not loaded yet (no lease), a reopen must bootstrap it normally, so
+// it falls back to PutOrRef.
+func (m *collectionManager) ReserveAppliedSchemaForReopen(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
+	logicalSchemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
+	schemaBarrierTs := loadMeta.GetSchemaBarrierTs()
+
+	if collection, ok := m.acquireCollectionLease(collectionID); ok {
+		defer m.Unref(collectionID, 1)
+		return m.reserveAppliedForReopenExisting(collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	}
+
+	m.mut.Lock()
+	if collection, ok := m.collections[collectionID]; ok {
+		collection.refCount.Inc()
+		m.mut.Unlock()
+		defer m.Unref(collectionID, 1)
+		return m.reserveAppliedForReopenExisting(collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	}
+	m.mut.Unlock()
+
+	// A reopen on a not-yet-loaded collection must bootstrap it normally.
+	return m.PutOrRef(collectionID, schema, meta, loadMeta)
+}
+
+// reserveAppliedForReopenExisting refreshes index meta, reserves the applied
+// segcore version, and publishes the caller-visible ref, mirroring the ref/lock
+// semantics of applyLoadUpdate (which the served load path uses).
+func (m *collectionManager) reserveAppliedForReopenExisting(collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
+	// Refresh index meta so newly indexed fields stay visible for search plan
+	// creation. The stream UpdateSchema carries no index meta, so dropping this
+	// reintroduces #51366.
+	if err := collection.updateIndexMeta(meta); err != nil {
+		return err
+	}
+	reserved := collection.reserveAppliedForReopen(schema, logicalSchemaVersion, schemaBarrierTs)
+	// The temporary manager lease keeps the collection alive while this update
+	// waits. Publish the caller-visible ref only after index meta and the applied
+	// reservation that determine the reopen's segcore version are in place,
+	// matching applyLoadUpdate.
+	collection.Ref(1)
+	mlog.Info(context.TODO(), "reserved applied schema for reopen",
+		mlog.Int64("collectionID", collection.ID()),
+		mlog.Uint64("schemaVersion", logicalSchemaVersion),
+		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
+		mlog.Uint64("appliedSegcoreSchemaVersion", reserved),
+	)
 	return nil
 }
 
@@ -331,9 +395,18 @@ type Collection struct {
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
 	metricType atomic.String // deprecated
-	schema     atomic.Pointer[collectionSchemaSnapshot]
-	isGpuIndex bool
-	loadFields typeutil.Set[int64]
+	// schema is the SERVED snapshot: the single ccollection schema used for
+	// search-plan creation and the delegator's derived state (idfOracle, function
+	// runner). It advances only via the stream UpdateSchema (or a full load).
+	schema atomic.Pointer[collectionSchemaSnapshot]
+	// appliedSchema is the APPLIED (segment-facing) snapshot: the schema+segcore
+	// version reserved for reopened segments that carry their own per-segment
+	// schema in segcore. It is nil until the first reopen reserves it, and lets a
+	// reopened segment adopt a version-ahead (V2, N+1) schema while the served
+	// schema stays V1.
+	appliedSchema atomic.Pointer[collectionSchemaSnapshot]
+	isGpuIndex    bool
+	loadFields    typeutil.Set[int64]
 
 	refCount *atomic.Uint32
 }
@@ -519,6 +592,66 @@ func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
 func (c *Collection) SchemaAndSegcoreVersion() (*schemapb.CollectionSchema, uint64) {
 	schema, _, _, segcoreSchemaVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
 	return schema, segcoreSchemaVersion
+}
+
+// AppliedSchemaAndSegcoreVersion returns the schema+segcore version a reopened
+// segment must load at. It is the APPLIED (segment-facing) snapshot when it is set
+// AND strictly ahead of the served segcore version, otherwise it falls back to the
+// served SchemaAndSegcoreVersion. So segments always load at max(applied, served):
+// a reopen that reserved N+1 loads at N+1 while served stays at N, and once the
+// stream advances served to N+1 the applied snapshot is no longer strictly greater
+// and this falls back to served (they reconcile with no extra reopen).
+func (c *Collection) AppliedSchemaAndSegcoreVersion() (*schemapb.CollectionSchema, uint64) {
+	_, _, _, servedSegcoreVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
+	applied := c.appliedSchema.Load()
+	if applied != nil && applied.segcoreSchemaVersion > servedSegcoreVersion {
+		return applied.schema, applied.segcoreSchemaVersion
+	}
+	return c.SchemaAndSegcoreVersion()
+}
+
+// reserveAppliedForReopen reserves an APPLIED segcore version for a reopen without
+// advancing the served schema. It runs under lockSchemaTransitionForUpdate so the
+// reservation is serialized against served schema transitions.
+//
+// The reserved version is deterministic: it is exactly the segcore version the
+// stream WILL assign when it advances served to this logical version. Served bumps
+// its segcore counter once per accepted schema update, so a delta d logical
+// versions ahead lands at servedSegcore+d. Deriving the reservation from the
+// logical distance (not from a per-call max()+1) makes it IDEMPOTENT per logical
+// version: the same additive delta reopened again — multiple pre-DDL segments,
+// retries, or the co-located worker+delegator legs of one load — reserves the SAME
+// value instead of drifting the applied counter ahead by the reopen count. A
+// per-reopen bump would push applied past what the stream assigns and, on a later
+// delta, collide with the served segcore version and defeat segcore's
+// ValidateSchemaCompatibility gate. This reservation never exceeds the stream's
+// assignment (barrier-only updates can add extra served bumps), so a reopened
+// segment is at worst behind and safely reopened, never wrongly ahead.
+func (c *Collection) reserveAppliedForReopen(schema *schemapb.CollectionSchema, logicalSchemaVersion, schemaBarrierTs uint64) uint64 {
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	_, servedLogicalVersion, _, servedSegcoreVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
+
+	// Served already covers this delta: the reopen loads at the served version
+	// (AppliedSchemaAndSegcoreVersion falls back to served). Reserving here would
+	// push applied past served again for no reason.
+	if logicalSchemaVersion <= servedLogicalVersion {
+		return servedSegcoreVersion
+	}
+
+	reserved := servedSegcoreVersion + (logicalSchemaVersion - servedLogicalVersion)
+	appliedBarrierTs := schemaBarrierTs
+	if applied := c.appliedSchema.Load(); applied != nil && applied.schemaBarrierTs > appliedBarrierTs {
+		appliedBarrierTs = applied.schemaBarrierTs
+	}
+	c.appliedSchema.Store(&collectionSchemaSnapshot{
+		schema:               schema,
+		logicalSchemaVersion: logicalSchemaVersion,
+		schemaBarrierTs:      appliedBarrierTs,
+		segcoreSchemaVersion: reserved,
+	})
+	return reserved
 }
 
 // Schema returns the schema of collection

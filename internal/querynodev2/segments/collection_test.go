@@ -974,6 +974,167 @@ func (s *CollectionManagerSuite) TestPutOrRef() {
 	})
 }
 
+// TestLoadWinsRaceDoesNotSuppressStreamSchemaUpdate reproduces the add_function_field
+// load-wins race (#50989 / #51062). The segment reopen path and the stream DDL path both
+// advance the delegator collection schema, but only the stream path rebuilds the delegator's
+// derived state (idfOracle / function runners). If a reopen advances the SERVED schema version
+// first, the stream's later UpdateSchema at the same version is judged a no-op and the derived-
+// state rebuild is skipped, leaving a newly added BM25/MinHash function field unsearchable.
+//
+// The applied-vs-served split makes the reopen path advance the per-segment applied schema +
+// index meta but NOT the collection SERVED schema version, so a same-version stream UpdateSchema
+// still applies and rebuilds derived state.
+func (s *CollectionManagerSuite) TestLoadWinsRaceDoesNotSuppressStreamSchemaUpdate() {
+	cm := NewCollectionManager()
+	const collID = 20
+
+	baseSchema := mock_segcore.GenTestCollectionSchema("load_wins_v1", schemapb.DataType_Int64, false)
+	baseSchema.Version = 1
+	s.Require().NoError(cm.PutOrRef(collID, baseSchema, mock_segcore.GenTestIndexMeta(collID, baseSchema), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	}))
+	defer cm.Unref(collID, 1)
+
+	// add_function_field bumps the collection to V2 (stands in for the new function output field).
+	v2Schema := mock_segcore.GenTestCollectionSchema("load_wins_v2", schemapb.DataType_Int64, false)
+	v2Schema.Version = 2
+	v2Schema.Fields = append(v2Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + int64(len(v2Schema.Fields)),
+		Name:     "added_function_field",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	})
+
+	// Capture the served segcore version before the reopen so we can assert the applied
+	// reservation lands at exactly served+1 for a single-version delta.
+	_, servedSegcoreBefore := cm.Get(collID).SchemaAndSegcoreVersion()
+
+	// The reopen reaches the delegator first. It reserves an APPLIED segcore version for the
+	// reopened segments + refreshes index meta, but MUST NOT advance the served schema.
+	s.Require().NoError(cm.ReserveAppliedSchemaForReopen(collID, v2Schema, mock_segcore.GenTestIndexMeta(collID, v2Schema), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	}))
+	// ReserveAppliedSchemaForReopen publishes a caller-visible Ref(1) like the load path; the
+	// delegator immediately Unrefs it in syncCollectionIndexMeta, so mirror that here.
+	cm.Unref(collID, 1)
+
+	// The reopen did NOT advance the served schema: it is still V1.
+	servedSchema, servedVersion := cm.Get(collID).SchemaAndVersion()
+	s.Equal(uint64(1), servedVersion, "reopen must not advance the served logical schema version")
+	s.Same(baseSchema, servedSchema, "reopen must not swap the served schema payload")
+	_, servedSegcoreAfter := cm.Get(collID).SchemaAndSegcoreVersion()
+	s.Equal(servedSegcoreBefore, servedSegcoreAfter, "reopen must not advance the served segcore version")
+
+	// The APPLIED (segment-facing) snapshot IS the V2 schema, reserved at served+1.
+	appliedSchema, appliedSegcore := cm.Get(collID).AppliedSchemaAndSegcoreVersion()
+	s.Same(v2Schema, appliedSchema, "applied (segment-facing) schema must be V2 after a reopen")
+	s.Equal(servedSegcoreBefore+1, appliedSegcore, "applied segcore version must be reserved at served+1")
+
+	// The stream DDL (which rebuilds idfOracle / function runners) arrives afterwards at the same
+	// V2 and MUST still be applied so the derived-state rebuild runs.
+	s.True(
+		ShouldUpdateCollectionSchema(cm.Get(collID), v2Schema, 100),
+		"stream UpdateSchema(V2) after a load-wins V2 must still apply so derived state is rebuilt; a no-op here is the #50989/#51062 race",
+	)
+
+	// After the stream advances served to V2, the applied snapshot is no longer strictly ahead,
+	// so AppliedSchemaAndSegcoreVersion falls back to served (reconcile with no extra reopen).
+	s.Require().NoError(cm.UpdateSchema(collID, v2Schema, 100))
+	servedSchema, servedVersion = cm.Get(collID).SchemaAndVersion()
+	s.Equal(uint64(2), servedVersion, "stream UpdateSchema(V2) must advance the served logical schema version")
+	s.Same(v2Schema, servedSchema)
+	_, servedSegcoreReconciled := cm.Get(collID).SchemaAndSegcoreVersion()
+	s.Equal(servedSegcoreBefore+1, servedSegcoreReconciled, "stream advance must reach the reserved applied segcore version")
+	_, reconciledSegcore := cm.Get(collID).AppliedSchemaAndSegcoreVersion()
+	s.Equal(servedSegcoreReconciled, reconciledSegcore, "applied must fall back to served once served catches up")
+}
+
+// TestReopenReservationIsIdempotentPerSchemaVersion is the Tier A drift/collision regression.
+// On a co-located node the worker leg (services.go) and the delegator relay (syncCollectionIndexMeta)
+// both reserve for the same reopen, and multiple pre-DDL segments / retries reopen the same
+// version. The applied segcore version must stay pinned to what the stream will assign (served +
+// logical distance), NOT drift ahead by one per reserve call. A drifting counter would, on a
+// later delta, collide with the served segcore version and defeat segcore's
+// ValidateSchemaCompatibility gate. This test fails under a naive max(served, applied)+1 reserve.
+func (s *CollectionManagerSuite) TestReopenReservationIsIdempotentPerSchemaVersion() {
+	cm := NewCollectionManager()
+	const collID = 22
+
+	baseSchema := mock_segcore.GenTestCollectionSchema("reopen_idem_v1", schemapb.DataType_Int64, false)
+	baseSchema.Version = 1
+	s.Require().NoError(cm.PutOrRef(collID, baseSchema, mock_segcore.GenTestIndexMeta(collID, baseSchema), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	}))
+	defer cm.Unref(collID, 1)
+
+	_, servedSegcoreBefore := cm.Get(collID).SchemaAndSegcoreVersion()
+
+	v2Schema := mock_segcore.GenTestCollectionSchema("reopen_idem_v2", schemapb.DataType_Int64, false)
+	v2Schema.Version = 2
+
+	reopenV2 := func() uint64 {
+		s.Require().NoError(cm.ReserveAppliedSchemaForReopen(collID, v2Schema, mock_segcore.GenTestIndexMeta(collID, v2Schema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 100,
+		}))
+		cm.Unref(collID, 1)
+		_, appliedSegcore := cm.Get(collID).AppliedSchemaAndSegcoreVersion()
+		return appliedSegcore
+	}
+
+	first := reopenV2()
+	second := reopenV2()
+	third := reopenV2()
+
+	s.Equal(servedSegcoreBefore+1, first, "first reopen of V2 reserves served+1")
+	s.Equal(first, second, "a second reopen of the SAME V2 must reuse the reservation, not drift")
+	s.Equal(first, third, "further reopens of the same V2 must not drift the applied segcore version")
+
+	// No number of reopens may touch the served schema.
+	_, servedVersion := cm.Get(collID).SchemaAndVersion()
+	s.Equal(uint64(1), servedVersion, "reopens must not advance the served logical schema version")
+	_, servedSegcoreAfter := cm.Get(collID).SchemaAndSegcoreVersion()
+	s.Equal(servedSegcoreBefore, servedSegcoreAfter, "reopens must not advance the served segcore version")
+}
+
+// TestFullLoadStillAdvancesServedSchema guards against accidentally gating the full-load path
+// behind the applied-vs-served split. A LoadScope_Full PutOrRef of a version-ahead schema (a
+// genuinely post-DDL segment born at the new version) MUST still advance the served schema; only
+// LoadScope_Reopen reserves applied-only.
+func (s *CollectionManagerSuite) TestFullLoadStillAdvancesServedSchema() {
+	cm := NewCollectionManager()
+	const collID = 21
+
+	baseSchema := mock_segcore.GenTestCollectionSchema("full_load_v1", schemapb.DataType_Int64, false)
+	baseSchema.Version = 1
+	s.Require().NoError(cm.PutOrRef(collID, baseSchema, mock_segcore.GenTestIndexMeta(collID, baseSchema), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	}))
+	defer cm.Unref(collID, 1)
+
+	v2Schema := mock_segcore.GenTestCollectionSchema("full_load_v2", schemapb.DataType_Int64, false)
+	v2Schema.Version = 2
+
+	// A full load of a genuinely-V2 segment advances the served schema as before (PutOrRef).
+	s.Require().NoError(cm.PutOrRef(collID, v2Schema, mock_segcore.GenTestIndexMeta(collID, v2Schema), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	}))
+	cm.Unref(collID, 1)
+
+	servedSchema, servedVersion := cm.Get(collID).SchemaAndVersion()
+	s.Equal(uint64(2), servedVersion, "full load must still advance the served logical schema version")
+	s.Same(v2Schema, servedSchema, "full load must swap the served schema payload to V2")
+	s.False(
+		ShouldUpdateCollectionSchema(cm.Get(collID), v2Schema, 100),
+		"full load already advanced served, so a same-version stream UpdateSchema is a no-op",
+	)
+}
+
 func TestCollectionManager(t *testing.T) {
 	suite.Run(t, new(CollectionManagerSuite))
 }

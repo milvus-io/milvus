@@ -1295,7 +1295,11 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	// Use the APPLIED (segment-facing) schema so a reopened segment adopts the
+	// version-ahead (V2, N+1) schema reserved for it by the reopen load path, even
+	// while the served collection schema stays V1. Falls back to the served schema
+	// when no reopen reservation is ahead.
+	schema, schemaVersion := s.collection.AppliedSchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,

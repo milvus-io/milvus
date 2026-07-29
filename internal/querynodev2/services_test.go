@@ -994,6 +994,62 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 	}
 }
 
+// TestLoadSegmentsReopenDoesNotAdvanceServedSchema verifies the Tier A worker-leg fix
+// (#50989/#51062). A LoadScope_Reopen carrying a version-ahead schema, routed through the worker
+// leg of node.LoadSegments (NeedTransfer=false), must reserve the APPLIED (segment-facing) schema
+// WITHOUT advancing the served collection schema. This worker leg runs on the same shared
+// *Collection as a co-located delegator and executes before the delegator's own relay, so
+// advancing served here would pre-empt the stream UpdateSchema and skip the derived-state rebuild.
+func (suite *ServiceSuite) TestLoadSegmentsReopenDoesNotAdvanceServedSchema() {
+	ctx := context.Background()
+	suite.TestLoadSegments_Int64()
+
+	coll := suite.node.manager.Collection.Get(suite.collectionID)
+	suite.Require().NotNil(coll)
+	_, servedVersionBefore := coll.SchemaAndVersion()
+	_, servedSegcoreBefore := coll.SchemaAndSegcoreVersion()
+
+	// The reopen carries a version-ahead schema (a post-DDL add_function_field bump).
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	schema.Version = 100
+	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
+	infos := suite.genSegmentLoadInfos(schema, indexInfos)[:1]
+
+	loader := suite.node.loader
+	mockLoader := segments.NewMockLoader(suite.T())
+	suite.node.loader = mockLoader
+	defer func() { suite.node.loader = loader }()
+
+	req := &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         infos,
+		Schema:        schema,
+		NeedTransfer:  false,
+		LoadScope:     querypb.LoadScope_Reopen,
+		IndexInfoList: indexInfos,
+	}
+	mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(nil).Once()
+
+	status, err := suite.node.LoadSegments(ctx, req)
+	suite.Require().NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	// The worker-leg reopen must NOT advance the served schema...
+	_, servedVersionAfter := coll.SchemaAndVersion()
+	suite.Equal(servedVersionBefore, servedVersionAfter, "reopen worker leg must not advance the served logical schema version")
+	_, servedSegcoreAfter := coll.SchemaAndSegcoreVersion()
+	suite.Equal(servedSegcoreBefore, servedSegcoreAfter, "reopen worker leg must not advance the served segcore version")
+
+	// ...but it must reserve the version-ahead APPLIED schema for the reopened segments.
+	_, appliedSegcore := coll.AppliedSchemaAndSegcoreVersion()
+	suite.Greater(appliedSegcore, servedSegcoreBefore, "reopen worker leg must reserve an applied segcore version ahead of served")
+}
+
 func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	ctx := context.Background()
 	// data
