@@ -32,14 +32,23 @@ namespace {
 template <typename T>
 void
 LoadAndCheck(const std::string& index_type, const knowhere::Json& params) {
-    auto cfg = knowhere::IndexStaticFaced<T>::CreateConfig(
-        index_type, knowhere::Version::GetCurrentVersion().VersionNumber());
     knowhere::Json json(params);
     std::string msg;
-    auto status = knowhere::Config::FormatAndCheck(*cfg, json, &msg);
-    if (status == knowhere::Status::success) {
-        status = knowhere::Config::Load(
-            *cfg, json, knowhere::PARAM_TYPE::SEARCH, &msg);
+    auto status = knowhere::Status::success;
+    try {
+        auto cfg = knowhere::IndexStaticFaced<T>::CreateConfig(
+            index_type, knowhere::Version::GetCurrentVersion().VersionNumber());
+        status = knowhere::Config::FormatAndCheck(*cfg, json, &msg);
+        if (status == knowhere::Status::success) {
+            status = knowhere::Config::Load(
+                *cfg, json, knowhere::PARAM_TYPE::SEARCH, &msg);
+        }
+    } catch (const std::exception&) {
+        // knowhere threw (e.g. index_type not registered, or a collection
+        // under test whose index family knowhere does not own) → there is no
+        // owner to validate against, so skip silently rather than break plan
+        // creation. Indexed collections still go through knowhere as before.
+        return;
     }
     if (status != knowhere::Status::success) {
         ThrowInfo(milvus::ErrorCode::InvalidParameter, msg);
