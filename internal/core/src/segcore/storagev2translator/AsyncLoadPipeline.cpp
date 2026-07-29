@@ -103,6 +103,17 @@ ExecutorPriority(milvus::proto::common::LoadPriority priority) {
                : futures::ExecutePriority::HIGH;
 }
 
+template <typename FutureLike>
+auto
+ViaWithExecutorPriority(FutureLike&& future,
+                        folly::Executor::KeepAlive<> executor,
+                        int8_t priority) {
+    if (executor->getNumPriorities() <= 1) {
+        return std::forward<FutureLike>(future).via(std::move(executor));
+    }
+    return std::forward<FutureLike>(future).via(std::move(executor), priority);
+}
+
 storage::TransientBudgetPriority
 BudgetPriority(milvus::proto::common::LoadPriority priority) {
     return priority == milvus::proto::common::LoadPriority::LOW
@@ -184,9 +195,11 @@ LoadWindowFuture(int64_t segment_id,
                  storage::TransientBudgetPriority budget_priority,
                  folly::CancellationToken cancellation_token) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
-    return budget
-        .AcquireAsync(window.budget_bytes, budget_priority, cancellation_token)
-        .via(executor.copy(), executor_priority)
+    return ViaWithExecutorPriority(
+               budget.AcquireAsync(
+                   window.budget_bytes, budget_priority, cancellation_token),
+               executor.copy(),
+               executor_priority)
         .thenValue([segment_id,
                     chunk_reader = std::move(chunk_reader),
                     window = std::move(window),
@@ -199,8 +212,9 @@ LoadWindowFuture(int64_t segment_id,
                 cancellation_token, segment_id, "AsyncLoadPipeline::admission");
             auto read_future = chunk_reader->get_chunks_async(
                 window.chunk_indices, /*parallelism=*/1);
-            return std::move(read_future)
-                .via(std::move(executor), executor_priority)
+            return ViaWithExecutorPriority(std::move(read_future),
+                                           std::move(executor),
+                                           executor_priority)
                 .thenTry([segment_id,
                           window = std::move(window),
                           finalize_cell = std::move(finalize_cell),

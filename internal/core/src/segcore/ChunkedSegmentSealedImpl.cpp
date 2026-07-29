@@ -14,6 +14,7 @@
 
 #include <cxxabi.h>
 #include <fmt/core.h>
+#include <folly/Executor.h>
 #include <folly/ScopeGuard.h>
 #include <folly/Try.h>
 #include <simdjson.h>
@@ -153,6 +154,26 @@
 namespace milvus::segcore {
 
 constexpr auto kCollectionSchemaVersionNotReady = static_cast<ErrorCode>(2046);
+
+namespace {
+
+class ColumnGroupPreparationExecutor final : public folly::Executor {
+ public:
+    void
+    add(folly::Func func) override {
+        auto task = std::make_shared<folly::Func>(std::move(func));
+        ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE)
+            .Submit([task = std::move(task)]() mutable { (*task)(); });
+    }
+};
+
+folly::Executor*
+GetColumnGroupPreparationExecutor() {
+    static ColumnGroupPreparationExecutor executor;
+    return &executor;
+}
+
+}  // namespace
 
 static void
 WaitAllColumnGroupFutures(
@@ -8688,6 +8709,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroupAsync(
     auto committer_ptr = &committer;
     auto executor_keep_alive =
         folly::getKeepAliveToken(storagev2translator::GetAsyncLoadExecutor());
+    auto preparation_executor_keep_alive =
+        folly::getKeepAliveToken(GetColumnGroupPreparationExecutor());
 
     return folly::makeSemiFuture()
         .via(executor_keep_alive.copy())
@@ -8701,8 +8724,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroupAsync(
                     op_ctx,
                     is_replace,
                     committer_ptr,
-                    executor_keep_alive =
-                        std::move(executor_keep_alive)](folly::Unit) mutable {
+                    executor_keep_alive = std::move(executor_keep_alive),
+                    preparation_executor_keep_alive = std::move(
+                        preparation_executor_keep_alive)](folly::Unit) mutable {
             CheckCancellation(
                 op_ctx,
                 id_,
@@ -8773,6 +8797,14 @@ ChunkedSegmentSealedImpl::LoadColumnGroupAsync(
 
             return reader->get_chunk_reader_async(index, needed_columns)
                 .via(std::move(executor_keep_alive))
+                // The storage future may be lazy, so consume it on the async
+                // load executor. Switch only the synchronous CacheSlot
+                // preparation and warmup continuation to MIDDLE.
+                .thenValue(
+                    [](arrow::Result<
+                        std::unique_ptr<milvus_storage::api::ChunkReader>>
+                           chunk_reader_result) { return chunk_reader_result; })
+                .via(std::move(preparation_executor_keep_alive))
                 .thenValue([this,
                             index,
                             field_ids = std::move(field_ids),
