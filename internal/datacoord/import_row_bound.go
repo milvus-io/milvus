@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -175,14 +176,17 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) (int64, error) {
 	var rows int64
 	for _, path := range paths {
+		// The header itself is read through RetryableReader (which retries Read),
+		// so only classification matters here: a transient object-store fault must
+		// stay a retriable IO error, not a non-retriable ImportFailed input error.
 		cmReader, err := cm.Reader(ctx, path)
 		if err != nil {
-			return 0, merr.Wrap(err, "open numpy reader failed")
+			return 0, storage.ToMilvusIoError(path, err)
 		}
 		r, err := npyio.NewReader(importutilv2common.NewRetryableReader(ctx, path, cmReader))
 		if err != nil {
 			cmReader.Close()
-			return 0, merr.WrapErrImportFailedMsg("read numpy header failed, err=%v", err)
+			return 0, storage.ToMilvusIoError(path, err)
 		}
 		shape := r.Header.Descr.Shape
 		cmReader.Close()
@@ -196,20 +200,31 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 	return rows, nil
 }
 
-// parquetNumRows reads only the parquet footer to get the exact row count.
+// parquetNumRows reads only the parquet footer to get the exact row count. The
+// footer is read via Seek/ReadAt, which RetryableReader (Read-only) does not cover,
+// so the whole open-and-read is wrapped in retry to survive a transient object-store
+// fault; a transient failure is classified as a retriable IO error, not a
+// non-retriable ImportFailed input error.
 func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
-	cmReader, err := cm.Reader(ctx, path)
-	if err != nil {
-		return 0, merr.Wrap(err, "open parquet reader failed")
-	}
-	retryableReader := importutilv2common.NewRetryableReader(ctx, path, cmReader)
-	defer retryableReader.Close()
-	pr, err := file.NewParquetReader(retryableReader)
-	if err != nil {
-		return 0, merr.WrapErrImportFailedMsg("new parquet reader failed, err=%v", err)
-	}
-	defer pr.Close()
-	return pr.NumRows(), nil
+	var rows int64
+	err := retry.Handle(ctx, func() (bool, error) {
+		cmReader, err := cm.Reader(ctx, path)
+		if err != nil {
+			ioErr := storage.ToMilvusIoError(path, err)
+			return !merr.IsNonRetryableErr(ioErr), ioErr
+		}
+		retryableReader := importutilv2common.NewRetryableReader(ctx, path, cmReader)
+		defer retryableReader.Close()
+		pr, err := file.NewParquetReader(retryableReader)
+		if err != nil {
+			ioErr := storage.ToMilvusIoError(path, err)
+			return !merr.IsNonRetryableErr(ioErr), ioErr
+		}
+		defer pr.Close()
+		rows = pr.NumRows()
+		return false, nil
+	})
+	return rows, err
 }
 
 // assignPKRangesToFiles computes a per-file row upper bound, allocates one
