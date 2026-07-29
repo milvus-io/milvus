@@ -24,16 +24,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
-// milvus-storage does not expose structured error codes, so callers cannot
-// distinguish a recoverable concurrent-transaction conflict from a hard IO
-// error. We treat all loon failures as retryable for now and rely on a
-// bounded retry budget plus outer error handling to keep the worst case
-// finite.
+// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Some
+// milvus-storage paths can still lose their structured error detail and fall
+// back to a generic error code, so callers cannot reliably distinguish a
+// transient failure from a permanent one. Treat all loon failures as retryable
+// for now and rely on a bounded retry budget plus outer error handling to keep
+// the worst case finite.
 //
-// TODO(storage v3): once milvus-storage exposes explicit error codes, narrow
-// this sentinel to only the concurrent-transaction case (FailResolver) and
-// let other errors propagate immediately as retry.Unrecoverable.
+// TODO(storage v3): once every milvus-storage FFI path preserves explicit error
+// codes end-to-end, narrow this sentinel to the retryable cases and let other
+// errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
 
 // Property keys exported by milvus-storage/ffi_c.h.

@@ -71,6 +71,7 @@ func TestExploreFiles_InvalidDirectory(t *testing.T) {
 	)
 
 	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrLoonTransient)
 	assert.Nil(t, files)
 }
 
