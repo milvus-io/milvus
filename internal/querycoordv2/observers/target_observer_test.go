@@ -29,13 +29,16 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	querycoordtask "github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -69,6 +72,8 @@ type TargetObserverSuite struct {
 }
 
 type mockeyTargetManager struct{ meta.TargetManagerInterface }
+
+type mockeyBroker struct{ meta.Broker }
 
 func TestInitSerializesTargetRefresh(t *testing.T) {
 	paramtable.Init()
@@ -1125,7 +1130,14 @@ func TestNextTargetStale_RefreshLifecycle(t *testing.T) {
 		}).
 		Build()
 	defer mockNextTargetVersion.UnPatch()
-	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).Return(nextTargetSegments).Build()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64, _ meta.TargetScope) map[int64]*datapb.SegmentInfo {
+			if targetContainsSegment {
+				return nextTargetSegments
+			}
+			return map[int64]*datapb.SegmentInfo{}
+		}).
+		Build()
 	defer mockNextTargetSegments.UnPatch()
 	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).Return(map[string]*meta.DmChannel{}).Build()
 	defer mockNextTargetChannels.UnPatch()
@@ -1154,13 +1166,13 @@ func TestNextTargetStale_RefreshLifecycle(t *testing.T) {
 
 	updateNextTargetErr = assert.AnError
 	assert.ErrorIs(t, observer.updateNextTarget(ctx, collectionID), assert.AnError)
-	assert.True(t, observer.nextTargetStale.Contain(collectionID))
+	assert.True(t, observer.isNextTargetStale(collectionID))
 
 	updateNextTargetErr = nil
 	previousProgress, ok := observer.nextTargetProgresses.Get(collectionID)
 	assert.True(t, ok)
 	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
-	assert.True(t, observer.nextTargetStale.Contain(collectionID))
+	assert.True(t, observer.isNextTargetStale(collectionID))
 	currentProgress, ok := observer.nextTargetProgresses.Get(collectionID)
 	assert.True(t, ok)
 	assert.Equal(t, previousProgress, currentProgress)
@@ -1168,15 +1180,227 @@ func TestNextTargetStale_RefreshLifecycle(t *testing.T) {
 	advanceTargetVersion = true
 	markDuringUpdate = true
 	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
-	assert.True(t, observer.nextTargetStale.Contain(collectionID))
+	assert.True(t, observer.isNextTargetStale(collectionID))
 
 	markDuringUpdate = false
 	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
-	assert.False(t, observer.nextTargetStale.Contain(collectionID))
+	assert.True(t, observer.isNextTargetStale(collectionID))
 
 	targetContainsSegment = false
+	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
+	assert.False(t, observer.isNextTargetStale(collectionID))
+
 	observer.MarkNextTargetStale(collectionID, segment.GetID())
-	assert.False(t, observer.nextTargetStale.Contain(collectionID))
+	assert.False(t, observer.isNextTargetStale(collectionID))
+}
+
+func TestNextTargetStale_IdenticalRecoveryKeepsCause(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	partitionID := int64(100)
+	segmentID := int64(1)
+	channelName := "channel-1"
+	channel := &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channelName,
+		SeekPosition: &msgpb.MsgPosition{Timestamp: 1},
+	}
+	segment := &datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: channelName,
+	}
+
+	collectionMgr := meta.NewCollectionManager(nil)
+	assert.NoError(t, collectionMgr.PutCollectionWithoutSave(ctx, utils.CreateTestCollection(collectionID, 1)))
+	assert.NoError(t, collectionMgr.PutPartitionWithoutSave(ctx, utils.CreateTestPartition(collectionID, partitionID)))
+	metaInstance := &meta.Meta{
+		CollectionManager: collectionMgr,
+		ReplicaManager:    meta.NewReplicaManager(nil, nil),
+	}
+
+	broker := &mockeyBroker{}
+	mockRecovery := mockey.Mock((*mockeyBroker).GetRecoveryInfoV2).
+		To(func(_ *mockeyBroker, _ context.Context, actualCollectionID int64, _ ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+			assert.Equal(t, collectionID, actualCollectionID)
+			return []*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{segment}, nil
+		}).
+		Build()
+	defer mockRecovery.UnPatch()
+
+	nodeMgr := session.NewNodeManager()
+	targetMgr := meta.NewTargetManager(broker, metaInstance)
+	observer := NewTargetObserver(
+		metaInstance,
+		targetMgr,
+		meta.NewDistributionManager(nodeMgr),
+		broker,
+		nil,
+		nodeMgr,
+	)
+
+	assert.NoError(t, targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+	oldVersion := targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	observer.MarkNextTargetStale(collectionID, segmentID)
+
+	// Real TargetManager uses a fresh local timestamp even when recovery returns
+	// identical data. The failed segment is therefore the stale identity, not the
+	// target version.
+	time.Sleep(time.Millisecond)
+	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
+	newVersion := targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	assert.Greater(t, newVersion, oldVersion)
+	assert.NotNil(t, targetMgr.GetSealedSegment(ctx, collectionID, segmentID, meta.NextTarget))
+	assert.True(t, observer.isNextTargetStale(collectionID))
+}
+
+func TestNextTargetStale_ErrSegmentNotFoundRefreshesRealTarget(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	partitionID := int64(100)
+	replicaID := int64(10)
+	nodeID := int64(1)
+	segmentID := int64(1)
+	channelName := "channel-1"
+	channel := &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channelName,
+		SeekPosition: &msgpb.MsgPosition{Timestamp: 1},
+	}
+	segment := &datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: channelName,
+	}
+	recoverySegments := []*datapb.SegmentInfo{segment}
+
+	collectionMgr := meta.NewCollectionManager(nil)
+	assert.NoError(t, collectionMgr.PutCollectionWithoutSave(
+		ctx,
+		utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loaded),
+	))
+	assert.NoError(t, collectionMgr.PutPartitionWithoutSave(ctx, utils.CreateTestPartition(collectionID, partitionID)))
+	replicaMgr := meta.NewReplicaManager(nil, nil)
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:            replicaID,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{nodeID},
+	})
+	mockGetReplica := mockey.Mock((*meta.ReplicaManager).Get).Return(replica).Build()
+	defer mockGetReplica.UnPatch()
+	mockGetReplicas := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+	defer mockGetReplicas.UnPatch()
+	metaInstance := &meta.Meta{
+		CollectionManager: collectionMgr,
+		ReplicaManager:    replicaMgr,
+	}
+
+	broker := &mockeyBroker{}
+	recoveryCalls := 0
+	mockRecovery := mockey.Mock((*mockeyBroker).GetRecoveryInfoV2).
+		To(func(_ *mockeyBroker, _ context.Context, actualCollectionID int64, _ ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+			assert.Equal(t, collectionID, actualCollectionID)
+			recoveryCalls++
+			return []*datapb.VchannelInfo{channel}, recoverySegments, nil
+		}).
+		Build()
+	defer mockRecovery.UnPatch()
+	mockDescribeCollection := mockey.Mock((*mockeyBroker).DescribeCollection).
+		Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{}}, nil).
+		Build()
+	defer mockDescribeCollection.UnPatch()
+	mockGetSegmentInfo := mockey.Mock((*mockeyBroker).GetSegmentInfo).
+		To(func(_ *mockeyBroker, _ context.Context, segmentIDs ...int64) ([]*datapb.SegmentInfo, error) {
+			assert.Equal(t, []int64{segmentID}, segmentIDs)
+			return nil, merr.WrapErrSegmentNotFound(segmentID)
+		}).
+		Build()
+	defer mockGetSegmentInfo.UnPatch()
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	targetMgr := meta.NewTargetManager(broker, metaInstance)
+	assert.NoError(t, targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+	assert.True(t, targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+	time.Sleep(time.Millisecond)
+	assert.NoError(t, targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, broker, nil, nodeMgr)
+	nextVersion := targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	observer.recordNextTargetProgress(collectionID, observer.sampleNextTargetProgress(ctx, collectionID, nextVersion))
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+
+	oldFailedLoadCache := meta.GlobalFailedLoadCache
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	defer func() {
+		meta.GlobalFailedLoadCache = oldFailedLoadCache
+	}()
+
+	scheduler := querycoordtask.NewScheduler(ctx, metaInstance, distMgr, targetMgr, broker, nil, nodeMgr)
+	scheduler.SetNextTargetStaleHandler(observer.MarkNextTargetStale)
+	scheduler.AddExecutor(nodeID)
+	defer scheduler.Stop()
+
+	loadTask, err := querycoordtask.NewSegmentTask(
+		ctx,
+		10*time.Second,
+		querycoordtask.WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		querycoordtask.NewSegmentActionWithScope(
+			nodeID,
+			querycoordtask.ActionTypeGrow,
+			channelName,
+			segmentID,
+			querypb.DataScope_Historical,
+			100,
+		),
+	)
+	assert.NoError(t, err)
+	assert.NoError(t, scheduler.Add(loadTask))
+
+	// The first dispatch injects ErrSegmentNotFound through the real executor.
+	// The second removes the failed task and invokes the observer callback.
+	scheduler.Dispatch(nodeID)
+	taskResult := make(chan error, 1)
+	go func() {
+		taskResult <- loadTask.Wait()
+	}()
+	select {
+	case err := <-taskResult:
+		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	case <-time.After(5 * time.Second):
+		t.Fatal("segment task did not finish")
+	}
+	scheduler.Dispatch(nodeID)
+	assert.True(t, observer.isNextTargetStale(collectionID))
+
+	oldVersion := targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	time.Sleep(time.Millisecond)
+	observer.check(ctx, collectionID)
+	newVersion := targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	assert.Greater(t, newVersion, oldVersion)
+	assert.Equal(t, 3, recoveryCalls)
+	assert.True(t, observer.isNextTargetStale(collectionID))
+	assert.NotNil(t, targetMgr.GetSealedSegment(ctx, collectionID, segmentID, meta.NextTarget))
+
+	// Once recovery no longer contains the failed segment, the next refresh
+	// resolves the stale cause.
+	recoverySegments = nil
+	time.Sleep(time.Millisecond)
+	observer.check(ctx, collectionID)
+	assert.Equal(t, 4, recoveryCalls)
+	assert.False(t, observer.isNextTargetStale(collectionID))
+	assert.Nil(t, targetMgr.GetSealedSegment(ctx, collectionID, segmentID, meta.NextTarget))
 }
 
 // TestShouldUpdateCurrentTarget_AllChannelsSynced tests that shouldUpdateCurrentTarget returns true

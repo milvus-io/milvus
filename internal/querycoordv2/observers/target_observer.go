@@ -96,13 +96,14 @@ type TargetObserver struct {
 	// nextTargetProgresses records the loading progress checkpoint for each
 	// collection's next target.
 	nextTargetProgresses *typeutil.ConcurrentMap[int64, nextTargetProgress]
-	// nextTargetStale records collections whose next target must be refreshed.
-	// A refresh consumes the marker before the RPC and restores it on failure or
-	// no-op, so a notification arriving during the RPC remains pending.
-	nextTargetStale *typeutil.ConcurrentSet[int64]
-	updateChan      chan targetUpdateRequest
-	mut             sync.Mutex                // Guard readyNotifiers
-	readyNotifiers  map[int64][]chan struct{} // CollectionID -> Notifiers
+	// nextTargetStaleSegments records the target segments that failed with
+	// ErrSegmentNotFound. A refresh only resolves a cause after that segment is
+	// absent from the refreshed next target.
+	nextTargetStaleMu       sync.RWMutex
+	nextTargetStaleSegments map[int64]typeutil.UniqueSet
+	updateChan              chan targetUpdateRequest
+	mut                     sync.Mutex                // Guard readyNotifiers
+	readyNotifiers          map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	// loadingDispatcher updates targets for collections that are loading (also collections without a current target).
 	loadingDispatcher *taskDispatcher[int64]
@@ -124,18 +125,18 @@ func NewTargetObserver(
 	nodeMgr *session.NodeManager,
 ) *TargetObserver {
 	result := &TargetObserver{
-		meta:                 meta,
-		targetMgr:            targetMgr,
-		distMgr:              distMgr,
-		broker:               broker,
-		cluster:              cluster,
-		nodeMgr:              nodeMgr,
-		nextTargetProgresses: typeutil.NewConcurrentMap[int64, nextTargetProgress](),
-		nextTargetStale:      typeutil.NewConcurrentSet[int64](),
-		updateChan:           make(chan targetUpdateRequest, 10),
-		readyNotifiers:       make(map[int64][]chan struct{}),
-		initChan:             make(chan initRequest),
-		keylocks:             lock.NewKeyLock[int64](),
+		meta:                    meta,
+		targetMgr:               targetMgr,
+		distMgr:                 distMgr,
+		broker:                  broker,
+		cluster:                 cluster,
+		nodeMgr:                 nodeMgr,
+		nextTargetProgresses:    typeutil.NewConcurrentMap[int64, nextTargetProgress](),
+		nextTargetStaleSegments: make(map[int64]typeutil.UniqueSet),
+		updateChan:              make(chan targetUpdateRequest, 10),
+		readyNotifiers:          make(map[int64][]chan struct{}),
+		initChan:                make(chan initRequest),
+		keylocks:                lock.NewKeyLock[int64](),
 	}
 
 	result.loadingDispatcher = newTaskDispatcher(result.check)
@@ -316,14 +317,26 @@ func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
 // MarkNextTargetStale marks the collection's next target as stale when the
 // failed segment still belongs to that target.
 func (ob *TargetObserver) MarkNextTargetStale(collectionID, segmentID int64) {
+	ob.nextTargetStaleMu.Lock()
+	defer ob.nextTargetStaleMu.Unlock()
+
 	if ob.targetMgr.GetSealedSegment(context.TODO(), collectionID, segmentID, meta.NextTarget) == nil {
 		return
 	}
 
-	// A concurrent target replacement can turn this into a conservative false
-	// positive. That only causes an extra refresh and avoids coupling tasks to a
-	// target generation.
-	ob.nextTargetStale.Upsert(collectionID)
+	staleSegments := ob.nextTargetStaleSegments[collectionID]
+	if staleSegments == nil {
+		staleSegments = typeutil.NewUniqueSet()
+		ob.nextTargetStaleSegments[collectionID] = staleSegments
+	}
+	staleSegments.Insert(segmentID)
+}
+
+func (ob *TargetObserver) isNextTargetStale(collectionID int64) bool {
+	ob.nextTargetStaleMu.RLock()
+	defer ob.nextTargetStaleMu.RUnlock()
+
+	return ob.nextTargetStaleSegments[collectionID].Len() > 0
 }
 
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
@@ -436,12 +449,13 @@ func (ob *TargetObserver) clean() {
 		}
 		return true
 	})
-	ob.nextTargetStale.Range(func(collectionID int64) bool {
+	ob.nextTargetStaleMu.Lock()
+	for collectionID := range ob.nextTargetStaleSegments {
 		if !collectionSet.Contain(collectionID) {
-			ob.nextTargetStale.Remove(collectionID)
+			delete(ob.nextTargetStaleSegments, collectionID)
 		}
-		return true
-	})
+	}
+	ob.nextTargetStaleMu.Unlock()
 
 	ob.mut.Lock()
 	defer ob.mut.Unlock()
@@ -464,7 +478,7 @@ func (ob *TargetObserver) clean() {
 //     NextTargetSurviveTime. A target version change or progress in any tracked
 //     readiness dimension establishes a new baseline and restarts the timer.
 func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collectionID int64) bool {
-	if ob.nextTargetStale.Contain(collectionID) {
+	if ob.isNextTargetStale(collectionID) {
 		mlog.Info(ctx, "force update next target",
 			mlog.FieldCollectionID(collectionID),
 			mlog.String("reason", "next target is marked stale"))
@@ -517,14 +531,10 @@ func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collection
 func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int64) error {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	oldVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-	hadStale := ob.nextTargetStale.TryRemove(collectionID)
 
 	log.RatedInfo(ctx, rate.Limit(10), "observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	if err != nil {
-		if hadStale {
-			ob.nextTargetStale.Upsert(collectionID)
-		}
 		log.Warn(ctx, "failed to update next target for collection",
 			mlog.Err(err))
 		return err
@@ -532,10 +542,28 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 
 	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
 	if newVersion <= oldVersion {
-		if hadStale {
-			ob.nextTargetStale.Upsert(collectionID)
-		}
 		log.RatedInfo(ctx, rate.Limit(10), "next target refresh did not install a new version",
+			mlog.Int64("oldVersion", oldVersion),
+			mlog.Int64("newVersion", newVersion))
+		return nil
+	}
+
+	ob.nextTargetStaleMu.Lock()
+	staleSegments := ob.nextTargetStaleSegments[collectionID]
+	for segmentID := range staleSegments {
+		if ob.targetMgr.GetSealedSegment(ctx, collectionID, segmentID, meta.NextTarget) == nil {
+			staleSegments.Remove(segmentID)
+		}
+	}
+	remainingStaleSegments := staleSegments.Collect()
+	if len(remainingStaleSegments) == 0 {
+		delete(ob.nextTargetStaleSegments, collectionID)
+	}
+	ob.nextTargetStaleMu.Unlock()
+
+	if len(remainingStaleSegments) > 0 {
+		log.RatedInfo(ctx, rate.Limit(10), "next target refresh still contains stale segments",
+			mlog.Int64s("segmentIDs", remainingStaleSegments),
 			mlog.Int64("oldVersion", oldVersion),
 			mlog.Int64("newVersion", newVersion))
 		return nil
@@ -627,7 +655,7 @@ func (ob *TargetObserver) getDelegatorReadiness(channel *meta.DmChannel, targetV
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
-	if ob.nextTargetStale.Contain(collectionID) {
+	if ob.isNextTargetStale(collectionID) {
 		return false
 	}
 
