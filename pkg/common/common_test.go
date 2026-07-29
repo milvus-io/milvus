@@ -742,8 +742,18 @@ func TestInternalStorageRootSegmentsIsExhaustive(t *testing.T) {
 		"DefaultResourceGroupName": "not a storage path at all",
 	}
 
-	registered := make(map[string]struct{}, len(InternalStorageRootSegments))
+	// Both registries count as classified: the split between them is about WHEN
+	// a segment is denied (every storage type vs local only), not about whether
+	// it is a top-level internal directory.
+	registered := make(map[string]struct{},
+		len(InternalStorageRootSegments)+len(LocalOnlyStorageRootSegments))
 	for _, seg := range InternalStorageRootSegments {
+		registered[seg] = struct{}{}
+	}
+	for _, seg := range LocalOnlyStorageRootSegments {
+		if _, dup := registered[seg]; dup {
+			assert.Fail(t, "segment listed in both registries", seg)
+		}
 		registered[seg] = struct{}{}
 	}
 
