@@ -505,16 +505,12 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                               op_ctx]() mutable {
                 auto& budget = milvus::storage::TransientMemoryBudget::
                     GetLoadTransientBudget();
-                size_t transferred_loading_overhead_bytes = 0;
+                // This guard is declared before the Arrow table locals below,
+                // so their shared backing buffers are destroyed before the
+                // batch reservation is released.
                 auto release_guard =
-                    folly::makeGuard([&budget,
-                                      batch_loading_overhead_bytes,
-                                      &transferred_loading_overhead_bytes]() {
-                        if (transferred_loading_overhead_bytes <
-                            batch_loading_overhead_bytes) {
-                            budget.Release(batch_loading_overhead_bytes -
-                                           transferred_loading_overhead_bytes);
-                        }
+                    folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
+                        budget.Release(batch_loading_overhead_bytes);
                     });
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
@@ -543,8 +539,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 loaded_cells.reserve(batch.cells.size());
                 for (const auto& cell : batch.cells) {
                     CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    auto cell_loading_overhead_bytes =
-                        CellLoadingOverheadBytes(cell);
                     std::vector<std::shared_ptr<arrow::Table>> cell_tables;
                     cell_tables.reserve(cell.rg_count);
                     for (int64_t i = 0; i < cell.rg_count; ++i) {
@@ -554,9 +548,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                     table_offset += cell.rg_count;
                     auto chunk = (*shared_finalizer)(cell_tables, cell.cid);
                     cell_tables.clear();
-                    budget.Release(cell_loading_overhead_bytes);
-                    transferred_loading_overhead_bytes +=
-                        cell_loading_overhead_bytes;
                     CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
                     loaded_cells.push_back({cell.cid, std::move(chunk)});
                 }

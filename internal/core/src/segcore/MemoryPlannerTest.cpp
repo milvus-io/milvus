@@ -524,6 +524,86 @@ TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
     EXPECT_TRUE(acquired) << "budget stayed held after cells were finalized";
 }
 
+TEST(LoadCellBatchAsync, KeepsBudgetWhileSharedBatchTablesRemain) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(2);
+    auto budget_cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool second_cell_started = false;
+    bool finish_second_cell = false;
+    auto unblock_second_cell = folly::makeGuard([&]() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            finish_second_cell = true;
+        }
+        cv.notify_all();
+    });
+
+    BatchReaderFactory shared_buffer_reader =
+        [](size_t /*batch_key*/,
+           int64_t /*rg_offset*/,
+           int64_t total_rg_count,
+           int64_t /*reader_memory_limit*/)
+        -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        AssertInfo(total_rg_count == 2,
+                   "shared buffer test requires two row groups");
+        arrow::Int64Builder builder;
+        ARROW_RETURN_NOT_OK(builder.AppendValues(std::vector<int64_t>{1, 2}));
+        ARROW_ASSIGN_OR_RAISE(auto array, builder.Finish());
+        auto table = arrow::Table::Make(
+            arrow::schema({arrow::field("x", arrow::int64())}), {array});
+        return std::vector<std::shared_ptr<arrow::Table>>{table->Slice(0, 1),
+                                                          table->Slice(1, 1)};
+    };
+
+    std::vector<CellSpec> specs = {
+        {0, 0, 0, 1, 1},
+        {1, 0, 1, 1, 1},
+    };
+    auto futures = LoadCellBatchAsync(
+        nullptr,
+        std::move(specs),
+        std::move(shared_buffer_reader),
+        2,
+        milvus::proto::common::LoadPriority::HIGH,
+        [&](const std::vector<std::shared_ptr<arrow::Table>>&, int64_t cid) {
+            if (cid == 1) {
+                std::unique_lock<std::mutex> lock(mutex);
+                second_cell_started = true;
+                cv.notify_all();
+                cv.wait(lock, [&]() { return finish_second_cell; });
+            }
+            return std::make_unique<milvus::GroupChunk>();
+        });
+
+    ASSERT_EQ(futures.size(), 1);
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(2), [&]() {
+            return second_cell_started;
+        }));
+    }
+
+    auto acquired = budget.TryAcquire(1);
+    EXPECT_FALSE(acquired)
+        << "batch budget was released while a shared Arrow buffer remained";
+    if (acquired) {
+        budget.Release(1);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        finish_second_cell = true;
+    }
+    cv.notify_all();
+    EXPECT_EQ(futures[0].get().size(), 2);
+}
+
 TEST(LoadCellBatchAsync, CompletedBatchDoesNotRequireResultConsumer) {
     std::vector<CellSpec> specs = {
         {0, 0, 0, 1, 1},
