@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -699,6 +700,17 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 		}
 	}
 	return value, nil
+}
+
+func validateBinaryRangeBounds(lower, upper *planpb.GenericValue, lowerInclusive, upperInclusive bool) error {
+	cmp, ok := rewriter.CompareRangeValues(lower, upper)
+	if !ok {
+		return merr.WrapErrQueryPlanMsg("invalid range: bounds are not comparable")
+	}
+	if cmp > 0 || (cmp == 0 && (!lowerInclusive || !upperInclusive)) {
+		return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
+	}
+	return nil
 }
 
 func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {

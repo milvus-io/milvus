@@ -855,6 +855,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplJson(EvalCtx& context);
 
+    VectorPtr
+    ExecRangeVisitorImplJsonPreciseNumeric(EvalCtx& context);
+
     template <typename ExprValueType>
     VectorPtr
     ExecRangeVisitorImplJsonByStats();

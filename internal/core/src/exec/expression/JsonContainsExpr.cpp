@@ -112,9 +112,15 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     if (expr_->vals_.empty()) {
-        auto real_batch_size = has_offset_input_
-                                   ? context.get_offset_input()->size()
-                                   : GetNextBatchSize();
+        // This constant-result path does not inspect raw data, an index, or
+        // JSON stats.  Use the logical row cursor directly so it also works
+        // when raw JSON has been dropped and no physical data cursor can
+        // advance.
+        auto real_batch_size =
+            has_offset_input_
+                ? context.get_offset_input()->size()
+                : std::min(batch_size_,
+                           active_count_ - current_data_global_pos_);
         if (real_batch_size == 0) {
             result = nullptr;
             return;
@@ -143,11 +149,20 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            const auto has_array_literal =
+                std::any_of(expr_->vals_.begin(),
+                            expr_->vals_.end(),
+                            [](const auto& value) {
+                                return value.val_case() ==
+                                       proto::plan::GenericValue::kArrayVal;
+                            });
+            if (expr_->same_type_ && !has_array_literal && !has_offset_input_ &&
+                SegmentExpr::CanUseIndex()) {
                 result = EvalArrayContainsForIndexSegment(
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
             } else {
+                SetNotUseIndex();
                 result = EvalJsonContainsForDataSegment(context);
             }
             break;

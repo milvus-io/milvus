@@ -161,6 +161,7 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.LowerValue = castedLowerValue
+		lowerValue = castedLowerValue
 	}
 
 	upperValue := expr.GetUpperValue()
@@ -175,37 +176,10 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.UpperValue = castedUpperValue
+		upperValue = castedUpperValue
 	}
 
-	// For JSON type, normalize numeric types to ensure both bounds have the same type.
-	// If one is float and the other is int, convert the int to float.
-	// This prevents type mismatch assertions in C++ expression execution.
-	if typeutil.IsJSONType(dataType) {
-		lowerVal := expr.GetLowerValue()
-		upperVal := expr.GetUpperValue()
-		lowerIsFloat := IsFloating(lowerVal)
-		upperIsFloat := IsFloating(upperVal)
-		lowerIsInt := IsInteger(lowerVal)
-		upperIsInt := IsInteger(upperVal)
-
-		if lowerIsFloat && upperIsInt {
-			expr.UpperValue = NewFloat(float64(upperVal.GetInt64Val()))
-		} else if lowerIsInt && upperIsFloat {
-			expr.LowerValue = NewFloat(float64(lowerVal.GetInt64Val()))
-		}
-	}
-
-	if !expr.GetLowerInclusive() || !expr.GetUpperInclusive() {
-		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-		}
-	} else {
-		if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-		}
-	}
-
-	return nil
+	return validateBinaryRangeBounds(lowerValue, upperValue, expr.GetLowerInclusive(), expr.GetUpperInclusive())
 }
 
 func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRangeExpr, templateValues map[string]*planpb.GenericValue) error {
@@ -306,5 +280,43 @@ func FillJSONContainsExpressionValue(expr *planpb.JSONContainsExpr, templateValu
 			expr.Elements = append(expr.Elements, castedValue)
 		}
 	}
+	expr.ElementsSameType = jsonContainsElementsSameType(expr.GetElements())
 	return nil
+}
+
+func jsonContainsElementsSameType(elements []*planpb.GenericValue) bool {
+	if len(elements) == 0 {
+		return true
+	}
+
+	elementType := genericValueDataType(elements[0])
+	if elementType == schemapb.DataType_None {
+		return false
+	}
+	for _, element := range elements[1:] {
+		if genericValueDataType(element) != elementType {
+			return false
+		}
+	}
+	return true
+}
+
+func genericValueDataType(value *planpb.GenericValue) schemapb.DataType {
+	if value == nil {
+		return schemapb.DataType_None
+	}
+	switch value.GetVal().(type) {
+	case *planpb.GenericValue_BoolVal:
+		return schemapb.DataType_Bool
+	case *planpb.GenericValue_Int64Val:
+		return schemapb.DataType_Int64
+	case *planpb.GenericValue_FloatVal:
+		return schemapb.DataType_Double
+	case *planpb.GenericValue_StringVal:
+		return schemapb.DataType_VarChar
+	case *planpb.GenericValue_ArrayVal:
+		return schemapb.DataType_Array
+	default:
+		return schemapb.DataType_None
+	}
 }

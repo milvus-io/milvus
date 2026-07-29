@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "UnaryExpr.h"
+
 #include <optional>
 #include <boost/regex.hpp>
 #include "common/EasyAssert.h"
@@ -25,6 +26,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
+#include "exec/expression/JsonNumberComparison.h"
 
 namespace milvus {
 namespace exec {
@@ -39,7 +41,8 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
     for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
         auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
 
-        if (index_ptr->GetIndexType() ==
+        if (index_ptr == nullptr ||
+            index_ptr->GetIndexType() ==
                 milvus::index::ScalarIndexType::HYBRID ||
             index_ptr->GetIndexType() ==
                 milvus::index::ScalarIndexType::BITMAP) {
@@ -52,11 +55,31 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
 template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
-    bool res;
-    if (!SegmentExpr::CanUseIndex()) {
-        use_index_ = res = false;
-        return res;
+    const auto val_case = expr_->val_.val_case();
+    if (val_case != proto::plan::GenericValue::ValCase::kArrayVal ||
+        (expr_->op_type_ != proto::plan::OpType::Equal &&
+         expr_->op_type_ != proto::plan::OpType::NotEqual)) {
+        use_index_ = false;
+        return false;
     }
+
+    const auto& literal = expr_->val_.array_val();
+    const auto expected_val_case =
+        array_detail::ExpectedLiteralValCase(expr_->column_.element_type_);
+    const auto literal_matches_index_type =
+        literal.array_size() > 0 && literal.same_type() &&
+        expected_val_case != proto::plan::GenericValue::ValCase::VAL_NOT_SET &&
+        std::all_of(literal.array().begin(),
+                    literal.array().end(),
+                    [expected_val_case](const auto& element) {
+                        return element.val_case() == expected_val_case;
+                    });
+    if (!literal_matches_index_type || !SegmentExpr::CanUseIndex()) {
+        use_index_ = false;
+        return false;
+    }
+
+    bool res = false;
     switch (expr_->column_.element_type_) {
         case DataType::BOOL:
             res = CanUseIndexForArray<bool>();
@@ -83,10 +106,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
             res = CanUseIndexForArray<std::string_view>();
             break;
         default:
-            ThrowInfo(DataTypeInvalid,
-                      "unsupported element type when execute array "
-                      "equal for index: {}",
-                      expr_->column_.element_type_);
+            res = false;
     }
     use_index_ = res;
     return res;
@@ -220,7 +240,14 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
             }
 
-            if (CanUseIndexForJson(val_type_inner) && !has_offset_input_) {
+            const auto requires_precise_numeric_comparison =
+                val_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val());
+            if (requires_precise_numeric_comparison) {
+                SetNotUseIndex();
+                result = ExecRangeVisitorImplJsonPreciseNumeric(context);
+            } else if (CanUseIndexForJson(val_type_inner) &&
+                       !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -322,6 +349,78 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
+}
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
+    EvalCtx& context) {
+    const auto& bitmap_input = context.get_bitmap_input();
+    auto* input = context.get_offset_input();
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto bound = expr_->val_;
+    const auto op_type = expr_->op_type_;
+
+    size_t processed_cursor = 0;
+    auto execute_sub_batch =
+        [ pointer, bound, op_type, &bitmap_input, &
+          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+        const bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
+            auto number = data[offset].at_numeric(pointer);
+            if (number.error()) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            auto comparison = CompareJsonNumberToBound(number.value(), bound);
+            res[i] = comparison.has_value() &&
+                     JsonNumberMatchesOp(*comparison, op_type);
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
 }
 
 template <typename ValueType>
@@ -583,87 +682,132 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
         return ExecRangeVisitorImplArray<proto::plan::Array>(context);
     }
 
-    // cache the result to suit the framework.
-    auto batch_res = ProcessIndexChunks<IndexInnerType>([this, &val, reverse](
-                                                            Index* _) {
+    // Build and cache a full row-level result.  ARRAY inverted indexes only
+    // identify rows containing the literal elements; order, duplicates, and
+    // exact length still require raw ARRAY verification.  The index Count()
+    // is not a reliable row count when null or empty arrays have no terms, so
+    // both the result and validity must be based on segment rows.
+    if (cached_index_chunk_res_ == nullptr) {
+        auto full_result = TargetBitmap(active_count_, reverse);
         boost::container::vector<IndexInnerType> elems;
-        for (auto const& element : val.array()) {
-            auto e = GetValueFromProto<IndexInnerType>(element);
-            if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                elems.push_back(e);
+        elems.reserve(val.array_size());
+        for (const auto& element : val.array()) {
+            auto value = GetValueFromProto<IndexInnerType>(element);
+            if (std::find(elems.begin(), elems.end(), value) == elems.end()) {
+                elems.push_back(value);
             }
         }
 
-        // filtering by index, get candidates.
-        std::function<bool(milvus::proto::plan::Array& /*val*/,
-                           int64_t /*offset*/)>
-            is_same;
+        // 2.6 sealed segments expose one field-wide scalar index even when
+        // raw ARRAY data is split across several chunks. Index callbacks
+        // therefore return global row offsets, not offsets local to a raw
+        // data chunk.
+        AssertInfo(num_index_chunk_ == 1,
+                   "ARRAY scalar index must be field-wide, got {} chunks",
+                   num_index_chunk_);
+        auto index_result = GetIndexPtrForChunk<IndexInnerType>(0);
+        auto* index_ptr = index_result.index_ptr;
+        AssertInfo(index_ptr != nullptr, "invalid ARRAY scalar index");
 
+        std::function<bool(milvus::proto::plan::Array&, int64_t)> is_same;
         if (segment_->is_chunked()) {
-            is_same = [this, reverse](milvus::proto::plan::Array& val,
+            is_same = [this, reverse](milvus::proto::plan::Array& value,
                                       int64_t offset) -> bool {
                 auto [chunk_idx, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, offset);
                 auto pw = segment_->template chunk_view<milvus::ArrayView>(
                     op_ctx_, field_id_, chunk_idx);
                 auto chunk = pw.get();
-                return chunk.first[chunk_offset].is_same_array(val) ^ reverse;
+                return chunk.first[chunk_offset].is_same_array(value) ^ reverse;
             };
         } else {
             auto size_per_chunk = segment_->size_per_chunk();
             is_same = [this, size_per_chunk, reverse](
-                          milvus::proto::plan::Array& val,
+                          milvus::proto::plan::Array& value,
                           int64_t offset) -> bool {
                 auto chunk_idx = offset / size_per_chunk;
                 auto chunk_offset = offset % size_per_chunk;
                 auto pw = segment_->template chunk_data<milvus::ArrayView>(
                     op_ctx_, field_id_, chunk_idx);
                 auto chunk = pw.get();
-                auto array_view = chunk.data() + chunk_offset;
-                return array_view->is_same_array(val) ^ reverse;
+                return chunk.data()[chunk_offset].is_same_array(value) ^
+                       reverse;
             };
         }
 
-        // collect all candidates.
         std::unordered_set<size_t> candidates;
         std::unordered_set<size_t> tmp_candidates;
-        auto first_callback = [&candidates](size_t offset) -> void {
-            candidates.insert(offset);
+        auto first_callback = [this, &candidates](size_t offset) -> void {
+            if (offset < static_cast<size_t>(active_count_)) {
+                candidates.insert(offset);
+            }
         };
-        auto callback = [&candidates, &tmp_candidates](size_t offset) -> void {
-            if (candidates.find(offset) != candidates.end()) {
+        auto callback =
+            [this, &candidates, &tmp_candidates](size_t offset) -> void {
+            if (offset < static_cast<size_t>(active_count_) &&
+                candidates.find(offset) != candidates.end()) {
                 tmp_candidates.insert(offset);
             }
         };
-        auto execute_sub_batch =
-            [](Index* index_ptr,
-               const IndexInnerType& val,
-               const std::function<void(size_t /* offset */)>& callback) {
-                index_ptr->InApplyCallback(1, &val, callback);
-            };
-
-        // run in-filter.
-        for (size_t idx = 0; idx < elems.size(); idx++) {
+        for (size_t idx = 0; idx < elems.size(); ++idx) {
             if (idx == 0) {
-                ProcessIndexChunksV2<IndexInnerType>(
-                    execute_sub_batch, elems[idx], first_callback);
+                index_ptr->InApplyCallback(1, &elems[idx], first_callback);
             } else {
-                ProcessIndexChunksV2<IndexInnerType>(
-                    execute_sub_batch, elems[idx], callback);
+                tmp_candidates.clear();
+                index_ptr->InApplyCallback(1, &elems[idx], callback);
                 candidates = std::move(tmp_candidates);
             }
-            // the size of candidates is small enough.
-            if (candidates.size() * 100 < active_count_) {
+            if (candidates.size() * 100 < static_cast<size_t>(active_count_)) {
                 break;
             }
         }
-        TargetBitmap res(active_count_);
-        // run post-filter. The filter will only be executed once in the framework.
-        for (const auto& candidate : candidates) {
-            res[candidate] = is_same(val, candidate);
+        for (const auto candidate : candidates) {
+            full_result[candidate] = is_same(val, candidate);
         }
-        return res;
-    });
+
+        auto full_validity = TargetBitmap(active_count_, true);
+        int64_t processed_rows = 0;
+        for (int64_t chunk_id = 0;
+             chunk_id < num_data_chunk_ && processed_rows < active_count_;
+             ++chunk_id) {
+            const auto chunk_size =
+                segment_->is_chunked()
+                    ? segment_->chunk_size(field_id_, chunk_id)
+                    : size_per_chunk_;
+            const auto size =
+                std::min(chunk_size, active_count_ - processed_rows);
+            segment_->ApplyFieldValidData(op_ctx_,
+                                          field_id_,
+                                          chunk_id,
+                                          0,
+                                          size,
+                                          full_validity + processed_rows);
+            processed_rows += size;
+        }
+        AssertInfo(processed_rows == active_count_,
+                   "ARRAY field validity covers {} rows, expected {}",
+                   processed_rows,
+                   active_count_);
+        cached_index_chunk_res_ =
+            std::make_shared<TargetBitmap>(std::move(full_result));
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(std::move(full_validity));
+        cached_index_chunk_id_ = 0;
+    }
+
+    auto batch_res = MoveOrSliceBitmap(*cached_index_chunk_res_,
+                                       *cached_index_chunk_valid_res_,
+                                       current_index_chunk_pos_,
+                                       real_batch_size);
+    current_index_chunk_pos_ += real_batch_size;
+    if (reverse) {
+        auto column = std::dynamic_pointer_cast<ColumnVector>(batch_res);
+        AssertInfo(column != nullptr && column->IsBitmap(),
+                   "ARRAY index equality must return a bitmap column");
+        TargetBitmapView data(column->GetRawData(), column->size());
+        TargetBitmapView validity(column->GetValidRawData(), column->size());
+        data.inplace_and(validity, column->size());
+    }
     AssertInfo(batch_res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1770,6 +1914,10 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
+    if (val_type == DataType::ARRAY) {
+        use_index_ = false;
+        return false;
+    }
     if (!SegmentExpr::CanUseIndex()) {
         use_index_ = false;
         return false;

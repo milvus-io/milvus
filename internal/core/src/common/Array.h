@@ -30,6 +30,32 @@
 
 namespace milvus {
 
+namespace array_detail {
+
+inline proto::plan::GenericValue::ValCase
+ExpectedLiteralValCase(DataType element_type) {
+    switch (element_type) {
+        case DataType::BOOL:
+            return proto::plan::GenericValue::ValCase::kBoolVal;
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            return proto::plan::GenericValue::ValCase::kInt64Val;
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return proto::plan::GenericValue::ValCase::kFloatVal;
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::GEOMETRY:
+            return proto::plan::GenericValue::ValCase::kStringVal;
+        default:
+            return proto::plan::GenericValue::ValCase::VAL_NOT_SET;
+    }
+}
+
+}  // namespace array_detail
+
 class Array {
  public:
     Array() = default;
@@ -410,9 +436,14 @@ class Array {
         if (!arr2.same_type()) {
             return false;
         }
+        const auto expected_val_case =
+            array_detail::ExpectedLiteralValCase(element_type_);
         switch (element_type_) {
             case DataType::BOOL: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<bool>(i);
                     if (val != arr2.array(i).bool_val()) {
                         return false;
@@ -424,6 +455,9 @@ class Array {
             case DataType::INT16:
             case DataType::INT32: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<int>(i);
                     if (val != arr2.array(i).int64_val()) {
                         return false;
@@ -433,6 +467,9 @@ class Array {
             }
             case DataType::INT64: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<int64_t>(i);
                     if (val != arr2.array(i).int64_val()) {
                         return false;
@@ -442,6 +479,9 @@ class Array {
             }
             case DataType::FLOAT: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<float>(i);
                     if (val != static_cast<float>(arr2.array(i).float_val())) {
                         return false;
@@ -451,6 +491,9 @@ class Array {
             }
             case DataType::DOUBLE: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<double>(i);
                     if (val != arr2.array(i).float_val()) {
                         return false;
@@ -462,6 +505,9 @@ class Array {
             case DataType::STRING:
             case DataType::GEOMETRY: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
                         return false;
@@ -672,9 +718,14 @@ class ArrayView {
         if (!arr2.same_type()) {
             return false;
         }
+        const auto expected_val_case =
+            array_detail::ExpectedLiteralValCase(element_type_);
         switch (element_type_) {
             case DataType::BOOL: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<bool>(i);
                     if (val != arr2.array(i).bool_val()) {
                         return false;
@@ -686,6 +737,9 @@ class ArrayView {
             case DataType::INT16:
             case DataType::INT32: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<int>(i);
                     if (val != arr2.array(i).int64_val()) {
                         return false;
@@ -695,6 +749,9 @@ class ArrayView {
             }
             case DataType::INT64: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<int64_t>(i);
                     if (val != arr2.array(i).int64_val()) {
                         return false;
@@ -704,6 +761,9 @@ class ArrayView {
             }
             case DataType::FLOAT: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<float>(i);
                     if (val != static_cast<float>(arr2.array(i).float_val())) {
                         return false;
@@ -713,6 +773,9 @@ class ArrayView {
             }
             case DataType::DOUBLE: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<double>(i);
                     if (val != arr2.array(i).float_val()) {
                         return false;
@@ -724,6 +787,9 @@ class ArrayView {
             case DataType::STRING:
             case DataType::GEOMETRY: {
                 for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
                         return false;

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <cmath>
+
 #include <fmt/core.h>
 
 #include "bitset/bitset.h"
@@ -242,6 +244,11 @@ struct BinaryRangeIndexFunc {
                IndexInnerType val2,
                bool lower_inclusive,
                bool upper_inclusive) {
+        if constexpr (std::is_floating_point_v<IndexInnerType>) {
+            if (std::isnan(val1) || std::isnan(val2)) {
+                return TargetBitmap(index->Count(), false);
+            }
+        }
         return index->Range(val1, lower_inclusive, val2, upper_inclusive);
     }
 };
@@ -311,7 +318,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForIndex();
+    ExecRangeVisitorImplForIndex(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -321,9 +328,12 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForJson(EvalCtx& context);
 
+    VectorPtr
+    ExecRangeVisitorImplForJsonPreciseNumeric(EvalCtx& context);
+
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJsonStats();
+    ExecRangeVisitorImplForJsonStats(OffsetVector* input = nullptr);
 
     template <typename ValueType>
     VectorPtr
@@ -339,6 +349,8 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     SingleElement lower_arg_;
     SingleElement upper_arg_;
     bool arg_inited_{false};
+    std::shared_ptr<TargetBitmap> cached_full_index_res_{nullptr};
+    std::shared_ptr<TargetBitmap> cached_full_index_valid_res_{nullptr};
     PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  //namespace exec

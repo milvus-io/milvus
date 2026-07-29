@@ -15,17 +15,9 @@ import (
 
 func columnKey(c *planpb.ColumnInfo) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|%t|",
-		c.GetFieldId(),
-		int32(c.GetDataType()),
-		int32(c.GetElementType()),
-		c.GetIsPrimaryKey(),
-		c.GetIsAutoID(),
-		c.GetIsPartitionKey(),
-		c.GetNullable())
+	fmt.Fprintf(&b, "%d|%d|", c.GetFieldId(), len(c.GetNestedPath()))
 	for _, p := range c.GetNestedPath() {
-		b.WriteString(p)
-		b.WriteByte('|')
+		fmt.Fprintf(&b, "%d:%s|", len(p), p)
 	}
 	return b.String()
 }
@@ -212,12 +204,48 @@ func hasMissingPathSemantics(col *planpb.ColumnInfo) bool {
 	return col != nil && len(col.GetNestedPath()) > 0
 }
 
-func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
-	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
+// only non-nullable fields that don't need the true/false/null semantics can be folded to a bool constant.
+func canFoldPredicateToBoolConstant(col *planpb.ColumnInfo) bool {
+	return col != nil && col.GetDataType() != schemapb.DataType_JSON &&
+		!hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
 }
 
-func hasMissingPathNotEqualSemantics(col *planpb.ColumnInfo, values ...*planpb.GenericValue) bool {
-	return hasMissingPathSemantics(col)
+// canRewriteNotEqual reports whether NOT(col == value) can be rewritten as
+// col != value without changing UNKNOWN results. JSON scalar and array
+// comparisons preserve missing paths, nulls, and type mismatches as UNKNOWN.
+// Keep the existing conservative behavior for non-JSON nested access.
+func canRewriteNotEqual(col *planpb.ColumnInfo, value *planpb.GenericValue) bool {
+	if col == nil {
+		return false
+	}
+	switch valueCaseWithNil(value) {
+	case "nil", "other":
+		return false
+	}
+	if col.GetDataType() == schemapb.DataType_JSON {
+		return true
+	}
+	return !hasMissingPathSemantics(col)
+}
+
+// canBuildTermExpr reports whether values can be represented by one segcore
+// TermExpr. TermExpr selects one scalar executor for the entire value list, so
+// the values must be concrete, homogeneous scalars; array-valued literals are
+// lowered to equality expressions instead.
+func canBuildTermExpr(values ...*planpb.GenericValue) bool {
+	if len(values) == 0 {
+		return false
+	}
+	kind := valueCaseWithNil(values[0])
+	if kind == "nil" || kind == "other" || kind == "array" {
+		return false
+	}
+	for _, value := range values[1:] {
+		if valueCaseWithNil(value) != kind {
+			return false
+		}
+	}
+	return true
 }
 
 func newAlwaysFalseExpr() *planpb.Expr {
@@ -308,10 +336,4 @@ func filterValuesByRange(dt schemapb.DataType, values []*planpb.GenericValue, lo
 		}
 	}
 	return out
-}
-
-func unionValues(valuesA, valuesB []*planpb.GenericValue) []*planpb.GenericValue {
-	all := append([]*planpb.GenericValue{}, valuesA...)
-	all = append(all, valuesB...)
-	return sortGenericValues(all)
 }

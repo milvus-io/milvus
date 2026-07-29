@@ -12,6 +12,19 @@ import (
 func convertArrayValue(templateName string, templateValue *schemapb.TemplateArrayValue) (*planpb.GenericValue, error) {
 	var arrayValues []*planpb.GenericValue
 	var elementType schemapb.DataType
+	// An empty SDK list has no element from which to infer a concrete oneof
+	// type. Preserve it as an untyped empty array; consumers with field context
+	// can still interpret its semantics (for example, ARRAY == []).
+	if templateValue != nil && templateValue.GetData() == nil {
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					SameType:    true,
+					ElementType: schemapb.DataType_None,
+				},
+			},
+		}, nil
+	}
 	switch templateValue.GetData().(type) {
 	case *schemapb.TemplateArrayValue_BoolData:
 		elements := templateValue.GetBoolData().GetData()

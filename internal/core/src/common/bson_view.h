@@ -22,9 +22,11 @@
 #include <bsoncxx/types/bson_value/view.hpp>
 #include <bsoncxx/json.hpp>
 #include <bsoncxx/types.hpp>
-#include <string>
-#include <vector>
+#include <cstring>
 #include <optional>
+#include <string>
+#include <variant>
+#include <vector>
 
 #include "fmt/format.h"
 #include "log/Log.h"
@@ -194,6 +196,8 @@ CanConvertToInt64(double x) {
 
 class BsonView {
  public:
+    using NumericValue = std::variant<int64_t, double>;
+
     explicit BsonView(const std::vector<uint8_t>& data)
         : data_(data.data()), size_(data.size()) {
     }
@@ -344,6 +348,81 @@ class BsonView {
                     ErrorCode::Unsupported, "unknown BSON type {}", type_tag);
         }
         return std::nullopt;
+    }
+
+    std::optional<NumericValue>
+    ParseAsNumberAtOffset(size_t offset) {
+        if (offset >= size_) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "bson offset:{} out of range:{}",
+                      offset,
+                      size_);
+        }
+        LOG_TRACE("bson hex: {}",
+                  BsonHexDebugString(data_ + offset, size_ - offset));
+
+        const uint8_t* ptr = data_ + offset;
+        const uint8_t* end = data_ + size_;
+        const auto type_byte = *ptr++;
+        auto type_tag = static_cast<bsoncxx::type>(type_byte);
+        const auto* key_end = static_cast<const uint8_t*>(
+            std::memchr(ptr, '\0', static_cast<size_t>(end - ptr)));
+        if (key_end == nullptr) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "truncated BSON element key at offset {}",
+                      offset);
+        }
+        ptr = key_end + 1;
+
+        auto read_numeric_payload = [&](auto value) {
+            using T = decltype(value);
+            const auto remaining = static_cast<size_t>(end - ptr);
+            if (remaining < sizeof(T)) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "truncated BSON {} payload at offset {}: need {} "
+                          "bytes, have {}",
+                          type_tag,
+                          offset,
+                          sizeof(T),
+                          remaining);
+            }
+            std::memcpy(&value, ptr, sizeof(T));
+            return value;
+        };
+
+        switch (type_tag) {
+            case bsoncxx::type::k_int32:
+                return NumericValue{
+                    static_cast<int64_t>(read_numeric_payload(int32_t{}))};
+            case bsoncxx::type::k_int64:
+                return NumericValue{read_numeric_payload(int64_t{})};
+            case bsoncxx::type::k_double:
+                return NumericValue{read_numeric_payload(double{})};
+            case bsoncxx::type::k_string:
+            case bsoncxx::type::k_document:
+            case bsoncxx::type::k_array:
+            case bsoncxx::type::k_binary:
+            case bsoncxx::type::k_undefined:
+            case bsoncxx::type::k_oid:
+            case bsoncxx::type::k_bool:
+            case bsoncxx::type::k_date:
+            case bsoncxx::type::k_null:
+            case bsoncxx::type::k_regex:
+            case bsoncxx::type::k_dbpointer:
+            case bsoncxx::type::k_code:
+            case bsoncxx::type::k_symbol:
+            case bsoncxx::type::k_codewscope:
+            case bsoncxx::type::k_timestamp:
+            case bsoncxx::type::k_decimal128:
+            case bsoncxx::type::k_maxkey:
+            case bsoncxx::type::k_minkey:
+                return std::nullopt;
+            default:
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "unknown BSON type 0x{:02x} at offset {}",
+                          static_cast<unsigned>(type_byte),
+                          offset);
+        }
     }
 
     std::optional<bsoncxx::array::view>
