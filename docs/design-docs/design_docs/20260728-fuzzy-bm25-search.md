@@ -10,8 +10,9 @@
 
 This document proposes a three-phase design for fuzzy BM25 search in Milvus.
 The first phase establishes a segment-level Text Term Index foundation: terms
-produced by the analyzer are preserved through WAL, flush, compaction, load,
-and recovery, and QueryNode Workers expose a common term-expansion interface.
+produced by the analyzer are preserved through WAL and immutable FST fragments
+across flush, compaction, load, and recovery, and QueryNode Workers expose a
+common term-expansion interface.
 Fuzzy BM25 then expands query tokens on the Workers before the Delegator builds
 the BM25 IDF vector.
 
@@ -24,9 +25,9 @@ segment RPC and trade freshness for latency.
 The initial field-level switch, `enable_fuzzy_bm25`, is intentionally
 transitional. The long-term direction is for `enable_match`, or a dedicated
 Match Index definition, to build one complete Milvus Text Term Index containing
-the term enumeration, FST, and postings. Exact text match, fuzzy text match,
-fuzzy BM25, prefix, wildcard, and other term-based text features should share
-that index instead of maintaining feature-specific files and execution paths.
+the enumerable FST and postings. Exact text match, fuzzy text match, fuzzy
+BM25, prefix, wildcard, and other term-based text features should share that
+index instead of maintaining feature-specific files and execution paths.
 
 ---
 
@@ -116,7 +117,8 @@ This behavior is important for the term dictionary design:
    segment-local text features as well as fuzzy BM25.
 3. Preserve analyzed terms across WAL, sync, recovery, and compaction without
    re-analyzing all raw text during every recovery.
-4. Avoid building fragmented persistent FSTs on every sync.
+4. Use FST itself as both the durable enumerable vocabulary and the query
+   artifact, avoiding a duplicate term-enum file.
 5. Provide exact fuzzy BM25 in Phase 1, exact Global FST acceleration in Phase
    2, and an explicit approximate low-RPC mode in Phase 3.
 6. Define artifacts and interfaces that can evolve into one shared Milvus Text
@@ -135,11 +137,13 @@ This behavior is important for the term dictionary design:
 
 ## 5. Terminology
 
-### 5.1 Term enum
+### 5.1 FST fragment
 
-A sorted, deduplicated list of analyzer output terms for one segment, field, and
-analyzer identity. A term enum is durable and mergeable. It is the source of
-truth for rebuilding an FST, compaction, migration, and Global FST generation.
+An immutable FST containing the sorted, deduplicated analyzer output terms
+newly covered by one sync for one segment, field, and analyzer identity. An FST
+is losslessly enumerable in lexical order, so it serves both as the durable
+vocabulary and as the query artifact. Compaction, migration, and Global FST
+generation iterate input FSTs directly; no parallel term-enum file is stored.
 
 ### 5.2 Segment term dictionary
 
@@ -148,9 +152,9 @@ Its implementation depends on the segment state:
 
 ```text
 SegmentTermDictionary
-  |- MutableTrieDictionary       growing segment
-  |- PersistentFSTDictionary     sorted sealed segment
-  `- TemporaryFSTDictionary      sealed segment without a persistent FST
+  |- MutableTrieDictionary       unsynced growing delta
+  |- CompositeFSTDictionary      synced FST fragments
+  `- PersistentFSTDictionary     compacted sealed segment
 ```
 
 ### 5.3 Text Term Index
@@ -159,8 +163,7 @@ The long-term, complete segment text-index artifact:
 
 ```text
 Text Term Index
-  |- term enum                   merge/rebuild source of truth
-  |- FST                         compact term navigation
+  |- FST                         enumerable term navigation
   `- postings                    term-to-row/doc location
 ```
 
@@ -201,19 +204,19 @@ snapshot.
 ### Phase 1: Segment Text Term Index foundation and exact fuzzy BM25
 
 - Add the temporary field switch `enable_fuzzy_bm25`.
-- Preserve message-level term enums in Insert WAL messages.
+- Preserve message-level deduplicated terms in Insert WAL messages.
 - Maintain a mutable Trie for growing segments.
-- Write one sorted term-enum fragment per sync, not one FST per sync.
-- Build one consolidated term enum and one FST during sort compaction.
-- Recover growing dictionaries from existing term-enum fragments and then WAL.
-- Load persistent FSTs on Workers; build a temporary FST when only term enums
-  exist.
+- Write one small immutable FST fragment per sync.
+- Build one consolidated FST during sort compaction.
+- Recover growing dictionaries from existing FST fragments and then WAL.
+- Load persistent FSTs on Workers and traverse multiple fragments directly for
+  unsorted or transitional segments.
 - Add a batched Worker RPC for fuzzy term expansion.
 - Merge terms and build a target-bound IDF vector on the Delegator.
 
 ### Phase 2: Global FST exact acceleration
 
-- Compact segment term enums into a Global FST.
+- Compact segment FSTs into a Global FST.
 - Load the Global FST on the SN with the Delegator.
 - Treat the Global FST as a compacted base vocabulary and segment dictionaries
   as an uncovered delta.
@@ -248,9 +251,9 @@ Validation rules:
 4. The property defaults to `false`.
 5. The first release treats the property as creation-time immutable. Enabling
    it on existing data requires an explicit backfill/rebuild design.
-6. For a multi-analyzer BM25 field, term enums and dictionaries are separated
-   by analyzer identity. A term analyzed with analyzer A must never be inserted
-   into or queried through analyzer B's dictionary.
+6. For a multi-analyzer BM25 field, message term batches and dictionaries are
+   separated by analyzer identity. A term analyzed with analyzer A must never
+   be inserted into or queried through analyzer B's dictionary.
 
 `enable_fuzzy_bm25` is not intended to become the permanent owner of text
 index construction. It exists so fuzzy BM25 can be delivered before the
@@ -260,7 +263,7 @@ The expected future rule is:
 
 ```text
 enable_match or Match Index enabled
-  -> build term enum + FST + postings once
+  -> build FST + postings once
   -> text_match, text_match_fuzzy, fuzzy BM25, prefix, wildcard share it
 ```
 
@@ -275,7 +278,7 @@ enable_match or Match Index enabled
 
 Proxy -> StreamingNode WAL materialization
           |- analyzer -> hashes + TF -> BM25 sparse output
-          `- analyzer terms -> message-level unique term enum sidecar
+          `- analyzer terms -> message-level unique term sidecar
                                   |
                                   v
                          WAL Insert message
@@ -284,14 +287,14 @@ Proxy -> StreamingNode WAL materialization
                     |                           |
                     v                           v
           query growing segment          Flush Manager
-          Mutable Trie update             segment enum cache
+          Mutable Trie update             per-sync term set
                                                 |
                                                 v
-                                      sync term-enum fragment
+                                        sync FST fragment
                                                 |
                                                 v
                                          sort compaction
-                                      one enum + one FST
+                                            one FST
 
 
                                SEARCH PATH
@@ -324,18 +327,18 @@ both results from the same analyzer pass:
 input text rows
   -> analyzer
       |- hashed per-row TF for the BM25 sparse output field
-      `- original term bytes for the term-enum sidecar
+      `- original term bytes for the message term sidecar
 ```
 
 Re-running the analyzer only to collect terms is undesirable because it doubles
 CPU cost and risks divergence if an analyzer or external resource is not fully
 deterministic.
 
-The term-enum sidecar is stored in the Insert message body, not in the light
+The message term sidecar is stored in the Insert message body, not in the light
 WAL header or message properties. Its logical shape is:
 
 ```text
-TextTermEnumBatch {
+TextTermBatch {
     input_field_id
     analyzer_identity
     repeated bytes sorted_unique_terms
@@ -360,48 +363,55 @@ normalization, lowercasing, or stemming is performed after the analyzer.
 The QueryNode Worker maintains one `MutableTrieDictionary` per enabled growing
 segment, field, and analyzer identity.
 
-When an Insert message becomes visible to the growing segment, its term enum is
-inserted into the Trie. Trie insertion is idempotent, which makes replaying a
-term that is already present in a synced fragment safe.
+When an Insert message becomes visible to the growing segment, its message term
+batch is inserted into the Trie. Trie insertion is idempotent, which makes
+replaying a term that is already present in a synced FST fragment safe.
 
-The write-side Flush Manager also consumes the same message term enum and
-updates its per-segment enum cache. These two consumers have different
+The write-side Flush Manager also consumes the same message term batch and
+updates its per-segment, per-sync term set. These two consumers have different
 responsibilities:
 
 - the query-side Trie serves current growing searches;
-- the Flush Manager cache produces durable term-enum fragments.
+- the Flush Manager term set produces a durable FST fragment at sync.
 
 They must advance under the same message/checkpoint boundary as the row data.
 
-### 8.4 Sync writes term-enum fragments
+### 8.4 Sync writes FST fragments
 
-Every sync writes a sorted, deduplicated term-enum fragment for the terms newly
-covered by that sync. It does not build an FST.
+Every sync sorts and deduplicates the terms newly covered by that sync and
+writes one immutable FST fragment for each enabled `(field, analyzer identity)`.
+The in-memory term set is cleared only after the sync manifest is committed.
 
-Building an FST per sync would create many small immutable dictionaries. Those
-fragments cannot provide one efficient searchable dictionary without an
-additional merge layer, and they would increase object count and load-time
-complexity.
+A separate term-enum file is unnecessary. FST construction from an already
+sorted per-sync term set is inexpensive, and an FST can be traversed in lexical
+order with low overhead whenever compaction or recovery needs to enumerate all
+terms. Persisting both the sorted terms and an FST would duplicate the same
+vocabulary and add another artifact whose checkpoint and lifecycle must remain
+consistent.
+
+Multiple small FST fragments are valid dictionaries. A Worker can traverse
+them directly and deduplicate the result, while sort compaction later reduces
+them to one FST for the stable sealed-segment path.
 
 A sync atomically publishes:
 
 - insert data files;
 - BM25 statistics;
-- zero or one term-enum fragment per enabled `(field, analyzer identity)`;
-- the data checkpoint and term-enum checkpoint;
+- zero or one FST fragment per enabled `(field, analyzer identity)`;
+- the data checkpoint and FST coverage checkpoint;
 - the manifest or V2 metadata that references the complete set.
 
 The core invariant is:
 
 ```text
-data_checkpoint == term_enum_checkpoint
+data_checkpoint == fst_coverage_checkpoint
 ```
 
-An empty-term sync still advances term-enum coverage. Otherwise recovery cannot
-distinguish “this data range contained no new terms” from “term persistence was
-lost.”
+An empty-term sync still advances FST coverage in the manifest even though it
+does not create a physical FST file. Otherwise recovery cannot distinguish
+“this data range contained no new terms” from “term persistence was lost.”
 
-Each fragment contains a versioned header with at least:
+Each FST fragment, together with its manifest entry, records at least:
 
 - field ID and analyzer identity;
 - covered WAL/checkpoint range;
@@ -414,23 +424,23 @@ referenced by the committed manifest is garbage, not readable state.
 
 ### 8.5 Sort compaction builds the persistent dictionary
 
-Sort compaction performs a streaming k-way merge over all input term-enum
-fragments, deduplicates terms, and produces exactly:
+Sort compaction opens iterators over all input FST fragments, performs a
+streaming k-way merge, deduplicates terms, and produces exactly:
 
 ```text
-one consolidated term-enum file
 one immutable FST file
 ```
 
-The two files describe the same dictionary generation and are published with
-the compaction output segment. Later mix, merge, schema-bump, or other segment
-compactions preserve the same one-enum/one-FST property for their output.
+The FST describes one dictionary generation and is published with the
+compaction output segment. Later mix, merge, schema-bump, or other segment
+compactions preserve the same one-FST property for their output.
 
-The term enum remains the durable source of truth. The FST is the optimized
-query artifact and can be rebuilt from the enum.
+The consolidated FST remains fully enumerable and is therefore sufficient as
+both compaction input and query artifact. Rebuilding it only requires iterating
+the previous FST generation; no raw term list is required.
 
 Compaction may apply deletes or TTL while merging data. A simple union of input
-term enums can therefore retain terms that no longer occur in a live row. This
+input FSTs can therefore retain terms that no longer occur in a live row. This
 does not create false-positive BM25 matches because those terms have target DF
 zero and no postings in the BM25 sparse index. Phase 1 filters target-DF-zero
 terms before applying candidate limits. A future compaction can optionally
@@ -449,35 +459,36 @@ fuzzy BM25.
 
 | Segment state | Dictionary load behavior |
 |---|---|
-| Growing, including flushed-but-invisible | Load all committed term-enum fragments, rebuild the mutable Trie, load BM25 stats, then resume WAL term updates. |
-| Sorted sealed | Load or mmap the persistent FST directly. Keep the term enum as rebuild/compaction input; it does not need to be resident. |
-| Visible sealed without an FST | Merge its term-enum files and build a Worker-local temporary FST. Cache it by segment, field, analyzer identity, and dictionary generation. |
-| Missing both term enum and FST | The segment is not exact-fuzzy-readable. Fail exact fuzzy BM25 instead of silently omitting its vocabulary. |
+| Growing, including flushed-but-invisible | Load or mmap all committed FST fragments as an immutable base, initialize an empty mutable Trie for the later WAL delta, load BM25 stats, then resume WAL term updates. |
+| Sorted sealed | Load or mmap the one consolidated persistent FST directly. |
+| Visible sealed without a consolidated FST | Load its committed FST fragments as a composite dictionary. A Worker may optionally merge and cache one local FST when fragment count crosses a threshold. |
+| Missing required FST coverage | The segment is not exact-fuzzy-readable. Fail exact fuzzy BM25 instead of silently omitting its vocabulary. |
 
 For a growing recovery, ordering is:
 
 ```text
 load segment data through committed checkpoint
   -> load BM25 stats through the same checkpoint
-  -> load term-enum fragments through the same checkpoint
-  -> build Mutable Trie
+  -> load FST fragments through the same checkpoint as immutable base
+  -> initialize Mutable Trie for later WAL terms
   -> publish segment as readable
   -> replay later WAL messages from seek position
 ```
 
-Term insertion is idempotent, so overlap at a recovery boundary is safe. A gap
-between the data and term-enum checkpoint is not safe and must prevent
-readability.
+Term insertion is idempotent, so overlap at a recovery boundary is safe. Query
+expansion unions the immutable FST base and mutable Trie delta. A gap between
+the data and FST coverage checkpoint is not safe and must prevent readability.
 
-The visible-sealed-without-FST path is required when sort compaction is
-disabled, for legacy/backfilled segments, or during a rolling transition. The
-query path must not upload the temporary FST; durable artifact publication
-remains a DataNode/compaction responsibility.
+The visible-sealed-without-consolidated-FST path is required when sort
+compaction is disabled or delayed. Direct fragment traversal is the correctness
+path; a locally merged FST is only a cache and must not be uploaded from the
+query path. Durable artifact publication remains a DataNode/compaction
+responsibility.
 
 ### 8.7 Common Worker dictionary interface
 
-Upper layers do not branch on Trie versus persistent or temporary FST. The
-Worker segment exposes one logical interface:
+Upper layers do not branch on mutable Trie, a composite of FST fragments, or a
+single compacted FST. The Worker segment exposes one logical interface:
 
 ```text
 ExpandTerms(
@@ -659,8 +670,8 @@ Indexes.
 
 ### 9.3 Building and publishing
 
-A background global-dictionary compaction job reads consolidated segment term
-enums and performs a streaming k-way union. It publishes:
+A background global-dictionary compaction job opens iterators over consolidated
+segment FSTs and performs a streaming k-way union. It publishes:
 
 - one Global FST per `(collection/vchannel, field, analyzer identity)`;
 - a generation ID and format version;
@@ -785,15 +796,15 @@ The implementation is expected to require changes in the following areas.
 
 ### WAL message
 
-- Add a versioned, field/analyzer-scoped term-enum sidecar to Insert messages.
+- Add a versioned, field/analyzer-scoped term sidecar to Insert messages.
 - Generate/update specialized message bindings through the existing codegen
   path.
 - Preserve the sidecar through transaction assembly and replication.
 
 ### Segment metadata and manifest
 
-- Term-enum fragment entries with checkpoint coverage.
-- Consolidated term-enum and FST entries with dictionary generation.
+- FST fragment entries with checkpoint coverage.
+- Consolidated FST entries with dictionary generation.
 - Analyzer identity and encoding version.
 - Global FST coverage manifest and generation.
 
@@ -815,15 +826,16 @@ The implementation is expected to require changes in the following areas.
 - Add the common `SegmentTermDictionary` interface.
 - Maintain mutable Trie dictionaries for growing segments.
 - Load/mmap persistent FST dictionaries for sorted sealed segments.
-- Build and cache temporary FST dictionaries from term enums when necessary.
+- Traverse FST fragments as a composite dictionary and optionally cache a
+  locally merged FST when necessary.
 
 ---
 
 ## 12. Correctness invariants
 
-1. **WAL materialization invariant**: BM25 sparse output and the term enum come
-   from the same analyzer execution and analyzer identity.
-2. **Sync coverage invariant**: data and term-enum checkpoints advance
+1. **WAL materialization invariant**: BM25 sparse output and the message term
+   batch come from the same analyzer execution and analyzer identity.
+2. **Sync coverage invariant**: data and FST coverage checkpoints advance
    together, including empty-term syncs.
 3. **Readable segment invariant**: an exact-fuzzy-readable segment has a
    dictionary covering all of its readable data.
@@ -849,11 +861,11 @@ Account separately for:
 
 - growing Trie memory;
 - persistent FST mmap or resident memory;
-- temporary FST cache memory and local disk;
+- FST-fragment mmap/resident memory and optional local merged-FST cache;
 - loaded Global FST memory/mmap;
-- term-enum fragment object count and bytes.
+- FST fragment object count and bytes.
 
-Temporary FST caches should use the existing segment lifecycle and resource
+Locally merged FST caches should use the existing segment lifecycle and resource
 manager so release/reopen removes the correct dictionary generation.
 
 ### 13.2 Metrics
@@ -861,9 +873,9 @@ manager so release/reopen removes the correct dictionary generation.
 Recommended metrics include:
 
 - terms emitted and unique terms per WAL message;
-- term-enum fragment count and bytes per segment;
+- FST fragment count and bytes per segment;
 - growing Trie term count and memory;
-- persistent/temporary FST load latency and memory;
+- fragment/composite/consolidated FST load latency and memory;
 - expansion candidate count before and after deduplication, DF filtering, and
   `max_expansions`;
 - expansion RPC fan-out, latency, bytes, and failure count;
@@ -887,20 +899,20 @@ analyze -> pin lexical snapshot -> global expansion -> worker expansion
 
 Existing fields default to `enable_fuzzy_bm25=false`. Phase 1 does not claim
 that enabling the property online makes old segments immediately searchable.
-An online enable flow needs a backfill job that creates complete term enums and
-FSTs before publishing the new schema capability.
+An online enable flow needs a backfill job that creates complete FSTs before
+publishing the new schema capability.
 
 ### 14.2 Rolling upgrade
 
 Collections using `enable_fuzzy_bm25` must be scheduled only to nodes that
 understand:
 
-- the WAL term-enum sidecar;
+- the WAL term sidecar;
 - the segment dictionary metadata;
 - the `ExpandTerms` RPC;
 - lexical snapshot generation checks.
 
-Old consumers must not discard a required term-enum sidecar and still advertise
+Old consumers must not discard a required term sidecar and still advertise
 the segment as exact-fuzzy-readable. Capability/version gating is therefore
 required before the feature can be enabled in a mixed-version cluster.
 
@@ -909,7 +921,7 @@ required before the feature can be enabled in a mixed-version cluster.
 The first implementation may build a lightweight fuzzy-BM25 dictionary beside
 the current Tantivy text index, but this duplication must be treated as
 transitional. The next consolidation step should make the Tantivy/Milvus Text
-Term Index export the term-enum and expansion interfaces required by the
+Term Index export FST enumeration and expansion interfaces required by the
 Delegator path.
 
 ---
@@ -919,20 +931,22 @@ Delegator path.
 ### Write and recovery
 
 - Message-level deduplication, including empty terms and repeated terms.
-- BM25 output and term enum use exactly the same analyzer identity.
+- BM25 output and the message term batch use exactly the same analyzer identity.
 - Multi-analyzer dictionaries remain isolated.
-- Sync publishes matching data/term checkpoints.
+- Sync publishes matching data/FST-coverage checkpoints.
 - Crash before and after manifest commit leaves either the old complete state
   or the new complete state.
-- Growing recovery rebuilds the Trie from fragments and WAL without gaps.
+- Growing recovery loads the immutable FST-fragment base and resumes the Trie
+  WAL delta without gaps.
 - Collection load between flush and sort restores the flushed-invisible segment
   as growing with a complete dictionary.
 
 ### Compaction and load
 
-- K-way merge produces one sorted enum and one matching FST.
+- K-way iteration over input FSTs produces one consolidated FST.
 - Sort, mix, schema-bump, and merge compactions publish correct generations.
-- Persistent FST load and temporary FST fallback return identical expansions.
+- Composite fragment traversal and consolidated FST traversal return identical
+  expansions.
 - Missing dictionary artifacts prevent exact-fuzzy readability.
 - Deleted/TTL-only stale terms are removed by target DF before candidate limit.
 
@@ -980,11 +994,13 @@ A global-only design cannot represent newly growing or recently compacted
 segments until the next global build. Without a segment delta path, exact
 search is impossible. It also does not serve segment-local posting lookup.
 
-### Build an FST on every sync
+### Persist both term enums and FSTs
 
-This produces fragmented FSTs and forces query-time multi-FST traversal or a
-load-time merge. Sorted term-enum fragments are cheaper, composable, and
-sufficient for growing recovery and later compaction.
+The FST is already a losslessly enumerable, lexically ordered representation
+of the term set. Persisting a parallel term-enum file duplicates storage,
+object count, checkpoint metadata, compaction inputs, and failure handling
+without adding information. Direct FST iteration is sufficient for recovery,
+segment compaction, and Global FST construction.
 
 ### Expand independently inside every BM25 segment search
 
@@ -994,9 +1010,9 @@ IDF context, making global ranking inconsistent.
 
 ### Re-analyze raw text during every load
 
-This avoids term-enum files but substantially increases load/recovery cost,
+This avoids dictionary files but substantially increases load/recovery cost,
 requires raw input availability, and risks analyzer-version divergence. Durable
-term enums make the analyzed vocabulary explicit and reproducible.
+FST fragments make the analyzed vocabulary explicit and reproducible.
 
 ---
 
@@ -1009,7 +1025,7 @@ finalized before implementation:
 2. Exact fuzzy boost and query-TF aggregation semantics.
 3. Scope and ordering semantics of `max_expansions` for multi-token and multi-NQ
    requests.
-4. Binary encoding and compression for term enums and FST metadata.
+4. FST format, fragment metadata, and compression/checksum details.
 5. Whether the first implementation extends `InsertRequest` or introduces a new
    versioned Insert body.
 6. Coordinator and object-storage protocol for Global FST build/publication.
