@@ -328,9 +328,6 @@ static const std::vector<std::pair<std::string, bool /*is_bool*/>>
         {"use_iam", true},
         {"use_virtual_host", true},
         {"anonymous", true},
-        // Not derived from the external source or its spec — mirrored from
-        // the process-level fs.max_connections. See kExtfsInheritedFsFields.
-        {"max_connections", false},
 };
 
 // kExtfsInheritedFsFields lists fs.* properties that extfs.{collectionID}.*
