@@ -1382,6 +1382,17 @@ func TestValidateImportFilePaths(t *testing.T) {
 		// Woodpecker's WAL lives under the same root; its segment reached the
 		// registry only after the milvus#51894 review flagged the omission.
 		{"woodpecker wal", "files", "files/wp/0/1/2.log", nil, true},
+
+		// Declared as C++ literals and joined onto GetRootPath(); they share the
+		// root with datacoord only under storageType=local, so an absolute root
+		// is the configuration that actually exposes them.
+		{"cpp raw_datas", "/var/lib/milvus/data", "/var/lib/milvus/data/raw_datas/449_100/0", nil, true},
+		{"cpp ngram_log", "/var/lib/milvus/data", "/var/lib/milvus/data/ngram_log/1/2/3", nil, true},
+		{"cpp temp index build", "/var/lib/milvus/data", "/var/lib/milvus/data/tmp/HNSW/1/2/3", nil, true},
+		{"cpp rtree index", "/var/lib/milvus/data", "/var/lib/milvus/data/rtree-index/1/2", nil, true},
+
+		// The node-local cache dir, same inclusion criterion.
+		{"local cache dir", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/x", nil, true},
 		{"exact directory with no trailing content", "files", "files/insert_log", nil, true},
 		{"empty root path", "", "insert_log/1/2/3/100/4", nil, true},
 
