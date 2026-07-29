@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -32,7 +34,7 @@ func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T)
 		sortedTargetSegment(3, 1, 10, "ch-1", 0, 200, false),
 	)
 
-	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	views := events[TriggerTypeTarget]
@@ -68,7 +70,7 @@ func TestCompactionTargetReconcilerSatisfiedTargetEmitsNoWork(t *testing.T) {
 		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
 	)
 
-	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Empty(t, events[TriggerTypeTarget])
@@ -102,7 +104,7 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 		sortedTargetSegment(2, 1, 20, "ch-2", 0, 199, false),
 		sortedTargetSegment(3, 2, 10, "ch-1", 0, 199, false),
 	)
-	events, err := newCompactionTargetReconciler(dcMeta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(dcMeta).Trigger(ctx)
 
 	require.NoError(t, err)
 	views := events[TriggerTypeTarget]
@@ -130,7 +132,7 @@ func TestCompactionTargetReconcilerInactivatesRewriteTargetWhenNoMatchRemains(t 
 		sortedTargetSegment(2, 1, 10, "ch-1", 0, 201, false),
 	)
 
-	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Empty(t, events[TriggerTypeTarget])
@@ -156,7 +158,7 @@ func TestCompactionTargetReconcilerIgnoresDroppedSegmentsForSatisfaction(t *test
 		sortedTargetSegment(2, 1, 10, "ch-1", 201, 199, false, 1),
 	)
 
-	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Empty(t, events[TriggerTypeTarget])
@@ -221,7 +223,7 @@ func TestCompactionTargetReconcilerOutsideManualMatchDomainDoesNotHoldTargetActi
 			meta := newCompactionTargetReconcilerTestMeta(targetMeta, segment)
 			test.mutate(meta, segment)
 
-			events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 			require.NoError(t, err)
 			require.Empty(t, events[TriggerTypeTarget])
@@ -279,7 +281,7 @@ func TestCompactionTargetReconcilerKeepsTemporarilyBlockedMatchActive(t *testing
 			test.mutate(segment)
 			meta := newCompactionTargetReconcilerTestMeta(targetMeta, segment)
 
-			events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 			require.NoError(t, err)
 			require.Empty(t, events[TriggerTypeTarget])
@@ -306,14 +308,14 @@ func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *
 	meta.snapshotMeta = createTestSnapshotMetaLoaded(t)
 	meta.snapshotMeta.SetSnapshotPending(1)
 
-	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Empty(t, events[TriggerTypeTarget])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 
 	meta.snapshotMeta.ClearSnapshotPending(1)
-	events, err = newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Len(t, events[TriggerTypeTarget], 1)
@@ -339,7 +341,7 @@ func TestCompactionTargetReconcilerGlobalTargetContinuesUnblockedCollections(t *
 	meta.snapshotMeta = createTestSnapshotMetaLoaded(t)
 	meta.snapshotMeta.SetSnapshotPending(1)
 
-	events, err := newCompactionTargetReconciler(meta).Trigger(ctx)
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Len(t, events[TriggerTypeTarget], 1)
@@ -348,12 +350,136 @@ func TestCompactionTargetReconcilerGlobalTargetContinuesUnblockedCollections(t *
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
+func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+	})
+
+	const (
+		collectionID  = int64(1)
+		vectorFieldID = int64(100)
+		indexID       = int64(1000)
+	)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: collectionID,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, collectionID, 10, "ch-1", 0, 199, false),
+		sortedTargetSegment(2, collectionID, 10, "ch-1", 0, 199, false),
+	)
+	meta.collections.Insert(collectionID, &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: vectorFieldID, DataType: schemapb.DataType_FloatVector},
+		}},
+	})
+	meta.indexMeta = &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collectionID: {
+				indexID: {
+					CollectionID: collectionID,
+					FieldID:      vectorFieldID,
+					IndexID:      indexID,
+				},
+			},
+		},
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	}
+	finishedIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	finishedIndexes.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collectionID,
+		SegmentID:    1,
+		IndexID:      indexID,
+		IndexState:   commonpb.IndexState_Finished,
+	})
+	meta.indexMeta.segmentIndexes.Insert(1, finishedIndexes)
+
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
+func TestCompactionTargetReconcilerSkipsManualIndexFilterWhenDisabled(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "false")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+	})
+
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+	)
+	meta.indexMeta.indexes[1] = map[UniqueID]*model.Index{
+		1000: {CollectionID: 1, FieldID: 100, IndexID: 1000},
+	}
+
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+}
+
+func TestCompactionTargetReconcilerManualIndexFilterKeepsNoIndexCollection(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+	})
+
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+	)
+
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+}
+
 func newLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ...*datapb.CompactionTarget) *compactionTargetMeta {
 	t.Helper()
 	catalog, _, _, _ := newCompactionTargetTestCatalog(t, records...)
 	targetMeta, err := newCompactionTargetMeta(ctx, catalog)
 	require.NoError(t, err)
 	return targetMeta
+}
+
+func newCompactionTargetReconcilerForTest(meta *meta) *compactionTargetReconciler {
+	return newCompactionTargetReconciler(meta, newMockHandlerWithMeta(meta))
 }
 
 func enableCompactionTargetReconciler(t *testing.T) {
@@ -369,6 +495,9 @@ func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, seg
 		segments:             NewSegmentsInfo(),
 		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		compactionTargetMeta: targetMeta,
+		indexMeta: &indexMeta{
+			indexes: make(map[UniqueID]map[UniqueID]*model.Index),
+		},
 	}
 	for _, segment := range segments {
 		meta.segments.SetSegment(segment.GetID(), segment)

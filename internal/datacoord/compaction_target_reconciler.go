@@ -17,13 +17,17 @@ import (
 // views for segments that still miss their target. It stores no progress - a
 // target is satisfied when no in-scope segment matches its predicate anymore.
 type compactionTargetReconciler struct {
-	meta *meta
+	meta    *meta
+	handler Handler
 }
 
 var _ CompactionPolicy = (*compactionTargetReconciler)(nil)
 
-func newCompactionTargetReconciler(meta *meta) *compactionTargetReconciler {
-	return &compactionTargetReconciler{meta: meta}
+func newCompactionTargetReconciler(meta *meta, handler Handler) *compactionTargetReconciler {
+	return &compactionTargetReconciler{
+		meta:    meta,
+		handler: handler,
+	}
 }
 
 func (reconciler *compactionTargetReconciler) Enable() bool {
@@ -67,7 +71,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
-		for _, segment := range reconciler.filterExecutable(matches) {
+		for _, segment := range reconciler.filterExecutable(ctx, matches) {
 			events[TriggerTypeTarget] = append(events[TriggerTypeTarget], compactionTargetView(record, segment))
 		}
 	}
@@ -84,7 +88,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	return events, nil
 }
 
-func (reconciler *compactionTargetReconciler) filterExecutable(matches []*SegmentInfo) []*SegmentInfo {
+func (reconciler *compactionTargetReconciler) filterExecutable(ctx context.Context, matches []*SegmentInfo) []*SegmentInfo {
 	blockedCollections := make(map[int64]bool)
 	executable := make([]*SegmentInfo, 0, len(matches))
 	for _, segment := range matches {
@@ -98,6 +102,9 @@ func (reconciler *compactionTargetReconciler) filterExecutable(matches []*Segmen
 			continue
 		}
 		executable = append(executable, segment)
+	}
+	if paramtable.Get().DataCoordCfg.IndexBasedCompaction.GetAsBool() {
+		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, executable...)
 	}
 	return executable
 }
