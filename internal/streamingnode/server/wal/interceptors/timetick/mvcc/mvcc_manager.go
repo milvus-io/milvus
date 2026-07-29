@@ -10,15 +10,17 @@ import (
 // NewMVCCManager creates a new per-vchannel query MVCC manager.
 func NewMVCCManager(_ uint64) *MVCCManager {
 	return &MVCCManager{
-		vchannelMVCCs: make(map[string]VChannelMVCC),
+		vchannelMVCCs:        make(map[string]VChannelMVCC),
+		unconfirmedVChannels: make(map[string]struct{}),
 	}
 }
 
 // MVCCManager is the manager that manages all the mvcc state of one wal.
 // It tracks the persisted query-plan frontiers of each recovered vchannel.
 type MVCCManager struct {
-	mu            sync.Mutex
-	vchannelMVCCs map[string]VChannelMVCC
+	mu                   sync.Mutex
+	vchannelMVCCs        map[string]VChannelMVCC
+	unconfirmedVChannels map[string]struct{}
 }
 
 // GetMVCCOfVChannel gets the query MVCC frontiers of the vchannel.
@@ -43,6 +45,7 @@ func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
 	mvcc.TransformingTimetick = max(mvcc.TransformingTimetick, timetick)
 	mvcc.Confirmed = true
 	cm.vchannelMVCCs[vchannel] = mvcc
+	delete(cm.unconfirmedVChannels, vchannel)
 }
 
 // UpdateMVCC updates the mvcc state by incoming message.
@@ -125,15 +128,17 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	}
 	mvcc.Confirmed = false
 	cm.vchannelMVCCs[vchannel] = mvcc
+	cm.unconfirmedVChannels[vchannel] = struct{}{}
 }
 
-// sync syncs the mvcc state by the incoming timetick message, push forward the wal mvcc state
-// and clear the vchannel mvcc state.
+// sync confirms the unconfirmed vchannel MVCC states covered by the incoming timetick message.
 func (cm *MVCCManager) sync(tt uint64) {
-	for vchannel, mvcc := range cm.vchannelMVCCs {
+	for vchannel := range cm.unconfirmedVChannels {
+		mvcc := cm.vchannelMVCCs[vchannel]
 		if max(mvcc.GrowingTimetick, mvcc.TransformingTimetick) <= tt {
 			mvcc.Confirmed = true
 			cm.vchannelMVCCs[vchannel] = mvcc
+			delete(cm.unconfirmedVChannels, vchannel)
 		}
 	}
 }
@@ -146,6 +151,7 @@ func (cm *MVCCManager) advanceTransformingAllLocked(tt uint64) {
 		mvcc.TransformingTimetick = tt
 		mvcc.Confirmed = false
 		cm.vchannelMVCCs[vchannel] = mvcc
+		cm.unconfirmedVChannels[vchannel] = struct{}{}
 	}
 }
 

@@ -305,26 +305,7 @@ Initial reason set:
 `MetricsObserver` should classify only reasons available from the event type
 and stable fields. Raw error strings must not become label values.
 
-### 6.6 `milvus_qv_sync_failure_total`
-
-Type: Counter
-
-Description: Count of failed Coord-to-worker QueryView sync batch attempts.
-
-Labels:
-
-```text
-node_role, state, reason
-```
-
-Derived from:
-
-- `CoordSyncViewBatchFailedEvent`
-
-The first implementation can use `reason="unknown"` until sync errors are
-classified into stable categories.
-
-### 6.7 `milvus_qv_view_ready_percent_bucket`
+### 6.6 `milvus_qv_view_ready_percent_bucket`
 
 Type: Gauge
 
@@ -361,7 +342,7 @@ StreamingNode reports, it is currently state-derived: resource-ready states
 report 100 and other states report 0. The metric is exported from the Coord
 observer because Coord owns the merged worker report view.
 
-### 6.8 `milvus_qv_sync_pending`
+### 6.7 `milvus_qv_sync_pending`
 
 Type: Gauge
 
@@ -375,10 +356,9 @@ node_role, node_id, state
 
 Status:
 
-This metric requires additional syncer events for exact accounting. Existing
-`CoordSyncViewBatchEvent` and `CoordSyncViewBatchFailedEvent` can observe send
-attempts and send failures, but they do not fully identify when a pending entry
-is matched and removed.
+This metric requires additional syncer events for exact accounting.
+`CoordSyncViewAcceptedEvent` identifies when ReliableSyncer accepts an entry,
+but does not identify when that entry is matched and removed.
 
 Required additional events:
 
@@ -539,7 +519,6 @@ Recommended first alerts:
 | Stuck non-Up view | `max(milvus_qv_view_state_max_age_seconds) > threshold` |
 | Shard not loaded | `milvus_qv_shard_load_states{state!="loaded"} > 0` for a sustained window |
 | Unrecoverable spike | Rate of `milvus_qv_unrecoverable_total` exceeds baseline |
-| Sync failure spike | Rate of `milvus_qv_sync_failure_total` exceeds baseline |
 
 Thresholds should be derived from expected segment load time and QueryView
 preparation SLA. The metric design intentionally exposes state and bounded age
@@ -548,7 +527,7 @@ diagnostics so alerts can be tuned without changing code.
 ## 12. Implementation Order
 
 1. Add QueryCoord event-derived counters:
-   `view_transition_total`, `unrecoverable_total`, and `sync_failure_total`.
+   `view_transition_total` and `unrecoverable_total`.
 2. Add QueryCoord state cache gauges:
    `view_states`, `view_state_max_age_seconds`, and
    `view_ready_percent_bucket`.

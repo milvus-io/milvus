@@ -51,8 +51,7 @@ const (
 	eventSNReleaseResource                  = "SNReleaseResource"
 	eventCoordPersistView                   = "CoordPersistView"
 	eventSNPersistView                      = "SNPersistView"
-	eventCoordSyncViewBatch                 = "CoordSyncViewBatch"
-	eventCoordSyncViewBatchFailed           = "CoordSyncViewBatchFailed"
+	eventCoordSyncViewAccepted              = "CoordSyncViewAccepted"
 )
 
 const (
@@ -682,8 +681,8 @@ func (e StreamingNodeReleaseResourceEvent) MarshalLogObject(enc mlog.ObjectEncod
 	return nil
 }
 
-// CoordPersistViewEvent is emitted when ShardViewManager.flush persists a view
-// state.
+// CoordPersistViewEvent is emitted after DirtyViewFlushScheduler successfully
+// persists one QueryView state.
 type CoordPersistViewEvent struct {
 	baseEvent
 	View  qviews.QueryViewKey
@@ -724,49 +723,29 @@ func (e StreamingNodePersistViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) 
 	return nil
 }
 
-// CoordSyncViewBatchEvent is emitted when ShardViewManager.flush syncs a view
-// state to one worker-node batch.
-type CoordSyncViewBatchEvent struct {
+// CoordSyncViewAcceptedEvent is emitted after ReliableSyncer accepts one
+// QueryView state for delivery to a worker node. It does not mean the worker
+// has applied the state.
+type CoordSyncViewAcceptedEvent struct {
 	baseEvent
 	View  qviews.QueryViewKey
+	Node  qviews.WorkNode
 	State qviews.QueryViewState
 }
 
-func (e CoordSyncViewBatchEvent) LogLevel() mlog.Level {
+func (e CoordSyncViewAcceptedEvent) LogLevel() mlog.Level {
 	return mlog.InfoLevel
 }
 
-func (e CoordSyncViewBatchEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
-	enc.AddString(fieldType, eventCoordSyncViewBatch)
+func (e CoordSyncViewAcceptedEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
+	enc.AddString(fieldType, eventCoordSyncViewAccepted)
 	enc.AddString(fieldSID, e.View.ShardID.String())
 	enc.AddString(fieldQV, e.View.QueryViewVersion.String())
 	enc.AddString(fieldDV, e.View.QueryViewVersion.DataVersion.String())
-	enc.AddString(fieldState, e.State.String())
-	return nil
-}
-
-// CoordSyncViewBatchFailedEvent is emitted when ShardViewManager.flush fails to
-// sync a view state to one worker-node batch.
-type CoordSyncViewBatchFailedEvent struct {
-	baseEvent
-	View  qviews.QueryViewKey
-	State qviews.QueryViewState
-	Err   error
-}
-
-func (e CoordSyncViewBatchFailedEvent) LogLevel() mlog.Level {
-	return mlog.WarnLevel
-}
-
-func (e CoordSyncViewBatchFailedEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
-	enc.AddString(fieldType, eventCoordSyncViewBatchFailed)
-	enc.AddString(fieldSID, e.View.ShardID.String())
-	enc.AddString(fieldQV, e.View.QueryViewVersion.String())
-	enc.AddString(fieldDV, e.View.QueryViewVersion.DataVersion.String())
-	enc.AddString(fieldState, e.State.String())
-	if e.Err != nil {
-		enc.AddString(fieldError, e.Err.Error())
+	if e.Node != nil {
+		enc.AddString(fieldWN, e.Node.String())
 	}
+	enc.AddString(fieldState, e.State.String())
 	return nil
 }
 
@@ -806,11 +785,7 @@ func (e CoordPersistViewEvent) ComponentInfo() string {
 	return componentCoord
 }
 
-func (e CoordSyncViewBatchEvent) ComponentInfo() string {
-	return componentCoord
-}
-
-func (e CoordSyncViewBatchFailedEvent) ComponentInfo() string {
+func (e CoordSyncViewAcceptedEvent) ComponentInfo() string {
 	return componentCoord
 }
 

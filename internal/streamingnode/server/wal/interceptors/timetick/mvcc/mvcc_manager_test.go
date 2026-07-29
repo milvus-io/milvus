@@ -113,6 +113,32 @@ func TestRecoveryBarrierConfirmsQueryPlanMVCC(t *testing.T) {
 	assert.Equal(t, VChannelMVCC{GrowingTimetick: 130, TransformingTimetick: 120, Confirmed: true}, mvcc)
 }
 
+func TestMVCCManagerTracksUnconfirmedVChannels(t *testing.T) {
+	cm := NewMVCCManager(100)
+	cm.ApplyRecoveryBarrier("vc1", 120)
+	cm.ApplyRecoveryBarrier("vc2", 120)
+	assert.Empty(t, cm.unconfirmedVChannels)
+
+	cm.UpdateMVCC(createTestMessage(t, 130, "vc1", message.MessageTypeInsert, false, true))
+	assert.Equal(t, map[string]struct{}{"vc1": {}}, cm.unconfirmedVChannels)
+
+	cm.UpdateMVCC(createTestMessage(t, 129, "", message.MessageTypeTimeTick, false, true))
+	assert.Equal(t, map[string]struct{}{"vc1": {}}, cm.unconfirmedVChannels)
+
+	cm.UpdateMVCC(createTestMessage(t, 130, "", message.MessageTypeTimeTick, false, true))
+	assert.Empty(t, cm.unconfirmedVChannels)
+
+	cm.UpdateMVCC(createTestMessage(t, 140, "vc1", message.MessageTypeInsert, false, true))
+	cm.ApplyRecoveryBarrier("vc1", 140)
+	assert.Empty(t, cm.unconfirmedVChannels)
+
+	cm.UpdateMVCC(createTestMessage(t, 150, "", message.MessageTypeFlushAll, false, true))
+	assert.Equal(t, map[string]struct{}{"vc1": {}, "vc2": {}}, cm.unconfirmedVChannels)
+
+	cm.UpdateMVCC(createTestMessage(t, 150, "", message.MessageTypeTimeTick, false, true))
+	assert.Empty(t, cm.unconfirmedVChannels)
+}
+
 func TestTransformBarrierMessagesAdvanceTransformingMVCC(t *testing.T) {
 	cm := NewMVCCManager(100)
 	cm.ApplyRecoveryBarrier("vc1", 120)
