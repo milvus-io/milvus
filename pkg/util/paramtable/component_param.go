@@ -4330,7 +4330,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.EnableGISSplitFusion = ParamItem{
 		Key:          "queryNode.segcore.enableGISSplitFusion",
 		Version:      "2.6.6",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable GIS filter coarse/refine split + same-column fusion optimization",
 		Export:       true,
 	}
