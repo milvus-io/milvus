@@ -289,6 +289,9 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "gcp_target_service_account",
     "bucket_name",
     "anonymous",
+    "azure_client_id",
+    "azure_tenant_id",
+    "azure_credential_endpoint",
 };
 
 // kExtfsFields is the contract with Go extfsFields in
