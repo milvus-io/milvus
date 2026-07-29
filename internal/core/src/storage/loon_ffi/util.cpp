@@ -31,6 +31,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "common/type_c.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_internal/result.h"
@@ -747,9 +748,12 @@ GetLoonManifest(
 
         auto fs_result =
             milvus_storage::FilesystemCache::getInstance().get(*properties);
-        AssertInfo(fs_result.ok(),
-                   "Failed to get filesystem: {}",
-                   fs_result.status().ToString());
+        if (!fs_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(fs_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get filesystem: {}",
+                      error.what());
+        }
         auto fs = std::move(fs_result.ValueOrDie());
 
         auto transaction_result =
@@ -759,14 +763,22 @@ GetLoonManifest(
                 version,
                 milvus_storage::api::transaction::FailResolver,
                 1);
-        AssertInfo(transaction_result.ok(),
-                   "Failed to open transaction: {}",
-                   transaction_result.status().ToString());
+        if (!transaction_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(transaction_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to open transaction: {}",
+                      error.what());
+        }
         auto transaction = std::move(transaction_result.ValueOrDie());
         auto manifest_result = transaction->GetManifest();
-        AssertInfo(manifest_result.ok(),
-                   "Failed to get manifest: {}",
-                   manifest_result.status().ToString());
+        if (!manifest_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(manifest_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get manifest: {}",
+                      error.what());
+        }
         auto current_manifest = manifest_result.ValueOrDie();
         return current_manifest;
     } catch (const json::parse_error& e) {

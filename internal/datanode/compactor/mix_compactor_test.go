@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -95,9 +96,13 @@ func newMixCompactionStorageV1SuiteForDirectTest(t *testing.T) *MixCompactionTas
 	s.SetupSuite()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 	t.Cleanup(func() {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+		initcore.CleanArrowFileSystem()
 		s.TearDownTest()
 	})
 	s.SetupTest()

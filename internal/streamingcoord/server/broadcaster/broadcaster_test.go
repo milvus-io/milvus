@@ -248,6 +248,8 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 
 	require.Error(t, err)
 	require.True(t, IsBroadcastTaskNotCreated(err))
+	require.True(t, IsBroadcastTaskNotCreated(errors.Wrap(err, "broadcast failed")))
+	require.False(t, IsBroadcastTaskNotCreated(context.Canceled))
 	require.True(t, streamingstatus.AsStreamingError(err).IsOnShutdown())
 	require.Empty(t, bm.tasks)
 

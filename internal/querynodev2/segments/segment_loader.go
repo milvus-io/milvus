@@ -152,10 +152,11 @@ type resourceEstimateFactor struct {
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
 	// externalRawDataFactor is the peak-memory safety factor for external
-	// segments. External tables always download, decompress and deserialize
-	// row groups into Arrow buffers regardless of mmap / TieredEviction
-	// settings, so peak transient memory = rawDataSize * factor. Defaults
-	// to 2.0 via paramtable queryNode.externalCollection.rawDataFactor.
+	// segments when tiered eviction is disabled. With tiered eviction enabled,
+	// the caching layer reserves transient loading overhead from the sampled
+	// external row size, so applying this factor in Go would reserve the same
+	// raw-data memory twice. Defaults to 2.0 via paramtable
+	// queryNode.externalCollection.rawDataFactor.
 	externalRawDataFactor float64
 }
 
@@ -2284,10 +2285,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// External segments carry pre-computed MemorySize in fake binlogs (from
 	// DataNode Take sampling). Adjust the memory estimate for two external-
 	// specific behaviors:
-	//   1. Non-lazy path: apply externalRawDataFactor to cover the peak
-	//      transient memory during download + decompress + Arrow deserialize
-	//      (normal packed segments do not have this peak because their
-	//      binlogs are already in Arrow IPC format).
+	//   1. Non-lazy path without tiered eviction: apply externalRawDataFactor
+	//      to cover the peak transient memory during download + decompress +
+	//      Arrow deserialize (normal packed segments do not have this peak
+	//      because their binlogs are already in Arrow IPC format). When tiered
+	//      eviction is enabled, the caching layer reserves this loading
+	//      overhead, so Go must not reserve the same raw-data margin again.
 	//   2. Full-lazy path (all external fields warmup=disable): no eager
 	//      load, so subtract the raw data size that PART 2 added.
 	// Also propagate EstimatedBytesPerRow to the C++ ManifestGroupTranslator
@@ -2307,9 +2310,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			} else {
 				segMemoryLoadingSize = 0
 			}
-		} else if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
-			// Non-lazy → add peak margin on top of rawSize that PART 2 added.
-			segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+		} else if !multiplyFactor.TieredEvictionEnabled {
+			if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
+				// Non-lazy → add peak margin on top of rawSize that PART 2 added.
+				segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+			}
 		}
 	}
 

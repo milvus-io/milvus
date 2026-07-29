@@ -250,6 +250,38 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 		assert.Equal(t, newIndexParams[0].Key, common.IndexTypeKey)
 		assert.Equal(t, newIndexParams[0].Value, "INVERTED")
 	})
+
+	t.Run("ngram index param rewrite", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				IndexName:    indexName,
+				CreateTime:   10,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+				},
+				UserIndexParams: userIndexParams,
+			},
+		}
+		ngramReq := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HYBRID"},
+			},
+			IsAutoIndex:     true,
+			UserIndexParams: userIndexParams,
+		}
+
+		indexID, err := m.CanCreateIndex(ngramReq, false)
+		assert.ErrorIs(t, err, errIndexOperationIgnored)
+		assert.Zero(t, indexID)
+		require.Len(t, ngramReq.GetIndexParams(), 1)
+		assert.Equal(t, "NGRAM", ngramReq.GetIndexParams()[0].GetValue())
+	})
 }
 
 func TestMeta_CanCreateIndex(t *testing.T) {
@@ -761,6 +793,44 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 		state := m.GetSegmentIndexState(collID, segID, indexID)
 		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
 	})
+}
+
+func TestMeta_GetSegmentsIndexStatesUsesScalarVersionForNGRAM(t *testing.T) {
+	const (
+		collID  = UniqueID(1)
+		indexID = UniqueID(10)
+		segID   = UniqueID(1000)
+	)
+
+	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	indexesForSegment := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	indexesForSegment.Insert(indexID, &model.SegmentIndex{
+		SegmentID:                 segID,
+		IndexID:                   indexID,
+		IndexType:                 "NGRAM",
+		CurrentIndexVersion:       11,
+		CurrentScalarIndexVersion: 7,
+		IndexState:                commonpb.IndexState_Finished,
+	})
+	segmentIndexes.Insert(segID, indexesForSegment)
+
+	m := &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					IndexID:      indexID,
+					IndexName:    "ngram_idx",
+				},
+			},
+		},
+		segmentIndexes: segmentIndexes,
+	}
+
+	states := m.getSegmentsIndexStates(collID, []UniqueID{segID})
+	require.Contains(t, states, segID)
+	require.Contains(t, states[segID], indexID)
+	assert.Equal(t, int32(7), states[segID][indexID].GetIndexVersion())
 }
 
 func TestMeta_GetIndexedSegment(t *testing.T) {

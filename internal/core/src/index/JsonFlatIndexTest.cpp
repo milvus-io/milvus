@@ -35,6 +35,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprCache.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
@@ -1047,10 +1048,8 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
             filter_expr = std::make_shared<expr::LogicalUnaryExpr>(
                 expr::LogicalUnaryExpr::OpType::LogicalNot, contains_expr);
         }
-        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                           filter_expr);
-        return gen_filter_res(
-            plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+        return EvalExprInBatches(filter_expr, segment_.get(), json_data_.size())
+            .result;
     }
 
     void
@@ -1164,6 +1163,20 @@ TEST_F(JsonFlatIndexContainsExprTest, UsesExactPathThreeValuedValidity) {
 }
 
 TEST_F(JsonFlatIndexContainsExprTest, PreservesLargeInt64LiteralPrecision) {
+    ExprBatchSizeGuard batch_size_guard(5);
+    proto::plan::GenericValue value;
+    value.set_int64_val(9007199254740993LL);
+    auto contains_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{value});
+    EXPECT_TRUE(CanExprExecuteAllAtOnce(
+        contains_expr, segment_.get(), json_data_.size()));
+    EXPECT_EQ(
+        EvalExprBatchSizes(contains_expr, segment_.get(), json_data_.size()),
+        (std::vector<int64_t>{5, 5, 4}));
+
     CheckResult(Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains,
                          {9007199254740993LL}),
                 {false,
@@ -1294,6 +1307,14 @@ TEST_F(JsonFlatIndexExprTest, JSONArrayEqualityFallsBackToRawData) {
 
 TEST_F(JsonFlatIndexExprTest,
        JSONContainsMixedAndArrayLiteralsFallBackToRawData) {
+    ExprBatchSizeGuard batch_size_guard(7);
+    const auto expect_three_batches = [&](const expr::TypedExprPtr& expr) {
+        std::vector<int64_t> batch_sizes;
+        EXPECT_NO_THROW(batch_sizes = EvalExprBatchSizes(
+                            expr, segment_.get(), json_data_.size()));
+        EXPECT_EQ(batch_sizes, (std::vector<int64_t>{7, 7, 5}));
+    };
+
     proto::plan::GenericValue string_value;
     string_value.set_string_val("a");
     proto::plan::GenericValue int_value;
@@ -1304,6 +1325,7 @@ TEST_F(JsonFlatIndexExprTest,
         proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
         false,
         std::vector<proto::plan::GenericValue>{string_value, int_value});
+    expect_three_batches(mixed_expr);
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
     auto final = query::ExecuteQueryExpr(
@@ -1321,11 +1343,24 @@ TEST_F(JsonFlatIndexExprTest,
         proto::plan::JSONContainsExpr_JSONOp_Contains,
         true,
         std::vector<proto::plan::GenericValue>{array_value});
+    expect_three_batches(array_expr);
     plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, array_expr);
     final = query::ExecuteQueryExpr(
         plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), 0);
+
+    auto in_field_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{string_value},
+        true);
+    expect_three_batches(in_field_expr);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  in_field_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 1);
+    EXPECT_TRUE(final[6]);
 }
 
 TEST_F(JsonFlatIndexExprTest, ReusesValidityAcrossLiteralsAndOperators) {
@@ -1400,6 +1435,19 @@ TEST_F(JsonFlatIndexExprTest, ReusesValidityAcrossLiteralsAndOperators) {
 }
 
 TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
+    ExprBatchSizeGuard batch_size_guard(7);
+    const auto evaluate = [&](const expr::TypedExprPtr& expr,
+                              bool can_execute_all_at_once) {
+        EXPECT_EQ(
+            CanExprExecuteAllAtOnce(expr, segment_.get(), json_data_.size()),
+            can_execute_all_at_once);
+        ExprBatchEvalResult evaluation;
+        EXPECT_NO_THROW(evaluation = EvalExprInBatches(
+                            expr, segment_.get(), json_data_.size()));
+        EXPECT_EQ(evaluation.batch_sizes, (std::vector<int64_t>{7, 7, 5}));
+        return evaluation.result;
+    };
+
     proto::plan::GenericValue value;
     value.set_int64_val(9007199254740993LL);
 
@@ -1408,10 +1456,7 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
-    auto plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, equal_expr);
-    auto result = gen_filter_res(
-        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    auto result = evaluate(equal_expr, true);
     TargetBitmapView result_view(result->GetRawData(), result->size());
     TargetBitmapView valid_view(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -1425,10 +1470,7 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{value},
         false);
-    plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
-    result = gen_filter_res(
-        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result = evaluate(term_expr, true);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -1443,10 +1485,7 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         proto::plan::OpType::GreaterThan,
         value,
         std::vector<proto::plan::GenericValue>());
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                  greater_expr);
-    result = gen_filter_res(
-        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result = evaluate(greater_expr, false);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -1462,10 +1501,7 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         value,
         true,
         true);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                  between_expr);
-    result = gen_filter_res(
-        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result = evaluate(between_expr, false);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -1483,10 +1519,7 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         upper_float,
         true,
         true);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                  mixed_lower_expr);
-    result = gen_filter_res(
-        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result = evaluate(mixed_lower_expr, false);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_FALSE(result_view[16]);
@@ -1501,10 +1534,7 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         value,
         true,
         true);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                  mixed_upper_expr);
-    result = gen_filter_res(
-        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result = evaluate(mixed_upper_expr, false);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_TRUE(result_view[16]);
