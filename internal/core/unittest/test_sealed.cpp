@@ -33,6 +33,8 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -83,6 +85,9 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
+#include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
@@ -4906,6 +4911,43 @@ TEST(SealedSegmentCowState,
     ASSERT_NO_THROW(resolved = sealed->TestResolveFieldDataWarmupPolicy(
                         vec, staged_load_info, new_schema));
     EXPECT_EQ(resolved, "disable");
+}
+
+TEST(SealedSegmentCowState, FieldTranslatorsRequireExplicitMmapWritebackMode) {
+    using storagev1translator::ChunkTranslator;
+    using storagev1translator::DefaultValueChunkTranslator;
+    using storagev2translator::GroupChunkTranslator;
+
+    EXPECT_FALSE(
+        (std::is_constructible_v<ChunkTranslator,
+                                 int64_t,
+                                 FieldMeta,
+                                 FieldDataInfo,
+                                 std::vector<ChunkTranslator::FileInfo>,
+                                 bool,
+                                 bool,
+                                 proto::common::LoadPriority,
+                                 std::string>));
+    EXPECT_FALSE((std::is_constructible_v<DefaultValueChunkTranslator,
+                                          int64_t,
+                                          FieldMeta,
+                                          FieldDataInfo,
+                                          bool,
+                                          bool,
+                                          std::string>));
+    EXPECT_FALSE((std::is_constructible_v<
+                  GroupChunkTranslator,
+                  int64_t,
+                  GroupChunkType,
+                  std::unordered_map<FieldId, FieldMeta>,
+                  FieldDataInfo,
+                  std::vector<std::string>,
+                  std::vector<milvus_storage::RowGroupMetadataVector>,
+                  bool,
+                  bool,
+                  int64_t,
+                  proto::common::LoadPriority,
+                  std::string>));
 }
 
 TEST(SealedSegmentCowState,
