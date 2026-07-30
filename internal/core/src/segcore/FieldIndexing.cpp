@@ -218,20 +218,25 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 
 VectorFieldIndexing::~VectorFieldIndexing() {
     // Queued task: abandon it, no wait -- once scheduled it exits after
-    // reading only the shared control block. Running task: join it; worst
-    // case one full first-build (knowhere Build is not interruptible;
-    // cancelled is honored at phase boundaries only). Safe to join:
-    // IndexingRecord (SegmentGrowingImpl.h) is declared after InsertRecord, so
-    // we are destroyed first and field_raw_data outlives this join.
-    if (build_ctrl_) {
-        build_ctrl_->cancelled.store(true);
-        if (build_ctrl_->TryAbandon()) {
-            return;
-        }
+    // reading only the shared control block (the FinishGuard and TryStart both
+    // touch ctrl only, never `this`). Running task: join it; worst case one
+    // full first-build (knowhere Build is not interruptible; cancelled is
+    // honored at phase boundaries only). Safe to join: IndexingRecord
+    // (SegmentGrowingImpl.h) is declared after InsertRecord, so we are
+    // destroyed first and field_raw_data outlives this join.
+    if (build_ctrl_ == nullptr) {
+        return;
     }
-    if (build_task_.valid()) {
-        build_task_.wait();
+    build_ctrl_->cancelled.store(true);
+    if (build_ctrl_->TryAbandon()) {
+        return;
     }
+    // Lost the race: the task body is running (or already finished) and may
+    // still dereference `this`. Join on the control block, NOT on build_task_:
+    // Submit can throw *after* enqueueing the task, leaving build_task_
+    // invalid while the task runs -- waiting on build_task_ would then return
+    // immediately and free the object under the running task.
+    build_ctrl_->finished.wait();
 }
 
 void
@@ -745,6 +750,10 @@ VectorFieldIndexing::StartBuildLocked(const VectorBase* field_raw_data,
     try {
         build_task_ = GrowingIndexBuildPool().Submit(
             [this, ctrl = build_ctrl_, field_raw_data, new_data_dim] {
+                // Fulfils ctrl->finished on every exit path, so the destructor
+                // can join even when Submit threw before assigning
+                // build_task_. Must outlive everything below.
+                BuildTaskCtrl::FinishGuard done{ctrl.get()};
                 // CAS on the control block BEFORE touching `this`: if the
                 // destructor abandoned us while queued, `this` is gone and we
                 // must return reading nothing but ctrl.
@@ -754,22 +763,75 @@ VectorFieldIndexing::StartBuildLocked(const VectorBase* field_raw_data,
                 BuildAsync(field_raw_data, new_data_dim);
             });
     } catch (std::exception& error) {
-        // The task was never queued, so nothing else can observe state_ here.
-        // Degrade exactly like a build failure: brute-force scan stays correct.
+        // Submit enqueues the task before its own throwable work, so the task
+        // may already be running here -- the abandon CAS decides who owns the
+        // state machine.
+        if (build_ctrl_->TryAbandon()) {
+            // We won: the body will never run (if the task was enqueued at
+            // all it will lose TryStart and exit touching only ctrl), so
+            // nothing else can observe state_ and nothing needs joining.
+            // Degrade exactly like a build failure: brute-force stays correct.
+            LOG_WARN(
+                "failed to submit async growing index build, disabling interim "
+                "index for this field: {}",
+                error.what());
+            build_ctrl_ = nullptr;
+            state_.store(GrowingIndexState::kDisabled);
+            milvus::monitor::internal_core_growing_index_build_failures
+                .Increment();
+            return;
+        }
+        // We lost: the task is running and owns state_ from here on. Storing
+        // kDisabled now would be a back edge that the task overwrites with
+        // kSynced. Leave state_ == kBuilding and let the running build drive
+        // it to kSynced/kDisabled itself -- the throw came from the pool's own
+        // bookkeeping after the task was handed off, so the build is still
+        // valid. The only casualty is the pool future we never received, which
+        // is why the destructor joins on build_ctrl_->finished.
         LOG_WARN(
-            "failed to submit async growing index build, disabling interim "
-            "index for this field: {}",
+            "async growing index build submit reported an error after the task "
+            "started, letting the running build drive the state machine: {}",
             error.what());
-        build_ctrl_->cancelled.store(true);
-        build_ctrl_->TryAbandon();
-        state_.store(GrowingIndexState::kDisabled);
-        milvus::monitor::internal_core_growing_index_build_failures.Increment();
     }
 }
 
 void
 VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
                                 int64_t new_data_dim) {
+    // Shared by both catch clauses below (a non-std exception must not leak
+    // the inflight gauge nor strand the field in kBuilding forever).
+    auto handle_failure = [&](const char* reason) {
+        if (sync_with_index_.load()) {
+            // The index is already published: CatchUp flips sync_with_index_
+            // and state_ under append_mutex_, and only post-publish
+            // bookkeeping (the metric Observe calls) runs after that.
+            // Recreating the index here would swap a live, searchable index
+            // out from under concurrent readers and hand them an empty one.
+            // Nothing to undo: the build itself succeeded.
+            LOG_WARN(
+                "async growing index build threw after publishing the index; "
+                "the index stays live, only post-publish bookkeeping was "
+                "lost: {}",
+                reason);
+            return;
+        }
+        LOG_WARN(
+            "async growing index build failed, disabling interim index for "
+            "this field, falling back to brute-force scan permanently: {}",
+            reason);
+        std::lock_guard<std::mutex> lock(append_mutex_);
+        // Legal here because the index has NOT taken raw-data ownership yet:
+        // sync_with_index_ was never set, so HasRawData() stayed false and
+        // try_remove_chunks never cleared the source chunks (unlike the
+        // post-sync recreate_index documented as a design defect in
+        // AddBatch*). Recreate only to free the half-built index memory.
+        recreate_index(get_data_type(), field_raw_data);
+        built_ = false;
+        index_cur_.store(0);
+        state_.store(GrowingIndexState::kDisabled);
+        milvus::monitor::internal_core_growing_index_build_failures.Increment();
+    };
+
     milvus::monitor::internal_core_growing_index_inflight_builds.Increment();
     try {
         CallBuildHook(GrowingBuildPhase::kBeforeBuild);
@@ -799,22 +861,10 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
             CallBuildHook(GrowingBuildPhase::kAfterBuild);
             CatchUp(field_raw_data);
         }
-    } catch (std::exception& error) {
-        LOG_WARN(
-            "async growing index build failed, disabling interim index for "
-            "this field, falling back to brute-force scan permanently: {}",
-            error.what());
-        std::lock_guard<std::mutex> lock(append_mutex_);
-        // Legal here because the index has NOT taken raw-data ownership yet:
-        // sync_with_index_ was never set, so HasRawData() stayed false and
-        // try_remove_chunks never cleared the source chunks (unlike the
-        // post-sync recreate_index documented as a design defect in
-        // AddBatch*). Recreate only to free the half-built index memory.
-        recreate_index(get_data_type(), field_raw_data);
-        built_ = false;
-        index_cur_.store(0);
-        state_.store(GrowingIndexState::kDisabled);
-        milvus::monitor::internal_core_growing_index_build_failures.Increment();
+    } catch (const std::exception& error) {
+        handle_failure(error.what());
+    } catch (...) {
+        handle_failure("unknown exception");
     }
     milvus::monitor::internal_core_growing_index_inflight_builds.Decrement();
 }

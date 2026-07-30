@@ -1090,13 +1090,18 @@ IndexedRowCount(const SegmentGrowingImpl* segment, FieldId vec) {
 }
 
 // Inserts one batch and returns the generated data (kept alive by the caller
-// when the vectors are needed afterwards).
+// when the vectors are needed afterwards). `patch` runs on the generated data
+// before it is inserted, so a test can plant a known vector in a known row.
 GeneratedData
 InsertAsyncBatch(SegmentGrowing* segment,
                  const SchemaPtr& schema,
                  int64_t rows,
-                 uint64_t seed) {
+                 uint64_t seed,
+                 const std::function<void(GeneratedData&)>& patch = nullptr) {
     auto dataset = DataGen(schema, rows, seed);
+    if (patch) {
+        patch(dataset);
+    }
     auto offset = segment->PreInsert(rows);
     segment->Insert(offset,
                     rows,
@@ -1119,6 +1124,48 @@ MakeAsyncPlaceholders(DataType data_type,
     }
     return ParsePlaceholderGroup(plan, ph_group_raw.SerializeAsString());
 }
+
+// nq=1 placeholder holding exactly the dim-kAsyncDim vector at `vec`.
+std::unique_ptr<milvus::query::PlaceholderGroup>
+MakeSingleDensePlaceholder(const milvus::query::Plan* plan, const float* vec) {
+    auto raw_group = CreatePlaceholderGroupFromBlob(1, kAsyncDim, vec);
+    return ParsePlaceholderGroup(plan, raw_group.SerializeAsString());
+}
+
+// nq=1 placeholder holding exactly `row`.
+std::unique_ptr<milvus::query::PlaceholderGroup>
+MakeSingleSparsePlaceholder(
+    const milvus::query::Plan* plan,
+    const knowhere::sparse::SparseRow<milvus::SparseValueType>& row) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto* value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::SparseFloatVector);
+    value->add_values(row.data(), row.data_byte_size());
+    return ParsePlaceholderGroup(plan, raw_group.SerializeAsString());
+}
+
+// Sets an atomic flag on every scope exit, including the early return an
+// ASSERT_* failure produces. Used to unpark a build thread that a test hook
+// is holding: declare it *after* the object whose destructor would otherwise
+// block on that thread, so it fires first.
+class ScopedFlagOnExit {
+ public:
+    explicit ScopedFlagOnExit(std::atomic<bool>& flag) : flag_(flag) {
+    }
+
+    ~ScopedFlagOnExit() {
+        flag_.store(true);
+    }
+
+    ScopedFlagOnExit(const ScopedFlagOnExit&) = delete;
+    ScopedFlagOnExit&
+    operator=(const ScopedFlagOnExit&) = delete;
+
+ private:
+    std::atomic<bool>& flag_;
+};
 
 }  // namespace
 
@@ -1146,8 +1193,21 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
 
     constexpr int64_t per_batch = 10000;
     constexpr int64_t n_batch = 5;
+    // The build threshold (22698) is crossed by the third batch, so the last
+    // batch is squarely inside the catch-up range -- it reaches the index
+    // through CopyDenseRows with from > 0, the slice arithmetic this test
+    // exists to pin down.
+    std::unique_ptr<GeneratedData> last_batch;
     for (int64_t i = 0; i < n_batch; i++) {
-        InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 42 + i);
+        // DataGen seeds row n of a batch with (batch seed + n), so batches
+        // whose seeds are closer together than per_batch share vectors
+        // verbatim. Spacing them apart keeps every inserted vector unique,
+        // which is what makes the exact-match probe below unambiguous.
+        auto dataset = InsertAsyncBatch(
+            segment.get(), fixture.schema, per_batch, 42 + i * 2 * per_batch);
+        if (i == n_batch - 1) {
+            last_batch = std::make_unique<GeneratedData>(std::move(dataset));
+        }
         // Insert must not wait for the build: the segment stays searchable
         // through the whole build/catch-up window.
         auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
@@ -1168,10 +1228,28 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
 
+    // Content check, not just a count: query with the exact vector of a row
+    // that was copied during catch-up. A misaligned catch-up slice would put
+    // some other row's data at this offset, so the self-match would either
+    // land on a different seg_offset or stop being an exact (distance 0) hit.
+    ASSERT_NE(last_batch, nullptr);
+    constexpr int64_t probe_row = 4237;
+    constexpr int64_t probe_offset = (n_batch - 1) * per_batch + probe_row;
+    auto probe_vectors = last_batch->get_col<float>(fixture.vec);
+    ASSERT_EQ(probe_vectors.size(), per_batch * kAsyncDim);
+    auto probe_ph = MakeSingleDensePlaceholder(
+        plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_EQ(probe_sr->total_nq_, 1);
+    ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], probe_offset);
+    EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
+
     // A post-sync batch takes the kSynced Add branch; try_remove_chunks only
     // runs on the insert path, so this batch is what reclaims the chunks
     // (IVF_FLAT_CC keeps raw data, so the index owns it now).
-    InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 99);
+    InsertAsyncBatch(
+        segment.get(), fixture.schema, per_batch, 42 + 10 * per_batch);
     auto* field_data =
         segment_impl->get_insert_record().get_data<milvus::FloatVector>(
             fixture.vec);
@@ -1260,8 +1338,39 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
 
     constexpr int64_t per_batch = 10000;
     constexpr int64_t n_batch = 4;
+    // Planted in the last batch, i.e. inside the catch-up range (the build
+    // threshold 22698 is crossed by the third batch), so the assertion below
+    // exercises CopySparseRows with from > 0. Values of 100 on three dims make
+    // the row's IP self-similarity (3e4) unreachable for any generated row,
+    // whose values are all in [0, 1) -- the top-1 hit is deterministic.
+    constexpr int64_t probe_row = 4237;
+    constexpr int64_t probe_offset = (n_batch - 1) * per_batch + probe_row;
+    knowhere::sparse::SparseRow<milvus::SparseValueType> probe(3);
+    probe.set_at(0, 3, 100.0f);
+    probe.set_at(1, 17, 100.0f);
+    probe.set_at(2, 42, 100.0f);
+    auto plant_probe = [&](GeneratedData& dataset) {
+        for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+            if (field_data.field_id() != fixture.vec.get()) {
+                continue;
+            }
+            field_data.mutable_vectors()
+                ->mutable_sparse_float_vector()
+                ->set_contents(
+                    probe_row,
+                    std::string(static_cast<const char*>(probe.data()),
+                                probe.data_byte_size()));
+        }
+    };
+
     for (int64_t i = 0; i < n_batch; i++) {
-        InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 11 + i);
+        InsertAsyncBatch(segment.get(),
+                         fixture.schema,
+                         per_batch,
+                         11 + i,
+                         i == n_batch - 1
+                             ? plant_probe
+                             : std::function<void(GeneratedData&)>{});
         auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
         EXPECT_EQ(sr->total_nq_, num_queries);
         EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
@@ -1271,6 +1380,14 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), n_batch * per_batch);
     auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
+
+    // Content check: the planted row must come back as the top-1 hit at its
+    // own offset. A misaligned catch-up slice would move it elsewhere.
+    auto probe_ph = MakeSingleSparsePlaceholder(plan.get(), probe);
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_EQ(probe_sr->total_nq_, 1);
+    ASSERT_GE(probe_sr->seg_offsets_.size(), 1);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], probe_offset);
 
     // Post-sync batch on the kSynced Add path.
     InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 77);
@@ -1379,6 +1496,11 @@ TEST(GrowingIndexAsyncBuildTest, InsertRacingFinalizeIsAbsorbed) {
                               knowhere::metric::L2,
                               /*nullable=*/false);
     auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    // Declared after `segment` so it runs BEFORE the segment destructor on
+    // every exit path: that destructor joins the build task, which parks in
+    // the hook above until release_finalize is set. Without this, any early
+    // return (a failing ASSERT_*) would deadlock the test binary.
+    ScopedFlagOnExit release_on_exit(release_finalize);
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 

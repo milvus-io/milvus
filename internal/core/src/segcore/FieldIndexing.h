@@ -495,6 +495,34 @@ class VectorFieldIndexing : public FieldIndexing {
         enum class Phase : uint8_t { kQueued, kRunning, kAbandoned };
         std::atomic<Phase> phase{Phase::kQueued};
         std::atomic<bool> cancelled{false};
+        // Completion signal owned by the control block, NOT by the future that
+        // Submit returns: ThreadPool::Submit enqueues the task first and only
+        // then does throwable work (mutex lock, std::thread construction, map
+        // insert), so a task can be running while `build_task_` was never
+        // assigned. The destructor therefore joins on `finished`, which exists
+        // and is reachable from the moment the control block is constructed --
+        // before Submit is ever called.
+        std::promise<void> finished_promise;
+        std::shared_future<void> finished;
+
+        BuildTaskCtrl() : finished(finished_promise.get_future()) {
+        }
+
+        // RAII: fulfils `finished` on every exit path of the task lambda --
+        // normal return, the abandoned early return, and exceptions.
+        struct FinishGuard {
+            BuildTaskCtrl* ctrl;
+            ~FinishGuard() {
+                try {
+                    ctrl->finished_promise.set_value();
+                } catch (...) {
+                    // Only reachable if the promise were already satisfied,
+                    // which cannot happen (one guard per task); never let a
+                    // destructor throw.
+                }
+            }
+        };
+
         bool
         TryStart() {
             auto e = Phase::kQueued;
@@ -529,7 +557,11 @@ class VectorFieldIndexing : public FieldIndexing {
     // insert side (spec §4.2).
     std::mutex append_mutex_;
     // Assigned exactly once, under append_mutex_, on kNotBuilt -> kBuilding.
+    // Cleared back to nullptr only when Submit failed *and* we won the abandon
+    // race, i.e. when no task body will ever run and nothing needs joining.
     std::shared_ptr<BuildTaskCtrl> build_ctrl_;
+    // Only holds the pool's future so it is not discarded mid-flight; the
+    // destructor joins on build_ctrl_->finished instead (see BuildTaskCtrl).
     std::future<void> build_task_;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
