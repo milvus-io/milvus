@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"io"
 	"math"
 
 	"github.com/apache/arrow/go/v17/parquet/file"
@@ -26,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	importutilv2common "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -176,20 +176,17 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) (int64, error) {
 	var rows int64
 	for _, path := range paths {
-		// The header itself is read through RetryableReader (which retries Read),
-		// so only classification matters here: a transient object-store fault must
-		// stay a retriable IO error, not a non-retriable ImportFailed input error.
-		cmReader, err := cm.Reader(ctx, path)
+		ra, err := newSizingReaderAt(ctx, cm, path)
 		if err != nil {
-			return 0, storage.ToMilvusIoError(path, err)
+			return 0, err
 		}
-		r, err := npyio.NewReader(importutilv2common.NewRetryableReader(ctx, path, cmReader))
+		r, err := npyio.NewReader(ra)
 		if err != nil {
-			cmReader.Close()
-			return 0, storage.ToMilvusIoError(path, err)
+			// Header parse over already-retried bytes: a file-format problem, not a
+			// transient fault, so it is a non-retryable import error.
+			return 0, merr.WrapErrImportFailedMsg("read numpy header failed, path=%s, err=%v", path, err)
 		}
 		shape := r.Header.Descr.Shape
-		cmReader.Close()
 		if len(shape) == 0 {
 			continue
 		}
@@ -200,31 +197,102 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 	return rows, nil
 }
 
-// parquetNumRows reads only the parquet footer to get the exact row count. The
-// footer is read via Seek/ReadAt, which RetryableReader (Read-only) does not cover,
-// so the whole open-and-read is wrapped in retry to survive a transient object-store
-// fault; a transient failure is classified as a retriable IO error, not a
-// non-retriable ImportFailed input error.
+// parquetNumRows reads only the parquet footer to get the exact row count via a
+// sizingReaderAt, which retries the ranged reads the footer relies on. Any error
+// from NewParquetReader is therefore a genuine file-format problem, not a transient
+// fault, and is returned as a non-retryable import error.
 func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
-	var rows int64
-	err := retry.Handle(ctx, func() (bool, error) {
-		cmReader, err := cm.Reader(ctx, path)
-		if err != nil {
-			ioErr := storage.ToMilvusIoError(path, err)
+	ra, err := newSizingReaderAt(ctx, cm, path)
+	if err != nil {
+		return 0, err
+	}
+	pr, err := file.NewParquetReader(ra)
+	if err != nil {
+		// Footer parse over already-retried bytes: a file-format problem, not a
+		// transient fault, so it is a non-retryable import error (matching
+		// internal/util/importutilv2/parquet/reader.go).
+		return 0, merr.WrapErrImportFailedMsg("read parquet footer failed, path=%s, err=%v", path, err)
+	}
+	defer pr.Close()
+	return pr.NumRows(), nil
+}
+
+// sizingReaderAt is a minimal io.Reader / io.ReaderAt / io.Seeker over a
+// ChunkManager, used only to read the small header/footer a sizing pass needs.
+// Each ReadAt is an independent ranged GET wrapped in retry, so transient
+// object-store faults are retried at the fetch layer and never reach the
+// parquet/numpy decoder — a decoder failure is therefore always a genuine
+// (non-retryable) file-format error. Unlike RetryableReader it retries the
+// ReadAt/Seek path the parquet footer relies on, and it holds no open handle
+// (nothing to close, no reopen-at-offset logic).
+type sizingReaderAt struct {
+	ctx  context.Context
+	cm   storage.ChunkManager
+	path string
+	size int64
+	off  int64
+}
+
+func newSizingReaderAt(ctx context.Context, cm storage.ChunkManager, path string) (*sizingReaderAt, error) {
+	size, err := cm.Size(ctx, path) // Size retries internally.
+	if err != nil {
+		return nil, storage.ToMilvusIoError(path, err)
+	}
+	return &sizingReaderAt{ctx: ctx, cm: cm, path: path, size: size}, nil
+}
+
+func (r *sizingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("negative read offset %d", off)
+	}
+	if len(p) == 0 || off >= r.size {
+		if off >= r.size {
+			return 0, io.EOF
+		}
+		return 0, nil
+	}
+	var data []byte
+	if err := retry.Handle(r.ctx, func() (bool, error) {
+		b, e := r.cm.ReadAt(r.ctx, r.path, off, int64(len(p)))
+		if e != nil {
+			ioErr := storage.ToMilvusIoError(r.path, e)
 			return !merr.IsNonRetryableErr(ioErr), ioErr
 		}
-		retryableReader := importutilv2common.NewRetryableReader(ctx, path, cmReader)
-		defer retryableReader.Close()
-		pr, err := file.NewParquetReader(retryableReader)
-		if err != nil {
-			ioErr := storage.ToMilvusIoError(path, err)
-			return !merr.IsNonRetryableErr(ioErr), ioErr
-		}
-		defer pr.Close()
-		rows = pr.NumRows()
+		data = b
 		return false, nil
-	})
-	return rows, err
+	}); err != nil {
+		return 0, err
+	}
+	n := copy(p, data)
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (r *sizingReaderAt) Read(p []byte) (int, error) {
+	n, err := r.ReadAt(p, r.off)
+	r.off += int64(n)
+	return n, err
+}
+
+func (r *sizingReaderAt) Seek(offset int64, whence int) (int64, error) {
+	var abs int64
+	switch whence {
+	case io.SeekStart:
+		abs = offset
+	case io.SeekCurrent:
+		abs = r.off + offset
+	case io.SeekEnd:
+		abs = r.size + offset
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("invalid seek whence %d", whence)
+	}
+	if abs < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("negative seek position %d", abs)
+	}
+	r.off = abs
+	return abs, nil
 }
 
 // assignPKRangesToFiles computes a per-file row upper bound, allocates one
@@ -344,7 +412,17 @@ func sizeReservations(bounds []int64, exacts []bool) {
 	}
 	for i, b := range bounds {
 		if exacts[i] {
-			b *= factor
+			// Exact counts are authoritative; the factor only adds headroom for a
+			// reader emitting marginally more rows than the footer/header advertised.
+			// Cap that headroom at the allocation-batch ceiling so an ordinary large
+			// file (e.g. a 500M-row column, ~4GB, well under the size limit) is not
+			// rejected merely for crossing rows*factor. reserveRanges still rejects a
+			// file whose row count itself exceeds one batch.
+			if b <= maxIDsPerAllocBatch/factor {
+				b *= factor
+			} else {
+				b = maxIDsPerAllocBatch
+			}
 		}
 		if b < 1 {
 			b = 1
