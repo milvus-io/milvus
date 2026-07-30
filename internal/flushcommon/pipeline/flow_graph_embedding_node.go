@@ -91,6 +91,15 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *
 	if _, ok := meta[outputFieldId]; !ok {
 		meta[outputFieldId] = storage.NewBM25Stats()
 	}
+	// Newer producers may have already materialized the output before WAL append.
+	if output, ok := data.Data[outputFieldId]; ok {
+		sparseData, ok := output.(*storage.SparseFloatVectorFieldData)
+		if !ok {
+			return merr.WrapErrFunctionFailedMsg("BM25 output field %d is not sparse vector data", outputFieldId)
+		}
+		meta[outputFieldId].AppendFieldData(sparseData)
+		return nil
+	}
 
 	datas := []any{}
 

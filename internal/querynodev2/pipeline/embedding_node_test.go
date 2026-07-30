@@ -29,10 +29,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // test of embedding node
@@ -251,6 +253,43 @@ func (suite *EmbeddingNodeSuite) TestAddInsertData() {
 }
 
 func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
+	suite.Run("precomputed output", func() {
+		collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, suite.collectionSchema)
+		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
+		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
+		suite.NoError(err)
+		defer node.Close()
+
+		rows := [][]byte{
+			typeutil.CreateSparseFloatRow([]uint32{7}, []float32{2}),
+			typeutil.CreateSparseFloatRow([]uint32{9}, []float32{3}),
+			typeutil.CreateSparseFloatRow([]uint32{11}, []float32{4}),
+		}
+		msg := &msgstream.InsertMsg{
+			BaseMsg:       msgstream.BaseMsg{},
+			InsertRequest: proto.Clone(suite.msgs[0].InsertRequest).(*msgpb.InsertRequest),
+		}
+		msg.FieldsData = append(msg.FieldsData, &schemapb.FieldData{
+			FieldId: 102,
+			Type:    schemapb.DataType_SparseFloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 12,
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{Contents: rows, Dim: 12},
+				},
+			}},
+		})
+
+		runner := function.NewMockFunctionRunner(suite.T())
+		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[3]})
+		stats := make(map[int64]*storage.BM25Stats)
+		err = node.bm25Embedding(runner, msg, stats)
+		suite.NoError(err)
+		suite.Len(msg.FieldsData, 3)
+		suite.Equal(int64(3), stats[102].NumRow())
+		suite.Equal(int64(9), stats[102].NumToken())
+	})
+
 	suite.Run("function run failed", func() {
 		collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, suite.collectionSchema)
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()

@@ -884,7 +884,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 	handleFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
 		if typeutil.IsBM25FunctionOutputField(field, collSchema) {
-			return nil, nil
+			// Newer producers may materialize BM25 output before appending to WAL.
+			// Keep the column when present, while still accepting legacy messages that omit it.
+			if _, ok := srcFields[field.GetFieldID()]; !ok {
+				return nil, nil
+			}
 		}
 
 		fieldData, err := getFieldData(field)
