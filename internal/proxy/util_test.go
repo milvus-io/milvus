@@ -4701,7 +4701,7 @@ func TestValidateStructArrayField_MaxCapacity(t *testing.T) {
 }
 
 func Test_reconstructStructFieldData(t *testing.T) {
-	t.Run("count(*) query - should return early", func(t *testing.T) {
+	t.Run("non-schema aggregate field should be preserved", func(t *testing.T) {
 		fieldsData := []*schemapb.FieldData{
 			{
 				FieldName: "count(*)",
@@ -4728,16 +4728,13 @@ func Test_reconstructStructFieldData(t *testing.T) {
 			},
 		}
 
-		originalFieldsData := make([]*schemapb.FieldData, len(fieldsData))
-		copy(originalFieldsData, fieldsData)
-		originalOutputFields := make([]string, len(outputFields))
-		copy(originalOutputFields, outputFields)
-
 		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
-		// Should not modify anything for count(*) query
-		assert.Equal(t, originalFieldsData, resultFieldsData)
-		assert.Equal(t, originalOutputFields, resultOutputFields)
+		require.Len(t, resultFieldsData, 1)
+		assert.Same(t, fieldsData[0], resultFieldsData[0])
+		assert.Equal(t, "count(*)", resultFieldsData[0].GetFieldName())
+		assert.Equal(t, int64(0), resultFieldsData[0].GetFieldId())
+		assert.Equal(t, []string{"count(*)"}, resultOutputFields)
 	})
 
 	t.Run("group by with count(*) should preserve aggregate field", func(t *testing.T) {

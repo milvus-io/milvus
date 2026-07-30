@@ -510,10 +510,6 @@ func getPrimaryKeyDataType(schema *schemapb.CollectionSchema) schemapb.DataType 
 	return schemapb.DataType_None
 }
 
-func matchCountRule(outputs []string) bool {
-	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
-}
-
 func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
 	if expr == "" {
 		return &planpb.PlanNode{
@@ -617,15 +613,6 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		mlog.Int64s("OutputFieldsID", t.OutputFieldsId),
 		mlog.String("requestType", t.getQueryLabel()))
 	return nil
-}
-
-func (t *queryTask) hasCountStar() bool {
-	for _, agg := range t.userAggregates {
-		if agg.Name() == "count" && agg.FieldID() == 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func (t *queryTask) CanSkipAllocTimestamp() bool {
@@ -832,11 +819,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
-	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
-	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
-		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
-	}
 	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	t.SerializedExprPlan, err = proto.Marshal(t.plan)

@@ -35,7 +35,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -3819,10 +3818,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
-	if mlog.LevelEnabled(mlog.DebugLevel) && matchCountRule(request.OutputFields) {
-		r, _ := protojson.Marshal(res)
-		mlog.Debug(ctx, "Count result", mlog.String("result", string(r)))
-	}
 	return res, nil
 }
 

@@ -1230,6 +1230,30 @@ func TestSearchTask_initSearchAggregation(t *testing.T) {
 		assert.Contains(t, err.Error(), "group_by_field and search_aggregation cannot be used simultaneously")
 	})
 
+	t.Run("order_by_fields conflict", func(t *testing.T) {
+		task := &searchTask{
+			SearchRequest: &internalpb.SearchRequest{Nq: 1},
+			request: &milvuspb.SearchRequest{
+				SearchParams: []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "price:desc"}},
+				SearchAggregation: &commonpb.SearchAggregationSpec{
+					Fields: []string{"brand"},
+				},
+			},
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+						{FieldID: 102, Name: "price", DataType: schemapb.DataType_Int64},
+					},
+				},
+			},
+		}
+
+		err := task.initSearchAggregation()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "order_by_fields and search_aggregation cannot be used simultaneously")
+	})
+
 	t.Run("highlighter conflict", func(t *testing.T) {
 		task := &searchTask{
 			SearchRequest: &internalpb.SearchRequest{Nq: 1},

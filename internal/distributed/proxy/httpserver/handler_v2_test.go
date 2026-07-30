@@ -3608,16 +3608,11 @@ func TestDML(t *testing.T) {
 		Status:         &StatusSuccess,
 	}, nil).Times(6)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
-	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-		if outputsContainCountStar(req.OutputFields) {
-			for _, pair := range req.QueryParams {
-				if pair.GetKey() == proxy.LimitKey {
-					return nil, errors.New("mock error")
-				}
-			}
-		}
-		return &milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil
-	}).Times(4)
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
+		Status:       commonSuccessStatus,
+		OutputFields: []string{},
+		FieldsData:   []*schemapb.FieldData{},
+	}, nil).Times(4)
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil).Once()
 	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
@@ -3793,20 +3788,19 @@ func TestQueryGroupByFields(t *testing.T) {
 			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count"], "limit": 10, "offset": 2}`),
 		},
 		{
-			// Preserve legacy REST behavior: pagination is omitted for global count(*).
+			// Global count(*) with omitted JSON limit forwards the REST default.
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"]}`),
+		},
+		{
+			// Global count(*) with an explicit limit forwards that limit.
 			path:        QueryAction,
 			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "limit": 10}`),
 		},
 		{
-			// Global mixed aggregate: default limit must still be suppressed, else
-			// Proxy rejects it as "count entities with pagination is not allowed".
+			// Valid global mixed aggregation also forwards the REST default.
 			path:        QueryAction,
-			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "word_count"]}`),
-		},
-		{
-			// Grouped mixed aggregate still paginates groups: limit is forwarded.
-			path:        QueryAction,
-			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "word_count"], "groupByFields": ["word_count"], "limit": 10}`),
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "sum(word_count)"]}`),
 		},
 	}, false)
 	require.Len(t, queryParams, 5)
@@ -3817,13 +3811,11 @@ func TestQueryGroupByFields(t *testing.T) {
 	assert.Equal(t, "10", queryParams[1][proxy.LimitKey])
 	assert.Equal(t, "2", queryParams[1][proxy.OffsetKey])
 	assert.NotContains(t, queryParams[2], proxy.GroupByFieldsKey)
-	assert.NotContains(t, queryParams[2], proxy.LimitKey)
-	// global mixed aggregate containing count(*): no limit forwarded
+	assert.Equal(t, "100", queryParams[2][proxy.LimitKey])
 	assert.NotContains(t, queryParams[3], proxy.GroupByFieldsKey)
-	assert.NotContains(t, queryParams[3], proxy.LimitKey)
-	// grouped mixed aggregate: limit forwarded to paginate groups
-	assert.Equal(t, "word_count", queryParams[4][proxy.GroupByFieldsKey])
-	assert.Equal(t, "10", queryParams[4][proxy.LimitKey])
+	assert.Equal(t, "10", queryParams[3][proxy.LimitKey])
+	assert.NotContains(t, queryParams[4], proxy.GroupByFieldsKey)
+	assert.Equal(t, "100", queryParams[4][proxy.LimitKey])
 }
 
 func TestSearchOrderByFields(t *testing.T) {

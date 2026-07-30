@@ -239,6 +239,58 @@ func TestNewQueryPipeline_EmptyResult(t *testing.T) {
 // GROUP BY pipeline
 // =========================================================================
 
+func TestNewQueryPipeline_GlobalAggregationPagination(t *testing.T) {
+	schema := testSchema()
+
+	countAggs, err := agg.NewAggregate("count", 0, "count(*)", schemapb.DataType_None)
+	require.NoError(t, err)
+	aggsBases := make([]agg.AggregateBase, len(countAggs))
+	copy(aggsBases, countAggs)
+	outputMap, err := agg.NewAggregationFieldMap(
+		[]string{"count(*)"},
+		nil,
+		aggsBases,
+	)
+	require.NoError(t, err)
+
+	results := []*internalpb.RetrieveResults{
+		{FieldsData: []*schemapb.FieldData{makeTestInt64Field(0, "count", []int64{3})}},
+		{FieldsData: []*schemapb.FieldData{makeTestInt64Field(0, "count", []int64{5})}},
+	}
+
+	t.Run("positive limit keeps complete aggregate", func(t *testing.T) {
+		pipeline, err := NewQueryPipeline(
+			schema, 1, 0, reduce.IReduceNoOrder,
+			nil, nil,
+			[]*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 0}},
+			outputMap,
+			nil,
+		)
+		require.NoError(t, err)
+
+		result, err := pipeline.Execute(context.Background(), results)
+		require.NoError(t, err)
+		require.Len(t, result.GetFieldsData(), 1)
+		assert.Equal(t, "count(*)", result.GetFieldsData()[0].GetFieldName())
+		assert.Equal(t, []int64{8}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	})
+
+	t.Run("positive offset skips final aggregate row", func(t *testing.T) {
+		pipeline, err := NewQueryPipeline(
+			schema, 1, 1, reduce.IReduceNoOrder,
+			nil, nil,
+			[]*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 0}},
+			outputMap,
+			nil,
+		)
+		require.NoError(t, err)
+
+		result, err := pipeline.Execute(context.Background(), results)
+		require.NoError(t, err)
+		assert.Empty(t, result.GetFieldsData())
+	})
+}
+
 func TestNewQueryPipeline_GroupBy(t *testing.T) {
 	schema := testSchema()
 

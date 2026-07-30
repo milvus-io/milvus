@@ -364,10 +364,9 @@ func TestQueryTask_all(t *testing.T) {
 		assert.Equal(t, enqueTs, qt.GetMvccTimestamp())
 	})
 
-	t.Run("test count(*) with aggregation validation rules", func(t *testing.T) {
-		// Test cases for the two validation rule fixes:
-		// 1. Aggregation queries exempt from "empty expression needs limit" check (#47326)
-		// 2. count(*) pagination only blocked when no GROUP BY (#47326)
+	t.Run("test aggregation validation rules", func(t *testing.T) {
+		// Aggregation queries are exempt from the "empty expression needs limit"
+		// check, and pagination is accepted uniformly for aggregate output.
 
 		makeTask := func(exprStr string, outputFields []string, limitValue int64, groupByField string) *queryTask {
 			queryParams := []*commonpb.KeyValuePair{
@@ -443,7 +442,7 @@ func TestQueryTask_all(t *testing.T) {
 			assert.NoError(t, err, "count(*) with GROUP BY and no limit should be allowed")
 		}
 
-		// Case 3: count(*) + no GROUP BY + limit → should FAIL
+		// Case 3: count(*) + no GROUP BY + limit → should PASS
 		{
 			task := makeTask(
 				expr,
@@ -452,8 +451,7 @@ func TestQueryTask_all(t *testing.T) {
 				"",
 			)
 			err := task.PreExecute(ctx)
-			assert.Error(t, err, "count(*) without GROUP BY with limit should fail")
-			assert.Contains(t, err.Error(), "count entities with pagination is not allowed")
+			assert.NoError(t, err, "count(*) without GROUP BY should accept a limit")
 		}
 
 		// Case 4: aggregation + empty expr + no limit → should PASS

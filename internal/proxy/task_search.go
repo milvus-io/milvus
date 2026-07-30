@@ -431,6 +431,10 @@ func (t *searchTask) initSearchAggregation() error {
 	if err == nil && strings.TrimSpace(groupByFields) != "" {
 		return merr.WrapErrParameterInvalidMsg("group_by_fields and search_aggregation cannot be used simultaneously")
 	}
+	orderByFields, err := funcutil.GetAttrByKeyFromRepeatedKV(OrderByFieldsKey, t.request.GetSearchParams())
+	if err == nil && strings.TrimSpace(orderByFields) != "" {
+		return merr.WrapErrParameterInvalidMsg("order_by_fields and search_aggregation cannot be used simultaneously")
+	}
 
 	aggCtx, err := search_agg.BuildSearchAggregationContext(spec, t.schema.CollectionSchema, t.GetNq())
 	if err != nil {

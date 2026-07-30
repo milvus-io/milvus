@@ -5622,9 +5622,11 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
         """
         target: test count with pagination params
         method: count with pagination params: offset, limit
-        expected: exception
+        expected: pagination applies to the final aggregate row
         """
         client = self._client()
+        # Offset without limit follows the existing generic parser behavior:
+        # the offset is ignored because no limit was provided.
         res = self.query(
             client,
             QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
@@ -5633,25 +5635,23 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
             offset=10,
         )[0]
         assert res[0]["count(*)"] == default_nb
-        self.query(
+        res = self.query(
             client,
             QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
             filter=default_search_exp,
             output_fields=["count(*)"],
             limit=10,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
-        )
-        self.query(
+        )[0]
+        assert res == [{"count(*)": default_nb}]
+        res = self.query(
             client,
             QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
             filter=default_search_exp,
             output_fields=["count(*)"],
             offset=10,
             limit=10,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
-        )
+        )[0]
+        assert res == []
 
 
 @pytest.mark.xdist_group("TestQueryCountExpressionShared")

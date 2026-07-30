@@ -1377,20 +1377,6 @@ func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Contex
 	return resp, err
 }
 
-// outputsContainCountStar reports whether any output field is the count(*)
-// aggregate, mirroring the Proxy's count(*) detection: a global (no GROUP BY)
-// query carrying count(*) plus a limit is rejected as meaningless pagination,
-// so REST must not attach its synthetic default limit to such a request —
-// including mixed aggregates like ["count(*)", "sum(x)"].
-func outputsContainCountStar(outputs []string) bool {
-	for _, o := range outputs {
-		if strings.EqualFold(strings.TrimSpace(o), "count(*)") {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
@@ -1420,11 +1406,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	}
-	// REST applies a default limit, but Proxy rejects pagination for a global
-	// query containing count(*). A grouped count(*) uses limit/offset to
-	// paginate groups, so its limit must still be forwarded.
-	isGlobalCount := len(httpReq.GroupByFields) == 0 && outputsContainCountStar(httpReq.OutputFields)
-	if httpReq.Limit > 0 && !isGlobalCount {
+	if httpReq.Limit > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
 	if len(httpReq.OrderByFields) > 0 {
