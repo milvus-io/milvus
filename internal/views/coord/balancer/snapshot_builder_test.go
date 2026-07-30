@@ -178,14 +178,14 @@ func TestSnapshotBuilder_NodeInfosCopied(t *testing.T) {
 	require.NotNil(t, n1)
 	assert.True(t, n1.Alive)
 	assert.Equal(t, "default", n1.ResourceGroup)
-	assert.Equal(t, int64(0), n1.UpMemLoad, "no shards → zero aggregate")
+	assert.Equal(t, int64(0), n1.UpRowCount, "no shards → zero aggregate")
 
 	n2 := snap.Nodes[2]
 	require.NotNil(t, n2)
 	assert.True(t, n2.Stopping)
 }
 
-func TestSnapshotBuilder_AggregatePerNodeLoad(t *testing.T) {
+func TestSnapshotBuilder_AggregatePerNodeRowLoad(t *testing.T) {
 	store := emptyLoadConfigStore(t)
 	reg := emptyRegistry(t)
 
@@ -225,13 +225,37 @@ func TestSnapshotBuilder_AggregatePerNodeLoad(t *testing.T) {
 
 	n1 := snap.Nodes[1]
 	// Both placements on node 1 are Preparing (no Up view).
-	assert.Equal(t, int64(0), n1.UpMemLoad)
-	assert.Equal(t, int64(100+50), n1.PendingMemLoad)
-	assert.Equal(t, 0, n1.SegmentCount, "no Up segments → count stays 0")
+	assert.Equal(t, int64(0), n1.UpRowCount)
+	assert.Equal(t, int64(10+5), n1.PendingRowCount)
 
 	n2 := snap.Nodes[2]
-	assert.Equal(t, int64(0), n2.UpMemLoad)
-	assert.Equal(t, int64(200), n2.PendingMemLoad)
+	assert.Equal(t, int64(0), n2.UpRowCount)
+	assert.Equal(t, int64(20), n2.PendingRowCount)
+}
+
+func TestSnapshotBuilder_AggregatePerNodeRowCount(t *testing.T) {
+	store := emptyLoadConfigStore(t)
+	reg := emptyRegistry(t)
+
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "v0"}
+	addShardWithPreparingView(t, reg, shardID, map[int64]map[int64][]int64{
+		1: {10: {101}},
+	})
+
+	builder := NewSnapshotBuilder(
+		store,
+		reg,
+		&fakeNodeProvider{infos: map[int64]*NodeInfo{
+			1: {NodeID: 1, Alive: true},
+		}},
+		&fakeDataViewProvider{segments: map[int64]*SegmentInfo{
+			101: {SegmentID: 101, MemSize: 1_000_000, RowNum: 10},
+		}},
+		&BalanceConfig{},
+	)
+
+	snap := builder.Build(context.Background())
+	assert.Equal(t, int64(10), snap.Nodes[1].PendingRowCount)
 }
 
 func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T) {
@@ -260,9 +284,9 @@ func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T
 	}
 
 	segInfos := map[int64]*SegmentInfo{
-		101: {SegmentID: 101, MemSize: 100},
-		102: {SegmentID: 102, MemSize: 200},
-		103: {SegmentID: 103, MemSize: 300},
+		101: {SegmentID: 101, MemSize: 100, RowNum: 10},
+		102: {SegmentID: 102, MemSize: 200, RowNum: 20},
+		103: {SegmentID: 103, MemSize: 300, RowNum: 30},
 	}
 
 	builder := NewSnapshotBuilder(
@@ -279,6 +303,7 @@ func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T
 	info, ok := snap.SegmentInfo(103)
 	require.True(t, ok)
 	assert.Equal(t, int64(300), info.MemSize)
+	assert.Equal(t, int64(30), info.RowNum)
 
 	// DataView stays owned by DataViewSnapshot and is exposed through lookup.
 	assert.Same(t, shardDV, snap.DataViewForShard(shardA))
@@ -304,7 +329,7 @@ func TestSnapshotBuilder_UnknownNodeInPlacementIsSkipped(t *testing.T) {
 	builder := NewSnapshotBuilder(
 		store, reg,
 		&fakeNodeProvider{infos: map[int64]*NodeInfo{}}, // no node 99
-		&fakeDataViewProvider{segments: map[int64]*SegmentInfo{101: {SegmentID: 101, MemSize: 100}}},
+		&fakeDataViewProvider{segments: map[int64]*SegmentInfo{101: {SegmentID: 101, RowNum: 10}}},
 		&BalanceConfig{},
 	)
 
@@ -328,14 +353,14 @@ func TestSnapshotBuilder_MissingSegmentInfoContributesZero(t *testing.T) {
 		store, reg,
 		&fakeNodeProvider{infos: map[int64]*NodeInfo{1: {NodeID: 1, Alive: true}}},
 		// Segment 102's info is missing.
-		&fakeDataViewProvider{segments: map[int64]*SegmentInfo{101: {SegmentID: 101, MemSize: 100}}},
+		&fakeDataViewProvider{segments: map[int64]*SegmentInfo{101: {SegmentID: 101, RowNum: 10}}},
 		&BalanceConfig{},
 	)
 
 	snap := builder.Build(context.Background())
 	n1 := snap.Nodes[1]
-	// Only segment 101 contributes its MemSize; segment 102 contributes 0.
-	assert.Equal(t, int64(100), n1.PendingMemLoad)
+	// Only segment 101 contributes its RowNum; segment 102 contributes 0.
+	assert.Equal(t, int64(10), n1.PendingRowCount)
 }
 
 func TestAggregateNodeLoad_SkipsUnrecoverableLoad(t *testing.T) {
@@ -345,8 +370,8 @@ func TestAggregateNodeLoad_SkipsUnrecoverableLoad(t *testing.T) {
 	}
 	snap := &BalancerSnapshot{
 		DataViewSnapshot: NewDataViewSnapshot(1, nil, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-			101: {SegmentID: 101, MemSize: 100},
-			102: {SegmentID: 102, MemSize: 200},
+			101: {SegmentID: 101, RowNum: 100},
+			102: {SegmentID: 102, RowNum: 200},
 		})),
 	}
 	stats := map[qviews.ShardID]*coordview.ShardStats{
@@ -368,6 +393,6 @@ func TestAggregateNodeLoad_SkipsUnrecoverableLoad(t *testing.T) {
 
 	aggregateNodeLoad(nodes, stats, snap)
 
-	assert.Zero(t, nodes[1].PendingMemLoad)
-	assert.Equal(t, int64(200), nodes[2].PendingMemLoad)
+	assert.Zero(t, nodes[1].PendingRowCount)
+	assert.Equal(t, int64(200), nodes[2].PendingRowCount)
 }

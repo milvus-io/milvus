@@ -3,6 +3,7 @@ package balancer
 import (
 	"sort"
 
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -23,8 +24,8 @@ type balanceCandidate struct {
 }
 
 // Plan classifies dirty shards, orders mandatory work before optional
-// optimization, and allocates each accepted shard against a shared predicted
-// load tracker.
+// optimization, and allocates each accepted shard against a shared
+// steady-state row tracker.
 func (p *DefaultBalancePolicy) Plan(snap *BalancerSnapshot, dirty []qviews.ShardID) *BalancePlan {
 	plan := &BalancePlan{
 		Prepares: make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder),
@@ -34,7 +35,7 @@ func (p *DefaultBalancePolicy) Plan(snap *BalancerSnapshot, dirty []qviews.Shard
 	}
 	if snap.Config == nil {
 		snapCopy := *snap
-		snapCopy.Config = &BalanceConfig{}
+		snapCopy.Config = DefaultBalanceConfig()
 		snap = &snapCopy
 	}
 
@@ -66,35 +67,113 @@ func (p *DefaultBalancePolicy) Plan(snap *BalancerSnapshot, dirty []qviews.Shard
 	sortCandidates(mandatory)
 	sortCandidates(optional)
 
-	predicted := clonePredictedLoad(snap.Nodes)
+	projectedRows := initialProjectedRows(snap.Nodes)
+	for _, shardID := range plan.Releases {
+		projectedRows = withoutRows(projectedRows, currentShardRows(snap, shardID))
+	}
+
 	for _, candidate := range mandatory {
-		nextPredicted := clonePredictedLoad(predicted)
-		builder := allocate(snap, candidate.shardID, nextPredicted)
-		if builder == nil {
+		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
+		result := allocate(snap, candidate.shardID, baseRows)
+		if result == nil {
 			continue
 		}
-		plan.Prepares[candidate.shardID] = builder
-		predicted = nextPredicted
+		plan.Prepares[candidate.shardID] = result.builder
+		projectedRows = withRows(baseRows, result.rowsByNode)
 	}
 
 	for _, candidate := range optional {
-		nextPredicted := clonePredictedLoad(predicted)
-		builder := allocate(snap, candidate.shardID, nextPredicted)
-		if builder == nil {
+		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
+		result := allocate(snap, candidate.shardID, baseRows)
+		if result == nil {
 			continue
 		}
-		gain, migrationCost := placementImprovement(snap, candidate.shardID, predicted, nextPredicted, builder)
-		if !worthOptionalMigration(gain, migrationCost, snap.Config) {
+		if assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
 			continue
 		}
-		plan.Prepares[candidate.shardID] = builder
-		predicted = nextPredicted
+		plan.Prepares[candidate.shardID] = result.builder
+		projectedRows = withRows(baseRows, result.rowsByNode)
 	}
 
 	sort.Slice(plan.Releases, func(i, j int) bool {
 		return shardLess(plan.Releases[i], plan.Releases[j])
 	})
 	return plan
+}
+
+func initialProjectedRows(nodes map[int64]*BalanceNode) map[int64]int64 {
+	projected := make(map[int64]int64, len(nodes))
+	for nodeID, node := range nodes {
+		if node == nil {
+			continue
+		}
+		rows := node.UpRowCount + node.PendingRowCount
+		if rows < 0 {
+			rows = 0
+		}
+		projected[nodeID] = rows
+	}
+	return projected
+}
+
+func currentShardRows(snap *BalancerSnapshot, shardID qviews.ShardID) map[int64]int64 {
+	rowsByNode := make(map[int64]int64)
+	stats := snap.ShardStatsMap()[shardID]
+	if stats == nil {
+		return rowsByNode
+	}
+	for segmentID, segment := range stats.Segments {
+		rows := segmentRows(segmentInfoFor(snap, segmentID, segment.PartitionID))
+		for nodeID, state := range segment.Nodes {
+			switch state {
+			case coordview.SegmentStateUp, coordview.SegmentStateReady, coordview.SegmentStatePreparing:
+				rowsByNode[nodeID] += rows
+			}
+		}
+	}
+	return rowsByNode
+}
+
+func withoutRows(projected, remove map[int64]int64) map[int64]int64 {
+	result := cloneRows(projected)
+	for nodeID, rows := range remove {
+		if _, ok := result[nodeID]; !ok {
+			continue
+		}
+		result[nodeID] -= rows
+		if result[nodeID] < 0 {
+			result[nodeID] = 0
+		}
+	}
+	return result
+}
+
+func withRows(base, add map[int64]int64) map[int64]int64 {
+	result := cloneRows(base)
+	for nodeID, rows := range add {
+		result[nodeID] += rows
+	}
+	return result
+}
+
+func cloneRows(rows map[int64]int64) map[int64]int64 {
+	result := make(map[int64]int64, len(rows))
+	for nodeID, rowCount := range rows {
+		result[nodeID] = rowCount
+	}
+	return result
+}
+
+func assignmentsEqual(current, candidate map[int64]int64) bool {
+	if len(current) != len(candidate) {
+		return false
+	}
+	for segmentID, nodeID := range current {
+		if candidate[segmentID] != nodeID {
+			return false
+		}
+	}
+	return true
 }
 
 func sortCandidates(candidates []balanceCandidate) {
@@ -121,76 +200,10 @@ func shardTotalLoad(snap *BalancerSnapshot, shardID qviews.ShardID) int64 {
 	var total int64
 	for _, p := range shard.GetPartitions() {
 		for _, segmentID := range p.GetSegmentIds() {
-			total += segmentLoad(segmentInfoFor(snap, segmentID, p.GetPartitionId()))
+			total += segmentRows(segmentInfoFor(snap, segmentID, p.GetPartitionId()))
 		}
 	}
 	return total
-}
-
-func placementImprovement(
-	snap *BalancerSnapshot,
-	shardID qviews.ShardID,
-	currentNodes map[int64]*BalanceNode,
-	candidateNodes map[int64]*BalanceNode,
-	builder *qviews.QueryViewAtCoordBuilder,
-) (float64, int64) {
-	currentAssignments := currentSegmentNodes(snap, shardID)
-	nextAssignments := flattenAssignments(builder.Build())
-
-	currentScore := placementScore(snap, shardID, currentNodes, currentAssignments)
-	nextScore := placementScore(snap, shardID, candidateNodes, nextAssignments)
-	migrationCost := movedSegmentLoad(snap, currentAssignments, nextAssignments)
-	return nextScore - currentScore, migrationCost
-}
-
-func placementScore(
-	snap *BalancerSnapshot,
-	shardID qviews.ShardID,
-	nodes map[int64]*BalanceNode,
-	assignments map[int64]int64,
-) float64 {
-	stickyStates := currentSegmentStates(snap, shardID)
-	shard := snap.DataViewForShard(shardID)
-	if shard == nil {
-		return 0
-	}
-
-	var total float64
-	for _, p := range shard.GetPartitions() {
-		for _, segmentID := range p.GetSegmentIds() {
-			nodeID, ok := assignments[segmentID]
-			if !ok {
-				continue
-			}
-			node := nodes[nodeID]
-			if node == nil {
-				continue
-			}
-			total += score(node, segmentInfoFor(snap, segmentID, p.GetPartitionId()), stickyStates[segmentID], snap.Config)
-		}
-	}
-	return total
-}
-
-func movedSegmentLoad(snap *BalancerSnapshot, current, next map[int64]int64) int64 {
-	var total int64
-	for segmentID, nextNode := range next {
-		if current[segmentID] == nextNode {
-			continue
-		}
-		total += segmentLoad(segmentInfoFor(snap, segmentID, 0))
-	}
-	return total
-}
-
-func worthOptionalMigration(gain float64, migrationCost int64, cfg *BalanceConfig) bool {
-	if migrationCost <= 0 {
-		return false
-	}
-	if gain <= cfg.BalanceThreshold {
-		return false
-	}
-	return gain/float64(migrationCost) > cfg.CostEfficiencyThreshold
 }
 
 func flattenAssignments(view *viewpb.QueryViewOfShard) map[int64]int64 {

@@ -75,7 +75,7 @@ func (b *SnapshotBuilder) Build(ctx context.Context) *BalancerSnapshot {
 }
 
 // buildBalanceNodes converts NodeInfos into BalanceNodes with zero aggregate
-// load; callers fill in UpMemLoad / PendingMemLoad / SegmentCount afterwards.
+// load; callers fill in UpRowCount / PendingRowCount afterwards.
 func buildBalanceNodes(snapshot *NodeSnapshot) map[int64]*BalanceNode {
 	out := make(map[int64]*BalanceNode)
 	snapshot.Range(func(id int64, info *NodeInfo) bool {
@@ -84,21 +84,16 @@ func buildBalanceNodes(snapshot *NodeSnapshot) map[int64]*BalanceNode {
 			Alive:         info.Alive,
 			Stopping:      info.Stopping,
 			ResourceGroup: info.ResourceGroup,
-			// TODO: populate MemoryCapacity / MemoryUsage from node view once
-			// QueryNode reports the capacity signal into the coordinator path.
 		}
 		return true
 	})
 	return out
 }
 
-// aggregateNodeLoad walks shard segment stats and accumulates UpMemLoad,
-// PendingMemLoad, and SegmentCount onto each BalanceNode.
-//
-// Segments missing from the Segments map contribute zero MemSize; this
-// matches DataCoord's "not yet estimated" semantics. SegmentCount is still
-// incremented so a node with many tiny unestimated segments still appears
-// more loaded than an empty node.
+// aggregateNodeLoad walks shard segment stats and accumulates UpRowCount and
+// PendingRowCount onto each BalanceNode. Segments missing from the metadata
+// snapshot contribute zero rows, matching DataCoord's "not yet estimated"
+// semantics.
 func aggregateNodeLoad(
 	nodes map[int64]*BalanceNode,
 	shardStats map[qviews.ShardID]*coordview.ShardStats,
@@ -109,9 +104,9 @@ func aggregateNodeLoad(
 			continue
 		}
 		for segmentID, segment := range stats.Segments {
-			memSize := int64(0)
+			rowCount := int64(0)
 			if info, ok := snap.SegmentInfo(segmentID); ok {
-				memSize = segmentLoad(info)
+				rowCount = segmentRows(info)
 			}
 			for nodeID, state := range segment.Nodes {
 				node, ok := nodes[nodeID]
@@ -123,10 +118,9 @@ func aggregateNodeLoad(
 				}
 				switch state {
 				case coordview.SegmentStateUp:
-					node.UpMemLoad += memSize
-					node.SegmentCount++
+					node.UpRowCount += rowCount
 				case coordview.SegmentStateReady, coordview.SegmentStatePreparing:
-					node.PendingMemLoad += memSize
+					node.PendingRowCount += rowCount
 				}
 			}
 		}
