@@ -57,13 +57,6 @@ func (impl *shardInterceptor) materializeFunctionFields(
 	collectionID int64,
 	schemaVersion int32,
 ) error {
-	body := insertMsg.MustBody()
-	changed, err := function.GetManager().Materialize(ctx, collectionID, walFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, body)
-	if err != nil {
-		return err
-	}
-	if changed {
-		insertMsg.OverwriteBody(body)
-	}
-	return nil
+	_, err := function.GetManager().Materialize(ctx, collectionID, walFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, insertMsg)
+	return err
 }
