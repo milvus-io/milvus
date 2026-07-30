@@ -655,10 +655,14 @@ func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
 //
 // The group size is the measured truth for the group as a whole, so it is used
 // as the budget: fields whose schema gives an exact size take exactly that, and
-// the remaining bytes are shared between the variable length fields
-// proportionally to their schema estimate. That keeps a 128 dim vector at its
-// real size while a large json column still gets the bytes it actually
-// occupies, instead of the configured per row guess.
+// whatever remains is charged to the variable length fields. That keeps a 128
+// dim vector at its real size, while a json column is charged what the data
+// really contains instead of the configured per row guess
+// (common.dynamicFieldLengthAvg), which can be an order of magnitude off. The
+// residual is not split proportionally between several variable length fields:
+// the schema weights are guesses, and splitting by them could understate a fat
+// column, i.e. over-admit tasks. Charging it once keeps the result an upper
+// bound, which is what a slot must be.
 func estimateFieldsReadSize(schema *schemapb.CollectionSchema, segment *SegmentInfo, fieldIDs []int64) (int64, error) {
 	if len(fieldIDs) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("no field to estimate size for")
@@ -703,28 +707,41 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 		return group.size, nil
 	}
 
+	requestedFields := make(map[int64]struct{}, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		requestedFields[fieldID] = struct{}{}
+	}
+
 	type fieldEstimate struct {
 		sizePerRecord int64
 		exact         bool
 	}
 	estimates := make(map[int64]fieldEstimate, len(group.fields))
-	var fixedPerRecord, variableWeight int64
+	var fixedPerRecord int64
+	var hasVariableField bool
 	for _, fieldID := range group.fields {
 		size, exact, err := fieldSizePerRecord(schema, fieldID)
 		if err != nil {
-			return 0, err
+			if _, requested := requestedFields[fieldID]; requested {
+				return 0, err
+			}
+			// A group member the schema cannot resolve, e.g. a field dropped
+			// after this segment was flushed and before compaction rewrote it.
+			// Skipping it leaves its bytes in the residual instead of giving up
+			// on the whole group.
+			continue
 		}
 		estimates[fieldID] = fieldEstimate{sizePerRecord: size, exact: exact}
 		if exact {
 			fixedPerRecord += size
 			continue
 		}
-		variableWeight += size
+		hasVariableField = true
 	}
 
 	// bytes the variable length fields of this group take per row, measured
 	residualPerRecord := group.size/numRows - fixedPerRecord
-	if residualPerRecord < 0 || variableWeight == 0 {
+	if residualPerRecord < 0 || !hasVariableField {
 		// the schema does not add up to the measured data, e.g. because some
 		// field of the group is not materialized in it. Fall back to the schema
 		// estimation alone, still bounded by the group size.
@@ -732,18 +749,62 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 	}
 
 	var total int64
+	var residualCharged bool
 	for _, fieldID := range fieldIDs {
 		estimate := estimates[fieldID]
-		sizePerRecord := estimate.sizePerRecord
 		if !estimate.exact && residualPerRecord > 0 {
-			sizePerRecord = residualPerRecord * sizePerRecord / variableWeight
+			// every variable length field of the group shares the same residual,
+			// so it is charged once no matter how many of them are requested
+			if !residualCharged {
+				total += residualPerRecord * numRows
+				residualCharged = true
+			}
+			continue
 		}
-		total += sizePerRecord * numRows
+		total += estimate.sizePerRecord * numRows
 	}
 	if total > group.size {
 		return group.size, nil
 	}
 	return total, nil
+}
+
+// collectionCache memoizes collection lookups over a loop that resolves the
+// same collections repeatedly. It goes through the handler, which loads from
+// rootcoord on a cache miss: the datacoord collection cache is filled by an
+// async goroutine (see Server.initMeta), so it is usually still empty while the
+// inspectors recover their tasks at startup. That load costs up to 5 retries
+// with a 10s timeout, hence the memoization - including of misses.
+type collectionCache struct {
+	handler Handler
+	cached  map[int64]*collectionInfo
+}
+
+func newCollectionCache(handler Handler) *collectionCache {
+	return &collectionCache{handler: handler, cached: make(map[int64]*collectionInfo)}
+}
+
+func (c *collectionCache) get(ctx context.Context, collectionID int64) *collectionInfo {
+	if coll, ok := c.cached[collectionID]; ok {
+		return coll
+	}
+	coll := resolveCollection(ctx, c.handler, collectionID)
+	c.cached[collectionID] = coll
+	return coll
+}
+
+// resolveCollection returns the collection info, loading it from rootcoord when
+// the datacoord cache does not hold it yet.
+func resolveCollection(ctx context.Context, handler Handler, collectionID int64) *collectionInfo {
+	if handler == nil {
+		return nil
+	}
+	coll, err := handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "failed to resolve collection", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		return nil
+	}
+	return coll
 }
 
 func calculateStatsTaskSlot(segmentSize int64) int64 {

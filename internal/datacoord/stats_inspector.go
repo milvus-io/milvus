@@ -101,6 +101,9 @@ func (si *statsInspector) Stop() {
 
 func (si *statsInspector) reloadFromMeta() {
 	tasks := si.mt.statsTaskMeta.GetAllTasks()
+	// the collection cache is usually not filled yet at startup, and resolving
+	// it hits rootcoord, so memoize it across all recovered tasks
+	collections := newCollectionCache(si.handler)
 	for _, st := range tasks {
 		if st.GetState() != indexpb.JobState_JobStateInit &&
 			st.GetState() != indexpb.JobState_JobStateRetry &&
@@ -110,7 +113,8 @@ func (si *statsInspector) reloadFromMeta() {
 		taskSlot := int64(0)
 		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
 		if segment != nil {
-			taskSlot = calculateStatsTaskSlot(segment.getSegmentSize())
+			coll := collections.get(si.ctx, segment.GetCollectionID())
+			taskSlot = calculateStatsTaskSlot(si.estimateStatsTaskSize(coll, segment, st.GetSubJobType()))
 		}
 		si.scheduler.Enqueue(newStatsTask(
 			proto.Clone(st).(*indexpb.StatsTask),
@@ -366,7 +370,8 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if err != nil {
 		return err
 	}
-	originSegmentSize := si.estimateStatsTaskSize(originSegment, subJobType)
+	coll := resolveCollection(si.ctx, si.handler, originSegment.GetCollectionID())
+	originSegmentSize := si.estimateStatsTaskSize(coll, originSegment, subJobType)
 
 	taskSlot := calculateStatsTaskSlot(originSegmentSize)
 	t := &indexpb.StatsTask{
@@ -461,11 +466,11 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 // other stats task reads the whole segment. The segment size is kept whenever
 // the estimation is not possible, which is the previous (over-estimating but
 // safe) behavior.
-func (si *statsInspector) estimateStatsTaskSize(segment *SegmentInfo, subJobType indexpb.StatsSubJob) int64 {
+func (si *statsInspector) estimateStatsTaskSize(coll *collectionInfo, segment *SegmentInfo, subJobType indexpb.StatsSubJob) int64 {
 	segmentSize := segment.getSegmentSize()
 
 	readSize := segmentSize
-	if coll := si.getCollection(segment.GetCollectionID()); coll != nil {
+	if coll != nil {
 		if fieldIDs := statsTaskFieldIDs(coll.Schema, subJobType); len(fieldIDs) > 0 {
 			fieldsSize, err := estimateFieldsReadSize(coll.Schema, segment, fieldIDs)
 			if err != nil {
