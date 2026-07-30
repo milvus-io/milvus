@@ -8,9 +8,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
+
+type testSnapshotSource struct {
+	snapshot     *BalancerSnapshot
+	afterCapture func()
+}
+
+func (s *testSnapshotSource) Build(context.Context) *BalancerSnapshot {
+	snapshot := s.snapshot
+	if s.afterCapture != nil {
+		s.afterCapture()
+	}
+	return snapshot
+}
 
 func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 	const collID, replicaID int64 = 1, 10
@@ -85,6 +99,52 @@ func TestBalancer_ReconcileDirtyCollectionExpandsTrackedShards(t *testing.T) {
 
 	stats := reg.Get(shardID).Stats()
 	assert.NotNil(t, stats.PreparingVersion)
+}
+
+func TestBalancer_ReconcilePreservesTriggerArrivingDuringSnapshotBuild(t *testing.T) {
+	const collID, replicaID int64 = 1, 10
+	shardID := qviews.ShardID{
+		ReplicaID: replicaID,
+		VChannel:  "by-dev-rootcoord-dml_0_1v0",
+	}
+
+	reg := emptyRegistry(t)
+	addShardWithPreparingView(t, reg, shardID, map[int64]map[int64][]int64{
+		1: {100: {101}},
+	})
+
+	viewSnapshot := reg.Snapshot()
+	source := &testSnapshotSource{
+		snapshot: &BalancerSnapshot{
+			LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(1, map[int64]*loadmgr.LoadConfig{
+				collID: cfgFor(collID, replicaID, nil, nil),
+			}),
+			ShardViewSnapshot: viewSnapshot,
+		},
+	}
+	b := &DefaultBalancer{
+		snapshotBuilder: source,
+		viewRegistry:    reg,
+		policy:          NewDefaultBalancePolicy(),
+		queue:           newTriggerQueue(),
+	}
+	source.afterCapture = func() {
+		source.afterCapture = nil
+		source.snapshot = &BalancerSnapshot{
+			LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(2, map[int64]*loadmgr.LoadConfig{}),
+			ShardViewSnapshot:  viewSnapshot,
+		}
+		b.Trigger(TriggerScope{DirtyCollections: []int64{collID}})
+	}
+
+	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
+	require.NoError(t, b.Reconcile(context.Background()))
+	require.NotNil(t, reg.Get(shardID).Stats().PreparingVersion)
+
+	require.NoError(t, b.Reconcile(context.Background()))
+	stats := reg.Get(shardID).Stats()
+	assert.Nil(t, stats.PreparingVersion)
+	assert.Empty(t, stats.Segments)
 }
 
 func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {

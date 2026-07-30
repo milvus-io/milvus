@@ -138,8 +138,14 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	if b.snapshotBuilder == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
 	}
+	// Take this cycle's work before building the snapshot so triggers arriving
+	// during snapshot construction remain queued for the next cycle.
+	pending := b.queue.takePending()
+	if pending.empty() {
+		return nil
+	}
 	snap := b.snapshotBuilder.Build(ctx)
-	dirty := b.queue.drain(snap)
+	dirty := pending.expand(snap)
 	if len(dirty) == 0 {
 		return nil
 	}
