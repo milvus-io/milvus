@@ -28,8 +28,8 @@ func TestTriggerQueueDirtyNodeExpandsOnlyAffectedShards(t *testing.T) {
 	queue := newTriggerQueue()
 	queue.add(TriggerScope{DirtyNodes: []int64{10, 10}})
 
-	assert.Equal(t, []qviews.ShardID{shardA}, queue.drain(snap))
-	assert.Empty(t, queue.drain(snap), "drain must clear the pending node set")
+	assert.Equal(t, []qviews.ShardID{shardA}, queue.takePending().expand(snap))
+	assert.Empty(t, queue.takePending().expand(snap), "takePending must clear the pending node set")
 }
 
 func TestTriggerQueueNilSnapshotDropsPendingWork(t *testing.T) {
@@ -40,6 +40,22 @@ func TestTriggerQueueNilSnapshotDropsPendingWork(t *testing.T) {
 		DirtyCollections: []int64{10},
 	})
 
-	assert.Nil(t, queue.drain(nil))
-	assert.Empty(t, queue.drain(&BalancerSnapshot{}))
+	assert.Nil(t, queue.takePending().expand(nil))
+	assert.Empty(t, queue.takePending().expand(&BalancerSnapshot{}))
+}
+
+func TestTriggerBatchExpandReleasedCollectionIncludesResidualShards(t *testing.T) {
+	const collectionID int64 = 1
+	residualShard := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	unrelatedShard := qviews.ShardID{ReplicaID: 20, VChannel: "by-dev-rootcoord-dml_0_2v0"}
+	snap := &BalancerSnapshot{
+		ShardViewSnapshot: coordview.NewShardViewSnapshot(1, map[qviews.ShardID]*coordview.ShardStats{
+			residualShard:  testShardStats(nil, 0),
+			unrelatedShard: testShardStats(nil, 0),
+		}),
+	}
+
+	pending := triggerBatch{dirtyColls: map[int64]struct{}{collectionID: {}}}
+
+	assert.Equal(t, []qviews.ShardID{residualShard}, pending.expand(snap))
 }

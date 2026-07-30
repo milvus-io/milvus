@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // TriggerScope describes the external event scope that dirtied the Balancer.
@@ -28,6 +29,17 @@ type triggerQueue struct {
 	dirtyColls  map[int64]struct{}
 
 	signal chan struct{}
+}
+
+type triggerBatch struct {
+	full        bool
+	dirtyNodes  map[int64]struct{}
+	dirtyShards map[qviews.ShardID]struct{}
+	dirtyColls  map[int64]struct{}
+}
+
+func (b triggerBatch) empty() bool {
+	return !b.full && len(b.dirtyNodes) == 0 && len(b.dirtyShards) == 0 && len(b.dirtyColls) == 0
 }
 
 func newTriggerQueue() *triggerQueue {
@@ -77,27 +89,26 @@ func (q *triggerQueue) signalCh() <-chan struct{} {
 	return q.signal
 }
 
-func (q *triggerQueue) drain(snap *BalancerSnapshot) []qviews.ShardID {
-	full, dirtyNodes, dirtyShards, dirtyColls := q.takePending()
+func (b triggerBatch) expand(snap *BalancerSnapshot) []qviews.ShardID {
 	if snap == nil {
 		return nil
 	}
 
 	out := make(map[qviews.ShardID]struct{})
-	if full {
+	if b.full {
 		for _, shardID := range allSnapshotShards(snap) {
 			out[shardID] = struct{}{}
 		}
 	}
-	for shardID := range dirtyShards {
+	for shardID := range b.dirtyShards {
 		out[shardID] = struct{}{}
 	}
-	for nodeID := range dirtyNodes {
+	for nodeID := range b.dirtyNodes {
 		for _, shardID := range snapshotShardsByNode(snap, nodeID) {
 			out[shardID] = struct{}{}
 		}
 	}
-	for collectionID := range dirtyColls {
+	for collectionID := range b.dirtyColls {
 		for _, shardID := range snapshotShardsByCollection(snap, collectionID) {
 			out[shardID] = struct{}{}
 		}
@@ -113,25 +124,22 @@ func (q *triggerQueue) drain(snap *BalancerSnapshot) []qviews.ShardID {
 	return shards
 }
 
-func (q *triggerQueue) takePending() (
-	bool,
-	map[int64]struct{},
-	map[qviews.ShardID]struct{},
-	map[int64]struct{},
-) {
+func (q *triggerQueue) takePending() triggerBatch {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	full := q.full
-	dirtyNodes := q.dirtyNodes
-	dirtyShards := q.dirtyShards
-	dirtyColls := q.dirtyColls
+	pending := triggerBatch{
+		full:        q.full,
+		dirtyNodes:  q.dirtyNodes,
+		dirtyShards: q.dirtyShards,
+		dirtyColls:  q.dirtyColls,
+	}
 
 	q.full = false
 	q.dirtyNodes = make(map[int64]struct{})
 	q.dirtyShards = make(map[qviews.ShardID]struct{})
 	q.dirtyColls = make(map[int64]struct{})
-	return full, dirtyNodes, dirtyShards, dirtyColls
+	return pending
 }
 
 func allSnapshotShards(snap *BalancerSnapshot) []qviews.ShardID {
@@ -175,7 +183,15 @@ func snapshotShardsByNode(snap *BalancerSnapshot, nodeID int64) []qviews.ShardID
 func snapshotShardsByCollection(snap *BalancerSnapshot, collectionID int64) []qviews.ShardID {
 	seen := make(map[qviews.ShardID]struct{})
 	for shardID := range snap.ShardStatsMap() {
-		if cfg := snap.ConfigForShard(shardID); cfg != nil && cfg.CollectionID == collectionID {
+		cfg := snap.ConfigForShard(shardID)
+		if cfg != nil && cfg.CollectionID == collectionID {
+			seen[shardID] = struct{}{}
+			continue
+		}
+		// ReleaseCollection removes the load config before triggering the
+		// collection reconcile. Recover the collection from the vchannel so
+		// residual shard views are released without waiting for a full scan.
+		if cfg == nil && funcutil.GetCollectionIDFromVChannel(shardID.VChannel) == collectionID {
 			seen[shardID] = struct{}{}
 		}
 	}
