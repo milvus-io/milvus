@@ -58,9 +58,6 @@ struct AsyncLoadPipelineOptions {
 using AsyncCellResult =
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>;
 
-folly::Executor*
-GetAsyncLoadExecutor();
-
 // Lazy coroutine: admission, storage read, and finalization start when the task
 // is awaited. The executor keep-alive and ctx cancellation token are captured
 // when this function is called.
