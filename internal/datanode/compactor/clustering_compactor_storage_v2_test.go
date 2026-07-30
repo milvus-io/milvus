@@ -60,6 +60,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
+	s.ClusteringCompactionTaskSuite.TearDownTest()
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -65,6 +66,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 func (s *ClusteringCompactionTaskSuite) setupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
@@ -119,6 +122,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
 func (s *ClusteringCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *ClusteringCompactionTaskSuite) TestWrongCompactionType() {
