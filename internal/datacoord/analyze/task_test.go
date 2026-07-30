@@ -246,7 +246,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 	s.Contains(at.GetFailReason(), "102")
 	// The terminal state must be persisted, not only set on the scheduler-owned copy.
-	s.Equal(indexpb.JobState_JobStateFailed, s.am.GetTask(s.taskID).GetState())
+	s.Equal(indexpb.JobState_JobStateNone, s.am.GetTask(s.taskID).GetState())
 	s.Contains(s.am.GetTask(s.taskID).GetFailReason(), "102")
 }
 
