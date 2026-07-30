@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -347,16 +349,59 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 
 	futures := make([]*conc.Future[any], 0, len(sources))
 	for i := range sources {
+		// Stop admitting work once Abort has fenced the task. Every source
+		// counted into wg above must still be released, or Abort would wait on
+		// copies that will never run — so hand back the whole remaining tail in
+		// one atomic decrement.
+		if t.runtimeAborted() {
+			t.runtime.wg.Add(i - len(sources))
+			break
+		}
+
 		source := sources[i]
 		target := targets[i]
+		// Each source owns a release latch so its wg slot is given back exactly
+		// once, whether the closure runs to completion or the pool rejects it
+		// outright (in which case the closure never runs and cannot release it).
+		released := atomic.NewBool(false)
+		release := func() {
+			if released.CompareAndSwap(false, true) {
+				t.runtime.wg.Done()
+			}
+		}
 		future := GetExecPool().Submit(func() (any, error) {
-			defer t.runtime.wg.Done()
+			defer release()
 			return t.copySingleSegment(source, target)
 		})
+		if isPoolRejection(future) {
+			release()
+		}
 		futures = append(futures, future)
 	}
 
 	return futures
+}
+
+// runtimeAborted reports whether Abort has fenced this task.
+func (t *CopySegmentTask) runtimeAborted() bool {
+	t.runtime.mu.Lock()
+	defer t.runtime.mu.Unlock()
+	return t.runtime.aborted
+}
+
+// isPoolRejection reports whether the pool declined the closure instead of
+// scheduling it. A rejected submission completes its future immediately with an
+// error without ever entering the closure, so the caller owns the cleanup that
+// the closure would otherwise have performed. A closure that ran and failed also
+// completes with an error, which is why the release latch — not this check — is
+// what keeps the accounting exactly-once.
+func isPoolRejection(future *conc.Future[any]) bool {
+	select {
+	case <-future.Inner():
+		return future.Err() != nil
+	default:
+		return false
+	}
 }
 
 // copySingleSegment copies all files for a single source-target segment pair.
@@ -545,6 +590,26 @@ func (t *CopySegmentTask) Abort(ctx context.Context) error {
 	t.cancel()
 	t.runtime.mu.Unlock()
 
-	t.runtime.wg.Wait()
+	// Joining every accepted closure before cleanup is the whole point of the
+	// shared runtime: removing output while a copy is still writing would leave
+	// the objects it writes afterwards behind forever. But the join must not
+	// outlive the caller's deadline — Abort runs synchronously inside the
+	// DropCopySegment RPC handler, and Execute's submit loop can be parked in the
+	// shared exec pool behind *other* tasks' work, which cancel() cannot release.
+	//
+	// On timeout, report the failure without touching storage. The task stays
+	// registered, so DataCoord's drop retry converges the cleanup later with the
+	// same runtime state, rather than this handler deleting files out from under
+	// copies that are still running.
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		t.runtime.wg.Wait()
+	}()
+	select {
+	case <-joined:
+	case <-ctx.Done():
+		return merr.Wrap(ctx.Err(), "timed out joining in-flight copy segment closures before cleanup")
+	}
 	return t.cleanupCopiedFiles(ctx)
 }
