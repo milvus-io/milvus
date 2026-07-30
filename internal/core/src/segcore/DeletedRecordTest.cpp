@@ -233,6 +233,37 @@ TEST(DeleteMVCC, LatestSnapshotCoversDeletesLoadedBeforeOlderStreamPush) {
     EXPECT_TRUE(after_view[1]);
 }
 
+TEST(DeleteMVCC, LatestSnapshotPreservesEarlierDeleteForSameRow) {
+    LatestDeleteSnapshotOptimizationGuard guard(true);
+
+    constexpr int64_t row_count = 1;
+    DeletedRecord<true> delete_record(nullptr, SearchDirectDeleteOffsets, 0);
+    delete_record.set_sealed_row_count(row_count);
+
+    std::vector<PkType> pk = {0};
+    std::vector<Timestamp> newer_ts = {200};
+    delete_record.LoadPush(pk, newer_ts.data());
+
+    std::vector<Timestamp> older_ts = {100};
+    delete_record.StreamPush(pk, older_ts.data());
+    EXPECT_EQ(1, delete_record.size());
+
+    BitsetType before(row_count);
+    BitsetTypeView before_view(before);
+    delete_record.Query(before_view, row_count, 50);
+    EXPECT_FALSE(before_view[0]);
+
+    BitsetType between(row_count);
+    BitsetTypeView between_view(between);
+    delete_record.Query(between_view, row_count, 150);
+    EXPECT_TRUE(between_view[0]);
+
+    BitsetType after(row_count);
+    BitsetTypeView after_view(after);
+    delete_record.Query(after_view, row_count, 200);
+    EXPECT_TRUE(after_view[0]);
+}
+
 TEST(DeleteMVCC, LatestSnapshotTimestampDoesNotRegressAcrossStreamPushes) {
     LatestDeleteSnapshotOptimizationGuard guard(true);
 

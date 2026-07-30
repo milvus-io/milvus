@@ -17,6 +17,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <folly/ConcurrentSkipList.h>
@@ -79,7 +80,8 @@ class DeletedRecord {
         : insert_record_(insert_record),
           search_pk_func_(std::move(search_pk_func)),
           segment_id_(segment_id),
-          deleted_lists_(SortedDeleteList::createInstance()) {
+          deleted_lists_(SortedDeleteList::createInstance()),
+          rollback_delete_list_(SortedDeleteList::createInstance()) {
     }
 
     ~DeletedRecord() {
@@ -141,6 +143,7 @@ class DeletedRecord {
         Timestamp max_timestamp = 0;
 
         SortedDeleteList::Accessor accessor(deleted_lists_);
+        SortedDeleteList::Accessor rollback_accessor(rollback_delete_list_);
         for (size_t i = 0; i < pks.size(); ++i) {
             auto deleted_ts = timestamps[i];
             if (deleted_ts > max_timestamp) {
@@ -152,10 +155,6 @@ class DeletedRecord {
             timestamps,
             [&](const SegOffset offset, const Timestamp delete_ts) {
                 auto row_id = offset.get();
-                // if already deleted, no need to add new record
-                if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
-                    return;
-                }
                 // Skip delete when delete_ts <= insert_ts.
                 // Normal segment callers search PKs with include_same_ts=false,
                 // so only rows with insert_ts < delete_ts reach this callback.
@@ -171,6 +170,31 @@ class DeletedRecord {
                 if (insert_ts != 0 && delete_ts <= insert_ts) {
                     return;
                 }
+
+                // The main delete list keeps the first-arriving delete for a
+                // physical row. If an out-of-order delete for the same row
+                // arrives later, preserve the minimum duplicate timestamp in
+                // a sparse overlay so historical queries can move the row's
+                // visibility boundary backward without expanding per-row
+                // storage for the whole segment.
+                if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
+                    auto [it, inserted] =
+                        rollback_min_timestamps_.try_emplace(row_id, delete_ts);
+                    if (inserted) {
+                        rollback_accessor.insert(
+                            std::make_pair(delete_ts, row_id));
+                        mem_add += DELETE_PAIR_SIZE;
+                    } else if (delete_ts < it->second) {
+                        auto previous_ts = it->second;
+                        rollback_accessor.insert(
+                            std::make_pair(delete_ts, row_id));
+                        rollback_accessor.erase(
+                            std::make_pair(previous_ts, row_id));
+                        it->second = delete_ts;
+                    }
+                    return;
+                }
+
                 accessor.insert(std::make_pair(delete_ts, row_id));
                 if constexpr (is_sealed) {
                     Assert(deleted_mask_.size() > 0);
@@ -277,6 +301,20 @@ class DeletedRecord {
                 bitset.set(it->second);
             }
             it++;
+        }
+
+        // Historical snapshots are built from the first-arriving delete list.
+        // Always overlay late duplicate deletes on the slow path so a smaller
+        // timestamp for an already-deleted row is still visible without
+        // invalidating or rebuilding all dumped snapshots.
+        SortedDeleteList::Accessor rollback_accessor(rollback_delete_list_);
+        auto rollback_it = rollback_accessor.begin();
+        while (rollback_it != rollback_accessor.end() &&
+               rollback_it->first <= query_timestamp) {
+            if (rollback_it->second < insert_barrier) {
+                bitset.set(rollback_it->second);
+            }
+            rollback_it++;
         }
     }
 
@@ -430,6 +468,11 @@ class DeletedRecord {
         search_pk_func_;
     int64_t segment_id_{0};
     std::shared_ptr<SortedDeleteList> deleted_lists_;
+    // Sparse timestamp correction for physical rows whose duplicate deletes
+    // arrive out of order. The main list keeps the first-arriving timestamp;
+    // this overlay keeps the minimum timestamp among later arrivals.
+    std::shared_ptr<SortedDeleteList> rollback_delete_list_;
+    std::unordered_map<Offset, Timestamp> rollback_min_timestamps_;
     // max timestamp of deleted records which replayed in load process
     Timestamp max_load_timestamp_{0};
     // max timestamp of all delete batches processed by this record;
