@@ -30,10 +30,11 @@ DDL Callbacks (WAL message acknowledgment)
 │                        Balancer                              │
 │  • Work queue (deduplicated shard IDs)                       │
 │  • Single goroutine loop:                                    │
-│      1. Build BalancerSnapshot (global world view)           │
-│      2. Drain dirty shards                                   │
-│      3. policy.Plan(snapshot, dirty) → BalancePlan           │
-│      4. Apply plan (AddPreparing + ReleaseShardViews)        │
+│      1. Detach the pending trigger batch                     │
+│      2. Build BalancerSnapshot (global world view)           │
+│      3. Expand trigger scopes into dirty shards              │
+│      4. policy.Plan(snapshot, dirty) → BalancePlan           │
+│      5. Apply plan (AddPreparing + ReleaseShardViews)        │
 │  • Periodic ticker as fallback (full scan)                   │
 └────────────┬────────────────────────────┬────────────────────┘
              │ build snapshot              │ apply plan
@@ -66,7 +67,7 @@ DDL Callbacks (WAL message acknowledgment)
 
 - **Level-triggered reconciliation (Kubernetes controller pattern)**: Event sources with a notifier enqueue affected shard IDs via `Trigger(scope)`; the Balancer compares desired vs. current state and converges. The periodic full scan covers sources without a direct notifier and any missed event. Multiple enqueues for the same shard are deduplicated.
 - **Unified allocation algorithm**: A single BalancePolicy handles all scenarios. Scenario differences are encoded in input variations (available nodes, current view, data view), not separate algorithms. This prevents thrashing.
-- **Batch planning**: Each reconcile cycle builds a global snapshot, drains dirty shards, and asks the Policy for a complete plan. The Policy handles all dirty shards in one call, enabling cross-shard coordination (e.g., avoiding multiple shards targeting the same node).
+- **Batch planning**: Each reconcile cycle detaches the pending trigger batch, builds a global snapshot, expands the batch into dirty shards, and asks the Policy for a complete plan. The Policy handles all dirty shards in one call, enabling cross-shard coordination (e.g., avoiding multiple shards targeting the same node).
 - **External inputs as interfaces**: Node Manager, Replica Manager, and DataView Manager are external dependencies consumed via interfaces.
 - **Separated desired and actual state ownership**: `loadmgr` owns load-config lifecycle and desired-state snapshots; `coordview` owns actual QueryView state, shard-view aggregation, and actual-state snapshots. The Balancer composes both snapshots during reconciliation.
 
@@ -94,7 +95,7 @@ type TriggerScope struct {
 ```
 
 - `Trigger()` with no scopes triggers a full scan.
-- `Trigger(scope)` enqueues only affected shards (expanded from the latest load-config and shard-view snapshots).
+- `Trigger(scope)` records only the affected scope; the reconcile cycle expands it into shard IDs from its load-config and shard-view snapshots.
 - A periodic ticker (e.g., 10s) calls `Trigger()` as a safety net for missed events and steady-state balance checks.
 
 #### Main Loop
@@ -109,8 +110,13 @@ for {
         return
     }
 
+    pending := b.queue.TakePending()
+    if pending.Empty() {
+        continue
+    }
+
     snap  := b.buildSnapshot()
-    dirty := b.queue.Drain()
+    dirty := pending.Expand(snap)
     if len(dirty) == 0 {
         continue
     }
@@ -119,6 +125,11 @@ for {
     b.apply(ctx, plan)
 }
 ```
+
+`TakePending` establishes the reconcile-cycle boundary before snapshot
+construction. Triggers arriving during snapshot construction remain queued for
+the next cycle, so a trigger batch is expanded only against a snapshot built
+after that batch was detached from the queue.
 
 The loop is purely infrastructural: the Policy is where all business decisions happen.
 
@@ -840,11 +851,13 @@ rebuilding it per shard, or double-counting the replacement view.
 
 ```
 1. Node Manager detects QN3 crash → Trigger(NodeChanged: true)
-2. Balancer loop wakes and builds snapshot
-3. Meanwhile, Syncer's OnNodeLost marks affected views as Unrecoverable
-4. Balancer drains queue and expands dirty nodes by scanning snapshot shard stats → dirty = [A, B, C]
+2. Balancer loop wakes and detaches the pending full-scan trigger batch
+3. Balancer builds snapshot; QN3 is unavailable, and shard stats may already
+   reflect Syncer's OnNodeLost transitions
+4. Balancer expands the full-scan batch from the completed snapshot → dirty = [A, B, C]
 5. policy.Plan(snap, dirty):
-   Phase 1: each shard's current view references QN3 → all actionMust
+   Phase 1: each shard either references unavailable QN3 or is already
+            Unrecoverable → all actionMust
    Phase 2: order by size desc; for each shard:
      - QN3 is ineligible → its segments have no reusable location and receive
        neutral stickiness
