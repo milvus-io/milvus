@@ -34,6 +34,32 @@
 
 namespace milvus::index {
 
+struct IndexLoadSpec {
+    DataType field_type;
+    DataType element_type;
+    IndexVersion index_version;
+    uint64_t index_size_in_bytes;
+    const std::map<std::string, std::string>& index_params;
+    bool mmap_enable;
+    int64_t num_rows;
+    int64_t dim;
+};
+
+struct IndexFileContext {
+    const std::vector<std::string>& index_files;
+    const storage::FileManagerContext& file_manager_context;
+};
+
+struct ScalarIndexFileInspection {
+    IndexType effective_index_type;
+    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
+};
+
+struct ScalarIndexLoadPlan {
+    LoadResourceRequest request;
+    std::optional<int64_t> shared_memory_runtime_unit_bytes;
+};
+
 class IndexFactory {
  public:
     IndexFactory() = default;
@@ -53,62 +79,23 @@ class IndexFactory {
     static bool
     CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 
+    // Metadata-only estimate used by admission and fallback paths. This entry
+    // never opens index files.
     LoadResourceRequest
-    IndexLoadResource(DataType field_type,
-                      DataType element_type,
-                      IndexVersion index_version,
-                      uint64_t index_size_in_bytes,
-                      const std::map<std::string, std::string>& index_params,
-                      bool mmap_enable,
-                      int64_t num_rows,
-                      int64_t dim);
+    EstimateIndexLoadResource(const IndexLoadSpec& spec);
 
-    LoadResourceRequest
-    IndexLoadResource(
-        DataType field_type,
-        DataType element_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows,
-        int64_t dim,
-        const std::vector<std::string>& index_files,
-        const storage::FileManagerContext& file_manager_context,
-        std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
-        bool* use_shared_memory_overhead_group = nullptr);
+    // Inspect scalar index files and normalize the effective index type. This
+    // entry performs file I/O but does not calculate a resource request.
+    ScalarIndexFileInspection
+    InspectScalarIndexFiles(const IndexLoadSpec& spec,
+                            const IndexFileContext& files);
 
-    LoadResourceRequest
-    VecIndexLoadResource(DataType field_type,
-                         DataType element_type,
-                         IndexVersion index_version,
-                         uint64_t index_size_in_bytes,
-                         const std::map<std::string, std::string>& index_params,
-                         bool mmap_enable,
-                         int64_t num_rows,
-                         int64_t dim);
-
-    LoadResourceRequest
-    ScalarIndexLoadResource(
-        DataType field_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows);
-
-    LoadResourceRequest
-    ScalarIndexLoadResource(
-        DataType field_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows,
-        const std::vector<std::string>& index_files,
-        const storage::FileManagerContext& file_manager_context,
-        std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
-        bool* use_shared_memory_overhead_group = nullptr);
+    // Build a scalar load plan from metadata and an existing file inspection.
+    // This entry performs no file I/O. Packed V3 planning requires persisted
+    // stream metadata and never falls back to the metadata-only estimate.
+    ScalarIndexLoadPlan
+    PlanScalarIndexLoad(const IndexLoadSpec& spec,
+                        const ScalarIndexFileInspection& inspection);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
@@ -193,14 +180,7 @@ class IndexFactory {
     FRIEND_TEST(StringIndexMarisaTest, Reverse);
 
     LoadResourceRequest
-    ScalarIndexLoadResourceImpl(
-        DataType field_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows,
-        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info);
+    EstimateVectorIndexLoadResource(const IndexLoadSpec& spec);
 
     template <typename T>
     ScalarIndexPtr<T>

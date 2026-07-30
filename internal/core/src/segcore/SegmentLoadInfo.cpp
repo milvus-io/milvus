@@ -170,15 +170,17 @@ SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
             load_index_info.load_resource_request->has_raw_data);
     } else {
         auto request =
-            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-                load_index_info.field_type,
-                load_index_info.element_type,
-                load_index_info.index_engine_version,
-                load_index_info.index_size,
-                load_index_info.index_params,
-                load_index_info.enable_mmap,
-                load_index_info.num_rows,
-                load_index_info.dim);
+            milvus::index::IndexFactory::GetInstance()
+                .EstimateIndexLoadResource(milvus::index::IndexLoadSpec{
+                    .field_type = load_index_info.field_type,
+                    .element_type = load_index_info.element_type,
+                    .index_version = load_index_info.index_engine_version,
+                    .index_size_in_bytes = load_index_info.index_size,
+                    .index_params = load_index_info.index_params,
+                    .mmap_enable = load_index_info.enable_mmap,
+                    .num_rows = load_index_info.num_rows,
+                    .dim = load_index_info.dim,
+                });
         return milvus::index::IndexFactory::CanUseIndexRawDataForField(
             load_index_info.field_type, request.has_raw_data);
     }

@@ -1245,14 +1245,17 @@ class SegmentLoadInfo {
             if (!needs_file_context) {
                 load_index_info.load_resource_request =
                     milvus::index::IndexFactory::GetInstance()
-                        .IndexLoadResource(load_index_info.field_type,
-                                           load_index_info.element_type,
-                                           load_index_info.index_engine_version,
-                                           load_index_info.index_size,
-                                           load_index_info.index_params,
-                                           load_index_info.enable_mmap,
-                                           load_index_info.num_rows,
-                                           load_index_info.dim);
+                        .EstimateIndexLoadResource(milvus::index::IndexLoadSpec{
+                            .field_type = load_index_info.field_type,
+                            .element_type = load_index_info.element_type,
+                            .index_version =
+                                load_index_info.index_engine_version,
+                            .index_size_in_bytes = load_index_info.index_size,
+                            .index_params = load_index_info.index_params,
+                            .mmap_enable = load_index_info.enable_mmap,
+                            .num_rows = load_index_info.num_rows,
+                            .dim = load_index_info.dim,
+                        });
             }
             // Check if index has raw data before moving
             if (CheckIndexHasRawData(load_index_info)) {

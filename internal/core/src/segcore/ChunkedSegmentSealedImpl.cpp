@@ -685,16 +685,17 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
     if (info.load_resource_request.has_value()) {
         request = *info.load_resource_request;
     } else {
-        request =
-            milvus::index::IndexFactory::GetInstance().VecIndexLoadResource(
-                field_meta.get_data_type(),
-                info.element_type,
-                info.index_engine_version,
-                info.index_size,
-                info.index_params,
-                info.enable_mmap,
-                info.num_rows,
-                info.dim);
+        request = milvus::index::IndexFactory::GetInstance()
+                      .EstimateIndexLoadResource(milvus::index::IndexLoadSpec{
+                          .field_type = field_meta.get_data_type(),
+                          .element_type = info.element_type,
+                          .index_version = info.index_engine_version,
+                          .index_size_in_bytes = info.index_size,
+                          .index_params = info.index_params,
+                          .mmap_enable = info.enable_mmap,
+                          .num_rows = info.num_rows,
+                          .dim = info.dim,
+                      });
     }
     request.has_raw_data =
         milvus::index::IndexFactory::CanUseIndexRawDataForField(
@@ -888,14 +889,17 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
     if (info.load_resource_request.has_value()) {
         request = *info.load_resource_request;
     } else {
-        request =
-            milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-                field_meta.get_data_type(),
-                info.index_engine_version,
-                info.index_size,
-                info.index_params,
-                info.enable_mmap,
-                target_runtime->row_count);
+        request = milvus::index::IndexFactory::GetInstance()
+                      .EstimateIndexLoadResource(milvus::index::IndexLoadSpec{
+                          .field_type = field_meta.get_data_type(),
+                          .element_type = info.element_type,
+                          .index_version = info.index_engine_version,
+                          .index_size_in_bytes = info.index_size,
+                          .index_params = info.index_params,
+                          .mmap_enable = info.enable_mmap,
+                          .num_rows = target_runtime->row_count,
+                          .dim = info.dim,
+                      });
     }
 
     request.has_raw_data =
