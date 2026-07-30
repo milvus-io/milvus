@@ -25,9 +25,9 @@ echo "Building plan parser shared library (${OS}, .${EXT}) ..."
 
 go env -w CGO_ENABLED="1"
 
-# Build Go c-shared library using package path (not file path) to ensure
-# proper module dependency resolution in all build environments.
-GO111MODULE=on go build -buildmode=c-shared \
+# Build Go c-shared library using package path (not file path) and keep the
+# local Milvus module at (devel) instead of stamping a misleading pseudo-version.
+GO111MODULE=on go build -buildvcs=false -buildmode=c-shared \
     -o "${OUTPUT_LIB}/libmilvus-planparser.${EXT}" \
     ./internal/parser/planparserv2/cwrapper
 
