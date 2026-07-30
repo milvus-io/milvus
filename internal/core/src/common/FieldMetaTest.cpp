@@ -84,6 +84,22 @@ TEST(FieldMetaTest, ParseFromWithoutExternalField) {
     EXPECT_TRUE(field.get_external_field_mapping().empty());
 }
 
+TEST(FieldMetaTest, TypeSchemaRoundTripForScalarField) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(202);
+    proto.set_name("typed_scalar");
+    proto.set_data_type(milvus::proto::schema::DataType::Int64);
+    proto.mutable_type_schema()->set_leaf_type(
+        milvus::proto::schema::DataType::Int64);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    auto serialized = field.ToProto();
+    ASSERT_TRUE(serialized.has_type_schema());
+    EXPECT_TRUE(serialized.type_schema().has_leaf_type());
+    EXPECT_EQ(serialized.type_schema().leaf_type(),
+              milvus::proto::schema::DataType::Int64);
+}
+
 TEST(FieldMetaTest, LocalFormatRoundTrip) {
     milvus::proto::schema::FieldSchema proto;
     proto.set_fieldid(202);

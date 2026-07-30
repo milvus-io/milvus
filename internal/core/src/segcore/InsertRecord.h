@@ -1739,8 +1739,13 @@ class InsertRecordGrowing {
                 return;
             }
             case DataType::ARRAY: {
-                this->append_data<Array>(
-                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                if (field_meta.has_element_schema()) {
+                    this->append_data<ArrayValue>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                } else {
+                    this->append_data<Array>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                }
                 return;
             }
             case DataType::GEOMETRY: {

@@ -204,7 +204,8 @@ GetObjectData(
     ChunkManager* remote_chunk_manager,
     const std::vector<std::string>& remote_files,
     milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH,
-    bool is_field_data = true);
+    bool is_field_data = true,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 // Helper function to wait for all futures and collect exceptions
 // This ensures all background threads complete before rethrowing exception
@@ -363,11 +364,13 @@ milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
 FieldDataPtr
-CreateFieldData(const DataType& type,
-                const DataType& element_type,
-                bool nullable = false,
-                int64_t dim = 1,
-                int64_t total_num_rows = 0);
+CreateFieldData(
+    const DataType& type,
+    const DataType& element_type,
+    bool nullable = false,
+    int64_t dim = 1,
+    int64_t total_num_rows = 0,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 int64_t
 GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);

@@ -133,7 +133,8 @@ SetFieldDataElementTypeIfNeeded(milvus::proto::schema::FieldData* field_data,
                                 const milvus::FieldMeta& field_meta) {
     if (field_meta.get_data_type() == milvus::DataType::ARRAY) {
         field_data->mutable_scalars()->mutable_array_data()->set_element_type(
-            milvus::proto::schema::DataType(field_meta.get_element_type()));
+            milvus::proto::schema::DataType(
+                field_meta.get_array_element_type()));
     } else if (field_meta.get_data_type() == milvus::DataType::VECTOR_ARRAY) {
         field_data->mutable_vectors()->mutable_vector_array()->set_element_type(
             milvus::proto::schema::DataType(field_meta.get_element_type()));

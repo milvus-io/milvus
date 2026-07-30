@@ -89,3 +89,76 @@ func CreateFieldSchemaHelper(schema *schemapb.FieldSchema) *FieldSchemaHelper {
 		indexParams: NewKvPairs(schema.GetIndexParams()),
 	}
 }
+
+// validateTypeSchemaNode validates the recursive encoding of a TypeSchema node
+// and returns the logical type of the node and its direct child. Array nodes
+// must use array_element; all other types must use leaf_type.
+func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) (
+	schemapb.DataType,
+	schemapb.DataType,
+	error,
+) {
+	if typeSchema == nil {
+		return schemapb.DataType_None, schemapb.DataType_None,
+			merr.WrapErrParameterInvalidMsg(
+				"type_schema kind should be specified for field %s", fieldName)
+	}
+
+	switch kind := typeSchema.GetKind().(type) {
+	case *schemapb.TypeSchema_ArrayElement:
+		if kind.ArrayElement == nil {
+			return schemapb.DataType_None, schemapb.DataType_None,
+				merr.WrapErrParameterInvalidMsg(
+					"type_schema array element should be specified for field %s", fieldName)
+		}
+		childType, _, err := validateTypeSchemaNode(fieldName, kind.ArrayElement)
+		if err != nil {
+			return schemapb.DataType_None, schemapb.DataType_None, err
+		}
+		return schemapb.DataType_Array, childType, nil
+	case *schemapb.TypeSchema_LeafType:
+		if _, ok := schemapb.DataType_name[int32(kind.LeafType)]; !ok || kind.LeafType == schemapb.DataType_None {
+			return schemapb.DataType_None, schemapb.DataType_None,
+				merr.WrapErrParameterInvalidMsg(
+					"type_schema leaf type %s is not valid for field %s",
+					kind.LeafType.String(), fieldName)
+		}
+		if kind.LeafType == schemapb.DataType_Array {
+			return schemapb.DataType_None, schemapb.DataType_None,
+				merr.WrapErrParameterInvalidMsg(
+					"type_schema data type Array must use array_element for field %s", fieldName)
+		}
+		return kind.LeafType, schemapb.DataType_None, nil
+	default:
+		return schemapb.DataType_None, schemapb.DataType_None,
+			merr.WrapErrParameterInvalidMsg(
+				"type_schema kind should be specified for field %s", fieldName)
+	}
+}
+
+// ValidateFieldTypeSchema verifies that the compatibility data_type and
+// element_type fields describe the same root and direct child types as the
+// recursive type_schema.
+func ValidateFieldTypeSchema(field *schemapb.FieldSchema) error {
+	typeSchema := field.GetTypeSchema()
+	if typeSchema == nil {
+		return nil
+	}
+
+	dataType, elementType, err := validateTypeSchemaNode(field.GetName(), typeSchema)
+	if err != nil {
+		return err
+	}
+	if dataType != field.GetDataType() {
+		return merr.WrapErrParameterInvalidMsg(
+			"type_schema data type %s does not match data_type %s for field %s",
+			dataType.String(), field.GetDataType().String(), field.GetName())
+	}
+	if elementType != field.GetElementType() {
+		return merr.WrapErrParameterInvalidMsg(
+			"type_schema element type %s does not match element_type %s for field %s",
+			elementType.String(), field.GetElementType().String(), field.GetName())
+	}
+
+	return nil
+}

@@ -330,6 +330,16 @@ class ChunkedColumnInterface {
     }
 
     virtual void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "BulkArrayValueAt only supported for recursive ARRAY columns");
+    }
+
+    virtual void
     BulkVectorArrayAt(milvus::OpContext* op_ctx,
                       std::function<void(VectorFieldProto&&, size_t)> fn,
                       const int64_t* offsets,

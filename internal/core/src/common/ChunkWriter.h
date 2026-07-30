@@ -34,12 +34,15 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 
 namespace milvus {
 class ChunkWriterBase {
  public:
     explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
     }
+
+    virtual ~ChunkWriterBase() = default;
 
     virtual std::pair<size_t, size_t>
     calculate_size(const arrow::ArrayVector& data) = 0;
@@ -295,6 +298,26 @@ class ArrayChunkWriter : public ChunkWriterBase {
     // Populated by calculate_size so write_to_target can emit the whole
     // header in a single target->write call.
     std::vector<uint32_t> header_;
+};
+
+class ColumnarArrayChunkWriter final : public ChunkWriterBase {
+ public:
+    ColumnarArrayChunkWriter(proto::schema::TypeSchema type, bool nullable);
+
+    ~ColumnarArrayChunkWriter() override;
+
+    std::pair<size_t, size_t>
+    calculate_size(const arrow::ArrayVector& array_vec) override;
+
+    void
+    write_to_target(const arrow::ArrayVector& array_vec,
+                    const std::shared_ptr<ChunkTarget>& target) override;
+
+ private:
+    struct Impl;
+
+    proto::schema::TypeSchema type_;
+    std::unique_ptr<Impl> impl_;
 };
 
 class VectorArrayChunkWriter : public ChunkWriterBase {

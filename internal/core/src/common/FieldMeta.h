@@ -116,7 +116,9 @@ class FieldMeta {
               bool nullable,
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
-              std::string local_format = LOCAL_FORMAT_RAW)
+              std::string local_format = LOCAL_FORMAT_RAW,
+              std::optional<milvus::proto::schema::TypeSchema> type_schema =
+                  std::nullopt)
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -124,8 +126,15 @@ class FieldMeta {
           nullable_(nullable),
           default_value_(std::move(default_value)),
           external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
+          local_format_(std::move(local_format)),
+          type_schema_(std::move(type_schema)) {
         Assert(IsArrayDataType(type_));
+        if (type_schema_.has_value()) {
+            AssertInfo(type_ == DataType::ARRAY,
+                       "type_schema is only supported for ARRAY FieldMeta");
+            ValidateFieldTypeSchema(
+                *type_schema_, type_, element_type_, name_.get());
+        }
     }
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
@@ -255,6 +264,34 @@ class FieldMeta {
         return element_type_;
     }
 
+    DataType
+    get_array_element_type() const {
+        return element_type_;
+    }
+
+    milvus::proto::schema::TypeSchema
+    get_array_type_schema() const {
+        if (type_schema_.has_value()) {
+            return *type_schema_;
+        }
+        milvus::proto::schema::TypeSchema type_schema;
+        auto* element = type_schema.mutable_array_element();
+        element->set_leaf_type(ToProtoDataType(element_type_));
+        return type_schema;
+    }
+
+    bool
+    has_element_schema() const {
+        return type_schema_.has_value() &&
+               type_schema_->array_element().has_array_element();
+    }
+
+    const milvus::proto::schema::TypeSchema&
+    get_element_schema() const {
+        Assert(has_element_schema());
+        return type_schema_->array_element();
+    }
+
     bool
     is_vector() const {
         return IsVectorDataType(type_);
@@ -346,6 +383,13 @@ class FieldMeta {
     ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto);
 
  private:
+    static void
+    ValidateFieldTypeSchema(
+        const milvus::proto::schema::TypeSchema& type_schema,
+        DataType data_type,
+        DataType element_type,
+        const std::string& field_name);
+
     struct VectorInfo {
         int64_t dim_;
         std::optional<knowhere::MetricType> metric_type_;
@@ -369,6 +413,7 @@ class FieldMeta {
     int64_t main_field_id_ = INVALID_FIELD_ID;
     std::string external_field_mapping_;
     std::string local_format_ = LOCAL_FORMAT_RAW;
+    std::optional<milvus::proto::schema::TypeSchema> type_schema_;
 };
 
 }  // namespace milvus

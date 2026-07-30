@@ -29,6 +29,62 @@
 #include "pb/common.pb.h"
 
 namespace milvus {
+namespace {
+
+struct TypeSchemaTypes {
+    DataType data_type;
+    DataType element_type;
+};
+
+TypeSchemaTypes
+ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
+                       const std::string& field_name) {
+    if (type_schema.has_array_element()) {
+        const auto child =
+            ValidateTypeSchemaNode(type_schema.array_element(), field_name);
+        return {DataType::ARRAY, child.data_type};
+    }
+
+    AssertInfo(type_schema.has_leaf_type(),
+               "type_schema kind is not set for field {}",
+               field_name);
+    AssertInfo(proto::schema::DataType_IsValid(type_schema.leaf_type()),
+               "type_schema leaf type {} is not valid for field {}",
+               static_cast<int>(type_schema.leaf_type()),
+               field_name);
+    const auto leaf_type = DataType(type_schema.leaf_type());
+    AssertInfo(leaf_type != DataType::NONE,
+               "type_schema leaf type NONE is not valid for field {}",
+               field_name);
+    AssertInfo(leaf_type != DataType::ARRAY,
+               "type_schema data type ARRAY must use array_element for field "
+               "{}",
+               field_name);
+    return {leaf_type, DataType::NONE};
+}
+
+}  // namespace
+
+void
+FieldMeta::ValidateFieldTypeSchema(const proto::schema::TypeSchema& type_schema,
+                                   DataType data_type,
+                                   DataType element_type,
+                                   const std::string& field_name) {
+    const auto schema_types = ValidateTypeSchemaNode(type_schema, field_name);
+    AssertInfo(schema_types.data_type == data_type,
+               "type_schema data type {} does not match data_type {} for "
+               "field {}",
+               schema_types.data_type,
+               data_type,
+               field_name);
+    AssertInfo(schema_types.element_type == element_type,
+               "type_schema element type {} does not match element_type {} "
+               "for field {}",
+               schema_types.element_type,
+               element_type,
+               field_name);
+}
+
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params) {
     auto iter = params.find("analyzer_params");
@@ -90,6 +146,9 @@ FieldMeta::ToProto() const {
 
     if (element_type_ != DataType::NONE) {
         proto.set_element_type(ToProtoDataType(element_type_));
+    }
+    if (type_schema_.has_value()) {
+        *proto.mutable_type_schema() = *type_schema_;
     }
 
     auto add_type_param = [&proto](const std::string& key,
@@ -159,6 +218,18 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto element_type = DataType(schema_proto.element_type());
     auto external_field_mapping = schema_proto.external_field();
 
+    if (schema_proto.has_type_schema()) {
+        ValidateFieldTypeSchema(
+            schema_proto.type_schema(), data_type, element_type, name.get());
+    }
+
+    auto with_type_schema = [&](FieldMeta field_meta) -> FieldMeta {
+        if (schema_proto.has_type_schema()) {
+            field_meta.type_schema_ = schema_proto.type_schema();
+        }
+        return field_meta;
+    };
+
     if (data_type == DataType::VECTOR_ARRAY) {
         AssertInfo(element_type != DataType::NONE,
                    "element_type must be specified for VECTOR_ARRAY");
@@ -185,15 +256,15 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         AssertInfo(type_map.count("dim"), "dim not found");
         dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
 
-        return FieldMeta{name,
-                         field_id,
-                         data_type,
-                         element_type,
-                         dim,
-                         std::nullopt,
-                         nullable,
-                         external_field_mapping,
-                         local_format()};
+        return with_type_schema(FieldMeta{name,
+                                          field_id,
+                                          data_type,
+                                          element_type,
+                                          dim,
+                                          std::nullopt,
+                                          nullable,
+                                          external_field_mapping,
+                                          local_format()});
     }
 
     if (IsVectorDataType(data_type)) {
@@ -208,26 +279,26 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         }
 
         if (!index_map.count("metric_type")) {
-            return FieldMeta{name,
-                             field_id,
-                             data_type,
-                             dim,
-                             std::nullopt,
-                             nullable,
-                             default_value,
-                             external_field_mapping,
-                             local_format()};
+            return with_type_schema(FieldMeta{name,
+                                              field_id,
+                                              data_type,
+                                              dim,
+                                              std::nullopt,
+                                              nullable,
+                                              default_value,
+                                              external_field_mapping,
+                                              local_format()});
         }
         auto metric_type = index_map.at("metric_type");
-        return FieldMeta{name,
-                         field_id,
-                         data_type,
-                         dim,
-                         metric_type,
-                         nullable,
-                         default_value,
-                         external_field_mapping,
-                         local_format()};
+        return with_type_schema(FieldMeta{name,
+                                          field_id,
+                                          data_type,
+                                          dim,
+                                          metric_type,
+                                          nullable,
+                                          default_value,
+                                          external_field_mapping,
+                                          local_format()});
     }
 
     if (IsStringDataType(data_type)) {
@@ -259,37 +330,37 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         auto string_params = type_map;
         string_params.erase(LOCAL_FORMAT_KEY);
 
-        return FieldMeta{name,
-                         field_id,
-                         data_type,
-                         max_len,
-                         nullable,
-                         enable_match,
-                         enable_analyzer,
-                         string_params,
-                         default_value,
-                         external_field_mapping,
-                         local_format()};
+        return with_type_schema(FieldMeta{name,
+                                          field_id,
+                                          data_type,
+                                          max_len,
+                                          nullable,
+                                          enable_match,
+                                          enable_analyzer,
+                                          string_params,
+                                          default_value,
+                                          external_field_mapping,
+                                          local_format()});
     }
 
     if (IsArrayDataType(data_type)) {
-        return FieldMeta{name,
-                         field_id,
-                         data_type,
-                         DataType(schema_proto.element_type()),
-                         nullable,
-                         default_value,
-                         external_field_mapping,
-                         local_format()};
+        return with_type_schema(FieldMeta{name,
+                                          field_id,
+                                          data_type,
+                                          element_type,
+                                          nullable,
+                                          default_value,
+                                          external_field_mapping,
+                                          local_format()});
     }
 
-    return FieldMeta{name,
-                     field_id,
-                     data_type,
-                     nullable,
-                     default_value,
-                     external_field_mapping,
-                     local_format()};
+    return with_type_schema(FieldMeta{name,
+                                      field_id,
+                                      data_type,
+                                      nullable,
+                                      default_value,
+                                      external_field_mapping,
+                                      local_format()});
 }
 
 }  // namespace milvus
