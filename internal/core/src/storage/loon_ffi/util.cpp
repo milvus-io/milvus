@@ -123,10 +123,18 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     keys.emplace_back(PROPERTY_FS_REQUEST_TIMEOUT_MS);
     values.emplace_back(timeout_str.c_str());
 
+    // 0 means "not set by the producer": leave the key absent so
+    // milvus-storage applies its registered default (100) instead of taking an
+    // explicit 0, which would drop the S3 connection cap to
+    // max(io_capacity, 25) and change the filesystem cache key. Same
+    // convention as ChunkManager.cpp / MinioChunkManager.cpp and the Go
+    // producer in storagev2/packed/ffi_common.go.
     std::string max_connections_str =
         std::to_string(c_storage_config.max_connections);
-    keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
-    values.emplace_back(max_connections_str.c_str());
+    if (c_storage_config.max_connections > 0) {
+        keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
+        values.emplace_back(max_connections_str.c_str());
+    }
 
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
@@ -242,10 +250,13 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_REQUEST_TIMEOUT_MS,
         std::to_string(c_storage_config.requestTimeoutMs).c_str());
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_MAX_CONNECTIONS,
-        std::to_string(c_storage_config.max_connections).c_str());
+    // Absent when unset -- see the note in MakePropertiesFromStorageConfig.
+    if (c_storage_config.max_connections > 0) {
+        milvus_storage::api::SetValue(
+            *properties_map,
+            PROPERTY_FS_MAX_CONNECTIONS,
+            std::to_string(c_storage_config.max_connections).c_str());
+    }
 
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
@@ -531,12 +542,22 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     // kAllowedExtfsSpecKeys nor derived from the URI, so no other layer
     // writes them; it sits next to Layer 0 because both are defaults rather
     // than external-source-derived values.
+    // "0" is treated as unset, like the empty string: for every fs.* tunable
+    // inherited here, 0 means "producer did not set it" (the convention in
+    // ChunkManager.cpp, MinioChunkManager.cpp and the Go producer). Mirroring
+    // it would be worse than not mirroring at all — before this key existed on
+    // the extfs side, ExtractExternalFsProperties fell back to the library
+    // default (100 connections), whereas an explicit "0" overrides it and
+    // caps the external S3 client at max(io_capacity, 25). The producers are
+    // guarded too; this is the last line of defence for the read path this
+    // whole change exists to widen.
     for (const auto& [fs_key, extfs_suffix] : kExtfsInheritedFsFields) {
-        if (auto value = PropertyValueAsString(properties, fs_key)) {
-            milvus_storage::api::SetValue(properties,
-                                          (extfs_prefix + extfs_suffix).c_str(),
-                                          value->c_str());
+        auto value = PropertyValueAsString(properties, fs_key);
+        if (!value.has_value() || *value == "0") {
+            continue;
         }
+        milvus_storage::api::SetValue(
+            properties, (extfs_prefix + extfs_suffix).c_str(), value->c_str());
     }
 
     // Layer 1: derive bucket / address / storage_type / use_ssl from URI.

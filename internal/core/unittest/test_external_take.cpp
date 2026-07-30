@@ -2991,6 +2991,51 @@ TEST(InjectExtfsInheritedFields, MaxConnectionsAbsentWhenUnset) {
     EXPECT_EQ(props.count("extfs.42.max_connections"), 0u);
 }
 
+// Present-but-zero must be treated as unset, in both variant shapes. A
+// producer that leaves MaxConnections at 0 -- a pre-upgrade DataCoord, or
+// common.storageType=local while the external data lives on S3 -- would
+// otherwise have that 0 mirrored into the extfs scope, where it *overrides*
+// milvus-storage's registered default of 100 and caps the external S3 client
+// at max(io_capacity, 25). Leaving the key absent keeps the 100.
+TEST(InjectExtfsInheritedFields, MaxConnectionsZeroTreatedAsUnset) {
+    {
+        milvus_storage::api::Properties props;
+        props["fs.max_connections"] = std::string("0");
+
+        ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+        EXPECT_EQ(props.count("extfs.42.max_connections"), 0u)
+            << "string \"0\" must not be mirrored";
+    }
+    {
+        milvus_storage::api::Properties props;
+        props["fs.max_connections"] = uint32_t(0);
+
+        ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+        EXPECT_EQ(props.count("extfs.42.max_connections"), 0u)
+            << "integral 0 must not be mirrored either";
+    }
+}
+
+// The producers themselves must not emit fs.max_connections when unset, so the
+// zero never reaches the extfs mirror (or the internal bucket's S3 client) in
+// the first place.
+TEST(MakePropertiesFromStorageConfig, MaxConnectionsZeroOmitted) {
+    CStorageConfig config{};
+    config.max_connections = 0;
+    auto props = MakeInternalPropertiesFromStorageConfig(config);
+    ASSERT_NE(props, nullptr);
+    EXPECT_EQ(props->count(PROPERTY_FS_MAX_CONNECTIONS), 0u);
+
+    config.max_connections = 237;
+    auto props_set = MakeInternalPropertiesFromStorageConfig(config);
+    ASSERT_NE(props_set, nullptr);
+    ASSERT_EQ(props_set->count(PROPERTY_FS_MAX_CONNECTIONS), 1u);
+    EXPECT_EQ(std::get<uint32_t>(props_set->at(PROPERTY_FS_MAX_CONNECTIONS)),
+              uint32_t(237));
+}
+
 // max_connections is server-side capacity config, not part of the external
 // source's identity: a user-supplied external_spec must not be able to set it.
 TEST(InjectExtfsInheritedFields, MaxConnectionsNotOverridableBySpec) {
