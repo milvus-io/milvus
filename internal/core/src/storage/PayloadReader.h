@@ -111,8 +111,10 @@ class PayloadReader {
         if (field_data_) {
             return field_data_->get_data_type();
         }
-        throw std::logic_error(
-            "Neither payload_buf nor field_data is available");
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "{}",
+            std::string("Neither payload_buf nor field_data is available"));
     }
 
  private:

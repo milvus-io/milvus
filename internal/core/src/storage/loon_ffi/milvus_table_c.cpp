@@ -30,6 +30,9 @@
 #include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_internal/result.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "storage/loon_ffi/loon_error_code.h"
+#include "storage/StatusToErrorCode.h"
+#include "common/EasyAssert.h"
 
 using json = nlohmann::json;
 
@@ -158,17 +161,23 @@ ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
 
     const char* msg = loon_ffi_get_errmsg(&result);
     std::string detail = msg != nullptr ? msg : "unknown error";
+    const int err_code = result.err_code;
     loon_ffi_free_result(&result);
-    // FIXME: Preserve result.err_code across this nested FFI boundary instead
-    // of letting the outer RETURN_EXCEPTION collapse every failure to code 5.
-    throw std::runtime_error(context + ": " + detail);
+    // Carry result.err_code across this nested FFI boundary: throwing a bare
+    // runtime_error let the outer RETURN_EXCEPTION collapse every failure to
+    // one code, so a transient object-storage error was indistinguishable
+    // from a permanent one.
+    ThrowInfo(milvus::storage::LoonErrCodeToErrorCode(err_code),
+              "{}: {}",
+              context,
+              detail);
 }
 
 char*
 DupString(const std::string& value) {
     auto* copied = strdup(value.c_str());
     if (copied == nullptr) {
-        throw std::bad_alloc();
+        ThrowInfo(milvus::ErrorCode::MemAllocateFailed, "allocation failed");
     }
     return copied;
 }
@@ -208,8 +217,9 @@ std::string
 MakeStorageUri(const milvus_storage::StorageUri& uri, bool include_address) {
     auto result = milvus_storage::StorageUri::Make(uri, include_address);
     if (!result.ok()) {
-        throw std::runtime_error("make storage URI: " +
-                                 result.status().ToString());
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "make storage URI: {}",
+                  result.status().ToString());
     }
     return result.ValueOrDie();
 }
@@ -218,8 +228,10 @@ milvus_storage::StorageUri
 ParseStorageUri(const std::string& uri, bool include_address) {
     auto result = milvus_storage::StorageUri::Parse(uri, include_address);
     if (!result.ok()) {
-        throw std::runtime_error("parse storage URI " + uri + ": " +
-                                 result.status().ToString());
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "parse storage URI {}: {}",
+                  uri,
+                  result.status().ToString());
     }
     return result.ValueOrDie();
 }
@@ -291,22 +303,29 @@ MakeExternalUriForSourcePath(const std::string& source_path,
     }
     if (external_source == nullptr || external_source[0] == '\0' ||
         properties == nullptr) {
-        throw std::runtime_error(
-            "milvus-table relative source path requires external_source: " +
-            source_path);
+        ThrowInfo(
+            milvus::ErrorCode::UnexpectedError,
+            "{}",
+            std::string(
+                "milvus-table relative source path requires external_source: " +
+                source_path));
     }
 
     auto source = ParseStorageUri(external_source, false);
     if (source.IsRelativeUri()) {
-        throw std::runtime_error(
-            "milvus-table external_source must be a storage URI: " +
-            std::string(external_source));
+        ThrowInfo(
+            milvus::ErrorCode::UnexpectedError,
+            "{}",
+            std::string("milvus-table external_source must be a storage URI: " +
+                        std::string(external_source)));
     }
     auto bucket_name = FindExtfsProperty(properties, ".bucket_name");
     if (bucket_name.empty()) {
-        throw std::runtime_error(
-            "milvus-table relative source path requires extfs bucket_name: " +
-            source_path);
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("milvus-table relative source path requires "
+                              "extfs bucket_name: " +
+                              source_path));
     }
     auto address_host =
         NormalizeExtfsAddress(FindExtfsProperty(properties, ".address"));
@@ -340,8 +359,10 @@ MakeExternalUriForSourcePath(const std::string& source_path,
 uint32_t
 CheckedUint32(size_t value, const char* field_name) {
     if (value > std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error(std::string(field_name) +
-                                 " exceeds uint32_t range");
+        ThrowInfo(
+            milvus::ErrorCode::UnexpectedError,
+            "{}",
+            std::string(std::string(field_name) + " exceeds uint32_t range"));
     }
     return static_cast<uint32_t>(value);
 }
@@ -379,14 +400,17 @@ CopyProperties(const LoonColumnGroupFile& file) {
         return properties;
     }
     if (file.property_keys == nullptr || file.property_values == nullptr) {
-        throw std::runtime_error("column group file has malformed properties");
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("column group file has malformed properties"));
     }
     properties.reserve(file.num_properties);
     for (uint32_t i = 0; i < file.num_properties; ++i) {
         if (file.property_keys[i] == nullptr ||
             file.property_values[i] == nullptr) {
-            throw std::runtime_error(
-                "column group file has null property entry");
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("column group file has null property entry"));
         }
         properties.emplace_back(file.property_keys[i], file.property_values[i]);
     }
@@ -405,8 +429,11 @@ BuildTargetColumnGroups(const LoonColumnGroups& source_groups,
         return result;
     }
     if (source_groups.column_group_array == nullptr) {
-        throw std::runtime_error(
-            "source manifest has column group count but no column groups");
+        ThrowInfo(
+            milvus::ErrorCode::UnexpectedError,
+            "{}",
+            std::string(
+                "source manifest has column group count but no column groups"));
     }
 
     const std::string source_row_count_text = std::to_string(source_row_count);
@@ -414,16 +441,21 @@ BuildTargetColumnGroups(const LoonColumnGroups& source_groups,
         const auto& source_group = source_groups.column_group_array[i];
         if (source_group.columns == nullptr &&
             source_group.num_of_columns > 0) {
-            throw std::runtime_error(
-                "source column group has column count but no columns");
+            ThrowInfo(
+                milvus::ErrorCode::UnexpectedError,
+                "{}",
+                std::string(
+                    "source column group has column count but no columns"));
         }
 
         ColumnGroupData target_group;
         std::unordered_set<std::string> seen_columns;
         for (uint32_t j = 0; j < source_group.num_of_columns; ++j) {
             if (source_group.columns[j] == nullptr) {
-                throw std::runtime_error(
-                    "source column group has null column name");
+                ThrowInfo(
+                    milvus::ErrorCode::UnexpectedError,
+                    "{}",
+                    std::string("source column group has null column name"));
             }
             std::string column(source_group.columns[j]);
             if (target_columns.find(column) != target_columns.end() &&
@@ -436,18 +468,24 @@ BuildTargetColumnGroups(const LoonColumnGroups& source_groups,
         }
 
         if (source_group.format == nullptr) {
-            throw std::runtime_error("source column group has null format");
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("source column group has null format"));
         }
         target_group.format = source_group.format;
         if (source_group.files == nullptr && source_group.num_of_files > 0) {
-            throw std::runtime_error(
-                "source column group has file count but no files");
+            ThrowInfo(
+                milvus::ErrorCode::UnexpectedError,
+                "{}",
+                std::string("source column group has file count but no files"));
         }
         target_group.files.reserve(source_group.num_of_files);
         for (uint32_t j = 0; j < source_group.num_of_files; ++j) {
             const auto& source_file = source_group.files[j];
             if (source_file.path == nullptr) {
-                throw std::runtime_error("source column group has null path");
+                ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                          "{}",
+                          std::string("source column group has null path"));
             }
             FileData target_file;
             target_file.path = MakeExternalUriForSourcePath(
@@ -475,7 +513,7 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
     owned.groups =
         static_cast<LoonColumnGroups*>(calloc(1, sizeof(LoonColumnGroups)));
     if (owned.groups == nullptr) {
-        throw std::bad_alloc();
+        ThrowInfo(milvus::ErrorCode::MemAllocateFailed, "allocation failed");
     }
 
     owned.groups->num_of_column_groups =
@@ -486,7 +524,7 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
     owned.groups->column_group_array = static_cast<LoonColumnGroup*>(
         calloc(groups.size(), sizeof(LoonColumnGroup)));
     if (owned.groups->column_group_array == nullptr) {
-        throw std::bad_alloc();
+        ThrowInfo(milvus::ErrorCode::MemAllocateFailed, "allocation failed");
     }
 
     for (size_t i = 0; i < groups.size(); ++i) {
@@ -497,7 +535,8 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
         group.columns = static_cast<const char**>(
             calloc(group_data.columns.size(), sizeof(char*)));
         if (group.columns == nullptr && !group_data.columns.empty()) {
-            throw std::bad_alloc();
+            ThrowInfo(milvus::ErrorCode::MemAllocateFailed,
+                      "allocation failed");
         }
         for (size_t j = 0; j < group_data.columns.size(); ++j) {
             group.columns[j] = DupString(group_data.columns[j]);
@@ -509,7 +548,8 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
         group.files = static_cast<LoonColumnGroupFile*>(
             calloc(group_data.files.size(), sizeof(LoonColumnGroupFile)));
         if (group.files == nullptr && !group_data.files.empty()) {
-            throw std::bad_alloc();
+            ThrowInfo(milvus::ErrorCode::MemAllocateFailed,
+                      "allocation failed");
         }
         for (size_t j = 0; j < group_data.files.size(); ++j) {
             const auto& file_data = group_data.files[j];
@@ -526,7 +566,8 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
             if ((file.property_keys == nullptr ||
                  file.property_values == nullptr) &&
                 !file_data.properties.empty()) {
-                throw std::bad_alloc();
+                ThrowInfo(milvus::ErrorCode::MemAllocateFailed,
+                          "allocation failed");
             }
             for (size_t k = 0; k < file_data.properties.size(); ++k) {
                 file.property_keys[k] =
@@ -560,7 +601,9 @@ ReadManifestWithFFI(const std::string& manifest_path,
         loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
         "get source manifest " + manifest_path);
     if (manifest.manifest == nullptr) {
-        throw std::runtime_error("source manifest is nil: " + manifest_path);
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("source manifest is nil: " + manifest_path));
     }
     return manifest;
 }
@@ -608,14 +651,18 @@ ReadStatMetadata(const LoonStatsLog& stats, uint32_t index) {
         stats.stat_metadata_values == nullptr ||
         stats.stat_metadata_keys[index] == nullptr ||
         stats.stat_metadata_values[index] == nullptr) {
-        throw std::runtime_error("manifest stat has malformed metadata");
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("manifest stat has malformed metadata"));
     }
 
     for (uint32_t i = 0; i < metadata_count; ++i) {
         const char* key = stats.stat_metadata_keys[index][i];
         const char* value = stats.stat_metadata_values[index][i];
         if (key == nullptr || value == nullptr) {
-            throw std::runtime_error("manifest stat has null metadata entry");
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("manifest stat has null metadata entry"));
         }
         metadata.emplace(key, value);
     }
@@ -635,12 +682,16 @@ CollectBloomFilterStats(const LoonStatsLog& source_stats,
         source_stats.stat_files == nullptr ||
         source_stats.stat_file_counts == nullptr ||
         source_stats.stat_metadata_counts == nullptr) {
-        throw std::runtime_error("manifest has malformed stats");
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("manifest has malformed stats"));
     }
 
     for (uint32_t i = 0; i < source_stats.num_stats; ++i) {
         if (source_stats.stat_keys[i] == nullptr) {
-            throw std::runtime_error("manifest stat has null key");
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("manifest stat has null key"));
         }
         std::string key(source_stats.stat_keys[i]);
         auto file_count = source_stats.stat_file_counts[i];
@@ -648,8 +699,9 @@ CollectBloomFilterStats(const LoonStatsLog& source_stats,
             continue;
         }
         if (source_stats.stat_files[i] == nullptr) {
-            throw std::runtime_error(
-                "manifest stat has file count but no files");
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("manifest stat has file count but no files"));
         }
 
         auto metadata = ReadStatMetadata(source_stats, i);
@@ -657,7 +709,9 @@ CollectBloomFilterStats(const LoonStatsLog& source_stats,
         bool added_path = false;
         for (uint32_t j = 0; j < file_count; ++j) {
             if (source_stats.stat_files[i][j] == nullptr) {
-                throw std::runtime_error("manifest stat has null file path");
+                ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                          "{}",
+                          std::string("manifest stat has null file path"));
             }
             auto normalized_path = MakeExternalUriForSourcePath(
                 source_stats.stat_files[i][j], external_source, properties);
@@ -720,11 +774,15 @@ AppendSourceDeltalogs(LoonTransactionHandle transaction,
     }
     if (delta_logs.delta_log_paths == nullptr ||
         delta_logs.delta_log_num_entries == nullptr) {
-        throw std::runtime_error("manifest has malformed delta logs");
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("manifest has malformed delta logs"));
     }
     for (uint32_t i = 0; i < delta_logs.num_delta_logs; ++i) {
         if (delta_logs.delta_log_paths[i] == nullptr) {
-            throw std::runtime_error("manifest has null delta log path");
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("manifest has null delta log path"));
         }
         auto normalized_path = MakeExternalUriForSourcePath(
             delta_logs.delta_log_paths[i], external_source, properties);
