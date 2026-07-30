@@ -50,7 +50,7 @@ func newPartitionSegmentManager(
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
 	}
-	m.SetLogger(logger.With(mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(paritionID)))
+	m.SetLogger(logger)
 	return m
 }
 
