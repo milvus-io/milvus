@@ -281,7 +281,7 @@ func SyncAsyncGrowingIndexBuild(ctx context.Context, params *paramtable.Componen
 		config.NewHandler("qn.segcore.asyncGrowingBuild", func(evt *config.Event) {
 			nv := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
 			C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(nv))
-			mlog.Info(context.TODO(), "asyncGrowingBuild updated, affects growing segments created afterwards",
+			mlog.Info(ctx, "asyncGrowingBuild updated, affects growing segments created afterwards",
 				mlog.Bool("value", nv))
 		}))
 }
