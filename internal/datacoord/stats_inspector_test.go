@@ -580,6 +580,87 @@ func (s *statsInspectorSuite) TestReloadFromMeta() {
 	s.Equal(1, enqueueCount)
 }
 
+func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
+	// The collection cache is filled asynchronously, so recovered stats tasks
+	// must resolve the collection through the handler and be sized by the
+	// columns their sub job actually reads.
+	const (
+		collectionID = UniqueID(5)
+		segmentID    = UniqueID(50)
+		pkFieldID    = int64(500)
+		jsonFieldID  = int64(501)
+		numRows      = int64(1000)
+		groupSize    = int64(2 * 1024 * 1024 * 1024)
+	)
+
+	collInfo := &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
+			},
+		},
+	}
+	handler := NewNMockHandler(s.T())
+	// resolved once for the two recovered tasks
+	handler.EXPECT().GetCollection(mock.Anything, collectionID).Return(collInfo, nil).Once()
+	s.inspector.handler = handler
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    3,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      numRows,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("files/insert_log/5/3/50", 1),
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID:     0,
+					ChildFields: []int64{pkFieldID, jsonFieldID},
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: numRows, LogSize: groupSize, MemorySize: groupSize},
+					},
+				},
+			},
+		},
+	}
+	s.mt.segments.SetSegment(segmentID, segment)
+
+	for taskID, subJobType := range map[UniqueID]indexpb.StatsSubJob{
+		2001: indexpb.StatsSubJob_JsonKeyIndexJob,
+		2002: indexpb.StatsSubJob_Sort,
+	} {
+		s.mt.statsTaskMeta.tasks.Insert(taskID, &indexpb.StatsTask{
+			CollectionID: collectionID,
+			TaskID:       taskID,
+			SegmentID:    segmentID,
+			SubJobType:   subJobType,
+			State:        indexpb.JobState_JobStateInProgress,
+		})
+	}
+
+	slots := make(map[indexpb.StatsSubJob]int64)
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		st := t.(*statsTask)
+		slots[st.GetSubJobType()] = t.GetTaskSlot()
+	}).Return()
+	s.inspector.scheduler = scheduler
+
+	s.inspector.reloadFromMeta()
+
+	// the json key index task drops the pk column out of its estimation, while
+	// the sort task still reads the whole segment
+	residual := groupSize/numRows - 8
+	s.Equal(calculateStatsTaskSlot(residual*numRows*2), slots[indexpb.StatsSubJob_JsonKeyIndexJob])
+	s.Equal(calculateStatsTaskSlot(segment.getSegmentSize()), slots[indexpb.StatsSubJob_Sort])
+	s.Less(slots[indexpb.StatsSubJob_JsonKeyIndexJob], calculateStatsTaskSlot(segment.getSegmentSize()*2))
+}
+
 func (s *statsInspectorSuite) TestReloadFromMetaExternalStatsTask() {
 	testCases := []struct {
 		name           string
@@ -768,10 +849,12 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 		return int64(size)
 	}
 	pkSize := perRecord(schema.Fields[0])
-	textSize := perRecord(schema.Fields[1])
-	jsonSize := perRecord(schema.Fields[2])
+	// both variable width columns of the group, only used to assert the
+	// estimation is not the raw schema guess
+	schemaGuess := perRecord(schema.Fields[1]) + perRecord(schema.Fields[2])
 	// bytes the two variable width columns really take per row
 	residual := wholeRowSize/numRows - pkSize
+	s.Greater(residual, schemaGuess)
 
 	newSegment := func(collID UniqueID) *SegmentInfo {
 		return &SegmentInfo{
@@ -796,35 +879,38 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 
 	s.Run("sort job reads the whole segment", func() {
 		segment := newSegment(collectionID)
-		s.Equal(segment.getSegmentSize(), s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_Sort))
+		s.Equal(segment.getSegmentSize(), s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_Sort))
 	})
 
-	s.Run("json job only counts json columns", func() {
+	s.Run("json job drops the fixed width columns of the group", func() {
+		// the json column is charged the whole measured residual of the group,
+		// i.e. everything but the pk, doubled for the index it writes
 		segment := newSegment(collectionID)
-		expected := residual * jsonSize / (jsonSize + textSize) * numRows * 2
-		s.Equal(expected, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+		expected := residual * numRows * 2
+		s.Equal(expected, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 		s.Less(expected, segment.getSegmentSize()*2)
 	})
 
-	s.Run("text job only counts match enabled columns and is not doubled", func() {
+	s.Run("text job is not doubled", func() {
 		segment := newSegment(collectionID)
-		expected := residual * textSize / (jsonSize + textSize) * numRows
-		s.Equal(expected, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_TextIndexJob))
+		expected := residual * numRows
+		s.Equal(expected, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_TextIndexJob))
+		s.Less(expected, segment.getSegmentSize())
 	})
 
 	s.Run("collection without the indexed column falls back to segment size", func() {
 		segment := newSegment(1)
-		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 	})
 
 	s.Run("unresolvable collection falls back to segment size", func() {
 		segment := newSegment(999)
-		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 	})
 
 	s.Run("segment without the field binlog falls back to segment size", func() {
 		segment := newSegment(collectionID)
 		segment.Binlogs[0].ChildFields = []int64{pkFieldID}
-		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 	})
 }
