@@ -38,6 +38,7 @@
 #include "query/PlanProto.h"
 #include "rescores/BoostScoreRunner.h"
 #include "segcore/SegmentInterface.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace {
 
@@ -116,10 +117,13 @@ BuildScorerOffsetChunks(ArrowArray* offset_chunks,
     for (auto chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
         auto offset_array_result = arrow::ImportArray(
             &offset_chunks[chunk_idx], &offset_schemas[chunk_idx]);
-        AssertInfo(offset_array_result.ok(),
-                   "failed to import offset chunk {}: {}",
-                   chunk_idx,
-                   offset_array_result.status().ToString());
+        if (!offset_array_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(offset_array_result),
+                "failed to import offset chunk {}: {}",
+                chunk_idx,
+                offset_array_result.status().ToString());
+        }
         auto offset_array = offset_array_result.ValueOrDie();
         if (offset_array->length() == 0) {
             continue;

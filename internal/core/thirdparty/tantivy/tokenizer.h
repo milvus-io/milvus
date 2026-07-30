@@ -8,6 +8,7 @@
 #include "token-stream.h"
 #include "log/Log.h"
 #include "common/Utils.h"
+#include "common/EasyAssert.h"
 namespace milvus::tantivy {
 
 struct Tokenizer {
@@ -94,7 +95,7 @@ validate_analyzer(std::string&& params, std::string&& extra_info) {
     if (len > 0) {
         result = static_cast<int64_t*>(malloc(len * sizeof(int64_t)));
         if (result == nullptr) {
-            throw std::bad_alloc();
+            ThrowInfo(ErrorCode::MemAllocateFailed, "allocation failed");
         }
         std::memcpy(result,
                     array,

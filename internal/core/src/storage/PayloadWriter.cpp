@@ -26,6 +26,7 @@
 #include "storage/PayloadStream.h"
 #include "storage/PayloadWriter.h"
 #include "storage/Util.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
 
@@ -112,7 +113,9 @@ PayloadWriter::finish() {
     AssertInfo(output_ == nullptr, "payload writer has been finished");
     std::shared_ptr<arrow::Array> array;
     auto ast = builder_->Finish(&array);
-    AssertInfo(ast.ok(), ast.ToString());
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast), ast.ToString());
+    }
 
     auto table = arrow::Table::Make(schema_, {array});
     output_ = std::make_shared<storage::PayloadOutputStream>();

@@ -44,6 +44,7 @@
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
+#include "common/EasyAssert.h"
 
 namespace {
 
@@ -119,7 +120,9 @@ ReadManifestColumnGroupsWithFFI(const char* manifest_path,
         loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
         "get external segment manifest");
     if (manifest.manifest == nullptr) {
-        throw std::runtime_error("external segment manifest is nil");
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("external segment manifest is nil"));
     }
 
     auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();

@@ -27,6 +27,7 @@
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
 #include "storage/MmapManager.h"
+#include "common/EasyAssert.h"
 
 namespace milvus {
 /**
@@ -82,8 +83,10 @@ struct VariableLengthChunk {
         uint32_t begin,
         uint32_t length,
         const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
-        throw std::runtime_error(
-            "set should be a template specialization function");
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "{}",
+            std::string("set should be a template specialization function"));
     }
     const ChunkViewType<Type>&
     view(const int i) const {

@@ -31,6 +31,7 @@
 #include "pb/schema.pb.h"
 #include "segcore/Utils.h"
 #include "storage/Util.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -260,17 +261,22 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
     arrow::Status ast;
     if (field_meta_.default_value().has_value()) {
         ast = builder->Reserve(num_rows);
-        AssertInfo(
-            ast.ok(), "reserve arrow builder failed: {}", ast.ToString());
+        if (!ast.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                      "reserve arrow builder failed: {}",
+                      ast.ToString());
+        }
         auto default_scalar =
             storage::CreateArrowScalarFromDefaultValue(field_meta_);
         ast = builder->AppendScalar(*default_scalar, num_rows);
     } else {
         ast = builder->AppendNulls(num_rows);
     }
-    AssertInfo(ast.ok(),
-               "append null/default values to arrow builder failed: {}",
-               ast.ToString());
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                  "append null/default values to arrow builder failed: {}",
+                  ast.ToString());
+    }
 
     arrow::ArrayVector array_vec;
     array_vec.emplace_back(builder->Finish().ValueOrDie());

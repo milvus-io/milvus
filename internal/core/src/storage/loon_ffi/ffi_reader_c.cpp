@@ -38,6 +38,7 @@
 #include "storage/loon_ffi/util.h"
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
+#include "storage/StatusToErrorCode.h"
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -67,7 +68,10 @@ GetLoonReader(
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
     CPluginContext* c_plugin_context) {
     auto result = arrow::ImportSchema(schema);
-    AssertInfo(result.ok(), "Import arrow schema failed");
+    if (!result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "Import arrow schema failed");
+    }
     auto arrow_schema = result.ValueOrDie();
     auto reader = milvus_storage::api::Reader::create(
         column_groups,
@@ -206,9 +210,11 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
 
         arrow::Status status =
             arrow::ExportRecordBatchReader(array_stream, out_stream);
-        AssertInfo(status.ok(),
-                   "failed to export record batch reader, {}",
-                   status.ToString());
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to export record batch reader, {}",
+                      status.ToString());
+        }
 
         return milvus::SuccessCStatus();
     }

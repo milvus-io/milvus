@@ -327,7 +327,11 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
+        // fmt::format returns a std::string; throwing it means catch
+        // (std::exception&) cannot see it, only catch (...). Throw a typed
+        // SegcoreError instead.
+        ThrowInfo(milvus::ErrorCode::Unsupported,
+                  "InvertedIndex.add_data: unsupported data type: {}",
                           typeid(T).name());
     }
 
@@ -457,8 +461,11 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        throw fmt::format(
-            "InvertedIndex.add_array_data: unsupported data type: {}",
+        // fmt::format returns a std::string; throwing it means catch
+        // (std::exception&) cannot see it, only catch (...). Throw a typed
+        // SegcoreError instead.
+        ThrowInfo(milvus::ErrorCode::Unsupported,
+                  "InvertedIndex.add_array_data: unsupported data type: {}",
             typeid(T).name());
     }
 
@@ -541,7 +548,11 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
+        // fmt::format returns a std::string; throwing it means catch
+        // (std::exception&) cannot see it, only catch (...). Throw a typed
+        // SegcoreError instead.
+        ThrowInfo(milvus::ErrorCode::Unsupported,
+                  "InvertedIndex.add_data: unsupported data type: {}",
                           typeid(T).name());
     }
 
@@ -631,8 +642,11 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        throw fmt::format(
-            "InvertedIndex.add_array_data: unsupported data type: {}",
+        // fmt::format returns a std::string; throwing it means catch
+        // (std::exception&) cannot see it, only catch (...). Throw a typed
+        // SegcoreError instead.
+        ThrowInfo(milvus::ErrorCode::Unsupported,
+                  "InvertedIndex.add_array_data: unsupported data type: {}",
             typeid(T).name());
     }
 
@@ -744,8 +758,11 @@ struct TantivyIndexWrapper {
                     reader_, views.data(), len, bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.terms_query: unsupported data type: {}",
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.terms_query: unsupported data type: {}",
                 typeid(T).name());
         }();
 
@@ -804,8 +821,11 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.lower_bound_range_query: unsupported data type: "
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.lower_bound_range_query: unsupported data type: "
                 "{}",
                 typeid(T).name());
         }();
@@ -852,8 +872,11 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.upper_bound_range_query: unsupported data type: "
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.upper_bound_range_query: unsupported data type: "
                 "{}",
                 typeid(T).name());
         }();
@@ -913,8 +936,11 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.range_query: unsupported data type: {}",
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.range_query: unsupported data type: {}",
                 typeid(T).name());
         }();
         auto res = RustResultWrapper(array);
@@ -1182,8 +1208,11 @@ struct TantivyIndexWrapper {
                     reader_, json_path.c_str(), term.c_str(), bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.json_term_query: unsupported data type: {}",
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.json_term_query: unsupported data type: {}",
                 typeid(T).name());
             return RustResult();
         }();
@@ -1340,8 +1369,11 @@ struct TantivyIndexWrapper {
                     reader_, json_path.c_str(), c_strs.data(), n, bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.json_terms_query: unsupported data type: {}",
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.json_terms_query: unsupported data type: {}",
                 typeid(T).name());
             return RustResult();
         }();
@@ -1439,8 +1471,11 @@ struct TantivyIndexWrapper {
                                                         bitset);
             }
 
-            throw fmt::format(
-                "InvertedIndex.json_range_query: unsupported data type: {}",
+            // fmt::format returns a std::string; throwing it means catch
+            // (std::exception&) cannot see it, only catch (...). Throw a typed
+            // SegcoreError instead.
+            ThrowInfo(milvus::ErrorCode::Unsupported,
+                      "InvertedIndex.json_range_query: unsupported data type: {}",
                 typeid(T).name());
             return RustResult();
         }();

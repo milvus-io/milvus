@@ -14,9 +14,12 @@ GetDefaultArrowFileSystem() {
     auto props =
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
     if (!props) {
-        throw std::runtime_error(
-            "GetDefaultArrowFileSystem: LoonFFIPropertiesSingleton not "
-            "initialized");
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "{}",
+            std::string(
+                "GetDefaultArrowFileSystem: LoonFFIPropertiesSingleton not "
+                "initialized"));
     }
     auto result =
         milvus_storage::FilesystemCache::getInstance().get(*props, "");
