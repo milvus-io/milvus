@@ -1091,7 +1091,7 @@ func TestFunctionRunnerManagerMaterializeRequiresAllocation(t *testing.T) {
 	t.Cleanup(manager.Close)
 
 	schema := newBM25SignatureTestSchema()
-	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("message")))
 	require.ErrorContains(t, err, "not allocated")
 	require.False(t, changed)
 	requireFunctionRunnerEntryRemoved(t, manager, 1)
@@ -1105,23 +1105,26 @@ func TestFunctionRunnerManagerMaterializeUsesLifecycleKeyVersion(t *testing.T) {
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 
 	body := newBM25InsertRequest("message")
-	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, body)
+	message := newTestInsertMessage(body)
+	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, message)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
+	require.EqualValues(t, 1, message.mustBodyCalls.Load())
+	require.EqualValues(t, 1, message.overwriteCalls.Load())
 }
 
 func TestFunctionRunnerManagerMaterializeLatestSkipsMissingLifecycleKey(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
-	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newTestInsertMessage(newBM25InsertRequest("message")))
 	require.NoError(t, err)
 	require.False(t, changed)
 
 	schema := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "other", schema))
-	changed, err = manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newBM25InsertRequest("message"))
+	changed, err = manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newTestInsertMessage(newBM25InsertRequest("message")))
 	require.NoError(t, err)
 	require.False(t, changed)
 }
@@ -1133,7 +1136,7 @@ func TestFunctionRunnerManagerMaterializeRejectsVersionMismatch(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 
-	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion()+1, newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion()+1, newTestInsertMessage(newBM25InsertRequest("message")))
 	require.ErrorContains(t, err, "schema version mismatch")
 	require.False(t, changed)
 }
@@ -1146,9 +1149,12 @@ func TestFunctionRunnerManagerMaterializeNoEmbeddingFunction(t *testing.T) {
 	schema.Functions = nil
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 
-	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("message"))
+	message := newTestInsertMessage(newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), message)
 	require.NoError(t, err)
 	require.False(t, changed)
+	require.Zero(t, message.mustBodyCalls.Load())
+	require.Zero(t, message.overwriteCalls.Load())
 }
 
 func TestFunctionRunnerManagerMaterializeNoRunnerBackedFunction(t *testing.T) {
@@ -1167,9 +1173,12 @@ func TestFunctionRunnerManagerMaterializeNoRunnerBackedFunction(t *testing.T) {
 	}
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 
-	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("message"))
+	message := newTestInsertMessage(newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), message)
 	require.NoError(t, err)
 	require.False(t, changed)
+	require.Zero(t, message.mustBodyCalls.Load())
+	require.Zero(t, message.overwriteCalls.Load())
 }
 
 func TestFunctionRunnerManagerMaterializeHonorsContextForInitWaiter(t *testing.T) {
@@ -1193,7 +1202,7 @@ func TestFunctionRunnerManagerMaterializeHonorsContextForInitWaiter(t *testing.T
 
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("first")))
 		firstErr <- err
 	}()
 	<-started
@@ -1201,7 +1210,7 @@ func TestFunctionRunnerManagerMaterializeHonorsContextForInitWaiter(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	changed, err := manager.Materialize(ctx, 1, "v1", schema.GetVersion(), newBM25InsertRequest("second"))
+	changed, err := manager.Materialize(ctx, 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("second")))
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, changed)
 	requireFunctionRunnerReady(t, manager, 1, signature, false)
@@ -1239,14 +1248,14 @@ func TestFunctionRunnerManagerMaterializeHonorsContextForInitCreator(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(ctx, 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
+		_, err := manager.Materialize(ctx, 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("first")))
 		firstErr <- err
 	}()
 	<-started
 
 	secondErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("second"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("second")))
 		secondErr <- err
 	}()
 
@@ -1283,14 +1292,14 @@ func TestFunctionRunnerManagerMaterializeWaitsForInitialBuild(t *testing.T) {
 
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("first")))
 		firstErr <- err
 	}()
 	<-started
 
 	secondErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("second"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("second")))
 		secondErr <- err
 	}()
 
@@ -1335,7 +1344,7 @@ func TestFunctionRunnerManagerMaterializeLeasesInitializedRunners(t *testing.T) 
 	body := newBM25InsertRequest("message")
 	materializeDone := make(chan error, 1)
 	go func() {
-		changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), body)
+		changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(body))
 		if err == nil && !changed {
 			err = errors.New("materialization unexpectedly reported no change")
 		}
@@ -1383,13 +1392,13 @@ func TestFunctionRunnerManagerRetriesFailedInitOnNextRequest(t *testing.T) {
 	})
 	allocSchemaForTest(t, manager, 1, "v1", schema)
 
-	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(newBM25InsertRequest("first")))
 	require.ErrorIs(t, err, expectedErr)
 	require.False(t, changed)
 	requireFunctionRunnerReady(t, manager, 1, signature, false)
 
 	body := newBM25InsertRequest("second")
-	changed, err = manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), body)
+	changed, err = manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(body))
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
@@ -1427,7 +1436,7 @@ func TestFunctionRunnerManagerAllocRetriesFailedInitOnNextRequest(t *testing.T) 
 	var body *msgpb.InsertRequest
 	require.Eventually(t, func() bool {
 		body = newBM25InsertRequest("message")
-		changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), body)
+		changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newTestInsertMessage(body))
 		return err == nil && changed
 	}, time.Second, 10*time.Millisecond)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
@@ -1435,7 +1444,7 @@ func TestFunctionRunnerManagerAllocRetriesFailedInitOnNextRequest(t *testing.T) 
 	requireFunctionRunnerReady(t, manager, 1, signature, true)
 }
 
-func TestFunctionRunnerManagerMaterializeNilSchemaRetriesWithAllocatedSchema(t *testing.T) {
+func TestFunctionRunnerManagerMaterializeLatestRetriesWithAllocatedSchema(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -1465,7 +1474,7 @@ func TestFunctionRunnerManagerMaterializeNilSchemaRetriesWithAllocatedSchema(t *
 	requireFunctionRunnerStateEventually(t, manager, 1, signature, functionRunnerStateFailed)
 
 	body := newBM25InsertRequest("message")
-	changed, err := manager.Materialize(context.Background(), 1, nil, body)
+	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newTestInsertMessage(body))
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
@@ -1802,6 +1811,26 @@ func newSchemaWithAddedFunction(base *schemapb.CollectionSchema) *schemapb.Colle
 
 func cloneCollectionSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
 	return proto.Clone(schema).(*schemapb.CollectionSchema)
+}
+
+type testInsertMessage struct {
+	body           *msgpb.InsertRequest
+	mustBodyCalls  atomic.Int32
+	overwriteCalls atomic.Int32
+}
+
+func newTestInsertMessage(body *msgpb.InsertRequest) *testInsertMessage {
+	return &testInsertMessage{body: body}
+}
+
+func (m *testInsertMessage) MustBody() *msgpb.InsertRequest {
+	m.mustBodyCalls.Add(1)
+	return m.body
+}
+
+func (m *testInsertMessage) OverwriteBody(body *msgpb.InsertRequest) {
+	m.overwriteCalls.Add(1)
+	m.body = body
 }
 
 func newBM25InsertRequest(texts ...string) *msgpb.InsertRequest {
