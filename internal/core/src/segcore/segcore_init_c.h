@@ -64,6 +64,12 @@ void
 SegcoreSetIndexBuildRatio(const float);
 
 void
+SegcoreSetEnableAsyncGrowingIndexBuild(const bool value);
+
+void
+SegcoreSetGrowingIndexBuildPoolRatio(const float value);
+
+void
 SegcoreInterminDenseIndexType(const char*);
 
 CStatus

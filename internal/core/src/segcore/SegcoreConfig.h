@@ -195,6 +195,26 @@ class SegcoreConfig {
     }
 
     void
+    set_enable_async_growing_index_build(bool value) {
+        enable_async_growing_index_build_ = value;
+    }
+
+    bool
+    get_enable_async_growing_index_build() const {
+        return enable_async_growing_index_build_;
+    }
+
+    void
+    set_growing_index_build_pool_ratio(float ratio) {
+        growing_index_build_pool_ratio_ = ratio;
+    }
+
+    float
+    get_growing_index_build_pool_ratio() const {
+        return growing_index_build_pool_ratio_;
+    }
+
+    void
     set_prefer_field_data_when_index_has_raw_data(bool value) {
         prefer_field_data_when_index_has_raw_data_ = value;
     }
@@ -269,6 +289,16 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
+    // Async first build of the growing interim index (spec:
+    // docs/superpowers/specs/2026-07-30-growing-index-async-build-design.md).
+    // SegmentGrowingImpl copies SegcoreConfig by value at segment creation, so
+    // a hot update only affects segments created afterwards; per-segment the
+    // value is immutable, hence a plain bool is race-free.
+    bool enable_async_growing_index_build_ = true;
+    // Capacity ratio (x CPU) of the background build pool; mirrors
+    // queryNode.segcore.interimIndex.buildParallelRate so this layer never
+    // out-submits the knowhere build pool.
+    float growing_index_build_pool_ratio_ = 0.5f;
     inline static bool enable_gis_split_fusion_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static bool reject_remote_vector_output_ = false;
