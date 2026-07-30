@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -229,20 +230,31 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.Equal(vecSize*numRows, size)
 	})
 
-	suite.Run("residual is shared between variable width fields", func() {
+	suite.Run("every variable width field is charged the whole residual", func() {
+		// the schema weights are guesses, so a single variable width column is
+		// charged all the measured variable bytes of its group instead of a
+		// share of them: under-charging a fat column would over-admit tasks
 		residualPerRow := (jsonSize + varcharSize) * 4
 		groupSize := (pkSize + residualPerRow) * numRows
 		segment := newSegment(group(groupSize, pkField, jsonField, varcharField))
 
 		jsonRead, err := estimateFieldsReadSize(schema, segment, []int64{jsonField})
 		suite.NoError(err)
+		suite.Equal(residualPerRow*numRows, jsonRead)
+
 		varcharRead, err := estimateFieldsReadSize(schema, segment, []int64{varcharField})
 		suite.NoError(err)
+		suite.Equal(residualPerRow*numRows, varcharRead)
 
-		// proportional to the schema estimates, summing up to the residual
-		suite.Equal(residualPerRow*jsonSize/(jsonSize+varcharSize)*numRows, jsonRead)
-		suite.Equal(residualPerRow*varcharSize/(jsonSize+varcharSize)*numRows, varcharRead)
-		suite.Less(jsonRead+varcharRead, groupSize)
+		// requesting both does not charge the residual twice
+		bothRead, err := estimateFieldsReadSize(schema, segment, []int64{jsonField, varcharField})
+		suite.NoError(err)
+		suite.Equal(residualPerRow*numRows, bothRead)
+
+		// and the fixed width column of the same group is unaffected
+		pkRead, err := estimateFieldsReadSize(schema, segment, []int64{pkField})
+		suite.NoError(err)
+		suite.Equal(pkSize*numRows, pkRead)
 	})
 
 	suite.Run("schema estimate is used when the group has no residual", func() {
@@ -290,16 +302,58 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.Error(err)
 	})
 
-	suite.Run("field missing from schema", func() {
+	suite.Run("requested field missing from schema", func() {
 		segment := newSegment(group(vecSize*numRows, vecField, 999))
-		_, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		_, err := estimateFieldsReadSize(schema, segment, []int64{999})
 		suite.Error(err)
 	})
 
-	suite.Run("field size not estimable", func() {
+	suite.Run("requested field size not estimable", func() {
 		segment := newSegment(group(vecSize*numRows, vecField, badField))
-		_, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		_, err := estimateFieldsReadSize(schema, segment, []int64{badField})
 		suite.Error(err)
+	})
+
+	suite.Run("group member missing from schema is skipped", func() {
+		// a field dropped after the segment was flushed still shows up in
+		// ChildFields until compaction rewrites the segment: its bytes stay in
+		// the residual instead of aborting the whole group
+		groupSize := (pkSize + vecSize + jsonSize) * numRows
+		segment := newSegment(group(groupSize, pkField, vecField, jsonField, 999))
+		size, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal(vecSize*numRows, size)
+	})
+
+	suite.Run("group member of unestimable size is skipped", func() {
+		groupSize := (pkSize + vecSize + jsonSize) * numRows
+		segment := newSegment(group(groupSize, pkField, vecField, jsonField, badField))
+		size, err := estimateFieldsReadSize(schema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal(vecSize*numRows, size)
+	})
+
+	suite.Run("system fields of a group are charged as fixed width", func() {
+		// real external segments list RowID(0) and Timestamp(1) in ChildFields,
+		// both Int64 in the persisted schema
+		sysSchema := &schemapb.CollectionSchema{
+			Fields: append([]*schemapb.FieldSchema{
+				{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: 1, Name: "timestamp", DataType: schemapb.DataType_Int64},
+			}, schema.Fields...),
+		}
+		residualPerRow := jsonSize * 4
+		groupSize := (8 + 8 + pkSize + residualPerRow) * numRows
+		segment := newSegment(group(groupSize, 0, 1, pkField, jsonField))
+
+		size, err := estimateFieldsReadSize(sysSchema, segment, []int64{0})
+		suite.NoError(err)
+		suite.Equal(int64(8)*numRows, size)
+
+		// the two system columns eat 16B/row out of the json residual
+		size, err = estimateFieldsReadSize(sysSchema, segment, []int64{jsonField})
+		suite.NoError(err)
+		suite.Equal(residualPerRow*numRows, size)
 	})
 
 	suite.Run("unrecognized data type", func() {
@@ -310,8 +364,36 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 			},
 		}
 		segment := newSegment(group(pkSize*numRows, pkField, vecField))
-		_, err := estimateFieldsReadSize(unknownSchema, segment, []int64{pkField})
+		_, err := estimateFieldsReadSize(unknownSchema, segment, []int64{vecField})
 		suite.Error(err)
+	})
+}
+
+func (suite *UtilSuite) TestCollectionCache() {
+	const collectionID = int64(7)
+	coll := &collectionInfo{ID: collectionID}
+
+	suite.Run("resolves once and memoizes", func() {
+		handler := NewNMockHandler(suite.T())
+		handler.EXPECT().GetCollection(mock.Anything, collectionID).Return(coll, nil).Once()
+
+		cache := newCollectionCache(handler)
+		suite.Equal(coll, cache.get(context.Background(), collectionID))
+		suite.Equal(coll, cache.get(context.Background(), collectionID))
+	})
+
+	suite.Run("memoizes misses too", func() {
+		handler := NewNMockHandler(suite.T())
+		handler.EXPECT().GetCollection(mock.Anything, collectionID).
+			Return(nil, errors.New("mock rootcoord unreachable")).Once()
+
+		cache := newCollectionCache(handler)
+		suite.Nil(cache.get(context.Background(), collectionID))
+		suite.Nil(cache.get(context.Background(), collectionID))
+	})
+
+	suite.Run("no handler", func() {
+		suite.Nil(resolveCollection(context.Background(), nil, collectionID))
 	})
 }
 
