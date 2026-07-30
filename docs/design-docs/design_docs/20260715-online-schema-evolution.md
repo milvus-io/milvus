@@ -134,7 +134,7 @@ schema:
 
 | View | Contains | Used by |
 |------|----------|---------|
-| Full schema view | Every non-physically-removed field and its internal lifecycle state | Storage, recovery, backfill, function runtime, cleanup |
+| Full schema view | Every non-metadata-removed field and its internal lifecycle state | Storage, recovery, backfill, function runtime, cleanup |
 | Write schema view | Fields accepted by the target schema for DML; function-output and dropping restrictions still apply | Proxy insert/upsert validation, StreamingNode function materialization, DataNode backfill |
 | Read schema view | Visible fields only | Search/query planning, output field validation, user-facing index/query operations |
 | Describe schema view | User-visible schema plus field lifecycle status for pending/dropping fields | `DescribeCollection`, admin/debug visibility |
@@ -187,13 +187,18 @@ create invisible field -> build snapshot data/index/query view -> publish visibl
 For drop field/function field:
 
 ```
-mark invisible/dropping -> drain stale read/write windows -> physically remove field
+mark invisible/dropping -> drain stale read/write windows -> publish dropped/final metadata
 ```
 
 Atomic Switch is a durable RootCoord publish record binding the read-schema
 version to a collection data-view identity. It is not a broadcaster fast ACK,
 Proxy cache invalidation, or a globally comparable WAL TimeTick. A reader must
 never observe the published read schema with a partially built data view.
+
+The write-schema version sequence for one schema evolution is always
+`N -> N+1 -> N+1`. Phase 1 installs the target write-schema epoch and advances
+the schema version. Phase 2 publishes visibility or final drop metadata without
+creating another write/segment schema epoch.
 
 For the Milvus 3.0 rollout, this atomic switch is a target model rather than a
 full semantic commitment. The first deliverable is a safe serialized path that
@@ -209,7 +214,7 @@ components and existing schema states.
 |----------|----------------|--------------------------|---------------------------|
 | Write Only | Install a schema that write/internal paths can understand while the user read view keeps the field invisible | `FieldCreating`: write path and backfill can materialize the field; read view hides it | `FieldDropping`: the read view hides the field; stale requests fail safely |
 | Data Build | Build or drain the data/index/query state needed before user semantics change | Bind the operation to a snapshot, backfill historical data, build indexes, load function runtime, and build a candidate data view | Expire Proxy schema caches, apply QueryNode barriers, drain in-flight plans, propagate distribution updates |
-| Atomic Switch | Publish the user-visible schema and the matching immutable data-view boundary after gates pass | Promote `FieldCreating -> FieldCreated`, expose the field in the read view, and publish the bound data view together | Physically remove the field, carry `DroppedFieldIds`, cascade index cleanup, and publish the removal data view |
+| Atomic Switch | Publish the user-visible schema and the matching immutable data-view boundary after gates pass | Promote `FieldCreating -> FieldCreated`, expose the field in the read view, and publish the bound data view together while keeping schema version `N+1` | Publish final dropped metadata or metadata removal, carry `DroppedFieldIds`, cascade index cleanup, and publish the removal data view while keeping schema version `N+1` |
 
 The important invariant is that user-visible semantics change only at the
 Atomic Switch step, where the read-schema version and data-view identity advance
@@ -272,9 +277,11 @@ names verbatim.
 3. The publish operation changes only `FieldCreating -> FieldCreated` and binds
    the visible read schema to the completed data view.
 4. Drop operations first change `FieldCreated -> FieldDropping`.
-5. Physical removal happens only after the drop drain gate passes.
+5. The `FieldDropping -> FieldDropped` transition or final metadata removal
+   happens after the drop drain gate passes, but it does not wait for physical
+   field-binlog deletion.
 6. `max_field_id` remains monotonic across all states and after physical
-   removal.
+   metadata removal.
 
 ### 3.3 Schema View Helpers
 
@@ -353,7 +360,7 @@ schema recovery.
 +----------------------------+
 | RootCoord phase 2          |
 | - promote visible          |
-| - or physically remove     |
+| - or finalize drop metadata|
 | - broadcast AlterCollection|
 +----------------------------+
 ```
@@ -472,10 +479,11 @@ required gates pass:
 Promotion:
 
 1. RootCoord changes `FieldCreating -> FieldCreated`.
-2. RootCoord increments schema version again.
+2. RootCoord keeps the target schema version from phase 1 (`N+1`); this publish
+   does not create another write-schema epoch.
 3. RootCoord persists one publish record binding the visible read-schema version
    and the completed data-view identity.
-4. RootCoord broadcasts another `AlterCollectionMessage`.
+4. RootCoord broadcasts another cluster-local `AlterCollectionMessage`.
 5. Proxy/QueryNode read schema views expose the field only with that bound data
    view.
 
@@ -590,7 +598,7 @@ Read/write behavior:
 
 ### 7.2 Drop Drain Gate
 
-Before physical removal, the system waits for:
+Before final dropped metadata is published, the system waits for:
 
 1. Proxy cache expiration for the collection schema.
 2. QueryNode schema barrier application for loaded collections.
@@ -598,14 +606,18 @@ Before physical removal, the system waits for:
    expiration of a configured drain window.
 4. Existing QueryCoord distribution updates have propagated.
 
-### 7.3 Phase 2: Physical Removal
+### 7.3 Phase 2: Finalize Drop Metadata
 
 RootCoord:
 
-1. Builds a new schema without the dropped field.
+1. Builds a final schema where the dropped field is either represented as a
+   `FieldDropped` tombstone or removed from the main field list according to the
+   chosen metadata policy.
 2. Keeps `max_field_id` unchanged or advanced, never decreased.
 3. Carries `DroppedFieldIds` in the `AlterCollectionMessage` header.
-4. Broadcasts the physical-removal schema.
+4. Keeps the phase-1 target schema version (`N+1`); this broadcast does not
+   create another write/segment schema epoch.
+5. Broadcasts the final-drop schema as a cluster-local phase-2 message.
 
 Ack callback:
 
@@ -619,6 +631,11 @@ QueryNode/Segcore:
 - Keep skipping binlogs/indexes whose fields no longer exist in schema.
 - Return `FieldIDInvalid` for stale read plans that reference the removed field.
 - The Go merr mapping classifies segcore code 2020 as input error.
+
+Physical field data deletion is not part of the `FieldDropping -> FieldDropped`
+state transition. Compaction or GC that removes old field binlogs runs
+asynchronously after metadata has made the field unavailable to user reads and
+writes.
 
 ---
 
@@ -638,12 +655,16 @@ reference in the same schema update. The function metadata and output fields
 move through the same lifecycle. This proposal does not support preserving the
 output field after function metadata is removed.
 
-### 8.2 Physical Removal
+### 8.2 Final Drop Metadata
 
-- phase 2 removes output fields from schema;
+- phase 2 marks output fields dropped or removes them from the main schema
+  metadata;
 - `DroppedFieldIds` includes every removed output field;
 - bound indexes are cascade-dropped inline;
 - field IDs are not reused.
+
+As with ordinary fields, physical function-output data cleanup is asynchronous
+and is not a prerequisite for the dropped state.
 
 Preserving the output field as a normal field after removing function metadata
 is not part of this schema evolution contract.
@@ -1069,6 +1090,12 @@ data processing, refresh, IDF, and index readiness checks. The cross-cluster
 contract is data equivalence after the external computation/backfill completes,
 not segment-level WAL replay of primary-side readiness state.
 
+Phase 2 broadcasts are cluster-local. They must not be replicated from the
+primary cluster to backup/secondary clusters, because the secondary's readiness
+gates may complete at a different time and over a different segment layout. A
+secondary cluster emits its own local Phase 2 broadcast only after its local
+backfill/index/IDF/refresh/query gates pass.
+
 ### 15.5 Milvus 3.0 Rollout Boundary
 
 The first production iteration should prioritize the safety fix agreed in the
@@ -1142,7 +1169,8 @@ versions and is a separate design.
 ### Phase 6: Drop Cleanup
 
 1. Implement `FieldDropping` drain gate.
-2. Physical schema removal with `DroppedFieldIds`.
+2. Publish final dropped metadata or metadata removal with `DroppedFieldIds`
+   while keeping schema version `N+1`.
 3. Verify cascade index deletion remains idempotent.
 
 ---
@@ -1156,7 +1184,7 @@ versions and is a separate design.
 | metastore model | FieldState marshal/unmarshal; missing state compatibility |
 | typeutil/schemautil | read/write/full/describe schema views; struct field handling |
 | proxy | invisible fields hidden from read planning; describe exposes lifecycle status; accepted/rejected write cases |
-| rootcoord | add phase 1, promote phase 2, drop phase 1, physical removal |
+| rootcoord | add phase 1, promote phase 2, drop phase 1, final drop metadata |
 | streamingnode | schema-change TimeTick boundary; segment schema version stamping/recovery; destructive mismatch rejection |
 | datacoord | snapshot-scoped backfill readiness; fenced commit; function output index readiness; external refresh readiness |
 | querycoord | schema barrier/query/load/balance/data-view readiness aggregation |
