@@ -46,6 +46,35 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
+namespace {
+
+class LatestDeleteSnapshotOptimizationGuard {
+ public:
+    explicit LatestDeleteSnapshotOptimizationGuard(bool enabled)
+        : original_(
+              ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.exchange(enabled)) {
+    }
+
+    ~LatestDeleteSnapshotOptimizationGuard() {
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_);
+    }
+
+ private:
+    bool original_;
+};
+
+void
+SearchDirectDeleteOffsets(
+    const std::vector<PkType>& pks,
+    const Timestamp* timestamps,
+    std::function<void(SegOffset offset, Timestamp ts)> cb) {
+    for (size_t i = 0; i < pks.size(); ++i) {
+        cb(SegOffset(std::get<int64_t>(pks[i])), timestamps[i]);
+    }
+}
+
+}  // namespace
+
 TEST(DeleteMVCC, common_case) {
     milvus::exec::expression::FunctionFactory& factory =
         milvus::exec::expression::FunctionFactory::Instance();
@@ -174,6 +203,91 @@ TEST(DeleteMVCC, common_case) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
         }
     }
+}
+
+TEST(DeleteMVCC, LatestSnapshotCoversDeletesLoadedBeforeOlderStreamPush) {
+    LatestDeleteSnapshotOptimizationGuard guard(true);
+
+    constexpr int64_t row_count = 2;
+    DeletedRecord<true> delete_record(nullptr, SearchDirectDeleteOffsets, 0);
+    delete_record.set_sealed_row_count(row_count);
+
+    std::vector<PkType> newer_pk = {1};
+    std::vector<Timestamp> newer_ts = {200};
+    delete_record.LoadPush(newer_pk, newer_ts.data());
+
+    std::vector<PkType> older_pk = {0};
+    std::vector<Timestamp> older_ts = {100};
+    delete_record.StreamPush(older_pk, older_ts.data());
+
+    BitsetType between(row_count);
+    BitsetTypeView between_view(between);
+    delete_record.Query(between_view, row_count, 150);
+    EXPECT_TRUE(between_view[0]);
+    EXPECT_FALSE(between_view[1]);
+
+    BitsetType after(row_count);
+    BitsetTypeView after_view(after);
+    delete_record.Query(after_view, row_count, 200);
+    EXPECT_TRUE(after_view[0]);
+    EXPECT_TRUE(after_view[1]);
+}
+
+TEST(DeleteMVCC, LatestSnapshotTimestampDoesNotRegressAcrossStreamPushes) {
+    LatestDeleteSnapshotOptimizationGuard guard(true);
+
+    constexpr int64_t row_count = 2;
+    DeletedRecord<true> delete_record(nullptr, SearchDirectDeleteOffsets, 0);
+    delete_record.set_sealed_row_count(row_count);
+
+    std::vector<PkType> newer_pk = {1};
+    std::vector<Timestamp> newer_ts = {200};
+    delete_record.StreamPush(newer_pk, newer_ts.data());
+
+    std::vector<PkType> older_pk = {0};
+    std::vector<Timestamp> older_ts = {100};
+    delete_record.StreamPush(older_pk, older_ts.data());
+
+    BitsetType between(row_count);
+    BitsetTypeView between_view(between);
+    delete_record.Query(between_view, row_count, 150);
+    EXPECT_TRUE(between_view[0]);
+    EXPECT_FALSE(between_view[1]);
+
+    BitsetType after(row_count);
+    BitsetTypeView after_view(after);
+    delete_record.Query(after_view, row_count, 200);
+    EXPECT_TRUE(after_view[0]);
+    EXPECT_TRUE(after_view[1]);
+}
+
+TEST(DeleteMVCC, LatestSnapshotCoversDeletesPushedWhileOptimizationDisabled) {
+    LatestDeleteSnapshotOptimizationGuard guard(false);
+
+    constexpr int64_t row_count = 2;
+    DeletedRecord<true> delete_record(nullptr, SearchDirectDeleteOffsets, 0);
+    delete_record.set_sealed_row_count(row_count);
+
+    std::vector<PkType> newer_pk = {1};
+    std::vector<Timestamp> newer_ts = {200};
+    delete_record.StreamPush(newer_pk, newer_ts.data());
+
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+    std::vector<PkType> older_pk = {0};
+    std::vector<Timestamp> older_ts = {100};
+    delete_record.StreamPush(older_pk, older_ts.data());
+
+    BitsetType between(row_count);
+    BitsetTypeView between_view(between);
+    delete_record.Query(between_view, row_count, 150);
+    EXPECT_TRUE(between_view[0]);
+    EXPECT_FALSE(between_view[1]);
+
+    BitsetType after(row_count);
+    BitsetTypeView after_view(after);
+    delete_record.Query(after_view, row_count, 200);
+    EXPECT_TRUE(after_view[0]);
+    EXPECT_TRUE(after_view[1]);
 }
 
 TEST(DeleteMVCC, normal_caller_filters_delete_before_or_at_insert_timestamp) {

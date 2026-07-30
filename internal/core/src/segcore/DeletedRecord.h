@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -103,6 +104,7 @@ class DeletedRecord {
         }
 
         auto max_deleted_ts = InternalPush(pks, timestamps);
+        max_delete_timestamp_ = std::max(max_delete_timestamp_, max_deleted_ts);
 
         if (max_deleted_ts > max_load_timestamp_) {
             max_load_timestamp_ = max_deleted_ts;
@@ -120,9 +122,10 @@ class DeletedRecord {
         }
 
         auto max_ts = InternalPush(pks, timestamps);
+        max_delete_timestamp_ = std::max(max_delete_timestamp_, max_ts);
 
         if (ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load()) {
-            UpdateLatestSnapshot(max_ts);
+            UpdateLatestSnapshot(max_delete_timestamp_);
         }
 
         bool can_dump = timestamps[0] >= max_load_timestamp_;
@@ -429,6 +432,9 @@ class DeletedRecord {
     std::shared_ptr<SortedDeleteList> deleted_lists_;
     // max timestamp of deleted records which replayed in load process
     Timestamp max_load_timestamp_{0};
+    // max timestamp of all delete batches processed by this record;
+    // a conservative upper bound for every delete in deleted_mask_
+    Timestamp max_delete_timestamp_{0};
     int32_t sealed_row_count_;
     // used to remove duplicated deleted records for fast access
     BitsetType deleted_mask_;
