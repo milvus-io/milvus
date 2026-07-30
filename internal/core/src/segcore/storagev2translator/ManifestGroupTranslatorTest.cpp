@@ -522,6 +522,57 @@ TEST_P(ManifestGroupTranslatorTest,
     EXPECT_EQ(meta->chunk_memory_size_, expected_cell_sizes);
 }
 
+TEST_P(ManifestGroupTranslatorTest, TestPrecomputedColumnEstimatesAreReused) {
+    const auto& column_group = test_data_->GetColumnGroups()->at(0);
+    ASSERT_GT(column_group->columns.size(), 1);
+
+    auto all_columns =
+        std::make_shared<std::vector<std::string>>(column_group->columns);
+    auto estimate_reader = test_data_->CreateChunkReader(0, all_columns);
+    auto size_estimate = FetchColumnSizeEstimates(*estimate_reader);
+    ASSERT_TRUE(size_estimate.error.empty());
+    ASSERT_NE(size_estimate.sizes, nullptr);
+
+    size_t column_lookup_count = 0;
+    auto all_field_metas = test_data_->GetFieldMetas(0);
+    for (size_t i = 0; i < 2; ++i) {
+        const auto& projected_column = column_group->columns[i];
+        auto needed_columns = std::make_shared<std::vector<std::string>>(
+            std::initializer_list<std::string>{projected_column});
+        auto chunk_reader = std::make_unique<ColumnEstimateTestChunkReader>(
+            test_data_->CreateChunkReader(0, needed_columns),
+            /*total_estimate_available=*/true,
+            ColumnEstimateMode::PASSTHROUGH,
+            &column_lookup_count);
+        auto field_id = FieldId(std::stoll(projected_column));
+        std::unordered_map<FieldId, FieldMeta> field_metas;
+        field_metas.emplace(field_id, all_field_metas.at(field_id));
+
+        auto translator = std::make_unique<ManifestGroupTranslator>(
+            segment_id_,
+            GroupChunkType::DEFAULT,
+            /*column_group_index=*/0,
+            std::move(chunk_reader),
+            field_metas,
+            column_group->columns,
+            *needed_columns,
+            GetParam(),
+            /*mmap_populate=*/true,
+            mmap_dir_,
+            /*num_fields=*/1,
+            milvus::proto::common::LoadPriority::LOW,
+            /*eager_load=*/false,
+            /*warmup_policy=*/"",
+            projected_column,
+            /*fallback_bytes_per_row=*/0,
+            /*shard=*/"",
+            size_estimate);
+        auto meta = static_cast<GroupCTMeta*>(translator->meta());
+        EXPECT_FALSE(meta->chunk_memory_size_.empty());
+    }
+    EXPECT_EQ(column_lookup_count, 0);
+}
+
 TEST_P(ManifestGroupTranslatorTest,
        TestProjectedColumnUsesProjectedEstimatedSize) {
     const auto& column_group = test_data_->GetColumnGroups()->at(0);

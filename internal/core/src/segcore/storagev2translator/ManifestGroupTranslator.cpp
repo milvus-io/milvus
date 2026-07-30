@@ -62,6 +62,17 @@ namespace milvus::segcore::storagev2translator {
 // See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
 static std::atomic<uint64_t> g_mmap_path_generation{0};
 
+ColumnSizeEstimateResult
+FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
+    auto column_size_result = chunk_reader.get_chunk_column_estimated_size();
+    if (!column_size_result.ok()) {
+        return {nullptr, column_size_result.status().ToString()};
+    }
+    auto sizes = std::make_shared<const ColumnSizeEstimateMatrix>(
+        std::move(column_size_result).ValueOrDie());
+    return {std::move(sizes), ""};
+}
+
 ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t segment_id,
     GroupChunkType group_chunk_type,
@@ -79,7 +90,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& warmup_policy,
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
-    std::string shard)
+    std::string shard,
+    std::optional<ColumnSizeEstimateResult> column_size_estimate)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -158,13 +170,20 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     }
 
     if (projected_estimate_available) {
-        auto column_size_result =
-            chunk_reader_->get_chunk_column_estimated_size();
-        if (!column_size_result.ok()) {
+        if (!column_size_estimate.has_value()) {
+            column_size_estimate = FetchColumnSizeEstimates(*chunk_reader_);
+        }
+
+        projected_estimate_error = column_size_estimate->error;
+        if (!projected_estimate_error.empty() ||
+            column_size_estimate->sizes == nullptr) {
             projected_estimate_available = false;
-            projected_estimate_error = column_size_result.status().ToString();
+            if (projected_estimate_error.empty()) {
+                projected_estimate_error =
+                    "column size estimate result contains no data";
+            }
         } else {
-            auto all_column_sizes = std::move(column_size_result).ValueOrDie();
+            const auto& all_column_sizes = *column_size_estimate->sizes;
             if (all_column_sizes.size() != column_group_columns.size()) {
                 projected_estimate_available = false;
                 projected_estimate_error = fmt::format(

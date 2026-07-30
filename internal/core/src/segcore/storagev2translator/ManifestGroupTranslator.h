@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -40,6 +41,19 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {
+
+using ColumnSizeEstimateMatrix = std::vector<std::vector<uint64_t>>;
+
+struct ColumnSizeEstimateResult {
+    std::shared_ptr<const ColumnSizeEstimateMatrix> sizes;
+    std::string error;
+};
+
+/**
+ * @brief Fetch the complete column-by-chunk estimate matrix once.
+ */
+ColumnSizeEstimateResult
+FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader);
 
 /**
  * @brief Translator for loading column groups from milvus storage manifest
@@ -84,7 +98,9 @@ class ManifestGroupTranslator
         const std::string& warmup_policy,
         const std::string& cache_key_suffix = "",
         int64_t fallback_bytes_per_row = 0,
-        std::string shard = "");
+        std::string shard = "",
+        std::optional<ColumnSizeEstimateResult> column_size_estimate =
+            std::nullopt);
     ~ManifestGroupTranslator() = default;
 
     /**

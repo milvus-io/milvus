@@ -1207,16 +1207,22 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     }
 
     // Lazy JSON stats columns are loaded through per-column projected readers,
-    // same as lazy storage-v2 column-group entries. This avoids co-loading
-    // sibling JSON paths when a query touches only one shredding column.
-    // TODO: This only projects the actual read path. ManifestGroupTranslator
-    // still estimates cache cell size from ChunkReader::get_chunk_size(), which
-    // currently reports full row-group size instead of projected-column size.
-    // Keep the conservative estimate until milvus-storage makes
-    // ChunkReader::get_chunk_size() projection-aware.
+    // same as lazy storage-v2 column-group entries. Fetch the complete estimate
+    // matrix once and pass that temporary result to each projected translator.
     auto all_columns = std::make_shared<std::vector<std::string>>(column_names);
     auto reader = milvus_storage::api::Reader::create(
         column_groups, nullptr, all_columns, properties);
+    auto estimate_reader_result = reader->get_chunk_reader(0, all_columns);
+    AssertInfo(estimate_reader_result.ok(),
+               "[JsonStats] failed to create estimate chunk reader for column "
+               "group {} segment {}: {}",
+               column_group_id,
+               segment_id_,
+               estimate_reader_result.status().ToString());
+    auto estimate_chunk_reader = std::move(estimate_reader_result).ValueOrDie();
+    auto size_estimate =
+        milvus::segcore::storagev2translator::FetchColumnSizeEstimates(
+            *estimate_chunk_reader);
     for (size_t i = 0; i < milvus_field_ids.size(); ++i) {
         const auto& inner_field_id = milvus_field_ids[i];
         const auto& column_name = column_names[i];
@@ -1257,7 +1263,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             warmup_policy,
             fmt::format("jks_{}_{}", field_id_, inner_field_id.get()),
             /*fallback_bytes_per_row=*/0,
-            shard_);
+            shard_,
+            size_estimate);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
