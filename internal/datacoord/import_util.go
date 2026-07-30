@@ -824,10 +824,12 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 	// the storage type is local. Denying them on a MinIO-backed cluster would
 	// reject caller paths Milvus never writes -- <minio.rootPath>/tmp/... being
 	// the one people actually stage imports under.
+	localStorage := paramtable.Get().CommonCfg.StorageType.GetValue() == "local"
+
 	segments := make([]string, 0,
 		len(common.InternalStorageRootSegments)+len(common.LocalOnlyStorageRootSegments))
 	segments = append(segments, common.InternalStorageRootSegments...)
-	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
+	if localStorage {
 		segments = append(segments, common.LocalOnlyStorageRootSegments...)
 	}
 
@@ -839,6 +841,19 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 
 	for _, file := range files {
 		for _, filePath := range file.GetPaths() {
+			// The deny entries are anchored at the storage root, but under local
+			// storage the read is os.Open, which resolves a relative key against
+			// the datanode's working directory instead. The two namespaces never
+			// meet, so a relative key can never match a deny entry no matter how
+			// it is normalized -- with WORKDIR /milvus and
+			// localStorage.path=/milvus/data, "data/snapshots/..." reads the
+			// snapshot directory while comparing as "/data/snapshots/...".
+			// Every legitimate local staging path is absolute, so refuse the rest.
+			if localStorage && !path.IsAbs(filePath) {
+				return merr.WrapErrImportFailedMsg(
+					"import path %s must be absolute under common.storageType=local", filePath)
+			}
+
 			cleaned := normalizeStorageKey(filePath)
 			for _, deniedPath := range denied {
 				// Boundary match, not a raw prefix match: a raw prefix would also

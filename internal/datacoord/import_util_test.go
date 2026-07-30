@@ -1542,6 +1542,18 @@ func TestValidateImportFilePaths(t *testing.T) {
 		// write it, so a caller directory of that name must pass.
 		{"remote root, cache-named dir", "files", "files/cache/mine.json", nil, false, "remote"},
 
+		// A relative key is resolved by os.Open against the datanode working
+		// directory, not against the storage root the deny entries are anchored
+		// at, so it could never match one. With WORKDIR /milvus and
+		// localStorage.path=/milvus/data this reads the snapshot dir while
+		// comparing as "/data/snapshots/...".
+		{"local root, relative path refused", "/milvus/data", "data/snapshots/449/metadata/12.json", nil, true, "local"},
+		{"local root, relative staging path refused too", "/milvus/data", "staging/a.json", nil, true, "local"},
+
+		// Remote keys are relative by nature and are used literally by S3, so the
+		// rule must not leak outside local storage.
+		{"remote root, relative path is normal", "files", "staging/a.json", nil, false, "remote"},
+
 		// Woodpecker writes under BOTH roots, so it stays denied on remote.
 		{"remote root, woodpecker still denied", "files", "files/wp/0/1/2.log", nil, true, "remote"},
 		{"exact directory with no trailing content", "files", "files/insert_log", nil, true, ""},
