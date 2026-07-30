@@ -127,6 +127,16 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes);
 void
 SetStorageV2AsyncLoadEnabled(bool enabled);
 
+// Target estimated-byte threshold for one storage v2 async read window.
+// Zero disables size-based splitting while preserving file/contiguity splits.
+// A window always contains at least one cell, so an oversized cell may exceed
+// the configured threshold.
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
+
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes();
+
 #ifdef __cplusplus
 };
 #endif

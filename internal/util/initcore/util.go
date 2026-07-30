@@ -257,6 +257,14 @@ func UpdateStorageV2AsyncLoadEnabled(enabled bool) {
 	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
 }
 
+func UpdateStorageV2AsyncLoadReadWindowSizeBytes(bytes int64) {
+	C.SetStorageV2AsyncLoadReadWindowSizeBytes(C.int64_t(bytes))
+}
+
+func GetStorageV2AsyncLoadReadWindowSizeBytes() int64 {
+	return int64(C.GetStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
 }

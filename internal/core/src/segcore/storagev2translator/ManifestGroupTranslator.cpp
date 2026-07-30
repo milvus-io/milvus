@@ -658,7 +658,6 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
     milvus::OpContext* ctx, std::vector<milvus::segcore::CellSpec> cell_specs) {
     AsyncLoadPipelineOptions options{
         .segment_id = segment_id_,
-        .read_window_bytes = FieldDataReadWindowBytes(),
         .load_priority = load_priority_,
     };
     if (use_mmap_) {

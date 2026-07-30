@@ -47,6 +47,7 @@
 #include "gtest/gtest.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
@@ -431,6 +432,102 @@ TEST_F(AsyncLoadPipelineTest, BuildsContiguousReadWindows) {
     EXPECT_EQ(windows[0].budget_bytes, 12);
     EXPECT_EQ(windows[1].chunk_indices, (std::vector<int64_t>{4, 5}));
     EXPECT_EQ(windows[2].chunk_indices, (std::vector<int64_t>{8}));
+}
+
+TEST_F(AsyncLoadPipelineTest, ZeroReadWindowDisablesSizeBasedSplitting) {
+    std::vector<CellSpec> cells{
+        {.cid = 0,
+         .file_idx = 0,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 8},
+        {.cid = 1,
+         .file_idx = 0,
+         .local_rg_offset = 1,
+         .rg_count = 1,
+         .memory_size = 8},
+        {.cid = 2,
+         .file_idx = 0,
+         .local_rg_offset = 2,
+         .rg_count = 1,
+         .memory_size = 8},
+        {.cid = 3,
+         .file_idx = 0,
+         .local_rg_offset = 4,
+         .rg_count = 1,
+         .memory_size = 8},
+        {.cid = 4,
+         .file_idx = 1,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 8},
+    };
+
+    auto windows = BuildAsyncReadWindows(cells, 0);
+
+    ASSERT_EQ(windows.size(), 3);
+    EXPECT_EQ(windows[0].chunk_indices, (std::vector<int64_t>{0, 1, 2}));
+    EXPECT_EQ(windows[1].chunk_indices, (std::vector<int64_t>{4}));
+    EXPECT_EQ(windows[2].chunk_indices, (std::vector<int64_t>{0}));
+    ASSERT_EQ(windows[2].cells.size(), 1);
+    EXPECT_EQ(windows[2].cells.front().cid, 4);
+}
+
+TEST_F(AsyncLoadPipelineTest, AsyncReadWindowConfigAllowsZero) {
+    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
+    auto restore = folly::makeGuard(
+        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(0);
+    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(), 0);
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024);
+    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(), 32 * 1024 * 1024);
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(-1);
+    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(),
+              kDefaultStorageV2AsyncLoadReadWindowSizeBytes);
+}
+
+TEST_F(AsyncLoadPipelineTest, DefaultOptionsUseConfiguredReadWindow) {
+    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
+    auto restore = folly::makeGuard(
+        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    std::vector<CellSpec> cells{
+        {.cid = 0,
+         .file_idx = 0,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 8},
+        {.cid = 1,
+         .file_idx = 0,
+         .local_rg_offset = 1,
+         .rg_count = 1,
+         .memory_size = 8},
+        {.cid = 2,
+         .file_idx = 0,
+         .local_rg_offset = 2,
+         .rg_count = 1,
+         .memory_size = 8},
+    };
+    auto run = [this, &cells](int64_t window_size) {
+        SetStorageV2AsyncLoadReadWindowSizeBytes(window_size);
+        auto reader = std::make_shared<FakeChunkReader>(&executor_);
+        auto options = AsyncLoadPipelineOptions{};
+        options.segment_id = 100;
+        options.executor = &executor_;
+        auto results = folly::coro::blockingWait(LoadCellsAsync(
+            nullptr,
+            cells,
+            reader,
+            [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
+            std::move(options)));
+        EXPECT_EQ(results.size(), cells.size());
+        return reader->AsyncCalls();
+    };
+
+    EXPECT_EQ(run(0), 1);
+    EXPECT_EQ(run(1), cells.size());
 }
 
 TEST_F(AsyncLoadPipelineTest, RestoresRequestedCellOrder) {
