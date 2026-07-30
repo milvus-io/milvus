@@ -3333,17 +3333,20 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cases := []struct {
-		name       string
-		src, spec  string
-		wantSubstr string
+		name          string
+		src, spec     string
+		wantSubstr    string
+		secretSubstrs []string
 	}{
-		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
-		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
-		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
-		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
-		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
-		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
-		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
+		{"source only rejected", "s3://SOURCE_ACCESS_SENTINEL:SOURCE_SECRET_SENTINEL@bucket/p", "", "both provided or both omitted", []string{"SOURCE_ACCESS_SENTINEL", "SOURCE_SECRET_SENTINEL"}},
+		{"spec only rejected", "", `{"format":"parquet","extfs":{"access_key_id":"AKIA_ERROR_SENTINEL","access_key_value":"SECRET_ERROR_SENTINEL"}}`, "both provided or both omitted", []string{"AKIA_ERROR_SENTINEL", "SECRET_ERROR_SENTINEL"}},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, "external_source is invalid", nil},
+		{"invalid format value redacted", "s3://bucket/prefix", `{"format":"FORMAT_REFRESH_SECRET_SENTINEL"}`, "external_spec is invalid", []string{"FORMAT_REFRESH_SECRET_SENTINEL"}},
+		{"invalid extfs value redacted", "s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_refresh_secret_sentinel"}}`, "external_spec is invalid", []string{"cloud_provider_refresh_secret_sentinel"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3356,6 +3359,9 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 			if tc.wantSubstr != "" {
 				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
+			}
+			for _, secret := range tc.secretSubstrs {
+				assert.NotContains(t, resp.GetStatus().GetReason(), secret)
 			}
 		})
 	}

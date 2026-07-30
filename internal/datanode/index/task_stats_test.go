@@ -17,6 +17,7 @@
 package index
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +46,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type statsTaskLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*statsTaskLogBuffer) Sync() error {
+	return nil
+}
+
+func captureStatsTaskLogs(t *testing.T) *statsTaskLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &statsTaskLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
 
 func TestTaskStatsSuite(t *testing.T) {
 	suite.Run(t, new(TaskStatsSuite))
@@ -185,6 +216,38 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		_, err = task.sort(ctx)
 		s.Error(err)
 	})
+}
+
+func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
+	logs := captureStatsTaskLogs(s.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	manager := NewTaskManager(ctx)
+	task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:    s.clusterID,
+		TaskID:       100,
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionID,
+		SegmentID:    102,
+		// #nosec G101 -- non-secret sentinel credentials verify that logs elide these fields.
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType:       "s3",
+			AccessKeyID:       "STORAGE_ACCESS_KEY_SENTINEL",
+			SecretAccessKey:   "STORAGE_SECRET_KEY_SENTINEL",
+			GcpCredentialJSON: `{"private_key":"GCP_CREDENTIAL_JSON_SENTINEL"}`,
+		},
+	}, manager, s.mockChunkManager)
+
+	err := task.PreExecute(ctx)
+	s.Require().NoError(err)
+	output := logs.String()
+	s.NotContains(output, "STORAGE_ACCESS_KEY_SENTINEL")
+	s.NotContains(output, "STORAGE_SECRET_KEY_SENTINEL")
+	s.NotContains(output, "GCP_CREDENTIAL_JSON_SENTINEL")
+	s.NotContains(output, "storageConfig")
+	s.Contains(output, "storageType")
+	s.Contains(output, "s3")
 }
 
 func (s *TaskStatsSuite) TestBuildIndexParams() {

@@ -477,6 +477,34 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 
 func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 	switch request := req.(type) {
+	case *CollectionReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.Schema.ExternalSource = externalspec.RedactExternalSource(request.Schema.ExternalSource)
+		redactedReq.Schema.ExternalSpec = externalspec.RedactExternalSpecForLog(request.Schema.ExternalSpec)
+		redactedReq.TopLevelExternalSource = externalspec.RedactExternalSource(request.TopLevelExternalSource)
+		redactedReq.TopLevelExternalSpec = externalspec.RedactExternalSpecForLog(request.TopLevelExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *RefreshExternalCollectionReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExternalSource = externalspec.RedactExternalSource(request.ExternalSource)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *PasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return mlog.Any("request", &UserReq{UserName: request.UserName})
+	case *NewPasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return mlog.Any("request", &UserReq{UserName: request.UserName})
 	case *RestoreExternalSnapshotReq:
 		if request == nil {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
@@ -2299,6 +2327,7 @@ func consistencyLevelForCreateCollection(httpReq *CollectionReq) (commonpb.Consi
 
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionReq)
+	requestLogField := getTraceLogRequestFieldWithoutSensitiveInfo(anyReq)
 	req := &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2309,7 +2338,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if httpReq.HasTopLevelExternalConfig() {
 		err := merr.WrapErrParameterInvalid("schema.externalSource/schema.externalSpec", "top-level externalSource/externalSpec",
 			"externalSource and externalSpec must be set under schema when creating an external collection")
-		mlog.Warn(ctx, "high level restful api, create external collection with top-level external config fail", mlog.Err(err), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, create external collection with top-level external config fail", mlog.Err(err), requestLogField)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
@@ -2326,7 +2355,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if httpReq.GetExternalSource() != "" || httpReq.GetExternalSpec() != "" {
 			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
 				"external collection is not supported by quick create; provide schema.fields with externalField")
-			mlog.Warn(ctx, "high level restful api, quickly create external collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create external collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2336,7 +2365,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if len(httpReq.Schema.Functions) > 0 {
 			err := merr.WrapErrParameterInvalid("schema", "functions",
 				"functions are not supported for quickly create collection")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2358,7 +2387,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		default:
 			err := merr.WrapErrParameterInvalid("FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector", httpReq.VectorFieldType,
 				"vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2369,7 +2398,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if quickCreateVectorDataType == schemapb.DataType_SparseFloatVector && httpReq.Dimension != 0 {
 			err := merr.WrapErrParameterInvalid(int32(0), httpReq.Dimension,
 				"dimension should not be specified for SparseFloatVector quick create")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2380,7 +2409,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if quickCreateVectorDataType != schemapb.DataType_SparseFloatVector && httpReq.Dimension == 0 {
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2391,7 +2420,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			httpReq.MetricType = defaultMetricTypeForQuickCreate(quickCreateVectorDataType)
 		}
 		if err := validateMetricTypeForQuickCreate(quickCreateVectorDataType, httpReq.MetricType); err != nil {
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2413,7 +2442,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		default:
 			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
 				"idType can only be [Int64, VarChar], default: Int64")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2430,7 +2459,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
 			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), mlog.Any("request", anyReq))
+				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
@@ -2568,7 +2597,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			structField := httpReq.Schema.StructFields[i]
 			if _, dup := fieldNames[structField.FieldName]; dup {
 				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
-				mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+				mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
@@ -2595,7 +2624,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		schema, err = proto.Marshal(&collSchema)
 	}
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, marshal collection schema fail", mlog.Err(err), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, marshal collection schema fail", mlog.Err(err), requestLogField)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
@@ -2614,7 +2643,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 
 	consistencyLevel, err := consistencyLevelForCreateCollection(httpReq)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), requestLogField)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
@@ -2732,7 +2761,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			createIndexReq.ExtraParams, err = convertToExtraParams(indexParam)
 			if err != nil {
 				// will not happen
-				mlog.Warn(ctx, "high level restful api, convertToExtraParams fail", mlog.Err(err), mlog.Any("request", anyReq))
+				mlog.Warn(ctx, "high level restful api, convertToExtraParams fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),

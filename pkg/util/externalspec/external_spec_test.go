@@ -159,6 +159,27 @@ func TestValidateExternalSource(t *testing.T) {
 	})
 }
 
+func TestRedactExternalSource(t *testing.T) {
+	testCases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "empty", source: "", want: ""},
+		{name: "normal URI", source: "s3://bucket/path", want: "s3://bucket/path"},
+		{name: "userinfo", source: "s3://ACCESS_SENTINEL:SECRET_SENTINEL@bucket/path", want: "<redacted>"},
+		{name: "query", source: "s3://bucket/path?token=QUERY_SECRET_SENTINEL", want: "<redacted>"},
+		{name: "fragment", source: "s3://bucket/path#FRAGMENT_SECRET_SENTINEL", want: "<redacted>"},
+		{name: "malformed", source: "s3://MALFORMED_SECRET_SENTINEL bad/path", want: "<redacted>"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.want, RedactExternalSource(testCase.source))
+		})
+	}
+}
+
 // minimalValidSpec returns an extfs block that ValidateExtfsComplete accepts
 // for AWS-family schemes: AK/SK pair + region.
 func minimalValidSpec() string {
@@ -176,16 +197,45 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("source_credentials_redacted", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://SOURCE_ACCESS_ERROR_SENTINEL:SOURCE_SECRET_ERROR_SENTINEL@bucket/prefix", minimalValidSpec())
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "SOURCE_ACCESS_ERROR_SENTINEL")
+		assert.NotContains(t, err.Error(), "SOURCE_SECRET_ERROR_SENTINEL")
+		assert.Contains(t, err.Error(), "external_source is invalid")
+	})
+
+	t.Run("malformed_source_redacted", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://SOURCE_PARSE_ERROR_SENTINEL bad/prefix", minimalValidSpec())
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "SOURCE_PARSE_ERROR_SENTINEL")
+		assert.Contains(t, err.Error(), "external_source is invalid")
+	})
+
 	t.Run("invalid_spec_redacts", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{bad json`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "<redacted>")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
+	})
+
+	t.Run("invalid_format_value_redacted", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"FORMAT_VALUE_SECRET_SENTINEL"}`)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "FORMAT_VALUE_SECRET_SENTINEL")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
+	})
+
+	t.Run("invalid_extfs_value_redacted", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_secret_sentinel"}}`)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "cloud_provider_secret_sentinel")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("missing_credentials_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "<redacted>")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("missing_region_for_aws_scheme_rejected", func(t *testing.T) {
@@ -198,14 +248,14 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "cloud_provider is required")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("invalid_cloud_provider_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"unknown"}}`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "is not supported")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("minio_cloud_provider_milvus_form", func(t *testing.T) {
@@ -224,7 +274,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "scheme=minio requires")
+		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("gcs_scheme_does_not_require_region", func(t *testing.T) {
@@ -390,6 +440,13 @@ func TestRedactExternalSpec(t *testing.T) {
 		assert.Equal(t, "***", extfs["external_id"])
 		assert.NotContains(t, out, "zilliz-external-sO1cjGS2Vgpyan")
 	})
+}
+
+func TestRedactExternalSpecForLog(t *testing.T) {
+	assert.Equal(t, "", RedactExternalSpecForLog(""))
+	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{"format":"parquet"}`))
+	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{"extfs":{"future_password":"FUTURE_SECRET_SENTINEL"}}`))
+	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{malformed SECRET_SENTINEL`))
 }
 
 func TestExternalSpecMarshalJSON(t *testing.T) {

@@ -182,7 +182,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		mlog.FieldSegmentID(st.req.GetSegmentID()),
 		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
 		mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-		mlog.Any("storageConfig", st.req.StorageConfig),
+		mlog.String("storageType", st.req.GetStorageConfig().GetStorageType()),
 	)
 	return nil
 }

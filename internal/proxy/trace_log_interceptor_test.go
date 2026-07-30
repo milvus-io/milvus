@@ -158,6 +158,53 @@ func TestTraceLogInterceptor(t *testing.T) {
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "0")
 }
 
+func TestGetRequestFieldRedactsExternalCollectionCredentials(t *testing.T) {
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"SPEC_ACCESS_GRPC_SENTINEL","access_key_value":"SPEC_SECRET_GRPC_SENTINEL","future_password":"FUTURE_SPEC_GRPC_SENTINEL","region":"us-east-1"}}`
+	externalSource := "s3://SOURCE_ACCESS_GRPC_SENTINEL:SOURCE_SECRET_GRPC_SENTINEL@bucket/path"
+	schema, err := proto.Marshal(&schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: externalSource,
+		ExternalSpec:   externalSpec,
+	})
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "create external collection",
+			req: &milvuspb.CreateCollectionRequest{
+				DbName:         "db",
+				CollectionName: "external_collection",
+				Schema:         schema,
+			},
+		},
+		{
+			name: "refresh external collection",
+			req: &milvuspb.RefreshExternalCollectionRequest{
+				DbName:         "db",
+				CollectionName: "external_collection",
+				ExternalSource: externalSource,
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := GetRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "SOURCE_ACCESS_GRPC_SENTINEL")
+			assert.NotContains(t, request, "SOURCE_SECRET_GRPC_SENTINEL")
+			assert.NotContains(t, request, "SPEC_ACCESS_GRPC_SENTINEL")
+			assert.NotContains(t, request, "SPEC_SECRET_GRPC_SENTINEL")
+			assert.NotContains(t, request, "FUTURE_SPEC_GRPC_SENTINEL")
+			assert.Contains(t, request, "<redacted>")
+		})
+	}
+}
+
 // TestRedactReqForLogAndField covers the two call-site wrappers over
 // elideRequestForLog: RedactReqForLog (wraps a template-bearing request, returns
 // others unchanged) and the GetRequestFieldWithoutSensitiveInfo template branch.

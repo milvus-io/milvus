@@ -7331,8 +7331,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	if srcSet != specSet {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
-				req.GetExternalSource(), req.GetExternalSpec())),
+				"external_source and external_spec must be both provided or both omitted on refresh (source_set=%t, spec_set=%t)",
+				srcSet, specSet)),
 		}, nil
 	}
 

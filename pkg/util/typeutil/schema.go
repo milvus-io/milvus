@@ -2630,8 +2630,8 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	srcSet := schema.GetExternalSource() != ""
 	specSet := schema.GetExternalSpec() != ""
 	if srcSet != specSet {
-		return merr.WrapErrParameterInvalidMsg("external collection %s requires external_source and external_spec to be both set or both empty (got source=%q, spec=%q)",
-			schema.GetName(), schema.GetExternalSource(), schema.GetExternalSpec())
+		return merr.WrapErrParameterInvalidMsg("external collection %s requires external_source and external_spec to be both set or both empty (source_set=%t, spec_set=%t)",
+			schema.GetName(), srcSet, specSet)
 	}
 
 	if !IsExternalCollection(schema) {
@@ -2653,7 +2653,7 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		var err error
 		isMilvusTable, err = isMilvusTableExternalSpec(schema.GetExternalSpec())
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidMsg("external_spec is invalid")
 		}
 	}
 	allowRealPrimaryKey := hasUserPrimaryKey(schema) && isMilvusTable
