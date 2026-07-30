@@ -2265,19 +2265,32 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxBloomFilterSize = ParamItem{
 		Key: "proxy.maxBloomFilterSize",
-		// 32 MiB. Budgets the SBBF body; the fixed 32-byte MBF1 header is allowed
-		// on top (see validateBloomFilterBlob). The body is always a power of two,
-		// so a full 32 MiB body fits under this cap and admits ~24M int64 members
-		// at the default FPR — budgeting the whole blob at 32 MiB would instead
-		// reject a 32 MiB body and halve the ceiling to a 16 MiB body.
-		DefaultValue: "33554432",
+		// 64 MiB. Budgets the SBBF body; the fixed 32-byte MBF1 header is allowed
+		// on top, so the gate is `len(blob) > maxSize + mbf1HeaderSize` and a
+		// full 64 MiB body passes exactly (see validateBloomFilterBlob). Because
+		// SBBF bodies are powers of two, any value in [64 MiB, 128 MiB) admits
+		// the same set of filters; 64 MiB is chosen as the smallest of those, so
+		// the number states the real ceiling rather than implying headroom that
+		// does not exist.
+		//
+		// A 64 MiB body admits ~48.6M int64 members at the default fpr=0.005 and
+		// ~55.4M at fpr=0.01. Raised from 32 MiB (~24M members) so 50M-member
+		// filters become expressible — but only at a raised fpr: 50M at the
+		// default 0.005 wants 65.77 MiB of bits, and the power-of-two round-up
+		// takes that to a 128 MiB body. The smallest fpr that keeps 50M inside
+		// 64 MiB is ~0.0058; oversizedBlobHint computes that bound per request
+		// and reports it in the rejection.
+		DefaultValue: "67108864",
 		Version:      "3.0.0",
 		Doc: "The maximum byte size of the SBBF body in a client pre-built bloom_match " +
 			"filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on " +
 			"top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
 			"so this bounds per-request memory/network amplification. Must not exceed the MBF1 " +
-			"format cap (128 MiB); the default admits ~24M int64 members at the default FPR " +
-			"while staying under the default gRPC receive limit.",
+			"format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies " +
+			"up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. " +
+			"Raising the member count past a tier boundary requires raising the fpr too, not " +
+			"only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of " +
+			"the request.",
 		Export: true,
 	}
 	p.MaxBloomFilterSize.Init(base.mgr)
