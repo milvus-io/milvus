@@ -61,6 +61,7 @@ const (
 	ExtfsKeyLoadFrequency           = "load_frequency"
 	ExtfsKeyAzureClientID           = "azure_client_id"
 	ExtfsKeyAzureTenantID           = "azure_tenant_id"
+	// #nosec G101 -- configuration key name, not a credential.
 	ExtfsKeyAzureCredentialEndpoint = "azure_credential_endpoint"
 )
 

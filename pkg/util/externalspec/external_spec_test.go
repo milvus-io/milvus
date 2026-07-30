@@ -526,7 +526,7 @@ func TestParseExternalSpec_ArnKeys(t *testing.T) {
 
 func TestValidateExtfsComplete_Azure(t *testing.T) {
 	azureBrokerSpec := func() map[string]string {
-		return map[string]string{
+		return map[string]string{ //nolint:gosec // synthetic test values, not credentials
 			"access_key_id":             "mystorageacct",
 			"cloud_provider":            "azure",
 			"region":                    "westus3",
