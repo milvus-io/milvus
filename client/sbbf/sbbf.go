@@ -151,35 +151,11 @@ func nextPower2(v uint32) uint32 {
 	return v
 }
 
-// XXH64 primes, from the xxHash spec. Needed by the specialized hashInt64 below.
-const (
-	xxhPrime1 uint64 = 11400714785074694791
-	xxhPrime2 uint64 = 14029467366897019727
-	xxhPrime3 uint64 = 1609587929392839161
-	xxhPrime4 uint64 = 9650029242287828579
-	xxhPrime5 uint64 = 2870177450012600261
-)
-
-// hashInt64 returns XXH64(seed=0) over v's 8-byte little-endian encoding — the
-// same value as xxhash.Sum64 of that byte image, with the general algorithm
-// unrolled for the fixed 8-byte length: no byte buffer, no loop, no bounds
-// checks. Equivalence with xxhash.Sum64 is asserted in TestHashInt64Equivalence.
+// hashInt64 returns XXH64(seed=0) over v's 8-byte little-endian encoding.
 func hashInt64(v int64) uint64 {
-	h := xxhPrime5 + 8
-	// One round over the single 8-byte lane. The little-endian byte image of v
-	// reinterpreted as a uint64 is exactly uint64(v), so no encoding step is
-	// needed even on a big-endian host.
-	k1 := uint64(v) * xxhPrime2
-	k1 = (k1<<31 | k1>>33) * xxhPrime1
-	h ^= k1
-	h = (h<<27|h>>37)*xxhPrime1 + xxhPrime4
-	// Final avalanche.
-	h ^= h >> 33
-	h *= xxhPrime2
-	h ^= h >> 29
-	h *= xxhPrime3
-	h ^= h >> 32
-	return h
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(v))
+	return xxhash.Sum64(buf[:])
 }
 
 // hashString returns XXH64(seed=0) over the raw UTF-8 bytes of s.
