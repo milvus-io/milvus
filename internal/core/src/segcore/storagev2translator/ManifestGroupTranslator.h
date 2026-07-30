@@ -205,8 +205,9 @@ class ManifestGroupTranslator
                      std::vector<milvus::segcore::CellSpec> cell_specs);
 
     std::vector<CellResult>
-    get_cells_via_async_pipeline(milvus::OpContext* ctx,
-                    std::vector<milvus::segcore::CellSpec> cell_specs);
+    get_cells_via_async_pipeline(
+        milvus::OpContext* ctx,
+        std::vector<milvus::segcore::CellSpec> cell_specs);
 
     /**
      * @brief Load a cell from multiple Arrow Tables
