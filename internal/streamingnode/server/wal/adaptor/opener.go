@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -35,6 +36,12 @@ import (
 )
 
 var _ wal.Opener = (*openerAdaptorImpl)(nil)
+
+const (
+	walSwitchFlushInitialBackoff = 20 * time.Millisecond
+	walSwitchFlushMaxBackoff     = 1 * time.Second
+	walSwitchFlushTimeout        = 1 * time.Minute
+)
 
 // adaptImplsToOpener creates a new wal opener with opener impls.
 // Test Only
@@ -340,16 +347,15 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 		mlog.String("channel", opt.Channel.Name),
 		mlog.Uint64("targetTimeTick", targetTimeTick))
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	const defaultWALSwitchFlushTimeout = 1 * time.Minute
+	flushCheckBackoff := newWALSwitchFlushBackoff()
+	timeoutTimer := time.NewTimer(walSwitchFlushTimeout)
+	defer timeoutTimer.Stop()
 
 	// Periodically check flush progress until target time tick is reached
 	var flusherCP *utility.WALCheckpoint
 	for flusherCP == nil || flusherCP.TimeTick < targetTimeTick {
 		select {
-		case <-ticker.C:
+		case <-time.After(flushCheckBackoff.NextBackOff()):
 			flusherCP = rs.GetFlusherCheckpointByTimeTick(ctx)
 			if flusherCP == nil {
 				mlog.Info(ctx, "waiting for flusher checkpoint initialization")
@@ -369,10 +375,10 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 				mlog.Uint64("currentTS", flusherCP.TimeTick),
 				mlog.Uint64("targetTS", targetTimeTick),
 				mlog.Uint64("remainingTS", remaining))
-		case <-time.After(defaultWALSwitchFlushTimeout):
+		case <-timeoutTimer.C:
 			mlog.Warn(ctx, "timeout waiting for flush completion",
 				mlog.String("channel", opt.Channel.Name),
-				mlog.Duration("timeout", defaultWALSwitchFlushTimeout))
+				mlog.Duration("timeout", walSwitchFlushTimeout))
 			return status.NewInner("timeout waiting for flush completion during WAL switch")
 		case <-ctx.Done():
 			mlog.Warn(ctx, "context canceled while waiting for flush completion", mlog.String("channel", opt.Channel.Name), mlog.Err(ctx.Err()))
@@ -398,6 +404,17 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTS", snapshot.Checkpoint.TimeTick))
 	return nil
+}
+
+func newWALSwitchFlushBackoff() *backoff.ExponentialBackOff {
+	flushCheckBackoff := backoff.NewExponentialBackOff()
+	flushCheckBackoff.InitialInterval = walSwitchFlushInitialBackoff
+	flushCheckBackoff.MaxInterval = walSwitchFlushMaxBackoff
+	flushCheckBackoff.MaxElapsedTime = 0
+	flushCheckBackoff.Multiplier = 2
+	flushCheckBackoff.RandomizationFactor = 0
+	flushCheckBackoff.Reset()
+	return flushCheckBackoff
 }
 
 func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Context, opt *wal.OpenOption, snapshot *recovery.RecoverySnapshot) error {

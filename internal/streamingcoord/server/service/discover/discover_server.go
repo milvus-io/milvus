@@ -3,6 +3,9 @@ package discover
 import (
 	"context"
 	"io"
+	"sort"
+	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -14,6 +17,11 @@ import (
 )
 
 var errClosedByUser = errors.New("closed by user")
+
+const (
+	assignmentErrorBatchInterval = 10 * time.Millisecond
+	assignmentErrorQueueCapacity = 128
+)
 
 func NewAssignmentDiscoverServer(
 	balancer balancer.Balancer,
@@ -57,7 +65,17 @@ func (s *AssignmentDiscoverServer) Execute() error {
 
 // recvLoop receives the message from client.
 func (s *AssignmentDiscoverServer) recvLoop() (err error) {
+	unavailableCh := make(chan types.PChannelInfo, assignmentErrorQueueCapacity)
+	var unavailableWG sync.WaitGroup
+	unavailableWG.Add(1)
+	go func() {
+		defer unavailableWG.Done()
+		s.markUnavailableLoop(unavailableCh)
+	}()
+
 	defer func() {
+		close(unavailableCh)
+		unavailableWG.Wait()
 		if err != nil {
 			s.cancel(err)
 			s.logger.Warn(s.ctx, "recv arm of stream closed by unexpected error", mlog.Err(err))
@@ -78,12 +96,81 @@ func (s *AssignmentDiscoverServer) recvLoop() (err error) {
 		switch req := req.Command.(type) {
 		case *streamingpb.AssignmentDiscoverRequest_ReportError:
 			channel := types.NewPChannelInfoFromProto(req.ReportError.GetPchannel())
-			// mark the channel as unavailable and trigger a recover right away.
-			s.balancer.MarkAsUnavailable(s.ctx, []types.PChannelInfo{channel})
+			select {
+			case unavailableCh <- channel:
+			case <-s.ctx.Done():
+				return context.Cause(s.ctx)
+			}
 		case *streamingpb.AssignmentDiscoverRequest_Close:
 		default:
 			s.logger.Warn(s.ctx, "unknown command type", mlog.Any("command", req))
 		}
+	}
+}
+
+func (s *AssignmentDiscoverServer) markUnavailableLoop(unavailableCh <-chan types.PChannelInfo) {
+	for {
+		first, ok := <-unavailableCh
+		if !ok {
+			return
+		}
+
+		batch := make(map[string]types.PChannelInfo)
+		addUnavailableChannel(batch, first)
+		batchTimer := time.NewTimer(assignmentErrorBatchInterval)
+
+	collect:
+		for {
+			select {
+			case channel, ok := <-unavailableCh:
+				if !ok {
+					if !batchTimer.Stop() {
+						select {
+						case <-batchTimer.C:
+						default:
+						}
+					}
+					s.markUnavailableBatch(batch)
+					return
+				}
+				addUnavailableChannel(batch, channel)
+			case <-batchTimer.C:
+				break collect
+			case <-s.ctx.Done():
+				if !batchTimer.Stop() {
+					select {
+					case <-batchTimer.C:
+					default:
+					}
+				}
+				return
+			}
+		}
+
+		s.markUnavailableBatch(batch)
+	}
+}
+
+func addUnavailableChannel(batch map[string]types.PChannelInfo, channel types.PChannelInfo) {
+	previous, ok := batch[channel.Name]
+	if !ok || channel.Term > previous.Term {
+		batch[channel.Name] = channel
+	}
+}
+
+func (s *AssignmentDiscoverServer) markUnavailableBatch(batch map[string]types.PChannelInfo) {
+	channels := make([]types.PChannelInfo, 0, len(batch))
+	for _, channel := range batch {
+		channels = append(channels, channel)
+	}
+	sort.Slice(channels, func(i, j int) bool {
+		return channels[i].Name < channels[j].Name
+	})
+
+	if err := s.balancer.MarkAsUnavailable(s.ctx, channels); err != nil {
+		s.logger.Warn(s.ctx, "failed to mark pchannels as unavailable",
+			mlog.Int("pchannelCount", len(channels)),
+			mlog.Err(err))
 	}
 }
 
