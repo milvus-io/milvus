@@ -210,30 +210,17 @@ const (
 	// localStorage.path. Under common.storageType=local that path is also the
 	// ChunkManager root, which is why this is a top-level segment there.
 	// Layout: {localStorage.path}/cache/{nodeID}/{growing_mmap|local_chunk|...}/...
-	LocalCacheRootPath = "cache"
-
-	// The four segments below are declared as string literals on the C++ side and
-	// joined onto ChunkManagerPtr->GetRootPath(). They are mirrored here so the
-	// registry below can list them; the Go guard test cannot see their real
-	// declaration sites. Keep them in sync by hand.
 	//
-	// All four resolve through LocalChunkManagerSingleton, so their root is
-	// localStorage.path. Under common.storageType=local that is also datacoord's
-	// ChunkManager root -- the same reason LocalCacheRootPath is listed.
-
-	// RawDataRootPath mirrors RAWDATA_ROOT_PATH (core/src/common/Consts.h).
-	RawDataRootPath = "raw_datas"
-
-	// NgramLogPath mirrors NGRAM_LOG_ROOT_PATH (core/src/common/Consts.h).
-	NgramLogPath = "ngram_log"
-
-	// TempRootPath mirrors TEMP (core/src/storage/Util.cpp), prefixed onto the
-	// root for is_temp index builds.
-	TempRootPath = "tmp"
-
-	// RTreeIndexPath mirrors the literal in core/src/index/RTreeIndex.cpp, which
-	// concatenates it onto GetRootPath() rather than declaring a constant.
-	RTreeIndexPath = "rtree-index"
+	// This entry also covers everything segcore writes, which is why the C++
+	// segment names (raw_datas, ngram_log, tmp, rtree-index) are NOT listed
+	// separately: segcore's ChunkManager is initialized with
+	// pathutil.GetPath(LocalChunkPath, nodeID), i.e.
+	// {localStorage.path}/cache/{nodeID}/local_chunk (see
+	// internal/util/initcore/query_node.go and
+	// internal/datanode/index/init_segcore.go), so those directories sit under
+	// this subtree rather than at the storage root. Registering them at the root
+	// would deny paths Milvus never writes.
+	LocalCacheRootPath = "cache"
 
 	DefaultResourceGroupName = "__default_resource_group"
 )
@@ -282,19 +269,14 @@ var InternalStorageRootSegments = []string{
 // They coincide with the ChunkManager root only under common.storageType=local,
 // where datacoord's root IS localStorage.path. Under a remote (MinIO/S3) root
 // Milvus never writes these keys, so denying them there would reject caller
-// paths for no benefit -- notably <minio.rootPath>/tmp/..., a plausible staging
-// location. Consumers must therefore append this list only when the storage
-// type is local; see ValidateImportFilePaths.
+// paths for no benefit. Consumers must therefore append this list only when the
+// storage type is local; see ValidateImportFilePaths.
 //
 // Woodpecker is deliberately NOT here: it writes under both minio.rootPath and
 // localStorage.path (pkg/streaming/walimpls/impls/wp/builder.go), so it belongs
 // in the unconditional list above.
 var LocalOnlyStorageRootSegments = []string{
 	LocalCacheRootPath,
-	RawDataRootPath,
-	NgramLogPath,
-	TempRootPath,
-	RTreeIndexPath,
 }
 
 const (
