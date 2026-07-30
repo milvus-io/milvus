@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "RTreeIndexSerialization.h"
 #include "RTreeIndexWrapper.h"
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
@@ -239,6 +240,27 @@ TEST_F(RTreeIndexWrapperTest, FinishReportsBinaryWriteFailure) {
     } catch (const milvus::SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), milvus::FileWriteFailed);
     }
+}
+
+TEST_F(RTreeIndexWrapperTest, FinishReportsBinaryCloseFailure) {
+    std::string index_path = test_dir_ + "/test_close_failure";
+    milvus::index::RTreeIndexWrapper wrapper(index_path, true);
+    const std::string payload = create_point_wkb(1.0, 1.0);
+    wrapper.add_geometry(
+        reinterpret_cast<const uint8_t*>(payload.data()), payload.size(), 0);
+
+    // A write error that the filesystem only reports at close(2) used to be
+    // swallowed by ~basic_ofstream and returned as Success, uploading a
+    // truncated .bgi as a successfully built index.
+    RTreeSerializer::CloseFailureForTesting().store(true);
+    try {
+        wrapper.finish();
+        FAIL() << "expected R-Tree binary close failure";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::FileWriteFailed);
+    }
+    // One-shot: the flag must not leak into the tests that follow.
+    EXPECT_FALSE(RTreeSerializer::CloseFailureForTesting().load());
 }
 
 TEST_F(RTreeIndexWrapperTest, LoadReportsMissingBinaryAsReadFailure) {
@@ -461,19 +483,28 @@ TEST_F(RTreeIndexWrapperTest, WriterIsNotStarvedByContinuousReaders) {
     for (int t = 0; t < 4; ++t) {
         readers.emplace_back([&]() {
             auto ctx = GEOS_init_r();
-            // A box covering every inserted point.
-            milvus::Geometry query_geom(
-                ctx,
-                "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 "
-                "-1))");
-            std::vector<int64_t> candidates;
-            while (!stop.load(std::memory_order_relaxed)) {
-                wrapper.query_candidates(
-                    milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
-                    query_geom.GetGeometry(),
+            // The inner scope is load-bearing: ~Geometry calls
+            // GEOSGeom_destroy_r(ctx_, ...), and locals are destroyed AFTER
+            // the last statement of the enclosing block. With query_geom
+            // declared beside ctx, the trailing GEOS_finish_r would free the
+            // context first and the destructor would run against it -- a
+            // use-after-free on every reader thread.
+            {
+                // A box covering every inserted point.
+                milvus::Geometry query_geom(
                     ctx,
-                    candidates);
-                reader_iters.fetch_add(1, std::memory_order_relaxed);
+                    "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 "
+                    "-1))");
+                std::vector<int64_t> candidates;
+                while (!stop.load(std::memory_order_relaxed)) {
+                    wrapper.query_candidates(
+                        milvus::proto::plan::
+                            GISFunctionFilterExpr_GISOp_Intersects,
+                        query_geom.GetGeometry(),
+                        ctx,
+                        candidates);
+                    reader_iters.fetch_add(1, std::memory_order_relaxed);
+                }
             }
             GEOS_finish_r(ctx);
         });

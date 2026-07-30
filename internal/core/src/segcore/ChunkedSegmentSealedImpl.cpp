@@ -1454,6 +1454,7 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
                                              : std::make_shared<SkipIndex>();
     runtime->mmap_field_ids = current.mmap_field_ids;
     runtime->variable_fields_avg_size = current.variable_fields_avg_size;
+    runtime->geometry_caches = current.geometry_caches;
     runtime->row_count = current.row_count;
     return ToConstRuntimeState(std::move(runtime));
 }

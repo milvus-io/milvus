@@ -319,10 +319,22 @@ class Geometry {
     // thread: (1) the cache's shared context is not thread-safe, so the clone
     // call itself is a data race, and (2) a copy that outlives the cache's
     // shared_ptr holds a dangling context. Query threads must use Clone(ctx)
-    // with their own (thread-local) context instead. Implicit copies cannot
-    // simply be deleted: generic container code (FieldDataImpl's std::copy_n)
-    // copies Geometry values on the single-threaded ingest path, which is the
-    // legitimate use these operators exist for.
+    // with their own (thread-local) context instead.
+    //
+    // These operators cannot simply be `= delete`d, but not because ingest
+    // copies Geometry values -- it does not. Geometry ingest stores WKB
+    // strings: FieldData<Geometry> derives from FieldDataGeometryImpl, which
+    // is FieldDataImpl<std::string, true>, and storage::CreateFieldData builds
+    // exactly that for GEOMETRY. FieldDataImpl<Geometry, true> has no user
+    // anywhere in the tree. What forces the operators is its explicit
+    // instantiation (`template class FieldDataImpl<Geometry, true>;` in
+    // FieldData.cpp), which instantiates the non-trivially-copyable
+    // std::copy_n branch of FillFieldData over Geometry -- so deleting them
+    // breaks the build even though nothing calls it.
+    //
+    // The only live copy sites are two std::any hops on the query path: the
+    // dataset Set in GISFunctionFilterExpr and the Get<Geometry>() in
+    // RTreeIndex::Query.
     Geometry&
     operator=(const Geometry& other) {
         if (this != &other) {

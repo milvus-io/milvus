@@ -372,7 +372,15 @@ RTreeIndexWrapper::finish() {
                       "Failed to write R-Tree meta file: {}.meta.json",
                       index_path_);
         }
+        // Check close(), not just the insertion above: a delayed-allocation
+        // filesystem reports ENOSPC/EIO for the flushed blocks at close(2),
+        // and an unchecked close leaves a truncated meta.json looking written.
         ofs.close();
+        if (!ofs.good()) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "Failed to close R-Tree meta file: {}.meta.json",
+                      index_path_);
+        }
         LOG_INFO("R-Tree meta written: {}.meta.json", index_path_);
     } catch (const SegcoreError&) {
         throw;

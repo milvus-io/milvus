@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <fstream>
 #include <iostream>
 #include <new>
@@ -42,6 +43,20 @@ class RTreeSerializer {
         ArchiveFailed,
     };
 
+    /**
+     * Test-only one-shot fault injection for the close() check in saveBinary.
+     *
+     * A close(2) that fails after a successful flush needs a filesystem that
+     * defers ENOSPC/EIO to close (ext4 delalloc, XFS, NFS) on a full or
+     * failing device; a unit test cannot provoke that, so the branch would
+     * otherwise be unreachable from a test. Production code never sets it.
+     */
+    static std::atomic<bool>&
+    CloseFailureForTesting() {
+        static std::atomic<bool> flag{false};
+        return flag;
+    }
+
     template <typename RTreeType>
     static BinaryIOResult
     saveBinary(const RTreeType& tree, const std::string& filename) {
@@ -57,6 +72,18 @@ class RTreeSerializer {
             }
             ofs.flush();
             if (!ofs.good()) {
+                return BinaryIOResult::StreamFailed;
+            }
+            // close() explicitly, and check it. flush() only guarantees the
+            // streambuf reached write(2); on a delayed-allocation filesystem
+            // (ext4 delalloc, XFS) ENOSPC/EIO for those blocks is reported at
+            // close(2). Letting ~basic_ofstream do the closing swallows that
+            // failbit, so a truncated .bgi would be reported as Success and
+            // uploaded as a successfully built index -- the exact outcome
+            // finish() must never produce -- resurfacing much later at load
+            // as ArchiveFailed/DataFormatBroken.
+            ofs.close();
+            if (CloseFailureForTesting().exchange(false) || !ofs.good()) {
                 return BinaryIOResult::StreamFailed;
             }
             return BinaryIOResult::Success;

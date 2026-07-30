@@ -2446,6 +2446,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return ToConstRuntimeState(std::move(runtime));
     }
 
+    // Reaches FreezeRuntimeResourceState itself, which copies the state
+    // field by field -- unlike TestFreezeRuntimeResourceState above, which
+    // only re-wraps a state that is already fully populated and therefore
+    // cannot catch a field the copy forgets.
+    static std::shared_ptr<const RuntimeResourceState>
+    TestFreezeRuntimeResourceStateCopy(const RuntimeResourceState& current) {
+        return FreezeRuntimeResourceState(current);
+    }
+
     void
     TestLoadIndex(LoadIndexInfo& info,
                   bool is_replace,

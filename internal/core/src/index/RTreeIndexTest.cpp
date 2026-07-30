@@ -109,12 +109,16 @@ CreateWkbFromWkt(const std::string& wkt) {
     return wkb;
 }
 
+// The returned Geometry keeps a pointer to the context it was built on and
+// dereferences it on every copy and in its destructor, so that context must
+// OUTLIVE the returned value. Building on a local context and finishing it
+// here would hand back a Geometry whose ctx_ is already freed -- a
+// use-after-free on the first copy or destruction, not at the call itself.
+// The thread-local context lives until the thread exits, which is what makes
+// returning by value safe.
 static milvus::Geometry
 CreateGeometryFromWkt(const std::string& wkt) {
-    auto ctx = GEOS_init_r();
-    auto geom = milvus::Geometry(ctx, wkt.c_str());
-    GEOS_finish_r(ctx);
-    return geom;
+    return milvus::Geometry(milvus::GetThreadLocalGEOSContext(), wkt.c_str());
 }
 
 struct FileSliceSizeGuard {
@@ -1648,19 +1652,29 @@ TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
 
     auto reader = [&]() {
         auto ctx = GEOS_init_r();
-        // A box covering the inserted points [0, kRows] x [0, kRows].
-        milvus::Geometry query_geom(
-            ctx,
-            "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 -1))");
-        while (!stop.load(std::memory_order_relaxed)) {
-            volatile int64_t c = rtree.Count();
-            (void)c;
-            std::vector<int64_t> candidates;
-            rtree.QueryCandidates(
-                ::milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
-                query_geom,
-                candidates);
-            reader_iters.fetch_add(1, std::memory_order_relaxed);
+        // The inner scope is load-bearing: ~Geometry calls
+        // GEOSGeom_destroy_r(ctx_, ...), and locals are destroyed AFTER the
+        // last statement of the enclosing block. With query_geom declared
+        // beside ctx, the trailing GEOS_finish_r would free the context first
+        // and the destructor would run against it -- a use-after-free on every
+        // reader thread, in the very test meant to prove memory safety.
+        {
+            // A box covering the inserted points [0, kRows] x [0, kRows].
+            milvus::Geometry query_geom(
+                ctx,
+                "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 "
+                "-1))");
+            while (!stop.load(std::memory_order_relaxed)) {
+                volatile int64_t c = rtree.Count();
+                (void)c;
+                std::vector<int64_t> candidates;
+                rtree.QueryCandidates(
+                    ::milvus::proto::plan::
+                        GISFunctionFilterExpr_GISOp_Intersects,
+                    query_geom,
+                    candidates);
+                reader_iters.fetch_add(1, std::memory_order_relaxed);
+            }
         }
         GEOS_finish_r(ctx);
     };
