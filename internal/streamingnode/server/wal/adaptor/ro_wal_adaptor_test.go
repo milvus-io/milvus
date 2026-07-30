@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestResolveReadWALOpensHistoricalBackend(t *testing.T) {
@@ -48,6 +49,40 @@ func TestResolveReadWALOpensHistoricalBackend(t *testing.T) {
 	require.NoError(t, err)
 	assert.Same(t, historicalWAL, readWAL)
 	assert.Equal(t, message.WALNameRocksmq, openedWALName)
+}
+
+func TestResolveReadWALKeepsCurrentBackend(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel", Term: 10, AccessMode: types.AccessModeRO}
+	currentWAL := mock_walimpls.NewMockWALImpls(t)
+	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+
+	roWAL := &roWALAdaptorImpl{
+		roWALImpls: currentWAL,
+		historicalWALOpener: func(
+			context.Context,
+			message.WALName,
+			types.PChannelInfo,
+		) (walimpls.ROWALImpls, error) {
+			t.Fatal("historical WAL opener should not be called")
+			return nil, nil
+		},
+	}
+
+	currentID := walimplstest.NewTestMessageID(1)
+	policies := map[string]options.DeliverPolicy{
+		"all":         options.DeliverPolicyAll(),
+		"latest":      options.DeliverPolicyLatest(),
+		"start-from":  options.DeliverPolicyStartFrom(currentID),
+		"start-after": options.DeliverPolicyStartAfter(currentID),
+	}
+	for name, policy := range policies {
+		t.Run(name, func(t *testing.T) {
+			readWAL, err := roWAL.resolveReadWAL(context.Background(), wal.ReadOption{DeliverPolicy: policy})
+			require.NoError(t, err)
+			assert.Same(t, currentWAL, readWAL)
+		})
+	}
 }
 
 func TestOpenHistoricalWALForcesReadOnlyMode(t *testing.T) {
