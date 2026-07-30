@@ -287,7 +287,7 @@ func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSc
 			timezone = common.DefaultTimezone
 		}
 		if err := timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
+			return merr.Wrapf(err, "invalid default value of field, name: %s", fieldSchema.Name)
 		}
 	}
 
