@@ -382,11 +382,7 @@ func (s *SnapshotSuite) TestExportSnapshot() {
 func (s *SnapshotSuite) TestGetExportSnapshotState() {
 	ctx := context.Background()
 	fakeService := &snapshotServiceClientStub{}
-	originalService := s.client.service
-	s.client.service = fakeService
-	defer func() {
-		s.client.service = originalService
-	}()
+	client := &Client{service: fakeService}
 
 	expected := &milvuspb.ExportSnapshotInfo{
 		JobId:               9001,
@@ -408,7 +404,7 @@ func (s *SnapshotSuite) TestGetExportSnapshotState() {
 			}).Build()
 		defer mockGetState.UnPatch()
 
-		info, err := s.client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
+		info, err := client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
 		s.NoError(err)
 		s.True(proto.Equal(expected, info))
 	})
@@ -418,7 +414,7 @@ func (s *SnapshotSuite) TestGetExportSnapshotState() {
 			Return((*milvuspb.GetExportSnapshotStateResponse)(nil), errors.New("mocked error")).Build()
 		defer mockGetState.UnPatch()
 
-		info, err := s.client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
+		info, err := client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
 		s.Error(err)
 		s.Nil(info)
 	})
@@ -430,13 +426,13 @@ func (s *SnapshotSuite) TestGetExportSnapshotState() {
 			}, nil).Build()
 		defer mockGetState.UnPatch()
 
-		info, err := s.client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
+		info, err := client.GetExportSnapshotState(ctx, NewGetExportSnapshotStateOption(9001))
 		s.Error(err)
 		s.Nil(info)
 	})
 
 	s.Run("nil option", func() {
-		info, err := s.client.GetExportSnapshotState(ctx, nil)
+		info, err := client.GetExportSnapshotState(ctx, nil)
 		s.Error(err)
 		s.Nil(info)
 	})

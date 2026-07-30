@@ -6485,7 +6485,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Key:          "dataCoord.snapshot.exportJobTimeout",
 		Version:      "2.6.15",
 		DefaultValue: "43200",
-		Doc:          "Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time.",
+		Doc:          "Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time. Default 12 hours.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || parsed <= 0 {
@@ -6501,7 +6501,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Key:          "dataCoord.snapshot.exportJobRetention",
 		Version:      "2.6.15",
 		DefaultValue: "10800",
-		Doc:          "Retention period in seconds for completed or failed snapshot export jobs after pin cleanup.",
+		Doc:          "Retention in seconds for completed or failed snapshot export jobs after pin cleanup. Default 3 hours.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || parsed < 0 {
@@ -7624,7 +7624,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportCopyObjectTimeout = ParamItem{
 		Key:          "dataNode.import.copyObjectTimeout",
 		Version:      "2.7.0",
-		Doc:          "The timeout in seconds for copying one object during snapshot restore, including retries.",
+		Doc:          "Timeout in seconds for copying one object during snapshot restore, including retries.",
 		DefaultValue: "3600",
 		PanicIfEmpty: false,
 		Export:       true,
