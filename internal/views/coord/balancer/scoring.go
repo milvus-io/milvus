@@ -1,55 +1,250 @@
 package balancer
 
 import (
+	"math"
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 )
 
+func reusableState(state coordview.SegmentState) bool {
+	switch state {
+	case coordview.SegmentStateUp, coordview.SegmentStateReady, coordview.SegmentStatePreparing:
+		return true
+	default:
+		return false
+	}
+}
+
+func stickinessScore(
+	nodeID int64,
+	rows int64,
+	currentStates map[int64]coordview.SegmentState,
+	eligible map[int64]struct{},
+	cfg *BalanceConfig,
+) float64 {
+	if len(currentStates) == 0 {
+		return 1
+	}
+
+	hasEligibleReusableCopy := false
+	for currentNodeID, state := range currentStates {
+		if _, ok := eligible[currentNodeID]; ok && reusableState(state) {
+			hasEligibleReusableCopy = true
+			break
+		}
+	}
+	if !hasEligibleReusableCopy {
+		return 1
+	}
+
+	if state, ok := currentStates[nodeID]; ok && reusableState(state) {
+		return 1
+	}
+
+	scale := int64(0)
+	if cfg != nil {
+		scale = cfg.StickyRowsScale
+	}
+	if scale <= 0 {
+		return 0
+	}
+	if rows < 0 {
+		rows = 0
+	}
+	penalty := math.Min(float64(rows)/float64(scale), 1)
+	return 1 - penalty
+}
+
+func nodeLoadScore(referenceRows, projectedRows float64) float64 {
+	if referenceRows <= 0 {
+		return 1
+	}
+	if projectedRows < 0 {
+		projectedRows = 0
+	}
+	return referenceRows / (referenceRows + projectedRows)
+}
+
+func fanoutScore(nodeID int64, opened map[int64]struct{}, budget int) float64 {
+	if _, ok := opened[nodeID]; ok {
+		return 1
+	}
+	if len(opened) < budget {
+		return 1
+	}
+	return 0
+}
+
+func placementIntent(stickiness, nodeLoad, fanout float64, cfg *BalanceConfig) float64 {
+	if cfg == nil {
+		return 0
+	}
+	weightSum := cfg.StickinessWeight + cfg.NodeLoadWeight + cfg.FanoutWeight
+	if weightSum <= 0 {
+		return 0
+	}
+	return (cfg.StickinessWeight*stickiness +
+		cfg.NodeLoadWeight*nodeLoad +
+		cfg.FanoutWeight*fanout) / weightSum
+}
+
 // This file implements Phase 2 node selection: given a segment and a set of
 // candidate nodes, filter by hard constraints then pick the highest-scoring
 // node via weighted soft constraints.
-//
-// The algorithm operates on a predictedLoad view of the nodes — a mutable
-// copy of snap.Nodes maintained by the Policy and updated as each segment
-// is placed. This gives cross-shard and intra-shard coordination without
-// any global optimization pass.
 
-// pickNode returns the best available node for the given segment, or
-// (0, false) if no node passes the hard constraints.
-//
-//   - predicted:     the mutable per-node load tracker (this shard + earlier)
-//   - seg:           segment metadata; MemSize drives stickiness and load
-//   - currentStates: current per-node states for this segment. Controls the
-//     reuse / avoidance score.
-//   - resourceGroup: resource-group constraint from ReplicaAssignment. Nodes
-//     outside this RG are never considered.
-//   - cfg:           scoring weights and baseline.
-func pickNode(
-	predicted map[int64]*BalanceNode,
-	seg *SegmentInfo,
-	currentStates map[int64]coordview.SegmentState,
+const scoreEpsilon = 1e-12
+
+type allocationContext struct {
+	nodes         map[int64]*BalanceNode
+	eligible      []int64
+	eligibleSet   map[int64]struct{}
+	baseRows      map[int64]int64
+	assignedRows  map[int64]int64
+	openedNodes   map[int64]struct{}
+	referenceRows float64
+	fanoutBudget  int
+	config        *BalanceConfig
+}
+
+func newAllocationContext(
+	nodes map[int64]*BalanceNode,
 	resourceGroup string,
+	baseRows map[int64]int64,
+	shardRows int64,
+	segmentCount int,
 	cfg *BalanceConfig,
-) (int64, bool) {
-	var (
-		bestID    int64
-		bestScore = -1.0
-		found     bool
-	)
-	for _, nodeID := range candidateNodeIDs(predicted, resourceGroup) {
-		node := predicted[nodeID]
-		if !passHardConstraints(node, seg) {
+) *allocationContext {
+	if cfg == nil {
+		cfg = DefaultBalanceConfig()
+	}
+	ctx := &allocationContext{
+		nodes:        nodes,
+		eligibleSet:  make(map[int64]struct{}),
+		baseRows:     make(map[int64]int64),
+		assignedRows: make(map[int64]int64),
+		openedNodes:  make(map[int64]struct{}),
+		config:       cfg,
+	}
+
+	var totalBaseRows int64
+	for _, nodeID := range candidateNodeIDs(nodes, resourceGroup) {
+		node := nodes[nodeID]
+		if !passHardConstraints(node, nil) {
 			continue
 		}
-		s := score(node, seg, currentStates, cfg)
-		if !found || s > bestScore || (s == bestScore && nodeID < bestID) {
-			bestID = nodeID
-			bestScore = s
+		rows := baseRows[nodeID]
+		if rows < 0 {
+			rows = 0
+		}
+		ctx.eligible = append(ctx.eligible, nodeID)
+		ctx.eligibleSet[nodeID] = struct{}{}
+		ctx.baseRows[nodeID] = rows
+		totalBaseRows += rows
+	}
+
+	if shardRows < 0 {
+		shardRows = 0
+	}
+	if len(ctx.eligible) > 0 {
+		ctx.referenceRows = float64(totalBaseRows+shardRows) / float64(len(ctx.eligible))
+	}
+	ctx.fanoutBudget = calculateFanoutBudget(len(ctx.eligible), segmentCount, shardRows, cfg.TargetRowsPerShardNode)
+	return ctx
+}
+
+func calculateFanoutBudget(eligibleNodes, segmentCount int, shardRows, targetRows int64) int {
+	if eligibleNodes <= 0 || segmentCount <= 0 {
+		return 0
+	}
+	if shardRows < 0 {
+		shardRows = 0
+	}
+	desired := 1
+	if targetRows > 0 && shardRows > 0 {
+		desired = int(1 + (shardRows-1)/targetRows)
+	}
+	return min(eligibleNodes, segmentCount, desired)
+}
+
+func (ctx *allocationContext) projectedRows(nodeID int64, segmentRows int64) int64 {
+	if segmentRows < 0 {
+		segmentRows = 0
+	}
+	return ctx.baseRows[nodeID] + ctx.assignedRows[nodeID] + segmentRows
+}
+
+func (ctx *allocationContext) assign(nodeID int64, rows int64) {
+	if rows < 0 {
+		rows = 0
+	}
+	ctx.assignedRows[nodeID] += rows
+	ctx.openedNodes[nodeID] = struct{}{}
+}
+
+func pickNode(
+	ctx *allocationContext,
+	seg *SegmentInfo,
+	currentStates map[int64]coordview.SegmentState,
+) (int64, bool) {
+	var (
+		best  nodeCandidate
+		found bool
+	)
+	rows := segmentRows(seg)
+	for _, nodeID := range ctx.eligible {
+		projectedRows := ctx.projectedRows(nodeID, rows)
+		stickiness := stickinessScore(nodeID, rows, currentStates, ctx.eligibleSet, ctx.config)
+		candidate := nodeCandidate{
+			nodeID:        nodeID,
+			intent:        placementIntent(stickiness, nodeLoadScore(ctx.referenceRows, float64(projectedRows)), fanoutScore(nodeID, ctx.openedNodes, ctx.fanoutBudget), ctx.config),
+			reusable:      reusableCopyOnNode(nodeID, currentStates),
+			opened:        nodeIsOpened(nodeID, ctx.openedNodes),
+			projectedRows: projectedRows,
+		}
+		if !found || candidate.betterThan(best) {
+			best = candidate
 			found = true
 		}
 	}
-	return bestID, found
+	return best.nodeID, found
+}
+
+type nodeCandidate struct {
+	nodeID        int64
+	intent        float64
+	reusable      bool
+	opened        bool
+	projectedRows int64
+}
+
+func (candidate nodeCandidate) betterThan(other nodeCandidate) bool {
+	if candidate.intent > other.intent+scoreEpsilon {
+		return true
+	}
+	if math.Abs(candidate.intent-other.intent) > scoreEpsilon {
+		return false
+	}
+	if candidate.reusable != other.reusable {
+		return candidate.reusable
+	}
+	if candidate.opened != other.opened {
+		return candidate.opened
+	}
+	if candidate.projectedRows != other.projectedRows {
+		return candidate.projectedRows < other.projectedRows
+	}
+	return candidate.nodeID < other.nodeID
+}
+
+func reusableCopyOnNode(nodeID int64, states map[int64]coordview.SegmentState) bool {
+	state, ok := states[nodeID]
+	return ok && reusableState(state)
+}
+
+func nodeIsOpened(nodeID int64, opened map[int64]struct{}) bool {
+	_, ok := opened[nodeID]
+	return ok
 }
 
 func candidateNodeIDs(predicted map[int64]*BalanceNode, resourceGroup string) []int64 {
@@ -66,92 +261,22 @@ func candidateNodeIDs(predicted map[int64]*BalanceNode, resourceGroup string) []
 	return ids
 }
 
-// passHardConstraints returns true iff the node can physically accept the
-// segment right now. The checks match the design doc's Phase 2 hard rules:
+// passHardConstraints returns true iff the node can accept the segment. The
+// checks match the row-count balancer's Phase 2 hard rules:
 //
 //   - Node alive and not in graceful shutdown
-//   - Predicted memory (UpMemLoad + PendingMemLoad + this segment) fits
-//     inside the node's declared MemoryCapacity (when capacity > 0)
 //
-// Capacity == 0 is treated as "unknown / unrestricted" and never rejects.
-func passHardConstraints(node *BalanceNode, seg *SegmentInfo) bool {
+// Row count is a relative balance signal, not an admission-control capacity.
+func passHardConstraints(node *BalanceNode, _ *SegmentInfo) bool {
 	if !node.Alive || node.Stopping {
 		return false
-	}
-	if node.MemoryCapacity > 0 {
-		predictedMem := node.UpMemLoad + node.PendingMemLoad + segmentLoad(seg)
-		if predictedMem > node.MemoryCapacity {
-			return false
-		}
 	}
 	return true
 }
 
-// score computes the weighted soft-constraint score for placing seg on node.
-// Higher is better. Weights live in BalanceConfig and should differ by orders
-// of magnitude (Stickiness >> Memory >> SegmentCount) to give the chain a
-// lexicographic feel: the higher-priority factor only loses to a
-// lower-priority one when the higher-priority factor is equal across
-// candidates.
-//
-// Contributors:
-//   - Reuse / avoidance: seg.MemSize / BaselineSegmentSize ×
-//     StickinessBaseWeight × state factor. Up gets full stickiness, Ready and
-//     Preparing get progressively weaker stickiness, and Unrecoverable gets a
-//     negative factor so the balancer prefers other nodes when possible.
-//   - Memory balance: 1 − (UpMem + PendingMem) / Capacity. Capacity==0
-//     collapses to 0 (no preference).
-//   - Segment count balance: 1 / (1 + SegmentCount). Smooth decay so a
-//     node with 0 segments beats one with 1, which beats one with 10, etc.
-func score(node *BalanceNode, seg *SegmentInfo, currentStates map[int64]coordview.SegmentState, cfg *BalanceConfig) float64 {
-	if cfg == nil {
-		cfg = &BalanceConfig{}
-	}
-	var s float64
-	load := segmentLoad(seg)
-
-	if currentStates != nil {
-		state, ok := currentStates[node.NodeID]
-		if ok {
-			bonus := cfg.StickinessBaseWeight * segmentStateAffinity(state)
-			if cfg.BaselineSegmentSize > 0 {
-				bonus *= float64(load) / float64(cfg.BaselineSegmentSize)
-			}
-			s += bonus
-		}
-	}
-
-	if node.MemoryCapacity > 0 {
-		used := float64(node.UpMemLoad + node.PendingMemLoad)
-		ratio := used / float64(node.MemoryCapacity)
-		s += cfg.MemoryWeight * (1 - ratio)
-	}
-
-	s += cfg.SegmentCountWeight * (1.0 / float64(1+node.SegmentCount))
-	return s
-}
-
-func segmentStateAffinity(state coordview.SegmentState) float64 {
-	switch state {
-	case coordview.SegmentStateUp:
-		return 1.0
-	case coordview.SegmentStateReady:
-		return 0.75
-	case coordview.SegmentStatePreparing:
-		return 0.25
-	case coordview.SegmentStateUnrecoverable:
-		return -1.0
-	default:
-		return 0
-	}
-}
-
-func segmentLoad(seg *SegmentInfo) int64 {
+func segmentRows(seg *SegmentInfo) int64 {
 	if seg == nil {
 		return 0
-	}
-	if seg.MemSize > 0 {
-		return seg.MemSize
 	}
 	return seg.RowNum
 }

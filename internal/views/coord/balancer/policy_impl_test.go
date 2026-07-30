@@ -14,13 +14,20 @@ import (
 
 func policyTestConfig() *BalanceConfig {
 	return &BalanceConfig{
-		StickinessBaseWeight:    1,
-		MemoryWeight:            100,
-		SegmentCountWeight:      1,
-		BaselineSegmentSize:     100,
-		BalanceThreshold:        1,
-		CostEfficiencyThreshold: 0.01,
+		StickinessWeight:       1,
+		NodeLoadWeight:         1,
+		FanoutWeight:           1,
+		StickyRowsScale:        1_000_000,
+		TargetRowsPerShardNode: 100_000,
 	}
+}
+
+func distinctAssignmentNodes(assignments map[int64]int64) map[int64]struct{} {
+	nodes := make(map[int64]struct{})
+	for _, nodeID := range assignments {
+		nodes[nodeID] = struct{}{}
+	}
+	return nodes
 }
 
 func shardDataView(vchannel string, partitionID int64, segmentIDs ...int64) *viewpb.DataViewOfShard {
@@ -61,27 +68,102 @@ func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
 	assert.Equal(t, []qviews.ShardID{shardID}, plan.Releases)
 }
 
-func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestFirst(t *testing.T) {
+func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestRowCountFirst(t *testing.T) {
 	const collectionID, replicaID int64 = 1, 10
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-		101: {SegmentID: 101, PartitionID: 1, MemSize: 800},
-		102: {SegmentID: 102, PartitionID: 1, MemSize: 100},
+		101: {SegmentID: 101, PartitionID: 1, MemSize: 800, RowNum: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, MemSize: 100, RowNum: 800_000},
 	}), shardDataView("v0", 1, 101, 102))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
 	require.Contains(t, plan.Prepares, shardID)
 	assignments := assignmentsFromBuilder(plan.Prepares[shardID])
-	assert.Equal(t, int64(1), assignments[101], "largest segment claims the first empty node")
-	assert.Equal(t, int64(2), assignments[102], "smaller segment fills the less loaded node")
+	assert.Equal(t, int64(1), assignments[102], "segment with more rows claims the first empty node")
+	assert.Equal(t, int64(2), assignments[101], "segment with fewer rows fills the less loaded node")
+}
+
+func TestDefaultBalancePolicy_SmallShardStaysWithinOneNodeFanout(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 40_000},
+		102: {SegmentID: 102, PartitionID: 1, RowNum: 30_000},
+		103: {SegmentID: 103, PartitionID: 1, RowNum: 20_000},
+		104: {SegmentID: 104, PartitionID: 1, RowNum: 10_000},
+	}), shardDataView("v0", 1, 101, 102, 103, 104))
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assignments := assignmentsFromBuilder(plan.Prepares[shardID])
+	assert.Len(t, distinctAssignmentNodes(assignments), 1)
+}
+
+func TestDefaultBalancePolicy_TenSmallSegmentsConsolidate(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	segments := make(map[int64]*SegmentInfo, 10)
+	segmentIDs := make([]int64, 0, 10)
+	for i := int64(0); i < 10; i++ {
+		segmentID := int64(101) + i
+		segments[segmentID] = &SegmentInfo{SegmentID: segmentID, PartitionID: 1, RowNum: 10_000}
+		segmentIDs = append(segmentIDs, segmentID)
+	}
+	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(segments), shardDataView("v0", 1, segmentIDs...))
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assignments := assignmentsFromBuilder(plan.Prepares[shardID])
+	assert.Len(t, distinctAssignmentNodes(assignments), 1)
+}
+
+func TestDefaultBalancePolicy_EqualRowsUseSegmentIDOrder(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, RowNum: 100_000},
+	}), shardDataView("v0", 1, 102, 101))
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assignments := assignmentsFromBuilder(plan.Prepares[shardID])
+	assert.Equal(t, int64(1), assignments[101])
+	assert.Equal(t, int64(2), assignments[102])
 }
 
 func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T) {
@@ -92,12 +174,12 @@ func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T)
 	snap := baseSnap(cfg, shardA)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-		101: {SegmentID: 101, PartitionID: 1, MemSize: 600},
-		201: {SegmentID: 201, PartitionID: 1, MemSize: 600},
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 600},
+		201: {SegmentID: 201, PartitionID: 1, RowNum: 600},
 	}), shardDataView("v0", 1, 101), shardDataView("v1", 1, 201))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardB, shardA})
@@ -108,6 +190,69 @@ func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T)
 	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardB])[201])
 }
 
+func TestDefaultBalancePolicy_ReusedShardRowsAreNotDoubleCounted(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	desiredVersion := qviews.DataVersion{StreamingVersion: 2}
+	shardA := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	shardB := qviews.ShardID{ReplicaID: replicaID, VChannel: "v1"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardA)
+	snap.Config = policyTestConfig()
+	snap.Config.StickinessWeight = 10
+	setTestDataSnapshot(snap, collectionID, desiredVersion, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+		201: {SegmentID: 201, PartitionID: 1, RowNum: 50_000},
+	}), shardDataView("v0", 1, 101), shardDataView("v1", 1, 201))
+	snap.ShardStatsMap()[shardA] = upStats(
+		qviews.DataVersion{StreamingVersion: 1},
+		[]int64{1},
+		nil,
+		placement(101, 1, 1, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 150_000},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardB, shardA})
+
+	require.Contains(t, plan.Prepares, shardA)
+	require.Contains(t, plan.Prepares, shardB)
+	assert.Equal(t, int64(1), assignmentsFromBuilder(plan.Prepares[shardA])[101])
+	assert.Equal(t, int64(1), assignmentsFromBuilder(plan.Prepares[shardB])[201],
+		"shard A must contribute 100k rows once, not 200k rows after reuse")
+}
+
+func TestDefaultBalancePolicy_ReleasedShardRowsAreRemovedBeforeAllocation(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	releaseShard := qviews.ShardID{ReplicaID: 99, VChannel: "old"}
+	loadShard := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, loadShard)
+	snap.Config = policyTestConfig()
+	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+		201: {SegmentID: 201, PartitionID: 1, RowNum: 50_000},
+	}), shardDataView("v0", 1, 201))
+	snap.ShardStatsMap()[releaseShard] = upStats(
+		qviews.DataVersion{StreamingVersion: 1},
+		[]int64{1},
+		nil,
+		placement(101, 1, 1, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 200_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 150_000},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{loadShard, releaseShard})
+
+	assert.Equal(t, []qviews.ShardID{releaseShard}, plan.Releases)
+	require.Contains(t, plan.Prepares, loadShard)
+	assert.Equal(t, int64(1), assignmentsFromBuilder(plan.Prepares[loadShard])[201],
+		"the released shard removes 100k rows from node 1 before new allocation")
+}
+
 func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T) {
 	const collectionID, replicaID int64 = 1, 10
 	version := qviews.DataVersion{StreamingVersion: 1}
@@ -116,12 +261,12 @@ func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T)
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-		101: {SegmentID: 101, PartitionID: 1, MemSize: 100},
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100},
 	}), shardDataView("v0", 1, 101))
 	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placement(101, 1, 1, coordview.SegmentStateUp))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 100},
-		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 100},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 100},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
@@ -137,12 +282,12 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-		101: {SegmentID: 101, PartitionID: 1, MemSize: 10},
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 10},
 	}), shardDataView("v0", 1, 101))
 	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placement(101, 1, 1, coordview.SegmentStateUp))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 900},
-		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 900},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
@@ -151,24 +296,283 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])
 }
 
-func TestDefaultBalancePolicy_OptionalOptimizationRejectedByThreshold(t *testing.T) {
+func TestDefaultBalancePolicy_OptionalChangedAssignmentEmitsWithoutPlanLevelThreshold(t *testing.T) {
 	const collectionID, replicaID int64 = 1, 10
 	version := qviews.DataVersion{StreamingVersion: 1}
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
-	snap.Config.BalanceThreshold = 1_000
 	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-		101: {SegmentID: 101, PartitionID: 1, MemSize: 10},
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 10},
 	}), shardDataView("v0", 1, 101))
 	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placement(101, 1, 1, coordview.SegmentStateUp))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 900},
-		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 900},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])
+}
+
+func TestDefaultBalancePolicy_LowBenefitScaleOutDoesNotOpenBeyondFanoutBudget(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 80_000},
+		102: {SegmentID: 102, PartitionID: 1, RowNum: 40_000},
+		103: {SegmentID: 103, PartitionID: 1, RowNum: 20_000},
+		104: {SegmentID: 104, PartitionID: 1, RowNum: 10_000},
+	}), shardDataView("v0", 1, 101, 102, 103, 104))
+	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil,
+		placement(101, 1, 1, coordview.SegmentStateUp),
+		placement(102, 1, 2, coordview.SegmentStateUp),
+		placement(103, 1, 2, coordview.SegmentStateUp),
+		placement(104, 1, 2, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 80_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 70_000},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
 	assert.NotContains(t, plan.Prepares, shardID)
+}
+
+func TestDefaultBalancePolicy_HighBenefitScaleOutUsesNewNodeWithinFanoutBudget(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	segments := make(map[int64]*SegmentInfo, 10)
+	segmentIDs := make([]int64, 0, 10)
+	placements := make([]testSegmentPlacement, 0, 10)
+	for i := int64(0); i < 10; i++ {
+		segmentID := int64(101) + i
+		segments[segmentID] = &SegmentInfo{SegmentID: segmentID, PartitionID: 1, RowNum: 100_000}
+		segmentIDs = append(segmentIDs, segmentID)
+		nodeID := int64(1)
+		if i >= 5 {
+			nodeID = 2
+		}
+		placements = append(placements, placement(segmentID, 1, nodeID, coordview.SegmentStateUp))
+	}
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(segments), shardDataView("v0", 1, segmentIDs...))
+	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placements...)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 500_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 500_000},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assignments := assignmentsFromBuilder(plan.Prepares[shardID])
+	assert.Contains(t, distinctAssignmentNodes(assignments), int64(3))
+}
+
+func TestDefaultBalancePolicy_SaturatedStickinessIsMaximumOptionalMoveCost(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = DefaultBalanceConfig()
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 1_000_000},
+	}), shardDataView("v0", 1, 101))
+	snap.ShardStatsMap()[shardID] = upStats(
+		version,
+		[]int64{1},
+		nil,
+		placement(101, 1, 1, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 101_000_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	assert.NotContains(t, plan.Prepares, shardID,
+		"a segment at StickyRowsScale pays the full default movement cost")
+}
+
+func TestDefaultBalancePolicy_DefaultFanoutBudgetRejectsPureLoadOnlyOverflow(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = DefaultBalanceConfig()
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 99_000},
+		102: {SegmentID: 102, PartitionID: 1, RowNum: 1_000},
+	}), shardDataView("v0", 1, 101, 102))
+	snap.ShardStatsMap()[shardID] = upStats(
+		version,
+		[]int64{1},
+		nil,
+		placement(101, 1, 1, coordview.SegmentStateUp),
+		placement(102, 1, 1, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	assert.NotContains(t, plan.Prepares, shardID,
+		"a shard fitting one target must not open another node only for a tiny load-score gain")
+}
+
+func TestDefaultBalancePolicy_SmallSpreadShardConsolidates(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	segments := make(map[int64]*SegmentInfo, 10)
+	segmentIDs := make([]int64, 0, 10)
+	placements := make([]testSegmentPlacement, 0, 10)
+	rowsByNode := map[int64]int64{}
+	for i := int64(0); i < 10; i++ {
+		segmentID := int64(101) + i
+		nodeID := 1 + i%3
+		segments[segmentID] = &SegmentInfo{SegmentID: segmentID, PartitionID: 1, RowNum: 10_000}
+		segmentIDs = append(segmentIDs, segmentID)
+		placements = append(placements, placement(segmentID, 1, nodeID, coordview.SegmentStateUp))
+		rowsByNode[nodeID] += 10_000
+	}
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(segments), shardDataView("v0", 1, segmentIDs...))
+	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placements...)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: rowsByNode[1]},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: rowsByNode[2]},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1", UpRowCount: rowsByNode[3]},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assert.Len(t, distinctAssignmentNodes(assignmentsFromBuilder(plan.Prepares[shardID])), 1)
+}
+
+func TestDefaultBalancePolicy_AppliedOptionalCandidateIsStable(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = DefaultBalanceConfig()
+	segments := make(map[int64]*SegmentInfo, 10)
+	segmentIDs := make([]int64, 0, 10)
+	placements := make([]testSegmentPlacement, 0, 10)
+	for i := int64(0); i < 10; i++ {
+		segmentID := int64(101) + i
+		nodeID := 1 + i%3
+		segments[segmentID] = &SegmentInfo{SegmentID: segmentID, PartitionID: 1, RowNum: 10_000}
+		segmentIDs = append(segmentIDs, segmentID)
+		placements = append(placements, placement(segmentID, 1, nodeID, coordview.SegmentStateUp))
+	}
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(segments), shardDataView("v0", 1, segmentIDs...))
+	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placements...)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 40_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 30_000},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1", UpRowCount: 30_000},
+	}
+
+	first := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+	require.Contains(t, first.Prepares, shardID)
+	assignments := assignmentsFromBuilder(first.Prepares[shardID])
+	require.Len(t, distinctAssignmentNodes(assignments), 1)
+
+	appliedPlacements := make([]testSegmentPlacement, 0, len(assignments))
+	for segmentID, nodeID := range assignments {
+		appliedPlacements = append(appliedPlacements, placement(segmentID, 1, nodeID, coordview.SegmentStateUp))
+	}
+	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, appliedPlacements...)
+	for _, node := range snap.Nodes {
+		node.UpRowCount = 0
+	}
+	for _, nodeID := range assignments {
+		snap.Nodes[nodeID].UpRowCount += 10_000
+	}
+
+	second := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	assert.NotContains(t, second.Prepares, shardID)
+}
+
+func TestDefaultBalancePolicy_NodeLossPreservesSurvivingReusableSegments(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	version := qviews.DataVersion{StreamingVersion: 1}
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = DefaultBalanceConfig()
+	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, RowNum: 100_000},
+	}), shardDataView("v0", 1, 101, 102))
+	snap.ShardStatsMap()[shardID] = upStats(
+		version,
+		[]int64{1},
+		nil,
+		placement(101, 1, 2, coordview.SegmentStateUp),
+		placement(102, 1, 1, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assignments := assignmentsFromBuilder(plan.Prepares[shardID])
+	assert.Equal(t, int64(2), assignments[101], "the copy on the surviving node remains reusable")
+	assert.Equal(t, int64(3), assignments[102], "only the segment on the failed node is redistributed")
+}
+
+func TestDefaultBalancePolicy_MandatorySameAssignmentStillEmits(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
+	snap := baseSnap(cfg, shardID)
+	snap.Config = policyTestConfig()
+	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 2}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+	}), shardDataView("v0", 1, 101))
+	snap.ShardStatsMap()[shardID] = upStats(
+		qviews.DataVersion{StreamingVersion: 1},
+		[]int64{1},
+		nil,
+		placement(101, 1, 1, coordview.SegmentStateUp),
+	)
+	snap.Nodes = map[int64]*BalanceNode{
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 200_000},
+	}
+
+	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
+
+	require.Contains(t, plan.Prepares, shardID)
+	assert.Equal(t, int64(1), assignmentsFromBuilder(plan.Prepares[shardID])[101])
 }

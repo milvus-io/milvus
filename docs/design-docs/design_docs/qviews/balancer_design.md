@@ -64,7 +64,7 @@ DDL Callbacks (WAL message acknowledgment)
 
 ### Design Principles
 
-- **Level-triggered reconciliation (Kubernetes controller pattern)**: External systems enqueue affected shard IDs via `Trigger(scope)`; the Balancer compares desired vs. current state and converges. Multiple enqueues for the same shard are deduplicated.
+- **Level-triggered reconciliation (Kubernetes controller pattern)**: Event sources with a notifier enqueue affected shard IDs via `Trigger(scope)`; the Balancer compares desired vs. current state and converges. The periodic full scan covers sources without a direct notifier and any missed event. Multiple enqueues for the same shard are deduplicated.
 - **Unified allocation algorithm**: A single BalancePolicy handles all scenarios. Scenario differences are encoded in input variations (available nodes, current view, data view), not separate algorithms. This prevents thrashing.
 - **Batch planning**: Each reconcile cycle builds a global snapshot, drains dirty shards, and asks the Policy for a complete plan. The Policy handles all dirty shards in one call, enabling cross-shard coordination (e.g., avoiding multiple shards targeting the same node).
 - **External inputs as interfaces**: Node Manager, Replica Manager, and DataView Manager are external dependencies consumed via interfaces.
@@ -87,6 +87,7 @@ type Balancer interface {
 
 type TriggerScope struct {
     NodeChanged      bool
+    DirtyNodes       []int64
     DirtyShards      []qviews.ShardID
     DirtyCollections []int64
 }
@@ -126,9 +127,9 @@ The loop is purely infrastructural: the Policy is where all business decisions h
 | External System | When | Trigger Call |
 |---|---|---|
 | Node Manager | Node crash / scale-out / graceful shutdown | `Trigger(TriggerScope{NodeChanged: true})` |
-| DataView Manager | New DataVersion (Flush/Compact) | `Trigger(TriggerScope{DirtyCollections: [collID]})` |
+| DataView Manager | New DataVersion (Flush/Compact) | Observed by the periodic full scan; the current provider interface has no direct change notifier |
 | CollectionLoadManager | Load config updated (DDL callback) | `Trigger(TriggerScope{DirtyCollections: [collID]})` |
-| ShardViewManager | View becomes Unrecoverable | `Trigger(TriggerScope{DirtyShards: [shardID]})` |
+| ShardViewManager | View becomes Unrecoverable | Node-loss cases are covered by `NodeChanged`; other cases are observed by the periodic full scan |
 | Periodic ticker | Timer fires | `Trigger()` (full scan) |
 
 ### 2.2 BalancePolicy
@@ -317,6 +318,13 @@ acquires resources.
 
 The Policy internally organizes work into three phases, but processes all dirty shards in one batch so decisions across shards are coordinated.
 
+The existing Balancer / BalancePolicy / BalancerSnapshot / BalancePlan
+boundaries already provide every input required by the normalized design:
+eligible nodes, cross-shard row counts, per-segment `RowNum`, and current
+segment-to-node states. This redesign does not add a provider, RPC, protobuf,
+or QueryView lifecycle state. It changes only Policy-internal configuration,
+steady-state row accounting, node selection, and optional-candidate emission.
+
 ```
 Plan(snap, dirty)
     │
@@ -330,13 +338,16 @@ Phase 1: Classify each dirty shard
     │    actionNone        → skip
     │
     ▼
-Phase 2: Order candidates + allocate with shared predicted-load tracker
+Phase 2: Order candidates + build complete placements with a shared
+         steady-state row tracker
     │
     │  Mandatory first, then optional.
-    │  After each allocation, update predictedLoad so later shards see the impact.
+    │  Rebuild each shard from an empty partial candidate.
+    │  After each accepted candidate, update projectedRows so later shards see it.
     │
     ▼
-Phase 3: For optional candidates, apply cost/benefit threshold
+Phase 3: Emit mandatory candidates; emit optional candidates only when
+         their complete assignment changed
     │
     ▼
 Return BalancePlan { Prepares, Releases }
@@ -349,19 +360,33 @@ Pure state comparison. For each dirty shard:
 | Condition (checked in order) | Action |
 |---|---|
 | Desired absent, current exists | **Release** |
-| Desired present, no current view | **Must** (initial load or post-Unrecoverable) |
 | Both absent | **None** |
+| Desired present, no Up view, Preparing exists | **None** (avoid stacking) |
+| Desired present, no Up view or only Unrecoverable state | **Must** (initial load or post-Unrecoverable) |
+| Current Up view and a Preparing view exists | **None** (avoid stacking; retry latest state after the in-flight view finishes) |
 | Current DataVersion < DataView DataVersion | **Must** (data changed) |
 | Current view references unavailable node | **Must** (node lost) |
-| Settings changed (partition/field diff) | **Must** |
-| Already has a Preparing view in flight | **None** (avoid stacking) |
+| Current `LoadInfoVersion` differs from the collection load-config version | **Must** (partition/field/settings changed) |
 | None of the above | **MayOptimize** (steady-state balance) |
 
-### 3.2 Phase 2: Ordered Allocation with Shared Load Tracker
+### 3.2 Phase 2: Normalized Ordered Allocation
 
-Candidates are processed in priority order — mandatory (Must) first, optional (MayOptimize) last. Within each group, larger shards (by total MemSize) are processed first so big allocations claim capacity before smaller ones.
+Candidates are processed in priority order — mandatory (Must) first, optional
+(MayOptimize) last. Within each group, larger shards by total `RowNum` are
+processed first, then by ShardID. Within a shard, segments are processed by
+`RowNum` descending and SegmentID ascending. The explicit secondary ordering
+makes planning deterministic.
 
-A `predictedLoad` map (cloned from `snap.Nodes`) is the shared tracker. After allocating a shard, its segment assignments update `predictedLoad` so the next shard sees the effect. This is how cross-shard coordination is achieved without explicit global optimization.
+A shared `projectedRows` map starts from the snapshot's cross-shard row counts.
+Before rebuilding a shard, the Policy removes that shard's currently accounted
+rows from the tracker. The candidate then adds each desired segment exactly
+once. Once accepted, the candidate remains in `projectedRows`, so later shards
+in the batch see its steady-state effect.
+
+This is deliberately different from transient preparation accounting. It does
+not keep the old shard placement and add the complete replacement on top: doing
+so would double-count moved segments and same-node reuse. Preparation overlap
+and migration concurrency are execution-layer concerns.
 
 **Hard constraints** (any failure excludes the node):
 
@@ -369,33 +394,288 @@ A `predictedLoad` map (cloned from `snap.Nodes`) is the shared tracker. After al
 |---|---|
 | Node Health | Must be alive and not stopping |
 | Resource Group | Must belong to this replica's resource group |
-| Memory Capacity | `predictedLoad[node].UpMemLoad + PendingMemLoad + accumulatedForThisShard` ≤ MemoryCapacity |
 
-**Soft constraints** (weighted score, weights differ by orders of magnitude for strict priority):
+**Soft constraints** are three independent normalized scores. Every component
+and their weighted combination is bounded in `[0, 1]`.
 
-| Priority | Constraint | Description |
-|---|---|---|
-| 1 | **Reuse / Avoidance** | Bonus or penalty based on the segment's current node-level state. `Up > Ready > Preparing > Unrecoverable`: Up has full stickiness, Ready/Preparing have weaker reuse preference, and Unrecoverable is penalized so Balancer prefers another node when possible. All factors are proportional to segment MemSize. |
-| 2 | **Memory Balance** | Prefer nodes with lower predicted memory utilization ratio |
-| 3 | **Segment Count Balance** | Prefer nodes with fewer total segments (secondary metric) |
+#### StickinessScore
 
-**Heterogeneous segment size optimizations**:
+Stickiness is local to one `(segment, candidateNode)` decision. It never
+accumulates the rows moved by earlier segments.
 
-| Optimization | Mechanism | Effect |
-|---|---|---|
-| Size as load metric | `accumulatedLoad += seg.MemSize` | Balance by actual memory volume, not count |
-| Largest-first ordering | Sort segments by MemSize descending before assignment | Large segments spread evenly; small segments fill gaps |
-| State-aware reuse | `stickinessWeight * stateFactor * seg.MemSize / baseline` | Large reusable segments rarely move; Unrecoverable placements are avoided when another feasible node exists |
-| Cost-aware threshold (Phase 3) | `scoreGain / migrationCost > threshold` | Avoids high-cost low-benefit migrations |
+```text
+MovePenalty(segment) =
+    min(segment.RowNum / StickyRowsScale, 1.0)
 
-### 3.3 Phase 3: Worth the Cost? (optional candidates only)
+StickinessScore(segment, node) =
+    1.0
+        if node has a valid reusable copy
+        or the segment has no historical placement
+        or the segment has no eligible reusable location
 
-Mandatory candidates are always added to the plan. Optional candidates (MayOptimize) must pass both gates:
+    1.0 - MovePenalty(segment)
+        otherwise
+```
 
-1. **Absolute improvement**: `scoreGain > balanceThreshold`
-2. **Cost-efficiency**: `scoreGain / totalSizeOfMovedSegments > costEfficiencyThreshold`
+The mandatory exception is segment-local. A mandatory shard rebuild still
+preserves stickiness for surviving reusable segments; only a segment whose old
+location cannot be reused becomes neutral. There are no time factors or
+state-specific fractional affinity weights.
 
-This prevents both meaningless small improvements and improvements that require disproportionate migration.
+#### NodeLoadScore
+
+For a shard with `N` eligible nodes, remove the current shard rows from the
+shared tracker and define:
+
+```text
+BaseRows(node) = projected rows excluding the shard being rebuilt
+
+ReferenceRows =
+    (sum(BaseRows over eligible nodes) + ShardTotalRows) / N
+```
+
+`ReferenceRows` is fixed for the entire shard candidate. When tentatively
+placing a segment:
+
+```text
+ProjectedRows(node) =
+    BaseRows(node)
+  + rows already assigned to node in the partial candidate
+  + segment.RowNum
+
+NodeLoadScore(segment, node) =
+    ReferenceRows / (ReferenceRows + ProjectedRows(node))
+```
+
+If `ReferenceRows == 0`, the score is `1.0` on every node. Otherwise a
+tentative placement with `ProjectedRows == 0` scores `1.0`, a placement at the
+reference load scores `0.5`, and increasingly heavy projected placements
+approach `0.0`. An empty `BaseRows` entry still includes the tentative
+segment's rows in `ProjectedRows`. The fixed reference keeps the normalization
+stable while the partial candidate grows.
+
+#### FanoutScore
+
+Fanout is a one-time cost for opening another QueryNode for this shard:
+
+```text
+FanoutBudget = min(
+    EligibleNodeCount,
+    SegmentCount,
+    max(1, ceil(ShardTotalRows / TargetRowsPerShardNode)),
+)
+```
+
+`FanoutBudget` is a free budget, not a fanout target that must be reached. Let
+`OpenedNodes` contain nodes already used by the partial candidate. It starts
+empty and is not pre-populated from the old placement.
+
+```text
+FanoutScore(segment, node | partialCandidate) =
+    1.0  if node is already open
+    1.0  if node is new and len(OpenedNodes) < FanoutBudget
+    0.0  if node is new and len(OpenedNodes) >= FanoutBudget
+```
+
+If an over-budget node still wins, only the segment that opens it pays the
+fanout cost. Later segments on the same node reuse the opening with score
+`1.0`.
+
+#### Combined placement intent
+
+```text
+PlacementIntent(segment, node | partialCandidate) =
+    (
+        StickinessWeight * StickinessScore
+      + NodeLoadWeight   * NodeLoadScore
+      + FanoutWeight     * FanoutScore
+    )
+    / (StickinessWeight + NodeLoadWeight + FanoutWeight)
+```
+
+Weights are non-negative and at least one must be positive. They control only
+relative contribution; they are not normalization constants. A reusable
+segment moves only when the weighted node-load and fanout benefit exceeds its
+weighted stickiness loss.
+
+The production calibration is:
+
+```text
+StickinessWeight       = 1
+NodeLoadWeight         = 1
+FanoutWeight           = 1
+StickyRowsScale        = 1,000,000 rows
+TargetRowsPerShardNode = 100,000 rows
+```
+
+These defaults intentionally give the two full-point penalties strong boundary
+semantics:
+
+- A segment at or above `StickyRowsScale` cannot be moved by node-load benefit
+  alone when fanout is equal. It is one indivisible migration whose movement
+  cost has saturated; mandatory relocation is still neutral when no eligible
+  reusable copy exists. Large shards remain balanceable by moving their
+  smaller, unsaturated segments.
+- When stickiness is equal, node-load benefit alone cannot open a node beyond
+  `FanoutBudget`. This prevents a shard that fits its row-derived budget from
+  spreading only to improve a small load difference. Recalibrating relative
+  weights can relax this boundary, but is a policy change that must repeat the
+  fanout and migration-cost experiments.
+
+When scores are numerically equal, the allocator prefers a valid reusable copy,
+then an already-open node, then lower projected rows, then lower NodeID. The
+comparison epsilon handles floating-point precision only and is not a balance
+threshold.
+
+### 3.3 Phase 3: Candidate Emission
+
+A complete shard candidate is only the final mapping
+`SegmentID -> QueryNodeID`. It does not receive a second aggregate score.
+Summing the per-segment values would repeatedly count node load, turn a
+one-time fanout opening into a per-segment cost, and reintroduce segment-count
+bias.
+
+- Release actions are always emitted.
+- Mandatory candidates are emitted whenever allocation succeeds, even if their
+  assignments are unchanged, because DataVersion or settings may still need to
+  advance.
+- Optional candidates are emitted only when the complete assignment differs
+  from the current assignment. A changed optional candidate is accepted
+  directly.
+
+There is no plan-level `BalanceThreshold`, `CostEfficiencyThreshold`, or
+migration-gain score. Stickiness already provides the migration-benefit gate at
+the segment decision point. Snapshot/version validation, prepare concurrency,
+and migration-row throttling belong to plan execution and may delay work, but
+do not decide whether a placement is economically worthwhile.
+
+### 3.4 Algorithm Complexity
+
+Let:
+
+- `K` be the number of shard IDs passed to `Plan`, including duplicates;
+- `D` be the number of unique dirty shards in one `Plan` call;
+- `M` be the total number of QueryNodes in the snapshot;
+- `A` be the number of dirty shards for which allocation is attempted;
+- `L` be the number of release shards, where `A + L <= D`;
+- `S_i` be the number of desired segments in shard `i`;
+- `R_i` be the number of replica assignments in shard `i`'s load config;
+- `G_i` be the number of QueryNodes in shard `i`'s Resource Group;
+- `N_i` be the number of eligible QueryNodes for shard `i`;
+- `P_i` be the size of shard `i`'s current placement state: its tracked segment
+  records plus their `(segment, node)` state entries. In steady state `P_i` is
+  `Theta(S_i)`; it can be larger while multiple views overlap.
+
+`N_i <= G_i <= M`. The distinction matters because the current implementation
+sorts every node in the Resource Group before filtering out unavailable nodes,
+but evaluates scores only on the remaining eligible nodes.
+
+The work for one allocated shard in the current implementation is:
+
+| Step | Time |
+|---|---:|
+| Classify the shard and calculate its row size | `O(P_i + S_i)` |
+| Remove the current shard contribution from projected rows | `O(M + P_i)` |
+| Resolve the shard's replica assignment | `O(R_i)` |
+| Collect and sort desired segments | `O(S_i log S_i)` |
+| Build and sort the eligible-node set and fixed `ReferenceRows` | `O(M + G_i log G_i)` |
+| Evaluate every eligible node for every segment | normally `O(S_i * N_i)`, strict worst case `O(N_i * (S_i + P_i))` |
+| Compare an optional candidate with the current assignment | `O(P_i + S_i)` |
+| Commit an accepted candidate to projected rows | `O(M + N_i)` |
+
+`NodeLoadScore`, `FanoutScore`, weighted aggregation, and tie-breaking are all
+`O(1)` for one `(segment, node)` evaluation. Logically, stickiness also needs
+only the candidate node's reusable-copy state plus one segment-level boolean:
+whether any eligible reusable copy exists. The current implementation derives
+that boolean by scanning the segment's current copies during every candidate
+node evaluation. Consequently, if a segment has `C_s` current copies, its
+strict evaluation cost is `O(N_i * (1 + C_s))`; summed over the shard this is
+`O(N_i * (S_i + P_i))`.
+
+In the normal steady state, each segment has at most one relevant current copy,
+so `P_i = Theta(S_i)` and candidate-node selection is `O(S_i * N_i)`. During
+overlapping views, the strict bound records the additional copy scan. In the
+pathological case where every segment is represented on every eligible node,
+`P_i = O(S_i * N_i)` and this implementation can reach `O(S_i * N_i^2)`.
+Precomputing the segment-level reusable-copy boolean once would reduce that
+term back to `O(P_i + S_i * N_i)` without changing placement behavior.
+
+The strict time complexity of one `Plan` call is therefore:
+
+```text
+O(
+    K
+  + D log D
+  + M
+  + (A + L) * M
+  + sum over all dirty shards of (S_i + P_i)
+  + sum over allocated shards of (
+        R_i
+      + S_i log S_i
+      + G_i log G_i
+      + N_i * (S_i + P_i)
+    )
+)
+```
+
+`K` covers deduplication, `D log D` covers candidate/release ordering, and the
+standalone `M` term initializes `projectedRows`. The `(A + L) * M` term covers
+the full-map clones used to remove a shard and, within the same asymptotic
+bound, to install each accepted candidate (`accepted <= A`). Shards classified
+as no-op do not pay this clone cost.
+
+For the expected steady state (`P_i = Theta(S_i)`), the batch complexity
+simplifies to:
+
+```text
+O(
+    K
+  + D log D
+  + M
+  + (A + L) * M
+  + sum over all dirty shards of (S_i + P_i)
+  + sum over allocated shards of (
+        R_i
+      + S_i log S_i
+      + G_i log G_i
+      + S_i * N_i
+    )
+)
+```
+
+With uniform upper bounds of `S` desired segments, `R` replica assignments,
+`G <= M` Resource Group nodes, and `N <= G` eligible nodes per dirty shard,
+this is:
+
+```text
+O(K + D log D + D * (M + R + S + S log S + G log G + S * N))
+```
+
+The shard-allocation core is therefore
+`O(S log S + S * N) = O(S * (log S + N))` in steady state. Segment sorting
+dominates when `log S > N`; candidate scoring dominates when `N > log S`.
+Normalized scoring and fanout tracking add only constant work to each
+segment-node comparison. The design deliberately avoids enumerating complete
+placements, whose search space would be `N^S`.
+
+Additional working memory, excluding the returned `BalancePlan`, is:
+
+```text
+O(D + M + max_i(S_i + N_i + P_i))
+```
+
+This covers dirty-shard deduplication and ordering, the shared projected-row
+tracker, and the largest partial shard candidate being constructed. The
+returned plan itself stores every accepted candidate and segment assignment
+and therefore requires
+`O(L + acceptedCandidates + sum over accepted candidates of S_i)` space.
+
+These bounds exclude snapshot acquisition. After its providers return their
+snapshots, `SnapshotBuilder` additionally spends `O(M + P_all)` time and
+`O(M)` balancer-owned space to build `BalanceNode` entries and aggregate row
+load, where `P_all` is the number of placement-state entries across all shards
+in the snapshot. Provider-specific snapshot construction costs are owned by
+those providers.
 
 ## 4. BalancerSnapshot
 
@@ -414,16 +694,16 @@ type BalancerSnapshot struct {
     // Per-node info with cross-shard aggregates embedded.
     Nodes      map[int64]*BalanceNode
 
-    // Tunables (from paramtable).
+    // Tunables (production defaults supplied by DefaultBalanceConfig).
     Config     *BalanceConfig
 }
 
 // ShardStats is the per-shard placement snapshot returned by ShardViewManager.
 type ShardStats struct {
-    UpVersion        *qviews.QueryViewVersion  // nil if no Up view
-    UpSettings       *viewpb.QueryViewSettings // nil if no Up view
-    PreparingVersion *qviews.QueryViewVersion  // nil if no Preparing/Ready view
-    Segments         map[int64]*SegmentStats   // segmentID -> node states
+    UpVersion         *qviews.QueryViewVersion // nil if no Up view
+    UpLoadInfoVersion uint64                   // zero if no Up view
+    PreparingVersion  *qviews.QueryViewVersion // nil if no Preparing/Ready view
+    Segments          map[int64]*SegmentStats  // segmentID -> node states
 }
 
 type SegmentStats struct {
@@ -458,14 +738,11 @@ const (
 // by priority: Up > Ready > Preparing > Unrecoverable.
 
 // SegmentInfo carries the minimum metadata the Balancer needs per segment.
-// All other per-segment attributes (index type, vector dim, compression, etc.)
-// are subsumed by MemSize — DataCoord is responsible for folding them into
-// its estimate of actual memory footprint.
 type SegmentInfo struct {
     SegmentID   int64
     PartitionID int64
-    MemSize     int64  // bytes; primary load metric (from DataCoord's estimate)
-    RowNum      int64  // row count; used as fallback when MemSize is unavailable
+    MemSize     int64  // retained for compatibility and diagnostics; not scored
+    RowNum      int64  // sole balance load metric
 }
 
 // BalanceNode combines identity/health with cross-shard aggregated load.
@@ -476,21 +753,34 @@ type BalanceNode struct {
     Stopping       bool
     ResourceGroup  string
 
-    // Resource capacity (node registration / config).
-    MemoryCapacity int64
-    MemoryUsage    int64  // current reported usage (node SyncResponse cache)
+    // Aggregated across all shards from SegmentInfo.RowNum.
+    UpRowCount      int64  // Up segments on this node
+    PendingRowCount int64  // Ready / Preparing segments on this node
+}
 
-    // Aggregated across all shards from Σ SegmentInfo.MemSize.
-    UpMemLoad      int64  // Up segments on this node
-    PendingMemLoad int64  // Ready / Preparing segments on this node
-    SegmentCount   int    // total Up segments (for count-based balance)
+// BalanceConfig contains only policy inputs. Each score is normalized before
+// its weight is applied.
+type BalanceConfig struct {
+    StickinessWeight float64
+    NodeLoadWeight   float64
+    FanoutWeight     float64
+
+    StickyRowsScale        int64
+    TargetRowsPerShardNode int64
+
+    TickerInterval time.Duration
 }
 ```
 
 **Notes**:
-- Segment-level size: we rely on DataCoord's `MemSize` estimate (bytes). It already folds in index type, vector dim, and compression. `RowNum` is only a fallback.
-- `DiskUsage` / `DiskCapacity` removed from `BalanceNode` for now — in-memory segments only. Will be added back when mmap / disk-index allocation is in scope.
-- `UpMemLoad` + `PendingMemLoad` vs raw `MemoryUsage`: the former are derived from our placement model (what we expect); the latter is node-reported (what actually is). Balance decisions use the former for predictability; anomaly detection can compare the two.
+- The current policy assumes QueryNodes are homogeneous, so absolute assigned row count is comparable across nodes.
+- `RowNum` is the only load signal used by allocation, scoring, shard ordering, stickiness, and fanout-budget calculation. `MemSize` remains in the snapshot only for compatibility and diagnostics.
+- `SegmentCount` is not a node-load score. The desired shard's segment count is used only to cap `FanoutBudget` because fanout cannot exceed the number of segments.
+- The three weights must be non-negative and at least one must be positive. `StickyRowsScale` and `TargetRowsPerShardNode` must be positive.
+- `SegmentCountWeight`, `BaselineSegmentRows`, `BalanceThreshold`, and `CostEfficiencyThreshold` are not part of the normalized design.
+- The production defaults in Section 3.2 are calibrated with deterministic unit and end-to-end scenarios; they are not used as hidden normalization constants.
+- `ShardStats.Segments`, `SegmentInfo.RowNum`, and the existing node aggregates are sufficient to derive per-shard contributions and reusable-copy state. No new snapshot provider field is required.
+- Memory and disk capacity are intentionally not admission-control constraints in this policy. Heterogeneous-node capacity normalization can be added later when a reliable capacity signal is available.
 
 ### 4.2 State Source Summary
 
@@ -502,12 +792,16 @@ BalancerSnapshot (built once per reconcile cycle)
 ├── DataViewSnapshot   ← DataView Manager + segment lookup
 ├── NodeSnapshot       ← Node Manager + Replica Manager
 ├── Nodes          ← Node Manager + Replica Manager
-│                     joined with per-node segment loads derived from
-│                     ShardViewSnapshot stats × DataViewSnapshot segment MemSize
-└── Config         ← Paramtable
+│                     joined with per-node row counts derived from
+│                     ShardViewSnapshot stats × DataViewSnapshot segment RowNum
+└── Config         ← runtime-supplied BalanceConfig
+                     (DefaultBalanceConfig in production wiring)
 ```
 
-`MemSize` in segment metadata is the **primary load metric**. Without it, all heterogeneous optimizations degrade to count-based. Fallback: `RowNum` directly (segment-count balance), optionally `RowNum * estimated_bytes_per_row` if schema is known.
+`RowNum` in segment metadata is the sole balance load metric. A missing or zero
+row count contributes zero load. Zero-row segments are placed using
+stickiness, fanout, and deterministic tie-breaking; no global segment-count
+bonus is added to the node score.
 
 `DeleteApplyStartAfterTimetick` from DataView is passed through to QueryView metadata but is NOT consumed by the allocation algorithm.
 
@@ -516,21 +810,29 @@ BalancerSnapshot (built once per reconcile cycle)
 | Phase | Snapshot Fields | Purpose |
 |---|---|---|
 | **Phase 1** | `LoadConfigSnapshot`, `ShardViewSnapshot`, `DataViewSnapshot`, `Nodes[*].Alive` | Classify each dirty shard: must / may-optimize / release / none |
-| **Phase 2** | `DataViewSnapshot` shard and segment lookup, `Nodes` (full fields, filtered by replica), shard stats (stickiness), `Config` | Produce segment → node assignment, update predictedLoad |
-| **Phase 3** | Current score (from shard stats), candidate score, segment lookup (MemSize for migration cost), `Config` (thresholds) | Accept or reject optional optimization |
+| **Phase 2** | `DataViewSnapshot` shard and segment lookup, `Nodes` filtered by replica, shard segment/node states, normalized-score config | Remove current shard rows, incrementally produce the complete segment → node assignment, update partial rows and opened-node state |
+| **Phase 3** | Current assignment and complete candidate assignment | Always emit mandatory work; emit optional work only when assignments differ |
 
 ### 4.4 Within-Batch Coordination
 
-The snapshot itself is not mutated during `Plan`. Instead, the Policy maintains a `predictedLoad` tracker (cloned from `snap.Nodes`) that is updated as each shard's allocation is decided:
+The snapshot itself is not mutated during `Plan`. The Policy owns a shared
+steady-state row tracker cloned from the snapshot:
 
 ```
-predictedLoad := snap.Nodes.clone()
+projectedRows := totalRows(snap.Nodes)
 for each candidate in orderedCandidates:
-    builder := allocate(snap, shardID, predictedLoad)
-    applyToTracker(predictedLoad, builder)  // next candidate sees this shard's effect
+    baseRows := projectedRows - currentRows(candidate.shardID)
+    placement := allocate(snap, candidate.shardID, baseRows)
+
+    if mandatory || placement differs from current assignment:
+        projectedRows := baseRows + rows(placement)
+        emit placement
 ```
 
-This gives cross-shard coordination without requiring the snapshot to be mutable or rebuilt per shard.
+Rejected/no-op optional candidates leave `projectedRows` unchanged. Accepted
+candidates replace their old shard contribution instead of being added on top
+of it. This gives cross-shard coordination without mutating the snapshot,
+rebuilding it per shard, or double-counting the replacement view.
 
 ## 5. Event Processing Examples
 
@@ -544,9 +846,11 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 5. policy.Plan(snap, dirty):
    Phase 1: each shard's current view references QN3 → all actionMust
    Phase 2: order by size desc; for each shard:
-     - QN3 not in Nodes → its segments lose stickiness → redistributed
+     - QN3 is ineligible → its segments have no reusable location and receive
+       neutral stickiness
      - other segments retain stickiness → stay in place
-     - predictedLoad updated so next shard sees the shifted load
+     - the accepted candidate replaces the shard's old contribution in
+       projectedRows so the next shard sees the shifted steady-state load
    → plan.Prepares = {A: ..., B: ..., C: ...}
 6. Balancer.apply(plan) → AddPreparing for each
 ```
@@ -561,9 +865,24 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 4. policy.Plan(snap, [shards of C1]):
    Phase 1: desired present, current absent → actionMust for each
    Phase 2: no stickiness; segments sorted largest-first
-            predictedLoad ensures large shards don't all land on the same node
+            NodeLoadScore coordinates rows across shards and FanoutScore avoids
+            opening unnecessary QueryNodes inside a small shard
    → plan.Prepares = {each shard: builder}
 5. Balancer.apply(plan) → AddPreparing for each
+```
+
+### 5.3 Optional Scale-Out
+
+```
+1. A new QueryNode joins the replica resource group → Trigger(NodeChanged: true)
+2. Stable shards classify as actionMayOptimize
+3. For each segment, the current node participates as a normal candidate:
+   - moving loses segment-local StickinessScore
+   - a lighter new node may gain NodeLoadScore
+   - opening the node may lose FanoutScore when the shard is already at budget
+4. If no segment selects a different node, no plan is emitted
+5. If at least one segment selects a different node, the complete candidate is
+   emitted directly; there is no second plan-level gain threshold
 ```
 
 ## 6. Thread Safety
@@ -580,7 +899,7 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 | Component | Responsibility | Holds State |
 |---|---|---|
 | Balancer | Scheduling framework: work queue + reconcile loop + snapshot builder + plan executor | Work queue only |
-| BalancePolicy | Batch planning: classify dirty shards + compute assignments + accept/reject threshold | None |
+| BalancePolicy | Batch planning: classify dirty shards + compute normalized incremental assignments + emit changed optional candidates | None |
 | CollectionLoadManager | Load-config lifecycle: DDL broadcast-result handling, desired-state persistence, shard ensure callback from result vchannels, dirty collection notify. | None beyond dependencies |
 | ShardViewRegistry | Actual shard view state aggregation and resident ShardViewSnapshot publication. | Registry indexes + snapshot cache |
 | ShardViewManager | Per-shard multi-version view management (existing). Exposes `Stats()` for aggregation. | Per-shard state |
@@ -591,12 +910,13 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 internal/views/
 ├── coord/
 │   ├── balancer/
-│   │   ├── balancer.go        # Balancer + main loop + snapshot builder
+│   │   ├── balancer.go        # Balancer + reconcile loop + plan application
+│   │   ├── snapshot_builder.go # SnapshotBuilder composition + row aggregation
 │   │   ├── trigger.go         # TriggerScope definition
 │   │   ├── snapshot.go        # BalancerSnapshot, BalanceNode, SegmentInfo, BalanceConfig
 │   │   ├── policy.go          # BalancePolicy interface + BalancePlan
-│   │   ├── policy_impl.go     # Default Plan() implementation (three phases)
-│   │   └── scoring.go         # Hard constraints + soft constraint scoring
+│   │   ├── policy_impl.go     # Default Plan() implementation + shared steady-state row tracker
+│   │   └── scoring.go         # Hard constraints + normalized stickiness/load/fanout scoring
 │   ├── loadmgr/
 │   │   ├── load_config.go           # LoadConfig, ReplicaAssignment types
 │   │   ├── load_config_store.go     # LoadConfigStore
@@ -613,7 +933,55 @@ internal/views/
 ## 9. Future Considerations
 
 1. **Preparing timeout eviction**: Periodic reconcile can detect shards stuck in Preparing beyond a timeout → mark as Unrecoverable to release the slot.
-2. **Global optimization passes**: The current Policy uses per-shard greedy allocation with a shared predicted-load tracker. For batches where many shards need rebalancing simultaneously (e.g., scale-out), a second optimization pass could detect and resolve cross-shard conflicts (two shards both wanting the same lightly-loaded node).
+2. **Global optimization passes**: The current Policy uses deterministic per-shard greedy allocation with a shared steady-state row tracker. For batches where many shards need rebalancing simultaneously (e.g., scale-out), a second optimization pass could detect and resolve cross-shard conflicts (two shards both wanting the same lightly-loaded node).
 3. **Disk-based scoring**: Add `DiskUsage`/`DiskCapacity` back to `BalanceNode` and a disk-balance soft constraint once mmap / disk-index segments are in scope.
 4. **Rate limiting**: Cap concurrent Preparing views across all shards to prevent overwhelming the cluster during large-scale events.
 5. **Snapshot incremental rebuild**: Currently snapshots are built fresh per reconcile cycle. For very large clusters, an incremental snapshot that only re-reads changed collections/shards could reduce overhead.
+
+## 10. Verification
+
+### 10.1 Score Invariants
+
+1. `StickinessScore`, `NodeLoadScore`, `FanoutScore`, and `PlacementIntent` are
+   always within `[0, 1]`.
+2. A segment's stickiness does not change because earlier segments moved.
+3. `ReferenceRows` remains fixed while one shard candidate is constructed.
+4. Opening an over-budget node is penalized once; reusing it is not penalized
+   again.
+5. Equal-score selection is deterministic and prefers reuse before movement.
+
+### 10.2 Policy Behavior
+
+1. Current shard rows are removed before candidate assignments are added, so
+   same-node reuse is not double-counted.
+2. Ten small segments whose total rows fit one shard-node target do not
+   automatically fan out to ten QueryNodes.
+3. A large shard can use more QueryNodes within its row-derived fanout budget
+   when node-load benefit justifies it.
+4. Small load improvements do not overcome segment stickiness; sufficiently
+   large improvements move unsaturated segments, while saturated stickiness is
+   the maximum optional movement cost under the equal default weights.
+5. Node loss neutralizes stickiness only for segments without an eligible
+   reusable copy.
+6. DataVersion advancement places new segments without unnecessarily moving
+   surviving reusable segments.
+7. Optional optimization emits no plan when the complete assignment is
+   unchanged and requires no additional gain threshold when it changes.
+8. Replanning an applied candidate with unchanged inputs produces no further
+   optional plan.
+9. Earlier accepted shards update the shared steady-state row tracker seen by
+   later shards in the same batch.
+10. Under production defaults, pure node-load benefit does not open a node
+    beyond `FanoutBudget` when stickiness is equal.
+
+### 10.3 End-to-End Scenarios
+
+1. Initial load balances rows without unnecessary shard fanout.
+2. Low-benefit scale-out remains a no-op.
+3. High-benefit scale-out moves segments when weighted load gain exceeds
+   stickiness.
+4. Flush/DataVersion changes preserve reusable placements and load new
+   segments.
+5. QueryNode failure performs mandatory recovery and converges.
+6. A small shard previously spread over many QueryNodes consolidates to a
+   smaller node subset.
