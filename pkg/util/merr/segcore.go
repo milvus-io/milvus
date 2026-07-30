@@ -56,6 +56,10 @@ type segcoreClass struct {
 	retriable bool
 }
 
+// SegcoreMetricTypeNotMatchCode is exposed for boundary adapters that must
+// preserve an established API contract for this specific C++ error.
+const SegcoreMetricTypeNotMatchCode int32 = 2031
+
 // segcoreCodeTable is the registry of known C++ segcore error codes. Codes
 // absent here fall back to ErrSegcore (see classifySegcoreError).
 //
@@ -98,14 +102,14 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2033: {sentinel: ErrSegcorePretendFinished, signal: true},
 
 	// Caller-input errors (errType=input => non-retriable by construction).
-	2020: {sentinel: ErrSegcore, inputError: true}, // FieldIDInvalid: field id not in schema
-	2023: {sentinel: ErrSegcore, inputError: true}, // DataIsEmpty: indexing empty/all-null source data
-	2025: {sentinel: ErrSegcore, inputError: true}, // JsonKeyInvalid
-	2026: {sentinel: ErrSegcore, inputError: true}, // MetricTypeInvalid
-	2028: {sentinel: ErrSegcore, inputError: true}, // ExprInvalid: filter expression invalid
-	2031: {sentinel: ErrSegcore, inputError: true}, // MetricTypeNotMatch
-	2032: {sentinel: ErrSegcore, inputError: true}, // DimNotMatch: query vector dim != schema
-	2042: {sentinel: ErrSegcore, inputError: true}, // InvalidParameter: rescorer params
+	2020:                          {sentinel: ErrSegcore, inputError: true}, // FieldIDInvalid: field id not in schema
+	2023:                          {sentinel: ErrSegcore, inputError: true}, // DataIsEmpty: indexing empty/all-null source data
+	2025:                          {sentinel: ErrSegcore, inputError: true}, // JsonKeyInvalid
+	2026:                          {sentinel: ErrSegcore, inputError: true}, // MetricTypeInvalid
+	2028:                          {sentinel: ErrSegcore, inputError: true}, // ExprInvalid: filter expression invalid
+	SegcoreMetricTypeNotMatchCode: {sentinel: ErrSegcore, inputError: true}, // MetricTypeNotMatch
+	2032:                          {sentinel: ErrSegcore, inputError: true}, // DimNotMatch: query vector dim != schema
+	2042:                          {sentinel: ErrSegcore, inputError: true}, // InvalidParameter: rescorer params
 
 	// Transient system errors (retriable: a retry / reroute to another replica
 	// can succeed).
@@ -188,4 +192,11 @@ func classifySegcoreError(code int32, msg string) error {
 func IsSegcoreSignal(code int32) bool {
 	cls, ok := segcoreCodeTable[code]
 	return ok && cls.signal
+}
+
+// IsSegcoreMetricTypeNotMatch reports the C++ MetricTypeNotMatch code without
+// making search-boundary callers duplicate a numeric segcore code. Search maps
+// this user-input failure back to the historical ParameterInvalid wire contract.
+func IsSegcoreMetricTypeNotMatch(code int32) bool {
+	return code == SegcoreMetricTypeNotMatchCode
 }

@@ -462,7 +462,6 @@ func (s *CollectionManagerSuite) TestSchemaUpdateWaitsForTransitionReader() {
 				CollectionID: coll.ID(),
 				LoadType:     querypb.LoadType_LoadCollection,
 			})
-
 		})
 		s.cm.Unref(coll.ID(), 1)
 	})
@@ -494,7 +493,6 @@ func (s *CollectionManagerSuite) TestSchemaUpdateDoesNotBlockUnrelatedCollection
 					CollectionID: collection.ID(),
 					LoadType:     querypb.LoadType_LoadCollection,
 				})
-
 			},
 			unref: true,
 		},
@@ -586,7 +584,6 @@ func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethods() {
 	releaser, ok := csegment.(interface{ Release() })
 	s.Require().True(ok)
 	releaser.Release()
-
 }
 
 func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {

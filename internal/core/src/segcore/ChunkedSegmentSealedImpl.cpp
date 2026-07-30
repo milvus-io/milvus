@@ -3685,7 +3685,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     auto segment_metric =
         ResolveMetricType(snapshot->runtime, snapshot->index_meta, field_id);
     search_info.metric_type_ = ResolveSearchMetricType(
-        search_info.metric_type_, segment_metric, field_id);
+        search_info.metric_type_, segment_metric, field_meta.get_name().get());
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
         ValidateVectorArraySearchMode(
             search_info.metric_type_, search_info.element_level(), field_id);

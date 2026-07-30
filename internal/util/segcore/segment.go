@@ -37,6 +37,9 @@ import (
 const (
 	SegmentTypeGrowing SegmentType = commonpb.SegmentState_Growing
 	SegmentTypeSealed  SegmentType = commonpb.SegmentState_Sealed
+
+	metricTypeMismatchExpectedMarker = "metric type not match[expected="
+	metricTypeMismatchActualMarker   = "][actual="
 )
 
 type (
@@ -171,6 +174,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 			))
 		},
 		cgo.WithName("search"),
+		cgo.WithErrorMapper(mapSearchCStatus),
 	)
 	defer future.Release()
 
@@ -179,6 +183,46 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		return nil, err
 	}
 	return &SearchResult{cSearchResult: (C.CSearchResult)(result)}, nil
+}
+
+// mapSearchCStatus restores the public metric-mismatch contract at the search
+// boundary. Before collection-wide index metadata was removed, Go compared the
+// request metric with the index metric during plan creation and returned
+// ParameterInvalid(1100). The authoritative comparison now happens inside the
+// segment, but callers must still observe the same code and message.
+func mapSearchCStatus(code int32, message string) error {
+	if !merr.IsSegcoreMetricTypeNotMatch(code) {
+		return merr.SegcoreError(code, message)
+	}
+
+	expected, actual, ok := parseMetricTypeMismatch(message)
+	if !ok {
+		return merr.WrapErrParameterInvalidMsg("metric type not match")
+	}
+	return merr.WrapErrParameterInvalid(expected, actual, "metric type not match")
+}
+
+func parseMetricTypeMismatch(message string) (string, string, bool) {
+	start := strings.Index(message, metricTypeMismatchExpectedMarker)
+	if start < 0 {
+		return "", "", false
+	}
+	rest := message[start+len(metricTypeMismatchExpectedMarker):]
+	separator := strings.Index(rest, metricTypeMismatchActualMarker)
+	if separator < 0 {
+		return "", "", false
+	}
+	expected := rest[:separator]
+	rest = rest[separator+len(metricTypeMismatchActualMarker):]
+	end := strings.IndexByte(rest, ']')
+	if end < 0 {
+		return "", "", false
+	}
+	actual := rest[:end]
+	if expected == "" || actual == "" {
+		return "", "", false
+	}
+	return expected, actual, true
 }
 
 // Retrieve retrieves entities from the segment.

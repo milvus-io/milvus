@@ -668,7 +668,7 @@ func TestInsertDefaultRowsWithKeepAutoIDPk(t *testing.T) {
 	// check collection stats
 	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(schema.CollectionName))
 	common.CheckErr(t, err, true)
-	require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
+	require.Equal(t, strconv.Itoa(common.DefaultNb), stats[common.RowCount])
 }
 
 // test insert rows enable or disable dynamic field

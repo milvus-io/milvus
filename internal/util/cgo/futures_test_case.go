@@ -32,11 +32,12 @@ type testCase struct {
 	caseNo   int
 }
 
-func createFutureWithTestCase(ctx context.Context, testCase testCase) Future {
+func createFutureWithTestCase(ctx context.Context, testCase testCase, opts ...Opt) Future {
 	f := func() CFuturePtr {
 		return (CFuturePtr)(C.future_create_test_case(C.int(testCase.interval.Milliseconds()), C.int(testCase.loopCnt), C.int(testCase.caseNo)))
 	}
-	future := Async(ctx, f, WithName("createFutureWithTestCase"))
+	opts = append([]Opt{WithName("createFutureWithTestCase")}, opts...)
+	future := Async(ctx, f, opts...)
 	return future
 }
 

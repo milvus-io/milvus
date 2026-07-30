@@ -1386,6 +1386,11 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
         segment.get(), knowhere::metric::IP, true, &missing_metric_result);
     EXPECT_EQ(missing_metric_status.error_code, FieldNotLoaded);
     EXPECT_EQ(missing_metric_result, nullptr);
+    ASSERT_NE(missing_metric_status.error_msg, nullptr);
+    EXPECT_NE(std::string(missing_metric_status.error_msg)
+                  .find("field index of the field: fakevec is not loaded, "
+                        "please reload the collection"),
+              std::string::npos);
     free(const_cast<char*>(missing_metric_status.error_msg));
     DeleteSearchPlan(missing_metric_plan);
 
@@ -1427,6 +1432,10 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
         segment.get(), knowhere::metric::L2, false, &mismatch_result);
     EXPECT_EQ(mismatch_status.error_code, MetricTypeNotMatch);
     EXPECT_EQ(mismatch_result, nullptr);
+    ASSERT_NE(mismatch_status.error_msg, nullptr);
+    EXPECT_NE(std::string(mismatch_status.error_msg)
+                  .find("metric type not match[expected=IP][actual=L2]"),
+              std::string::npos);
     free(const_cast<char*>(mismatch_status.error_msg));
     DeleteSearchPlan(mismatch_plan);
 
@@ -1453,6 +1462,10 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
         growing.get(), knowhere::metric::L2, false, &growing_mismatch_result);
     EXPECT_EQ(growing_mismatch_status.error_code, MetricTypeNotMatch);
     EXPECT_EQ(growing_mismatch_result, nullptr);
+    ASSERT_NE(growing_mismatch_status.error_msg, nullptr);
+    EXPECT_NE(std::string(growing_mismatch_status.error_msg)
+                  .find("metric type not match[expected=IP][actual=L2]"),
+              std::string::npos);
     free(const_cast<char*>(growing_mismatch_status.error_msg));
     DeleteSearchPlan(growing_mismatch_plan);
     growing.reset();

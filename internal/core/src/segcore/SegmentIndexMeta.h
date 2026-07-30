@@ -87,7 +87,7 @@ ResolveMetricTypeFromIndexMeta(const IndexMetaPtr& index_meta,
 inline MetricType
 ResolveSearchMetricType(const MetricType& requested_metric,
                         const MetricType& segment_metric,
-                        FieldId field_id) {
+                        const std::string& field_name) {
     if (segment_metric.empty()) {
         // Legacy/test-created segments may not carry index configuration. An
         // explicit request metric is still sufficient to execute them safely;
@@ -96,14 +96,16 @@ ResolveSearchMetricType(const MetricType& requested_metric,
             return requested_metric;
         }
         ThrowInfo(FieldNotLoaded,
-                  "segment has no metric type for vector field {}",
-                  field_id.get());
+                  "field index of the field: {} is not loaded, please reload "
+                  "the collection",
+                  field_name);
     }
     if (!requested_metric.empty() && requested_metric != segment_metric) {
+        // Keep this marker stable. The Go search boundary extracts the two
+        // values and restores the established ParameterInvalid(1100) wire
+        // contract without reintroducing collection-wide index metadata.
         ThrowInfo(MetricTypeNotMatch,
-                  "metric type of field index is not the same as search "
-                  "request, field {}, field index: {}, search request: {}",
-                  field_id.get(),
+                  "metric type not match[expected={}][actual={}]",
                   segment_metric,
                   requested_metric);
     }

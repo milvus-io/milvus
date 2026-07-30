@@ -139,7 +139,7 @@ func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 	getCGOCaller().call("future_leak_and_get", func() {
 		status = C.future_leak_and_get(f.future, &ptr)
 	})
-	err := ConsumeCStatusIntoError(&status)
+	err := consumeCStatusIntoError(&status, f.opts.errorMapper)
 
 	if errors.Is(err, merr.ErrSegcoreFollyCancel) {
 		// mark the error with context error.
