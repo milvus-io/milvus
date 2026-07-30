@@ -66,12 +66,14 @@ ValidateVectorSearchParams(SearchInfo& search_info,
     if (index_type.empty()) {
         return;
     }
-    // Mirror PrepareSearchParams (index/VectorIndex.h): seed metric_type and
-    // topk so the validated input is byte-identical to the indexed path —
-    // the two then cannot disagree because they run the same knowhere code.
+    // Seed metric_type so knowhere resolves the index family (e.g. IvfConfig
+    // vs HnswConfig). We deliberately do NOT seed topk: milvus adjusts ef vs
+    // topk at search time (ef = max(ef, k)), so seeding the raw topk here
+    // would make knowhere's CheckAndAdjust reject legitimate HNSW searches
+    // like ef=32, k=1000 (test_bitmap_index_search_group_by). nprobe and
+    // other range/type checks do not depend on topk.
     knowhere::Json json = search_info.search_params_;
     json[knowhere::meta::METRIC_TYPE] = search_info.metric_type_;
-    json[knowhere::meta::TOPK] = search_info.topk_;
 
     if (data_type == DataType::VECTOR_FLOAT) {
         LoadAndCheck<knowhere::fp32>(index_type, json);
