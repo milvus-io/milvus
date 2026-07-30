@@ -23,6 +23,7 @@
 
 #include "arrow/array/builder_base.h"
 #include "milvus-storage/packed/writer.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::index {
 
@@ -136,9 +137,11 @@ JsonStatsParquetWriter::Init(ParquetWriteContext context) {
                                                                 storage_config_,
                                                                 column_groups_,
                                                                 buffer_size_);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create packed writer: {}",
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "[StorageV2] Failed to create packed writer: {}",
+                  result.status().ToString());
+    }
     packed_writer_ = result.ValueOrDie();
     for (const auto& [key, value] : kv_metadata_) {
         (void)packed_writer_->AddUserMetadata(key, value);
@@ -151,9 +154,11 @@ JsonStatsParquetWriter::AddCurrentRow() {
     all_row_count_++;
     if (unflushed_row_count_ >= batch_size_) {
         auto result = WriteCurrentBatch();
-        AssertInfo(result.ok(),
-                   "failed to write current json stats parquet batch: {}",
-                   result.status().ToString());
+        if (!result.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                      "failed to write current json stats parquet batch: {}",
+                      result.status().ToString());
+        }
     }
     return all_row_count_;
 }
@@ -166,10 +171,16 @@ JsonStatsParquetWriter::AppendSharedRow(const uint8_t* data, size_t length) {
 
     if (length == 0) {
         auto status = shared_builder->AppendNull();
-        AssertInfo(status.ok(), "failed to append null data");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to append null data");
+        }
     } else {
         auto status = shared_builder->Append(data, length);
-        AssertInfo(status.ok(), "failed to append binary data");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to append binary data");
+        }
     }
 }
 
@@ -184,7 +195,10 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
 
     auto& builder = it->second;
     auto ast = AppendDataToBuilder(value, builder);
-    AssertInfo(ast.ok(), "failed to append data to builder");
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                  "failed to append data to builder");
+    }
 }
 
 void
@@ -200,7 +214,10 @@ JsonStatsParquetWriter::AppendRow(
 
         auto& builder = it->second;
         auto status = AppendDataToBuilder(value, builder);
-        AssertInfo(status.ok(), "failed to append data to builder");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to append data to builder");
+        }
     }
 
     AddCurrentRow();

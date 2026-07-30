@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "arrow/result.h"
 #include "arrow/status.h"
 #include "common/EasyAssert.h"
 #include "milvus-storage/common/extend_status.h"
@@ -49,6 +50,15 @@ namespace milvus::storage {
 inline ErrorCode
 ArrowStatusToErrorCode(const arrow::Status& status) {
     return milvus_storage::ToSegcoreError(status).get_error_code();
+}
+
+// Same mapping for an arrow::Result: call sites check `.ok()` on both types,
+// so the overload lets every consumption point be written the same way
+// instead of having to know which one it is holding.
+template <typename T>
+inline ErrorCode
+ArrowStatusToErrorCode(const arrow::Result<T>& result) {
+    return ArrowStatusToErrorCode(result.status());
 }
 
 }  // namespace milvus::storage

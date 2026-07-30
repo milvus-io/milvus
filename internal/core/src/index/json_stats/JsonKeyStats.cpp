@@ -73,6 +73,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::index {
 
@@ -106,16 +107,21 @@ ReadJsonStatsParquetMetadata(const std::string& file) {
         fs, file, properties, {}, NoopParquetKeyRetriever);
 
     auto open_status = reader.open();
-    AssertInfo(open_status.ok(),
-               "[JsonStats] failed to open parquet metadata reader for {}: {}",
-               file,
-               open_status.ToString());
+    if (!open_status.ok()) {
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(open_status),
+            "[JsonStats] failed to open parquet metadata reader for {}: {}",
+            file,
+            open_status.ToString());
+    }
 
     auto row_group_result = reader.get_row_group_infos();
-    AssertInfo(row_group_result.ok(),
-               "[JsonStats] failed to read parquet row groups for {}: {}",
-               file,
-               row_group_result.status().ToString());
+    if (!row_group_result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(row_group_result),
+                  "[JsonStats] failed to read parquet row groups for {}: {}",
+                  file,
+                  row_group_result.status().ToString());
+    }
     auto row_groups = row_group_result.ValueOrDie();
 
     int64_t num_rows = 0;
@@ -139,11 +145,14 @@ GetJsonStatsFieldIdFromArrowField(const std::shared_ptr<arrow::Field>& field) {
                "json stats field id not found in metadata for field {}",
                field->name());
     auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
-    AssertInfo(result.ok(),
-               "failed to get json stats field id from metadata for field {}: "
-               "{}",
-               field->name(),
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(result),
+            "failed to get json stats field id from metadata for field {}: "
+            "{}",
+            field->name(),
+            result.status().ToString());
+    }
     return FieldId(std::stoll(result.ValueOrDie()));
 }
 
@@ -872,9 +881,11 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
     parquet_writer_->Init(std::move(writer_context));
     BuildKeyStats(field_datas, nullable);
     auto close_status = parquet_writer_->Close();
-    AssertInfo(close_status.ok(),
-               "failed to close json stats parquet writer: {}",
-               close_status.ToString());
+    if (!close_status.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(close_status),
+                  "failed to close json stats parquet writer: {}",
+                  close_status.ToString());
+    }
     bson_inverted_index_->BuildIndex();
 
     // write meta file with layout type map and other metadata
@@ -903,12 +914,14 @@ JsonKeyStats::GetColumnSchemaFromParquet(int64_t column_group_id,
         }
 
         auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
-        AssertInfo(result.ok(),
-                   "failed to get field id from metadata for field {}: {} "
-                   "for segment {}",
-                   field_name,
-                   result.status().ToString(),
-                   segment_id_);
+        if (!result.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                      "failed to get field id from metadata for field {}: {} "
+                      "for segment {}",
+                      field_name,
+                      result.status().ToString(),
+                      segment_id_);
+        }
         auto field_id_str = result.ValueOrDie();
         auto field_id = std::stoll(field_id_str);
         field_name_to_id_map_[field_name] = field_id;
@@ -944,9 +957,11 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
 
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "[StorageV2] Failed to create file row group reader: {}",
+                  result.status().ToString());
+    }
     auto file_reader = result.ValueOrDie();
     // get key value metadata from parquet file
     std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
@@ -1154,12 +1169,15 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         auto reader = milvus_storage::api::Reader::create(
             column_groups, nullptr, needed_columns, properties);
         auto chunk_reader_result = reader->get_chunk_reader(0, needed_columns);
-        AssertInfo(chunk_reader_result.ok(),
-                   "[JsonStats] failed to create chunk reader for column group "
-                   "{} segment {}: {}",
-                   column_group_id,
-                   segment_id_,
-                   chunk_reader_result.status().ToString());
+        if (!chunk_reader_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(chunk_reader_result),
+                "[JsonStats] failed to create chunk reader for column group "
+                "{} segment {}: {}",
+                column_group_id,
+                segment_id_,
+                chunk_reader_result.status().ToString());
+        }
         auto chunk_reader_unique = std::move(chunk_reader_result).ValueOrDie();
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader(
             std::move(chunk_reader_unique));
@@ -1231,13 +1249,16 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                 column_name,
             });
         auto chunk_reader_result = reader->get_chunk_reader(0, needed_columns);
-        AssertInfo(chunk_reader_result.ok(),
-                   "[JsonStats] failed to create projected chunk reader for "
-                   "column group {} column {} segment {}: {}",
-                   column_group_id,
-                   column_name,
-                   segment_id_,
-                   chunk_reader_result.status().ToString());
+        if (!chunk_reader_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(chunk_reader_result),
+                "[JsonStats] failed to create projected chunk reader for "
+                "column group {} column {} segment {}: {}",
+                column_group_id,
+                column_name,
+                segment_id_,
+                chunk_reader_result.status().ToString());
+        }
         auto chunk_reader_unique = std::move(chunk_reader_result).ValueOrDie();
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader(
             std::move(chunk_reader_unique));

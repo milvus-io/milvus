@@ -145,7 +145,7 @@ GetDimFromConfig(const Config& config) {
         auto err_message = fmt::format(
             "invalided dimension:{}, error:{}", dimension.value(), e.what());
         LOG_ERROR("{}", err_message);
-        throw std::logic_error(err_message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
     }
 }
 
@@ -177,7 +177,7 @@ GetIndexEngineVersionFromConfig(const Config& config) {
                         index_engine_version.value(),
                         e.what());
         LOG_ERROR("{}", err_message);
-        throw std::logic_error(err_message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
     }
 }
 
@@ -194,7 +194,7 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
                                        bitmap_limit.value(),
                                        e.what());
         LOG_ERROR("{}", err_message);
-        throw std::logic_error(err_message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
     }
 }
 
