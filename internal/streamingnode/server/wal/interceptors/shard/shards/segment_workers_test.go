@@ -7,7 +7,9 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,11 +33,11 @@ import (
 )
 
 type capturedShardScheduler struct {
-	tasks []nodescheduler.Task
+	tasks chan nodescheduler.Task
 }
 
 func (s *capturedShardScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
-	s.tasks = append(s.tasks, task)
+	s.tasks <- task
 	return noopShardTaskHandle{}
 }
 
@@ -45,11 +47,36 @@ func (noopShardTaskHandle) Cancel() {}
 
 func (noopShardTaskHandle) Wait(context.Context) error { return nil }
 
-func TestPartitionManagerSubmitsFlushAndAllocationToNodeScheduler(t *testing.T) {
+func runShardWorkerAndWait(t *testing.T, run func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		run()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for segment worker to complete")
+	}
+}
+
+func TestPartitionManagerRunsFlushAndAllocationOutsideNodeScheduler(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
 
-	scheduler := &capturedShardScheduler{}
+	flushStarted := make(chan struct{}, 1)
+	flushMock := mockey.Mock((*segmentFlushWorker).do).To(func(*segmentFlushWorker) {
+		flushStarted <- struct{}{}
+	}).Build()
+	defer flushMock.UnPatch()
+	allocStarted := make(chan struct{}, 1)
+	allocMock := mockey.Mock((*segmentAllocWorker).do).To(func(*segmentAllocWorker) {
+		allocStarted <- struct{}{}
+	}).Build()
+	defer allocMock.UnPatch()
+
+	scheduler := &capturedShardScheduler{tasks: make(chan nodescheduler.Task, 2)}
 	walFuture := syncutil.NewFuture[wal.WAL]()
 	walFuture.Set(mock_wal.NewMockWAL(t))
 	channel := types.PChannelInfo{Name: "pchannel", Term: 1}
@@ -77,111 +104,21 @@ func TestPartitionManagerSubmitsFlushAndAllocationToNodeScheduler(t *testing.T) 
 	m.asyncFlushSegment(context.Background(), segment)
 	m.asyncAllocSegment(7, true)
 
-	require.Len(t, scheduler.tasks, 2)
-	assert.IsType(t, &segmentFlushWorker{}, scheduler.tasks[0])
-	assert.IsType(t, &segmentAllocWorker{}, scheduler.tasks[1])
-}
-
-func TestSegmentFlushWorkerExecuteUsesErrDelay(t *testing.T) {
-	paramtable.Init()
-	resource.InitForTest(t)
-	channel := types.PChannelInfo{Name: "pchannel", Term: 1}
-	operator := mock_utils.NewMockSealOperator(t)
-	operator.EXPECT().Channel().Return(channel)
-	operator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
-	resource.Resource().SegmentStatsManager().RegisterSealOperator(operator, nil, nil)
-
-	t.Run("txn recovery", func(t *testing.T) {
-		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
-		w := &segmentFlushWorker{
-			txnManager: &neverReadyTxnManager{},
-			ctx:        context.Background(),
-			wal:        mockWAL,
-		}
-		w.SetLogger(mlog.With())
-		require.ErrorIs(t, w.Execute(context.Background()), nodescheduler.ErrDelay)
-	})
-
-	t.Run("ack precondition", func(t *testing.T) {
-		segment := newTestSegmentAllocManager(channel, &message.CreateSegmentMessageHeader{
-			CollectionId:   1,
-			PartitionId:    2,
-			SegmentId:      1001,
-			MaxRows:        100,
-			MaxSegmentSize: 100,
-		}, 100)
-		result, err := segment.AllocRows(&AssignSegmentRequest{TimeTick: 101, ModifiedMetrics: stats.ModifiedMetrics{Rows: 1, BinarySize: 1}})
-		require.NoError(t, err)
-		defer result.Ack()
-		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
-		w := &segmentFlushWorker{
-			txnManager: &mockedTxnManager{},
-			ctx:        context.Background(),
-			segment:    segment,
-			wal:        mockWAL,
-		}
-		w.SetLogger(mlog.With())
-		require.ErrorIs(t, w.Execute(context.Background()), nodescheduler.ErrDelay)
-	})
-
-	t.Run("transient append", func(t *testing.T) {
-		segment := newTestSegmentAllocManager(channel, &message.CreateSegmentMessageHeader{
-			CollectionId:   1,
-			PartitionId:    2,
-			SegmentId:      1002,
-			MaxRows:        100,
-			MaxSegmentSize: 100,
-		}, 100)
-		segment.Flush(policy.PolicyCapacity())
-		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
-		mockWAL.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, errors.New("temporary append failure")).Once()
-		w := &segmentFlushWorker{
-			txnManager: &mockedTxnManager{},
-			ctx:        context.Background(),
-			vchannel:   "v1",
-			segment:    segment,
-			wal:        mockWAL,
-		}
-		w.SetLogger(mlog.With())
-		require.ErrorIs(t, w.Execute(context.Background()), nodescheduler.ErrDelay)
-	})
-}
-
-func TestSegmentAllocWorkerExecuteRetriesAndPreservesConfiguration(t *testing.T) {
-	paramtable.Init()
-	resource.InitForTest(t)
-
-	var attempts atomic.Int32
-	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
-	mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, message.MutableMessage) (*wal.AppendResult, error) {
-		if attempts.Add(1) == 1 {
-			return nil, errors.New("temporary append failure")
-		}
-		return &wal.AppendResult{MessageID: rmq.NewRmqID(100), TimeTick: 200}, nil
-	}).Twice()
-	w := &segmentAllocWorker{
-		ctx:          context.Background(),
-		collectionID: 1,
-		partitionID:  2,
-		vchannel:     "v1",
-		wal:          mockWAL,
+	select {
+	case <-flushStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("flush worker was not started directly")
 	}
-	w.SetLogger(mlog.With())
-
-	require.ErrorIs(t, w.Execute(context.Background()), nodescheduler.ErrDelay)
-	segmentID := w.segmentID
-	storageVersion := w.storageVersion
-	limitation := w.limitation
-	require.NotZero(t, segmentID)
-
-	require.NoError(t, w.Execute(context.Background()))
-	assert.Equal(t, segmentID, w.segmentID)
-	assert.Equal(t, storageVersion, w.storageVersion)
-	assert.Equal(t, limitation, w.limitation)
+	select {
+	case <-allocStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("allocation worker was not started directly")
+	}
+	select {
+	case task := <-scheduler.tasks:
+		t.Fatalf("unexpected NodeScheduler task %T", task)
+	default:
+	}
 }
 
 // TestSegmentFlushWorker_RetryAfterAppendFailure tests that the flush worker
@@ -486,9 +423,46 @@ func TestSegmentAllocWorkerStorageVersionFollowsRequirements(t *testing.T) {
 	}
 }
 
-func TestTxnManagerRecovered(t *testing.T) {
-	assert.True(t, txnManagerRecovered(&mockedTxnManager{}))
-	assert.False(t, txnManagerRecovered(&neverReadyTxnManager{}))
+func TestSegmentFlushWorkerWaitForTxnManagerRecoverDone(t *testing.T) {
+	t.Run("txn manager ready", func(t *testing.T) {
+		mockWAL := mock_wal.NewMockWAL(t)
+		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
+		w := &segmentFlushWorker{
+			txnManager: &mockedTxnManager{},
+			ctx:        context.Background(),
+			wal:        mockWAL,
+		}
+		w.SetLogger(mlog.With())
+		require.NoError(t, w.waitForTxnManagerRecoverDone())
+	})
+
+	t.Run("context canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		mockWAL := mock_wal.NewMockWAL(t)
+		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
+		w := &segmentFlushWorker{
+			txnManager: &neverReadyTxnManager{},
+			ctx:        ctx,
+			wal:        mockWAL,
+		}
+		w.SetLogger(mlog.With())
+		require.ErrorIs(t, w.waitForTxnManagerRecoverDone(), context.Canceled)
+	})
+
+	t.Run("wal unavailable", func(t *testing.T) {
+		unavailable := make(chan struct{})
+		close(unavailable)
+		mockWAL := mock_wal.NewMockWAL(t)
+		mockWAL.EXPECT().Available().Return(unavailable).Maybe()
+		w := &segmentFlushWorker{
+			txnManager: &neverReadyTxnManager{},
+			ctx:        context.Background(),
+			wal:        mockWAL,
+		}
+		w.SetLogger(mlog.With())
+		require.Error(t, w.waitForTxnManagerRecoverDone())
+	})
 }
 
 // TestSegmentAllocWorker_DoLoop tests the main do loop
@@ -522,7 +496,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 		}
 		w.SetLogger(mlog.With())
 
-		require.NoError(t, w.Execute(context.Background()))
+		runShardWorkerAndWait(t, w.do)
 	})
 
 	t.Run("context canceled during retry", func(t *testing.T) {
@@ -549,7 +523,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 		}
 		w.SetLogger(mlog.With())
 
-		require.NoError(t, w.Execute(context.Background()))
+		runShardWorkerAndWait(t, w.do)
 	})
 }
 
@@ -601,7 +575,7 @@ func TestSegmentFlushWorker_DoLoop(t *testing.T) {
 		}
 		w.SetLogger(mlog.With())
 
-		require.NoError(t, w.Execute(context.Background()))
+		runShardWorkerAndWait(t, w.do)
 	})
 }
 
@@ -822,9 +796,7 @@ func TestSegmentAllocWorker_UnrecoverableError(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	err := w.Execute(context.Background())
-	require.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_UnrecoverableError tests handling of unrecoverable errors
@@ -871,9 +843,7 @@ func TestSegmentFlushWorker_UnrecoverableError(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	err := w.Execute(context.Background())
-	require.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentAllocWorker_WALUnavailable tests handling when WAL becomes unavailable
@@ -906,7 +876,7 @@ func TestSegmentAllocWorker_WALUnavailable(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	require.NoError(t, w.Execute(context.Background()))
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_ContextCanceledDuringRetry tests context cancellation during retry
@@ -954,7 +924,7 @@ func TestSegmentFlushWorker_ContextCanceledDuringRetry(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	require.NoError(t, w.Execute(context.Background()))
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_TxnManagerRecoverFailed tests when txn manager recovery fails
@@ -998,7 +968,7 @@ func TestSegmentFlushWorker_TxnManagerRecoverFailed(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	require.NoError(t, w.Execute(context.Background()))
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_WALUnavailableDuringRetry tests WAL unavailable during retry
@@ -1048,5 +1018,5 @@ func TestSegmentFlushWorker_WALUnavailableDuringRetry(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	require.NoError(t, w.Execute(context.Background()))
+	runShardWorkerAndWait(t, w.do)
 }

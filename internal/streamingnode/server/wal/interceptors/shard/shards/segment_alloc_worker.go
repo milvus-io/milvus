@@ -2,6 +2,9 @@ package shards
 
 import (
 	"context"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -10,14 +13,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // asyncAllocSegment allocates a new growing segment asynchronously.
 func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorageV3 bool) {
 	if m.onAllocating != nil {
-		m.Logger().Debug(context.TODO(), "segment alloc worker is already on allocating")
+		m.Logger().Debug(context.TODO(), "segment alloc worker is already on allocating",
+			mlog.FieldVChannel(m.vchannel),
+			mlog.FieldCollectionID(m.collectionID),
+			mlog.FieldPartitionID(m.partitionID),
+		)
 		// manager is already on allocating.
 		return
 	}
@@ -33,7 +39,9 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorag
 		requiresStorageV3: requiresStorageV3,
 	}
 	w.SetLogger(m.Logger())
-	m.scheduler.Submit(w)
+	// It should always run asynchronously. Otherwise, a deadlock may happen
+	// while the WAL is writing the CreateSegment message.
+	go w.do()
 }
 
 // segmentAllocWorker is a worker that allocates new growing segments asynchronously.
@@ -53,33 +61,62 @@ type segmentAllocWorker struct {
 	requiresStorageV3 bool
 }
 
-func (w *segmentAllocWorker) Execute(schedulerCtx context.Context) error {
-	ctx, cancel := mergeSegmentTaskContext(schedulerCtx, w.ctx)
-	defer cancel()
-	if segmentTaskStopped(ctx, w.wal) {
-		return nil
-	}
-	if err := w.doOnceWithContext(ctx); err != nil {
-		if segmentTaskStopped(ctx, w.wal) {
-			return nil
+// do is the main loop of the segment allocation worker.
+func (w *segmentAllocWorker) do() {
+	retryBackoff := backoff.NewExponentialBackOff()
+	retryBackoff.InitialInterval = 10 * time.Millisecond
+	retryBackoff.MaxInterval = time.Second
+	retryBackoff.MaxElapsedTime = 0
+	retryBackoff.Reset()
+
+	for {
+		err := w.doOnce()
+		if err == nil {
+			return
 		}
 		if status.AsStreamingError(err).IsUnrecoverable() {
-			return err
+			w.Logger().Warn(w.ctx, "allocate new growing segment with unrecoverable error, stop retrying",
+				mlog.FieldVChannel(w.vchannel),
+				mlog.FieldCollectionID(w.collectionID),
+				mlog.FieldPartitionID(w.partitionID),
+				mlog.Err(err),
+			)
+			return
 		}
-		return nodescheduler.ErrDelay
+		nextInterval := retryBackoff.NextBackOff()
+		w.Logger().Info(w.ctx, "failed to allocate new growing segment, retrying",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.Duration("nextInterval", nextInterval),
+			mlog.Err(err),
+		)
+		select {
+		case <-w.ctx.Done():
+			w.Logger().Info(w.ctx, "segment allocation canceled",
+				mlog.FieldVChannel(w.vchannel),
+				mlog.FieldCollectionID(w.collectionID),
+				mlog.FieldPartitionID(w.partitionID),
+				mlog.Err(w.ctx.Err()),
+			)
+			return
+		case <-w.wal.Available():
+			w.Logger().Warn(w.ctx, "wal is unavailable, stop alloc new segment",
+				mlog.FieldVChannel(w.vchannel),
+				mlog.FieldCollectionID(w.collectionID),
+				mlog.FieldPartitionID(w.partitionID),
+			)
+			return
+		case <-time.After(nextInterval):
+		}
 	}
-	return nil
 }
 
 // doOnce executes the segment allocation operation.
 func (w *segmentAllocWorker) doOnce() error {
-	return w.doOnceWithContext(w.ctx)
-}
-
-func (w *segmentAllocWorker) doOnceWithContext(ctx context.Context) error {
 	// Initialize segment configuration on first attempt.
 	// These values are preserved across retries to ensure consistency.
-	if err := w.initSegmentConfigWithContext(ctx); err != nil {
+	if err := w.initSegmentConfig(); err != nil {
 		return err
 	}
 
@@ -105,32 +142,46 @@ func (w *segmentAllocWorker) doOnceWithContext(ctx context.Context) error {
 		WithBody(&message.CreateSegmentMessageBody{}).
 		MustBuildMutable()
 
-	result, err := w.wal.Append(ctx, msg)
+	result, err := w.wal.Append(w.ctx, msg)
 	if err != nil {
-		w.Logger().Warn(ctx, "failed to append create segment message", mlog.FieldMessage(msg), mlog.Err(err))
+		w.Logger().Warn(w.ctx, "failed to append create segment message",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.FieldMessage(msg),
+			mlog.Err(err),
+		)
 		return err
 	}
-	w.Logger().Info(ctx,
-		"append create segment message", mlog.FieldMessage(msg), mlog.String("messageID", result.MessageID.String()), mlog.Uint64("timetick", result.TimeTick))
+	w.Logger().Info(w.ctx,
+		"append create segment message",
+		mlog.FieldVChannel(w.vchannel),
+		mlog.FieldCollectionID(w.collectionID),
+		mlog.FieldPartitionID(w.partitionID),
+		mlog.FieldMessage(msg),
+		mlog.String("messageID", result.MessageID.String()),
+		mlog.Uint64("timetick", result.TimeTick),
+	)
 	return nil
 }
 
 // initSegmentConfig initializes the segment configuration (segmentID, storageVersion, limitation).
 // These values are only set once and preserved across retries to ensure consistency.
 func (w *segmentAllocWorker) initSegmentConfig() error {
-	return w.initSegmentConfigWithContext(w.ctx)
-}
-
-func (w *segmentAllocWorker) initSegmentConfigWithContext(ctx context.Context) error {
 	// Skip if already initialized.
 	if w.segmentID != 0 {
 		return nil
 	}
 
 	// Allocate new segment id.
-	segmentID, err := resource.Resource().IDAllocator().Allocate(ctx)
+	segmentID, err := resource.Resource().IDAllocator().Allocate(w.ctx)
 	if err != nil {
-		w.Logger().Warn(ctx, "failed to allocate segment id", mlog.Err(err))
+		w.Logger().Warn(w.ctx, "failed to allocate segment id",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.Err(err),
+		)
 		return err
 	}
 	w.segmentID = segmentID
@@ -145,5 +196,3 @@ func (w *segmentAllocWorker) initSegmentConfigWithContext(ctx context.Context) e
 	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
 	return nil
 }
-
-var _ nodescheduler.Task = (*segmentAllocWorker)(nil)
