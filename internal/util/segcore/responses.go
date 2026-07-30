@@ -22,6 +22,15 @@ func (r *SearchResult) Release() {
 	r.cSearchResult = nil
 }
 
+// ReportStorageMetrics publishes the final per-segment search IO exactly once.
+// Call only after Arrow export and late materialization have finished.
+func (r *SearchResult) ReportStorageMetrics() {
+	if r == nil || r.cSearchResult == nil {
+		return
+	}
+	C.ReportSearchResultStorageMetrics(r.cSearchResult)
+}
+
 // SearchResultMetadata is the post-search information attached to a
 // SearchResult: group-by configuration plus accumulated storage cost.
 // All fields are populated by a single CGO call (GetMetadata).
@@ -37,15 +46,16 @@ type SearchResultMetadata struct {
 // when reading extra fields, and by FillOutputFieldsOrdered during late
 // materialization — call this after all those phases complete.
 func (r *SearchResult) GetMetadata() SearchResultMetadata {
-	var has C.bool
+	var has, valid C.bool
 	var gs, remote, total C.int64_t
-	C.GetSearchResultMetadata(r.cSearchResult, &has, &gs, &remote, &total)
+	C.GetSearchResultMetadata(r.cSearchResult, &has, &gs, &remote, &total, &valid)
 	return SearchResultMetadata{
 		HasGroupBy: bool(has),
 		GroupSize:  int64(gs),
 		StorageCost: StorageCost{
 			ScannedRemoteBytes: int64(remote),
 			ScannedTotalBytes:  int64(total),
+			Valid:              bool(valid),
 		},
 	}
 }

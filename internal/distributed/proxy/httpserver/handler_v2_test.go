@@ -4366,7 +4366,9 @@ func TestSearchAggregationV2(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	paramtable.Get().Save(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key, "true")
+	// HTTP output follows the validity carried by the completed request, not a
+	// live Proxy-side config value that may have changed since QueryNode start.
+	paramtable.Get().Save(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key, "false")
 	defer paramtable.Get().Reset(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key)
 
 	mp := mocks.NewMockProxy(t)

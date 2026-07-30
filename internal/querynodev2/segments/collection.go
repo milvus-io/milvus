@@ -56,8 +56,9 @@ type CollectionManager interface {
 }
 
 type collectionManager struct {
-	mut         sync.RWMutex
-	collections map[int64]*Collection
+	mut                          sync.RWMutex
+	collections                  map[int64]*Collection
+	cleanupCoreCollectionMetrics func(dbName, collectionName string)
 }
 
 type collectionSchemaUpdatePlan struct {
@@ -75,7 +76,8 @@ type collectionSchemaUpdatePlan struct {
 
 func NewCollectionManager() *collectionManager {
 	return &collectionManager{
-		collections: make(map[int64]*Collection),
+		collections:                  make(map[int64]*Collection),
+		cleanupCoreCollectionMetrics: segcore.CleanupCoreCollectionMetrics,
 	}
 }
 
@@ -291,6 +293,15 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 			mlog.Info(context.TODO(), "release collection due to ref count to 0",
 				mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
+			schema := collection.Schema()
+			if schema != nil && !m.hasCollectionWithMetricLabels(schema.GetDbName(), schema.GetName()) {
+				// This is the final collection reference and all query/stream
+				// paths hold their own refs until C++ execution (including metric
+				// reporting) completes. Clean synchronously before releasing the
+				// native collection; an async cleanup could delete a freshly
+				// re-created series for the same labels.
+				m.cleanupCoreCollectionMetrics(schema.GetDbName(), schema.GetName())
+			}
 			DeleteCollection(collection)
 			// Run metrics cleanup in background; DeletePartialMatch is CPU-heavy and should not block Unref.
 			nodeID := paramtable.GetNodeID()
@@ -302,6 +313,20 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 	}
 
 	return true
+}
+
+// hasCollectionWithMetricLabels reports whether another loaded collection
+// still owns the same Prometheus label set. This can happen briefly when a
+// collection is dropped and re-created with a new ID but the same name.
+// m.mut must be held by the caller.
+func (m *collectionManager) hasCollectionWithMetricLabels(dbName, collectionName string) bool {
+	for _, collection := range m.collections {
+		schema := collection.Schema()
+		if schema != nil && schema.GetDbName() == dbName && schema.GetName() == collectionName {
+			return true
+		}
+	}
+	return false
 }
 
 type collectionSchemaSnapshot struct {

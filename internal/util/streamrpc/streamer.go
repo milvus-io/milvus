@@ -81,16 +81,22 @@ func (c *RetrieveResultCache) IsEmpty() bool {
 }
 
 func (c *RetrieveResultCache) merge(result *internalpb.RetrieveResults) {
-	switch result.GetIds().GetIdField().(type) {
-	case *schemapb.IDs_IntId:
-		c.result.GetIds().GetIntId().Data = append(c.result.GetIds().GetIntId().GetData(), result.GetIds().GetIntId().GetData()...)
-	case *schemapb.IDs_StrId:
-		c.result.GetIds().GetStrId().Data = append(c.result.GetIds().GetStrId().GetData(), result.GetIds().GetStrId().GetData()...)
+	if (c.result.GetIds() == nil || c.result.GetIds().GetIdField() == nil) &&
+		result.GetIds() != nil && result.GetIds().GetIdField() != nil {
+		c.result.Ids = result.GetIds()
+	} else {
+		switch result.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			c.result.GetIds().GetIntId().Data = append(c.result.GetIds().GetIntId().GetData(), result.GetIds().GetIntId().GetData()...)
+		case *schemapb.IDs_StrId:
+			c.result.GetIds().GetStrId().Data = append(c.result.GetIds().GetStrId().GetData(), result.GetIds().GetStrId().GetData()...)
+		}
 	}
 	c.result.AllRetrieveCount = c.result.AllRetrieveCount + result.AllRetrieveCount
 	c.result.CostAggregation = mergeCostAggregation(c.result.GetCostAggregation(), result.GetCostAggregation())
 	c.result.ScannedRemoteBytes = c.result.GetScannedRemoteBytes() + result.GetScannedRemoteBytes()
 	c.result.ScannedTotalBytes = c.result.GetScannedTotalBytes() + result.GetScannedTotalBytes()
+	c.result.StorageCostValid = c.result.GetStorageCostValid() && result.GetStorageCostValid()
 	c.size = proto.Size(c.result)
 }
 
@@ -157,8 +163,9 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 	results := make([]*internalpb.RetrieveResults, len(newpks))
 	for i, pks := range newpks {
 		results[i] = &internalpb.RetrieveResults{
-			Status: merr.Status(nil),
-			Ids:    pks,
+			Status:           merr.Status(nil),
+			Ids:              pks,
+			StorageCostValid: result.GetStorageCostValid(),
 		}
 	}
 	results[len(results)-1].AllRetrieveCount = result.AllRetrieveCount

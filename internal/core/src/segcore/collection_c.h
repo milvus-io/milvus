@@ -45,6 +45,9 @@ SetIndexMeta(CCollection collection,
 void
 DeleteCollection(CCollection collection);
 
+void
+CleanupCoreCollectionMetrics(const char* db_name, const char* collection_name);
+
 const char*
 GetCollectionName(CCollection collection);
 

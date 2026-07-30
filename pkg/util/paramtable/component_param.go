@@ -257,7 +257,10 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
-	ParquetStatsSkipIndex               ParamItem `refreshable:"true"`
+	// Not refreshable: this flag decides the row-group -> cell packing of
+	// loaded segments; flipping it at runtime would let a reloaded column's
+	// cell layout diverge from what in-flight queries cached. Requires restart.
+	ParquetStatsSkipIndex ParamItem `refreshable:"false"`
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
@@ -671,8 +674,10 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.parquetStatsSkipIndex.enabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
-		Doc:          "whether to skip parquet stats index when reading; set true to enable skipping.",
-		Export:       true,
+		Doc: "whether to build the sealed-segment chunk skip index from parquet footer statistics. " +
+			"Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. " +
+			"Storage v2 segments only; manifest-based (v3) segments do not build this index yet.",
+		Export: true,
 	}
 	p.ParquetStatsSkipIndex.Init(base.mgr)
 
@@ -3654,8 +3659,11 @@ type queryNodeConfig struct {
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
-	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
-	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
+	// Not refreshable: every cache slot freezes this at creation, so flipping
+	// it at runtime leaves a node with slots on both sides of the flip and a
+	// query's byte accounting covering only part of what it read. Restart.
+	StorageUsageTrackingEnabled    ParamItem `refreshable:"false"`
+	TieredRejectRemoteVectorOutput ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -4131,9 +4139,13 @@ If set to 0, time based eviction is disabled.`,
 	p.StorageUsageTrackingEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
 		Version:      "2.6.3",
-		DefaultValue: "false",
-		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
-		Export:       true,
+		DefaultValue: "true",
+		Doc: "Enable storage usage tracking for Tiered Storage. Accounts the bytes each request touched " +
+			"and how many of those had to be loaded, which is what the per-request cache_hit_ratio and the " +
+			"scanned-bytes metrics are derived from. " +
+			"Takes effect only at startup (not refreshable): every cache slot freezes this setting when it is " +
+			"created, so a runtime flip would leave the node accounting for only some of what a query reads.",
+		Export: true,
 	}
 	p.StorageUsageTrackingEnabled.Init(base.mgr)
 

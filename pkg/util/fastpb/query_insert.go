@@ -76,6 +76,8 @@ func (d dec) retrieveResults(b []byte, rr *internalpb.RetrieveResults) error {
 				rr.ScannedTotalBytes = int64(v)
 			case 18:
 				rr.ElementLevel = v != 0
+			case 20:
+				rr.StorageCostValid = v != 0
 				// fields 6/8 (packed int64) may also appear as a single varint:
 			case 6:
 				rr.SealedSegmentIDsRetrieved = append(rr.SealedSegmentIDsRetrieved, int64(v))

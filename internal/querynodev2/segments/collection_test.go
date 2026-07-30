@@ -941,6 +941,31 @@ func (s *CollectionManagerSuite) TestUnref() {
 	})
 }
 
+func (s *CollectionManagerSuite) TestCollectionMetricLabelOwner() {
+	cm := NewCollectionManager()
+	cleaned := make([]string, 0, 1)
+	cm.cleanupCoreCollectionMetrics = func(dbName, collectionName string) {
+		cleaned = append(cleaned, dbName+"/"+collectionName)
+	}
+	schema := mock_segcore.GenTestCollectionSchema("same_name", schemapb.DataType_Int64, false)
+	schema.DbName = "same_db"
+	first := NewCollectionWithoutSegcoreForTest(10001, schema)
+	second := NewCollectionWithoutSegcoreForTest(
+		10002, proto.Clone(schema).(*schemapb.CollectionSchema))
+	first.Ref(1)
+	second.Ref(1)
+	cm.collections[10001] = first
+	cm.collections[10002] = second
+
+	s.True(cm.Unref(10001, 1))
+	s.Empty(cleaned)
+	s.NotNil(cm.Get(10002))
+
+	s.True(cm.Unref(10002, 1))
+	s.Equal([]string{"same_db/same_name"}, cleaned)
+	s.Nil(cm.Get(10002))
+}
+
 func (s *CollectionManagerSuite) TestList() {
 	ids := s.cm.List()
 	s.Contains(ids, int64(1))

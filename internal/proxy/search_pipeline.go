@@ -1435,8 +1435,7 @@ func (op *requeryOperator) run(ctx context.Context, span trace.Span, inputs ...a
 	if err != nil {
 		return nil, err
 	}
-	storageCost.ScannedRemoteBytes += storageCostFromLastOp.ScannedRemoteBytes
-	storageCost.ScannedTotalBytes += storageCostFromLastOp.ScannedTotalBytes
+	storageCost.Add(storageCostFromLastOp)
 	return []any{queryResult.GetFieldsData(), storageCost}, nil
 }
 

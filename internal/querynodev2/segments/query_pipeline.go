@@ -57,7 +57,12 @@ func RunQNQueryPipeline(
 ) (*segcorepb.RetrieveResults, error) {
 	// Early empty check before any pipeline construction
 	if allSegcoreResultsEmpty(segcoreResults) {
-		return emptySegcoreResult(req, schema)
+		empty, err := emptySegcoreResult(req, schema)
+		if err != nil {
+			return nil, err
+		}
+		preserveSegcoreStats(empty, segcoreResults)
+		return empty, nil
 	}
 
 	// Build pipeline + input msg — the only branching point
@@ -81,7 +86,7 @@ func RunQNQueryPipeline(
 	}
 
 	// Common: extract output + aggregate stats + fill empty fields
-	return extractSegcoreResult(finalMsg, segcoreResults, req, schema)
+	return extractSegcoreResult(finalMsg, segcoreResults, req, schema, retrievePlan.IsIgnoreNonPk())
 }
 
 // buildIgnoreNonPkPipeline builds the two-phase pipeline for IgnoreNonPk=true:
@@ -192,6 +197,7 @@ func extractSegcoreResult(
 	segcoreResults []*segcorepb.RetrieveResults,
 	req *querypb.QueryRequest,
 	schema *schemapb.CollectionSchema,
+	includeOutputStorageCost bool,
 ) (*segcorepb.RetrieveResults, error) {
 	rawOutput := finalMsg[queryutil.PipelineOutput]
 
@@ -199,6 +205,7 @@ func extractSegcoreResult(
 	var fieldsData []*schemapb.FieldData
 	var elementLevel bool
 	var elementIndices []*segcorepb.ElementIndices
+	outputStorageCost := segcore.StorageCost{Valid: true}
 
 	switch output := rawOutput.(type) {
 	case *segcorepb.RetrieveResults:
@@ -206,10 +213,20 @@ func extractSegcoreResult(
 		fieldsData = output.GetFieldsData()
 		elementLevel = output.GetElementLevel()
 		elementIndices = output.GetElementIndices()
+		outputStorageCost = segcore.StorageCost{
+			ScannedRemoteBytes: output.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  output.GetScannedTotalBytes(),
+			Valid:              output.GetStorageCostValid(),
+		}
 	case *internalpb.RetrieveResults:
 		ids = output.GetIds()
 		fieldsData = output.GetFieldsData()
 		elementLevel = output.GetElementLevel()
+		outputStorageCost = segcore.StorageCost{
+			ScannedRemoteBytes: output.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  output.GetScannedTotalBytes(),
+			Valid:              output.GetStorageCostValid(),
+		}
 		// Convert internalpb.ElementIndices back to segcorepb.ElementIndices
 		if elementLevel {
 			elementIndices = make([]*segcorepb.ElementIndices, len(output.GetElementIndices()))
@@ -224,14 +241,16 @@ func extractSegcoreResult(
 	}
 
 	merged := &segcorepb.RetrieveResults{
-		Ids:                ids,
-		FieldsData:         fieldsData,
-		ElementLevel:       elementLevel,
-		ElementIndices:     elementIndices,
-		AllRetrieveCount:   sumInt64Field(segcoreResults, func(r *segcorepb.RetrieveResults) int64 { return r.GetAllRetrieveCount() }),
-		HasMoreResult:      anyFieldTrue(segcoreResults, func(r *segcorepb.RetrieveResults) bool { return r.GetHasMoreResult() }),
-		ScannedRemoteBytes: sumInt64Field(segcoreResults, func(r *segcorepb.RetrieveResults) int64 { return r.GetScannedRemoteBytes() }),
-		ScannedTotalBytes:  sumInt64Field(segcoreResults, func(r *segcorepb.RetrieveResults) int64 { return r.GetScannedTotalBytes() }),
+		Ids:            ids,
+		FieldsData:     fieldsData,
+		ElementLevel:   elementLevel,
+		ElementIndices: elementIndices,
+	}
+	preserveSegcoreStats(merged, segcoreResults)
+	if includeOutputStorageCost {
+		merged.ScannedRemoteBytes += outputStorageCost.ScannedRemoteBytes
+		merged.ScannedTotalBytes += outputStorageCost.ScannedTotalBytes
+		merged.StorageCostValid = merged.StorageCostValid && outputStorageCost.Valid
 	}
 
 	// Only fill empty fields when result has no data at all.
@@ -293,6 +312,7 @@ func RunDelegatorQueryPipeline(
 	output.HasMoreResult = anyFieldTrueInternal(results, func(r *internalpb.RetrieveResults) bool { return r.GetHasMoreResult() })
 	output.ScannedRemoteBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedRemoteBytes() })
 	output.ScannedTotalBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedTotalBytes() })
+	output.StorageCostValid = allFieldTrueInternal(results, func(r *internalpb.RetrieveResults) bool { return r.GetStorageCostValid() })
 
 	// Only fill empty fields when result has no data at all (same guard as QN level).
 	if len(output.GetFieldsData()) == 0 {
@@ -302,6 +322,30 @@ func RunDelegatorQueryPipeline(
 	}
 
 	return output, nil
+}
+
+func preserveSegcoreStats(output *segcorepb.RetrieveResults, inputs []*segcorepb.RetrieveResults) {
+	output.AllRetrieveCount = sumInt64Field(inputs, func(r *segcorepb.RetrieveResults) int64 { return r.GetAllRetrieveCount() })
+	output.HasMoreResult = anyFieldTrue(inputs, func(r *segcorepb.RetrieveResults) bool { return r.GetHasMoreResult() })
+	output.ScannedRemoteBytes = sumInt64Field(inputs, func(r *segcorepb.RetrieveResults) int64 { return r.GetScannedRemoteBytes() })
+	output.ScannedTotalBytes = sumInt64Field(inputs, func(r *segcorepb.RetrieveResults) int64 { return r.GetScannedTotalBytes() })
+	output.StorageCostValid = allFieldTrue(inputs, func(r *segcorepb.RetrieveResults) bool { return r.GetStorageCostValid() })
+}
+
+// allFieldTrue deliberately returns true for an empty input: when no segment
+// participated, the exact storage cost is zero. A nil/old result contributes
+// false via the protobuf getter and invalidates the aggregate.
+func allFieldTrue[T any](items []T, getter func(T) bool) bool {
+	for _, item := range items {
+		if !getter(item) {
+			return false
+		}
+	}
+	return true
+}
+
+func allFieldTrueInternal(items []*internalpb.RetrieveResults, getter func(*internalpb.RetrieveResults) bool) bool {
+	return allFieldTrue(items, getter)
 }
 
 // allSegcoreResultsEmpty checks if all segcore results have no data.

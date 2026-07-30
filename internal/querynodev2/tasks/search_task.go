@@ -216,6 +216,7 @@ func (t *SearchTask) Execute() error {
 				},
 			}
 		}
+		t.attributeStorageCost(results)
 		mlog.Debug(t.ctx, "filter-only search completed", mlog.Int("segments", len(segmentIDs)))
 		return nil
 	}
@@ -245,6 +246,7 @@ func (t *SearchTask) Execute() error {
 			searchResults.CostAggregation = &internalpb.CostAggregation{
 				ServiceTime: tr.ElapseSpan().Milliseconds(),
 			}
+			searchResults.StorageCostValid = true
 			task.result = searchResults
 		}
 		return nil

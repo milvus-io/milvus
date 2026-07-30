@@ -1311,24 +1311,46 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
         std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
                            int64_t,
                            U>;
-    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
-    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
     auto skip_index = segment_->GetSkipIndex();
 
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index->CanSkipBinaryRange(field_id_,
-                                                   i,
-                                                   lower_val,
-                                                   upper_val,
-                                                   expr_->lower_inclusive_,
-                                                   expr_->upper_inclusive_);
-        if (!skip) {
-            chunks_may_hit.push_back(i);
+    auto prefetch = [&](const auto& lower_val, const auto& upper_val) {
+        using ValueType = std::decay_t<decltype(lower_val)>;
+        std::vector<int64_t> chunks_may_hit;
+        for (size_t i = 0; i < num_data_chunk_; ++i) {
+            auto skip = skip_index->CanSkipBinaryRange<ValueType>(
+                field_id_,
+                i,
+                lower_val,
+                upper_val,
+                expr_->lower_inclusive_,
+                expr_->upper_inclusive_);
+            if (!skip) {
+                chunks_may_hit.push_back(i);
+            }
         }
-    }
 
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+        RecordSkipIndexEffect(*skip_index,
+                              num_data_chunk_,
+                              num_data_chunk_ - chunks_may_hit.size());
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    };
+
+    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
+    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
+    if constexpr (std::is_integral_v<U> && !std::is_same_v<bool, T>) {
+        // Literals are carried as int64_t so overflow checks happen before
+        // narrowing to the field's physical type. If either bound cannot be
+        // represented, conservatively prefetch everything; narrowing here
+        // could wrap and make the skip index discard a chunk that matches.
+        if (query::out_of_range<T>(lower_val) ||
+            query::out_of_range<T>(upper_val)) {
+            SegmentExpr::PrefetchRawData(field_id_);
+            return;
+        }
+        prefetch(static_cast<T>(lower_val), static_cast<T>(upper_val));
+    } else {
+        prefetch(lower_val, upper_val);
+    }
 }
 }  // namespace exec
 }  // namespace milvus

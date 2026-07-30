@@ -22,4 +22,17 @@ package segcore
 type StorageCost struct {
 	ScannedRemoteBytes int64
 	ScannedTotalBytes  int64
+	// Valid is true only when every contributing storage-bearing segment
+	// accounted its bytes. Its zero value is deliberately false so results from
+	// older QueryNodes are treated as incomplete during rolling upgrades.
+	Valid bool
+}
+
+// Add merges another independently measured contribution. Callers must start
+// the accumulator with Valid=true so validity is AND-reduced; the zero value
+// intentionally remains invalid for backward compatibility with old nodes.
+func (c *StorageCost) Add(other StorageCost) {
+	c.ScannedRemoteBytes += other.ScannedRemoteBytes
+	c.ScannedTotalBytes += other.ScannedTotalBytes
+	c.Valid = c.Valid && other.Valid
 }

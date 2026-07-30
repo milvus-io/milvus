@@ -237,6 +237,7 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 			SlicedBlob:         mockBlob,
 			ScannedRemoteBytes: 100,
 			ScannedTotalBytes:  200,
+			StorageCostValid:   true,
 		}
 		results = append(results, subRes1)
 	}
@@ -248,6 +249,7 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 			SlicedBlob:         mockBlob,
 			ScannedRemoteBytes: 100,
 			ScannedTotalBytes:  200,
+			StorageCostValid:   true,
 		}
 		results = append(results, subRes2)
 	}
@@ -263,6 +265,7 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 	suite.Equal(mockBlob, subRes1.GetSlicedBlob())
 	suite.Equal(int64(200), reducedRes.GetScannedRemoteBytes())
 	suite.Equal(int64(400), reducedRes.GetScannedTotalBytes())
+	suite.True(reducedRes.GetStorageCostValid())
 }
 
 func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
@@ -289,16 +292,24 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
 	suite.NoError(err)
 	rEnc1.ScannedRemoteBytes = 111
 	rEnc1.ScannedTotalBytes = 222
+	rEnc1.StorageCostValid = true
 	rEnc2, err := EncodeSearchResultData(ctx, srd2, nq, topK, metricType)
 	suite.NoError(err)
 	rEnc2.ScannedRemoteBytes = 333
 	rEnc2.ScannedTotalBytes = 444
+	rEnc2.StorageCostValid = true
 
 	out, err := ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{rEnc1, rEnc2}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
 	suite.NoError(err)
 	// costs should aggregate across both included results
 	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
 	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+	suite.True(out.GetStorageCostValid())
+
+	rEnc2.StorageCostValid = false
+	out, err = ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{rEnc1, rEnc2}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	suite.False(out.GetStorageCostValid())
 }
 
 func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvancedKeepsZeroHitWorkerMetadata() {
@@ -535,19 +546,43 @@ func (suite *ResultSuite) TestReduceSearchResults_FilterIncludesResultData() {
 		Topks:      []int64{1},
 	}
 
-	// Single result with ResultData only (no SlicedBlob) — should pass filter and use shortcut return
-	out, err := ReduceSearchResults(ctx, []*internalpb.SearchResults{
-		{
-			MetricType: metric.IP,
-			NumQueries: nq,
-			TopK:       topK,
-			ResultData: resultData,
-		},
-		nil, // should be filtered out
-		{},  // no data — should be filtered out
+	validResult := &internalpb.SearchResults{
+		MetricType:       metric.IP,
+		NumQueries:       nq,
+		TopK:             topK,
+		ResultData:       resultData,
+		StorageCostValid: true,
+	}
+
+	// Nil entries carry no worker contribution, so the real single-result case
+	// keeps its zero-copy shortcut.
+	shortcut, err := ReduceSearchResults(ctx, []*internalpb.SearchResults{
+		validResult,
+		nil,
 	}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64))
 	suite.NoError(err)
-	suite.Same(resultData, out.GetResultData())
+	suite.Same(resultData, shortcut.GetResultData())
+
+	// A non-nil payload-less worker still participates in storage-cost
+	// validity. It may be an old worker that cannot prove its scanned-byte
+	// contribution, so reduction must not shortcut-return validResult.
+	out, err := ReduceSearchResults(ctx, []*internalpb.SearchResults{
+		validResult,
+		nil, // should be filtered out
+		{},  // no data, but missing validity must invalidate the aggregate
+	}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	decoded, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{out})
+	suite.NoError(err)
+	suite.Len(decoded, 1)
+	reducedData := decoded[0]
+	suite.NotSame(resultData, reducedData)
+	suite.Equal(resultData.GetNumQueries(), reducedData.GetNumQueries())
+	suite.Equal(resultData.GetTopK(), reducedData.GetTopK())
+	suite.True(proto.Equal(resultData.GetIds(), reducedData.GetIds()))
+	suite.Equal(resultData.GetScores(), reducedData.GetScores())
+	suite.Equal(resultData.GetTopks(), reducedData.GetTopks())
+	suite.False(out.GetStorageCostValid())
 }
 
 func (suite *ResultSuite) TestEncodeSearchResultData_EmptyResult() {

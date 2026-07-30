@@ -25,29 +25,63 @@
 #include "index/skipindex_stats/SkipIndexStats.h"
 
 namespace milvus {
+
+// Lazily re-readable source of one field's per-chunk skip metrics: cells are
+// built on first use and can be rebuilt by asking the source again, exactly
+// like the column-backed translator below rebuilds from
+// ChunkedColumnInterface::GetChunk. NOTE: rebuildable is not the same as
+// evicted -- both skip-metrics translators still report support_eviction=false
+// and a {0,0} size estimate, so the cache never reclaims these cells. Enabling
+// that (now that rebuilding works) needs a real size estimate too, and is a
+// follow-up.
+//
+// The source owns the INTERPRETATION as well as the read, which is what keeps
+// this seam storage-neutral: the parquet implementation (see segcore) reads a
+// footer and runs SkipIndexStatsBuilder over it, while a manifest/zone-map
+// backed one can construct metrics directly. Whatever it reads from must stay
+// alive for the duration of the call -- Arrow's BYTE_ARRAY min/max are
+// string_views into the file metadata -- but since the built metrics deep-copy,
+// they are safe to hand out afterwards.
+class ChunkStatsSource {
+ public:
+    virtual ~ChunkStatsSource() = default;
+
+    // Number of chunks this source can describe; must equal the column's
+    // num_chunks() for the positional cell mapping to be correct.
+    virtual int64_t
+    num_chunks() const = 0;
+
+    // The skip metrics of `chunk_id`, already interpreted. The source owns the
+    // interpretation, so a new backing store (v3 manifest, Vortex zone maps, a
+    // future range filter) only implements this -- it does not have to express
+    // its statistics as parquet's, and a richer filter is just another
+    // FieldChunkMetrics subclass. Must never return nullptr; a chunk with no
+    // usable statistics yields NoneFieldChunkMetrics (never skips).
+    virtual std::unique_ptr<index::FieldChunkMetrics>
+    BuildChunkMetrics(int64_t chunk_id) = 0;
+};
+
 class FieldChunkMetricsTranslatorFromStatistics
     : public cachinglayer::Translator<index::FieldChunkMetrics> {
  public:
     FieldChunkMetricsTranslatorFromStatistics(
         int64_t segment_id,
         FieldId field_id,
-        milvus::DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics)
+        std::shared_ptr<ChunkStatsSource> stats_source)
         : key_(fmt::format("skip_seg_{}_f_{}", segment_id, field_id.get())),
-          data_type_(data_type),
+          stats_source_(std::move(stats_source)),
           meta_(cachinglayer::StorageType::MEMORY,
                 milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
                 milvus::cachinglayer::CellDataType::OTHER,
                 CacheWarmupPolicy::CacheWarmupPolicy_Disable,
                 false) {
-        for (auto& statistic : statistics) {
-            cells_.emplace_back(builder_.Build(data_type_, statistic));
-        }
+        AssertInfo(stats_source_ != nullptr,
+                   "skip index stats source must not be null");
     }
 
     size_t
     num_cells() const override {
-        return cells_.size();
+        return static_cast<size_t>(stats_source_->num_chunks());
     }
 
     milvus::cachinglayer::cid_t
@@ -77,7 +111,11 @@ class FieldChunkMetricsTranslatorFromStatistics
             cells;
         cells.reserve(cids.size());
         for (auto cid : cids) {
-            cells.emplace_back(cid, cells_[cid]->Clone());
+            // Rebuild this chunk's metrics from the source. Nothing is
+            // retained between calls, so an evicted cell costs one (small,
+            // usually cached) lookup to restore -- the same shape as the
+            // column-backed translator below, which re-reads its chunk.
+            cells.emplace_back(cid, stats_source_->BuildChunkMetrics(cid));
         }
         return cells;
     }
@@ -95,10 +133,8 @@ class FieldChunkMetricsTranslatorFromStatistics
 
  private:
     std::string key_;
-    milvus::DataType data_type_;
-    index::SkipIndexStatsBuilder builder_;
+    std::shared_ptr<ChunkStatsSource> stats_source_;
     cachinglayer::Meta meta_;
-    std::vector<std::unique_ptr<index::FieldChunkMetrics>> cells_;
 };
 
 class FieldChunkMetricsTranslator
@@ -173,16 +209,8 @@ class SkipIndex {
             std::is_same<T, milvus::Json>::value ||
             std::is_same<T, bool>::value;
         static constexpr bool value = isAllowedType && !isDisabledType;
-        static constexpr bool arith_value =
-            std::is_integral<T>::value && !std::is_same<T, bool>::value;
         static constexpr bool in_value = isAllowedType;
     };
-
-    template <typename T>
-    using HighPrecisionType =
-        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
-                           int64_t,
-                           T>;
 
  public:
     std::shared_ptr<SkipIndex>
@@ -193,10 +221,28 @@ class SkipIndex {
         return cloned;
     }
 
+    // Drop a field's skip metrics. Callers erase before (re)installing so a
+    // replaced column -- e.g. ComputeDiffBinlogs remapping a storage v2 grouped
+    // column to a v1 per-field binlog -- cannot keep being pruned by the
+    // previous load's slot when the new one installs nothing.
     void
     Erase(FieldId field_id) {
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_.erase(field_id);
+    }
+
+    // Whether this field has skip metrics at all. A field with none still
+    // answers every CanSkip* query -- GetFieldChunkMetrics hands back a shared
+    // NoneFieldChunkMetrics that never skips -- so a caller cannot tell "judged
+    // and found nothing to prune" from "there was nothing to judge with". That
+    // distinction only matters to the effectiveness metrics: counting the
+    // second case would report a 0% prune ratio for every numeric and VARCHAR
+    // expression on a default (flag off) or storage v3 deployment, where no
+    // metrics are installed at all, and bury the collections that do have them.
+    bool
+    HasFieldMetrics(FieldId field_id) const {
+        std::shared_lock lck(mutex_);
+        return fieldChunkMetrics_.find(field_id) != fieldChunkMetrics_.end();
     }
 
     template <typename T>
@@ -305,117 +351,6 @@ class SkipIndex {
     }
 
     template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(milvus::OpContext* op_ctx,
-                            FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        auto check_and_skip = [&](HighPrecisionType<T> new_value_hp,
-                                  OpType new_op_type) {
-            if constexpr (std::is_integral_v<T>) {
-                if (new_value_hp > std::numeric_limits<T>::max() ||
-                    new_value_hp < std::numeric_limits<T>::min()) {
-                    // Overflow detected. The transformed value cannot be represented by T.
-                    // We cannot make a safe comparison with the chunk's min/max.
-                    return false;
-                }
-            }
-            return CanSkipUnaryRange<T>(op_ctx,
-                                        field_id,
-                                        chunk_id,
-                                        new_op_type,
-                                        static_cast<T>(new_value_hp));
-        };
-        switch (arith_type) {
-            case ArithOpType::Add: {
-                // field + C > V  =>  field > V - C
-                return check_and_skip(value - right_operand, op_type);
-            }
-            case ArithOpType::Sub: {
-                // field - C > V  =>  field > V + C
-                return check_and_skip(value + right_operand, op_type);
-            }
-            case ArithOpType::Mul: {
-                // field * C > V
-                if (right_operand == 0) {
-                    // field * 0 > V => 0 > V. This doesn't depend on the field's range.
-                    return false;
-                }
-
-                OpType new_op_type = op_type;
-                if (right_operand < 0) {
-                    new_op_type = FlipComparisonOperator(op_type);
-                }
-                return check_and_skip(value / right_operand, new_op_type);
-            }
-            case ArithOpType::Div: {
-                // field / C > V
-                if (right_operand == 0) {
-                    // Division by zero. Cannot evaluate, so cannot skip.
-                    return false;
-                }
-
-                OpType new_op_type = op_type;
-                if (right_operand < 0) {
-                    new_op_type = FlipComparisonOperator(op_type);
-                }
-                return check_and_skip(value * right_operand, new_op_type);
-            }
-            default:
-                return false;
-        }
-    }
-
-    template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        return CanSkipBinaryArithRange<T>(nullptr,
-                                          field_id,
-                                          chunk_id,
-                                          op_type,
-                                          arith_type,
-                                          value,
-                                          right_operand);
-    }
-
-    template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(milvus::OpContext* op_ctx,
-                            FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        return false;
-    }
-
-    template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(FieldId field_id,
-                            int64_t chunk_id,
-                            OpType op_type,
-                            ArithOpType arith_type,
-                            const HighPrecisionType<T> value,
-                            const HighPrecisionType<T> right_operand) const {
-        return CanSkipBinaryArithRange<T>(nullptr,
-                                          field_id,
-                                          chunk_id,
-                                          op_type,
-                                          arith_type,
-                                          value,
-                                          right_operand);
-    }
-
-    template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::in_value, bool>
     CanSkipInQuery(milvus::OpContext* op_ctx,
                    FieldId field_id,
@@ -471,15 +406,24 @@ class SkipIndex {
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
     }
 
+    // Install a lazily re-readable statistics source (storage v2: the parquet
+    // footer). Cells are built on demand and stay evictable/rebuildable, just
+    // like the column-backed LoadSkip above -- nothing is retained eagerly, and
+    // the source keeps its reader alive across each Build so the BYTE_ARRAY
+    // min/max views never dangle.
+    //
+    // CONTRACT: cells are POSITIONAL -- cell i describes chunk i -- so
+    // `stats_source->num_chunks()` MUST equal the installed column's
+    // num_chunks(); a mismatch would prune the wrong chunks (dropped rows).
+    // Callers verify this before installing (see the num_chunks() check in
+    // ChunkedSegmentSealedImpl::load_field_data_common).
     void
-    LoadSkipFromStatistics(
-        int64_t segment_id,
-        milvus::FieldId field_id,
-        milvus::DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+    LoadSkipFromStatsSource(int64_t segment_id,
+                            milvus::FieldId field_id,
+                            std::shared_ptr<ChunkStatsSource> stats_source) {
         auto translator =
             std::make_unique<FieldChunkMetricsTranslatorFromStatistics>(
-                segment_id, field_id, data_type, statistics);
+                segment_id, field_id, std::move(stats_source));
         auto cache_slot = cachinglayer::Manager::GetInstance()
                               .CreateCacheSlot<index::FieldChunkMetrics>(
                                   std::move(translator));

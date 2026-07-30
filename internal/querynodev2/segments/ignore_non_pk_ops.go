@@ -197,8 +197,9 @@ func NewFetchFieldsDataOperator(
 		merged := inputs[0].(*MergedResultWithOffsets)
 
 		ret := &segcorepb.RetrieveResults{
-			Ids:          merged.IDs,
-			ElementLevel: merged.ElementLevel,
+			Ids:              merged.IDs,
+			ElementLevel:     merged.ElementLevel,
+			StorageCostValid: true,
 		}
 
 		if len(merged.Selections) == 0 {
@@ -237,6 +238,15 @@ func NewFetchFieldsDataOperator(
 		// Must be BlockOnAll: if we fast-fail, cgo struct like `plan` could be used after free.
 		if err := conc.BlockOnAll(futures...); err != nil {
 			return nil, err
+		}
+
+		for _, r := range segmentResults {
+			if r == nil {
+				continue
+			}
+			ret.ScannedRemoteBytes += r.GetScannedRemoteBytes()
+			ret.ScannedTotalBytes += r.GetScannedTotalBytes()
+			ret.StorageCostValid = ret.StorageCostValid && r.GetStorageCostValid()
 		}
 
 		// Find a non-empty result to initialize FieldsData layout

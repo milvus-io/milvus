@@ -326,6 +326,36 @@ class Schema {
         this->schema_version_ = version;
     }
 
+    // The owning collection's name, carried over from CollectionSchema.name.
+    // segcore::Collection has it too, but CreateSegment only hands the schema
+    // down, so the schema is the only place a segment (and anything reached
+    // from one, e.g. an expression) can still recover it -- which is what lets
+    // core-side metrics carry a collection label. Empty for schemas built in
+    // tests via AddDebugField.
+    void
+    set_collection_name(std::string name) {
+        this->collection_name_ = std::move(name);
+    }
+
+    const std::string&
+    collection_name() const {
+        return this->collection_name_;
+    }
+
+    // Collection names are only unique within a database, so the name alone
+    // does not identify a tenant: two databases may each hold a "documents"
+    // and their metrics would land on one series. Carried from
+    // CollectionSchema.dbName alongside the name for that reason.
+    void
+    set_db_name(std::string name) {
+        this->db_name_ = std::move(name);
+    }
+
+    const std::string&
+    db_name() const {
+        return this->db_name_;
+    }
+
     std::optional<FieldId>
     get_namespace_field_id() const {
         return this->namespace_field_id_opt_;
@@ -688,6 +718,14 @@ class Schema {
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
+
+    // CollectionSchema.name of the owning collection; empty when the schema
+    // was not parsed from a proto.
+    std::string collection_name_;
+
+    // CollectionSchema.dbName of the owning collection; empty when the schema
+    // was not parsed from a proto.
+    std::string db_name_;
 
     // mmap settings
     bool has_mmap_setting_ = false;

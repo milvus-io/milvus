@@ -46,7 +46,12 @@ class GroupChunkTranslator
         bool mmap_populate,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
-        const std::string& warmup_policy);
+        const std::string& warmup_policy,
+        // When set, force exactly one parquet row group per cache cell so the
+        // per-row-group footer statistics that back the stats skip index line
+        // up 1:1 with cells (see the .cpp for why). Off by default: a group
+        // with no skippable field keeps target-size packing.
+        bool force_one_row_group_per_cell = false);
 
     ~GroupChunkTranslator() override;
 

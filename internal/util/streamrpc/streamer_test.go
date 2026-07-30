@@ -98,7 +98,8 @@ func (s *ResultCacheServerSuite) TestSplit() {
 		cacheSrv := NewResultCacheServer(srv, 1024, 1024)
 
 		err := cacheSrv.Send(&internalpb.RetrieveResults{
-			Ids: generateIntIDs(1024),
+			Ids:              generateIntIDs(1024),
+			StorageCostValid: true,
 		})
 		s.NoError(err)
 
@@ -117,6 +118,7 @@ func (s *ResultCacheServerSuite) TestSplit() {
 			cnt := len(result.Ids.GetIntId().GetData())
 			rev += cnt
 			s.LessOrEqual(4*cnt, 1024)
+			s.True(result.GetStorageCostValid())
 		}
 		s.Equal(1024, rev)
 	})
@@ -172,6 +174,25 @@ func (s *ResultCacheServerSuite) TestMerge() {
 	s.Equal(int64(3), c.ServiceTime)
 	s.Equal(int64(2), c.TotalNQ)
 	s.Equal(int64(3), c.TotalRelatedDataSize)
+
+	cache := &RetrieveResultCache{cap: math.MaxInt}
+	cache.Put(&internalpb.RetrieveResults{
+		Ids:                &schemapb.IDs{},
+		ScannedRemoteBytes: 1,
+		ScannedTotalBytes:  2,
+		StorageCostValid:   true,
+	})
+	cache.Put(&internalpb.RetrieveResults{
+		Ids:                generateIntIDs(2),
+		ScannedRemoteBytes: 3,
+		ScannedTotalBytes:  5,
+		StorageCostValid:   false,
+	})
+	merged := cache.Flush()
+	s.Equal([]int64{0, 1}, merged.GetIds().GetIntId().GetData())
+	s.Equal(int64(4), merged.GetScannedRemoteBytes())
+	s.Equal(int64(7), merged.GetScannedTotalBytes())
+	s.False(merged.GetStorageCostValid())
 }
 
 func TestResultCacheServerSuite(t *testing.T) {

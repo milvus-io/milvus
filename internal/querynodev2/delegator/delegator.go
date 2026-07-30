@@ -778,9 +778,23 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
 		ctx = retry.WithMaxAttemptsContext(ctx, 3)
-		err := worker.QueryStreamSegments(ctx, req, srv)
+		sent := atomic.NewBool(false)
+		trackingSrv := &trackingQueryStreamServer{
+			QueryStreamServer: srv,
+			sent:              sent,
+		}
+		err := worker.QueryStreamSegments(ctx, req, trackingSrv)
 		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		if err == nil && !sent.Load() {
+			// Old workers do not send a frame for zero-hit segments. Emit an
+			// explicit invalid contribution so a mixed-version rollout cannot
+			// mistake missing storage cost for a measured zero.
+			err = srv.Send(&internalpb.RetrieveResults{
+				Status: merr.Success(),
+				Ids:    &schemapb.IDs{},
+			})
 		}
 		return nil, err
 	}, "QueryStream", log)
@@ -1145,11 +1159,28 @@ func executeSubTasks[T any, R interface {
 				mlog.Float64("accessedDataRatio", accessedDataRatio),
 				mlog.Int64s("failureSegmentList", failureSegmentList),
 			)
+			if taskType == "Search" {
+				for _, result := range results {
+					if searchResult, ok := any(result).(*internalpb.SearchResults); ok {
+						searchResult.StorageCostValid = false
+					}
+				}
+			}
 			return results, nil
 		}
 	}
 
 	return nil, merr.Combine(errors...)
+}
+
+type trackingQueryStreamServer struct {
+	streamrpc.QueryStreamServer
+	sent *atomic.Bool
+}
+
+func (s *trackingQueryStreamServer) Send(result *internalpb.RetrieveResults) error {
+	s.sent.Store(true)
+	return s.QueryStreamServer.Send(result)
 }
 
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.

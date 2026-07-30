@@ -137,21 +137,21 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 				return
 			}
 
-			if len(result.GetOffset()) != 0 {
-				if err = svr.Send(&internalpb.RetrieveResults{
-					Status:     merr.Success(),
-					Ids:        result.GetIds(),
-					FieldsData: result.GetFieldsData(),
-					CostAggregation: &internalpb.CostAggregation{
-						TotalRelatedDataSize: GetSegmentRelatedDataSize(segment),
-					},
-					SealedSegmentIDsRetrieved: []int64{segment.ID()},
-					AllRetrieveCount:          result.GetAllRetrieveCount(),
-					ScannedRemoteBytes:        result.GetScannedRemoteBytes(),
-					ScannedTotalBytes:         result.GetScannedTotalBytes(),
-				}); err != nil {
-					errs[i] = err
-				}
+			if err = svr.Send(&internalpb.RetrieveResults{
+				Status:     merr.Success(),
+				Ids:        result.GetIds(),
+				FieldsData: result.GetFieldsData(),
+				CostAggregation: &internalpb.CostAggregation{
+					TotalRelatedDataSize: GetSegmentRelatedDataSize(segment),
+				},
+				SealedSegmentIDsRetrieved: []int64{segment.ID()},
+				AllRetrieveCount:          result.GetAllRetrieveCount(),
+				ScannedRemoteBytes:        result.GetScannedRemoteBytes(),
+				ScannedTotalBytes:         result.GetScannedTotalBytes(),
+				StorageCostValid:          result.GetStorageCostValid(),
+			}); err != nil {
+				errs[i] = err
+				return
 			}
 
 			errs[i] = nil

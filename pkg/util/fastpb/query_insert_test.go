@@ -24,6 +24,7 @@ func TestEquiv_RetrieveResults(t *testing.T) {
 		AllRetrieveCount:          3,
 		HasMoreResult:             true,
 		ScannedTotalBytes:         4096,
+		StorageCostValid:          true,
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
@@ -108,6 +109,7 @@ func randRetrieveResults(r *rand.Rand) *internalpb.RetrieveResults {
 		ReqID:            int64(r.Uint32()),
 		AllRetrieveCount: int64(r.Uint32()),
 		HasMoreResult:    r.Intn(2) == 0,
+		StorageCostValid: r.Intn(2) == 0,
 	}
 	if r.Intn(2) == 0 {
 		ids := make([]int64, rows)
