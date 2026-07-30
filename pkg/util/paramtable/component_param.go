@@ -41,18 +41,19 @@ import (
 
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize                      = 16
-	DefaultLoadTransientBudgetBytes            = 0
-	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 1800 // s, for node
-	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
-	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
-	DefaultHighPriorityThreadCoreCoefficient   = 10
-	DefaultMiddlePriorityThreadCoreCoefficient = 5
-	DefaultLowPriorityThreadCoreCoefficient    = 1
-	DefaultThreadPoolMaxThreadsSize            = 16
-	DefaultStorageIopsInitialRate              = uint32(2000)
-	DefaultStorageIopsMaxRate                  = uint32(5000)
+	DefaultIndexSliceSize                        = 16
+	DefaultLoadTransientBudgetBytes              = 0
+	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
+	DefaultGracefulTime                          = 5000 // ms
+	DefaultGracefulStopTimeout                   = 1800 // s, for node
+	DefaultProxyGracefulStopTimeout              = 30   // s，for proxy
+	DefaultCoordGracefulStopTimeout              = 5    // s，for coord
+	DefaultHighPriorityThreadCoreCoefficient     = 10
+	DefaultMiddlePriorityThreadCoreCoefficient   = 5
+	DefaultLowPriorityThreadCoreCoefficient      = 1
+	DefaultThreadPoolMaxThreadsSize              = 16
+	DefaultStorageIopsInitialRate                = uint32(2000)
+	DefaultStorageIopsMaxRate                    = uint32(5000)
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -4056,8 +4057,9 @@ type queryNodeConfig struct {
 
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
-	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
-	StorageV2EnableAsyncLoad     ParamItem `refreshable:"true"`
+	StorageV2CellTargetSizeBytes          ParamItem `refreshable:"true"`
+	StorageV2EnableAsyncLoad              ParamItem `refreshable:"true"`
+	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -5365,6 +5367,27 @@ user-task-polling:
 		Export:       false,
 	}
 	p.StorageV2EnableAsyncLoad.Init(base.mgr)
+
+	p.StorageV2AsyncLoadReadWindowSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes),
+		Doc: `Target estimated loaded-byte threshold for one storage v2 async read window. ` +
+			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
+			`Set to 0 to disable size-based splitting; file boundaries and non-contiguous row groups ` +
+			`still start new windows. Default 16 MiB.`,
+		Export: true,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes must be non-negative, using default 16 MiB",
+					mlog.String("configured", v))
+				return strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes)
+			}
+			return v
+		},
+	}
+	p.StorageV2AsyncLoadReadWindowSizeBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",

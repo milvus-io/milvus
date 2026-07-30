@@ -1291,6 +1291,36 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
     }
 }
 
+TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowConfigControlsReadBatching) {
+    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
+    auto restore = folly::makeGuard(
+        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    auto previous_cell_target = GetCellTargetSizeBytes();
+    auto restore_cell_target = folly::makeGuard([previous_cell_target]() {
+        SetCellTargetSizeBytes(previous_cell_target);
+    });
+    auto use_mmap = GetParam();
+
+    SetCellTargetSizeBytes(1);
+    SetStorageV2AsyncLoadReadWindowSizeBytes(0);
+    auto unlimited_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto unlimited_translator =
+        MakeTranslator(0, use_mmap, true, unlimited_reader);
+    auto num_cells = unlimited_translator->num_cells();
+    ASSERT_GT(num_cells, 1);
+    std::vector<cachinglayer::cid_t> cids(num_cells);
+    std::iota(cids.begin(), cids.end(), 0);
+    auto unlimited_cells = unlimited_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(unlimited_cells.size(), num_cells);
+    EXPECT_EQ(unlimited_reader->AsyncCalls(), 1);
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    auto limited_cells = unlimited_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(limited_cells.size(), num_cells);
+    EXPECT_EQ(unlimited_reader->AsyncCalls(), 1 + num_cells);
+}
+
 TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
     auto use_mmap = GetParam();
     auto& pool = storage::LocalFileIOPool::GetInstance();

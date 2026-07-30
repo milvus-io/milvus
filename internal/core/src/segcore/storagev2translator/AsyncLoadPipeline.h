@@ -46,7 +46,9 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
 
 struct AsyncLoadPipelineOptions {
     int64_t segment_id{-1};
-    int64_t read_window_bytes{0};
+    // Negative uses the process default. Zero disables size-based splitting;
+    // file boundaries and non-contiguous row groups still start new windows.
+    int64_t read_window_bytes{-1};
     milvus::proto::common::LoadPriority load_priority{
         milvus::proto::common::LoadPriority::HIGH};
     // A single-priority custom executor is scheduled through add(). Executors
