@@ -633,6 +633,15 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 #endif
 }
 
+bool
+IndexFactory::RequiresFileContextForLoadResource(const IndexLoadSpec& spec) {
+    if (milvus::IsVectorDataType(spec.field_type)) {
+        return false;
+    }
+    return ScalarIndexVersionFromSpec(spec) >= 3 ||
+           ScalarIndexTypeFromSpec(spec) == HYBRID_INDEX_TYPE;
+}
+
 LoadResourceRequest
 IndexFactory::EstimateIndexLoadResource(const IndexLoadSpec& spec) {
     if (milvus::IsVectorDataType(spec.field_type)) {

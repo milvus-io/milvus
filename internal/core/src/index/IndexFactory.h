@@ -79,6 +79,11 @@ class IndexFactory {
     static bool
     CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 
+    // Whether resource planning needs scalar index file inspection instead of
+    // a reusable metadata-only estimate.
+    static bool
+    RequiresFileContextForLoadResource(const IndexLoadSpec& spec);
+
     // Metadata-only estimate used by admission and fallback paths. This entry
     // never opens index files.
     LoadResourceRequest

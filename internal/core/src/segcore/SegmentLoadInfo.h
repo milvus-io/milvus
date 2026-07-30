@@ -1229,33 +1229,23 @@ class SegmentLoadInfo {
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
-            auto index_type_it =
-                load_index_info.index_params.find(milvus::index::INDEX_TYPE);
-            auto scalar_version_it = load_index_info.index_params.find(
-                milvus::index::SCALAR_INDEX_ENGINE_VERSION);
-            auto scalar_v3 =
-                !IsVectorDataType(load_index_info.field_type) &&
-                scalar_version_it != load_index_info.index_params.end() &&
-                std::stoi(scalar_version_it->second) >= 3;
-            auto needs_file_context =
-                scalar_v3 ||
-                (!IsVectorDataType(load_index_info.field_type) &&
-                 index_type_it != load_index_info.index_params.end() &&
-                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
-            if (!needs_file_context) {
+            const auto load_spec = milvus::index::IndexLoadSpec{
+                .field_type = load_index_info.field_type,
+                .element_type = load_index_info.element_type,
+                .index_version = load_index_info.index_engine_version,
+                .index_size_in_bytes = load_index_info.index_size,
+                .index_params = load_index_info.index_params,
+                .mmap_enable = load_index_info.enable_mmap,
+                .num_rows = load_index_info.num_rows,
+                .dim = load_index_info.dim,
+            };
+            auto& index_factory = milvus::index::IndexFactory::GetInstance();
+            const auto requires_file_context =
+                milvus::index::IndexFactory::RequiresFileContextForLoadResource(
+                    load_spec);
+            if (!requires_file_context) {
                 load_index_info.load_resource_request =
-                    milvus::index::IndexFactory::GetInstance()
-                        .EstimateIndexLoadResource(milvus::index::IndexLoadSpec{
-                            .field_type = load_index_info.field_type,
-                            .element_type = load_index_info.element_type,
-                            .index_version =
-                                load_index_info.index_engine_version,
-                            .index_size_in_bytes = load_index_info.index_size,
-                            .index_params = load_index_info.index_params,
-                            .mmap_enable = load_index_info.enable_mmap,
-                            .num_rows = load_index_info.num_rows,
-                            .dim = load_index_info.dim,
-                        });
+                    index_factory.EstimateIndexLoadResource(load_spec);
             }
             // Check if index has raw data before moving
             if (CheckIndexHasRawData(load_index_info)) {

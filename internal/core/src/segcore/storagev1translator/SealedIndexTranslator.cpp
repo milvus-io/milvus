@@ -93,7 +93,23 @@ SealedIndexTranslator::SealedIndexTranslator(
         .dim = index_load_info_.dim,
     };
     auto& index_factory = milvus::index::IndexFactory::GetInstance();
-    if (IsVectorDataType(index_load_info_.field_type)) {
+    const auto is_vector = IsVectorDataType(index_load_info_.field_type);
+    const auto config_scalar_version =
+        is_vector ? 1
+                  : milvus::index::GetValueFromConfig<int32_t>(
+                        config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+                        .value_or(1);
+    const auto requires_file_context =
+        milvus::index::IndexFactory::RequiresFileContextForLoadResource(
+            load_spec) ||
+        config_scalar_version >= 3;
+    if (index_load_info_.load_resource_request.has_value() &&
+        !requires_file_context) {
+        load_resource_request_ = *index_load_info_.load_resource_request;
+        return;
+    }
+
+    if (is_vector) {
         load_resource_request_ =
             index_factory.EstimateIndexLoadResource(load_spec);
     } else {
@@ -106,11 +122,7 @@ SealedIndexTranslator::SealedIndexTranslator(
         auto plan = index_factory.PlanScalarIndexLoad(load_spec, inspection);
         load_resource_request_ = plan.request;
 
-        auto scalar_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-                .value_or(1);
-        if (scalar_version >= 3) {
+        if (config_scalar_version >= 3) {
             AssertInfo(inspection.stream_load_info.has_value(),
                        "missing stream load info for packed scalar V3 index");
             if (plan.shared_memory_runtime_unit_bytes.has_value()) {

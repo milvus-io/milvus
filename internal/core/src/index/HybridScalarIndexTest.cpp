@@ -91,6 +91,63 @@ class CountingOpenFileSystem : public arrow::fs::SubTreeFileSystem {
     size_t open_input_file_count_{0};
 };
 
+TEST(SealedIndexTranslatorTest, CachedVectorRequestSkipsResourceEstimate) {
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.field_type = DataType::VECTOR_FLOAT;
+    load_info.element_type = DataType::NONE;
+    // Deliberately omit index_type: any estimator call would reject this spec.
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/10,
+                            /*max_disk_cost=*/20,
+                            /*final_memory_cost=*/3,
+                            /*final_disk_cost=*/4,
+                            /*has_raw_data=*/true};
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = "HNSW";
+    index_info.field_type = DataType::VECTOR_FLOAT;
+
+    Config config{};
+    milvus::segcore::storagev1translator::SealedIndexTranslator translator(
+        index_info,
+        &load_info,
+        milvus::tracer::TraceContext{},
+        storage::FileManagerContext{},
+        std::move(config));
+
+    auto [loaded_resource, loading_overhead] =
+        translator.estimated_byte_size_of_cell(0);
+    EXPECT_EQ(loaded_resource, (milvus::cachinglayer::ResourceUsage{3, 4}));
+    EXPECT_EQ(loading_overhead, (milvus::cachinglayer::ResourceUsage{7, 36}));
+}
+
+TEST(SealedIndexTranslatorTest, CachedRequestDoesNotBypassConfigV3Inspection) {
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.field_type = DataType::INT64;
+    load_info.element_type = DataType::NONE;
+    load_info.index_params = {{"index_type", ASCENDING_SORT}};
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/10,
+                            /*max_disk_cost=*/20,
+                            /*final_memory_cost=*/3,
+                            /*final_disk_cost=*/4,
+                            /*has_raw_data=*/true};
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = ASCENDING_SORT;
+    index_info.field_type = DataType::INT64;
+
+    Config config = load_info.index_params;
+    config[SCALAR_INDEX_ENGINE_VERSION] = "3";
+    EXPECT_THROW(milvus::segcore::storagev1translator::SealedIndexTranslator(
+                     index_info,
+                     &load_info,
+                     milvus::tracer::TraceContext{},
+                     storage::FileManagerContext{},
+                     std::move(config)),
+                 milvus::SegcoreError);
+}
+
 TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
     HybridScalarIndex<int64_t> int_index(7);
     std::vector<int64_t> int_data{1, 2, 3, 4};
