@@ -216,6 +216,11 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
     }
 
     arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string&) override {
+        return std::vector<uint64_t>{1};
+    }
+
+    arrow::Result<std::vector<uint64_t>>
     get_chunk_rows() override {
         if (chunk_rows_thread_ != nullptr) {
             *chunk_rows_thread_ = std::this_thread::get_id();
@@ -5001,8 +5006,8 @@ TEST(SealedSegmentCowState,
 }
 
 TEST(SealedSegmentCowState,
-     StagedStorageV2ColumnGroupKeepsSyncReaderWhenAsyncDisabled) {
-    auto async_load_guard = SetStorageV2AsyncLoadForTest(false);
+     StagedStorageV2ColumnGroupKeepsSyncReaderWhenAsyncEnabled) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
 
@@ -5031,37 +5036,6 @@ TEST(SealedSegmentCowState,
         schema,
         std::move(reader),
         /*eager_load=*/true);
-
-    EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
-}
-
-TEST(SealedSegmentCowState, StagedStorageV2ColumnGroupUsesAsyncReader) {
-    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
-    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
-    const FieldId vec(kWarmupVectorFieldId);
-
-    auto segment = CreateSealedSegment(schema);
-    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
-
-    proto::segcore::SegmentLoadInfo load_proto;
-    load_proto.set_segmentid(1007);
-    load_proto.set_num_of_rows(1);
-    SegmentLoadInfo segment_load_info(load_proto, schema);
-
-    auto column_groups = MakeWarmupTestColumnGroups();
-    auto reader = std::make_shared<WarmupTestReader>(column_groups,
-                                                     /*allow_sync_open=*/false);
-    std::shared_ptr<ChunkedColumnInterface> column;
-    ASSERT_NO_THROW(column = sealed->TestStageLoadColumnGroupWithReader(
-                        column_groups,
-                        std::make_shared<milvus_storage::api::Properties>(),
-                        /*index=*/0,
-                        {vec},
-                        segment_load_info,
-                        schema,
-                        std::move(reader),
-                        /*eager_load=*/true));
 
     EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
 }
@@ -5102,47 +5076,6 @@ TEST(SealedSegmentCowState,
 
     EXPECT_NE(chunk_rows_thread, caller_thread);
     EXPECT_EQ(chunk_rows_thread_name, "MIDD_SEGC_POOL");
-}
-
-TEST(SealedSegmentCowState,
-     StagedStorageV2ColumnGroupPreservesAsyncReaderStorageError) {
-    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
-    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
-    const FieldId vec(kWarmupVectorFieldId);
-
-    auto segment = CreateSealedSegment(schema);
-    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
-
-    proto::segcore::SegmentLoadInfo load_proto;
-    load_proto.set_segmentid(1009);
-    load_proto.set_num_of_rows(1);
-    SegmentLoadInfo segment_load_info(load_proto, schema);
-
-    auto column_groups = MakeWarmupTestColumnGroups();
-    auto reader = std::make_shared<WarmupTestReader>(
-        column_groups,
-        /*allow_sync_open=*/true,
-        milvus_storage::MakeExtendError(
-            milvus_storage::ExtendStatusCode::StorageTransientTimeout,
-            "async open timeout"));
-
-    bool caught_storage_error = false;
-    try {
-        sealed->TestStageLoadColumnGroupWithReader(
-            column_groups,
-            std::make_shared<milvus_storage::api::Properties>(),
-            /*index=*/0,
-            {vec},
-            segment_load_info,
-            schema,
-            std::move(reader),
-            /*eager_load=*/true);
-    } catch (const SegcoreError& error) {
-        caught_storage_error = true;
-        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageTransientError);
-    }
-    EXPECT_TRUE(caught_storage_error);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {

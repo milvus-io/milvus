@@ -85,16 +85,6 @@
 #include "storage/MmapChunkManager.h"
 #include "segcore/TextColumnCache.h"
 
-#ifdef MILVUS_UNIT_TEST
-#include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#endif
-
-namespace folly {
-template <typename T>
-class SemiFuture;
-struct Unit;
-}  // namespace folly
-
 namespace milvus::segcore {
 
 namespace storagev2translator {
@@ -2005,19 +1995,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace,
         StagedStateCommitter& committer,
         storagev2translator::ColumnSizeEstimateResult column_size_estimate);
-
-    folly::SemiFuture<folly::Unit>
-    LoadColumnGroupAsync(
-        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index,
-        const std::vector<FieldId>& milvus_field_ids,
-        const SegmentLoadInfo& segment_load_info,
-        const SchemaPtr& schema_snapshot,
-        bool eager_load,
-        milvus::OpContext* op_ctx,
-        bool is_replace,
-        StagedStateCommitter& committer);
 
     void
     LoadColumnGroup(
