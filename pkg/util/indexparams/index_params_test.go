@@ -39,7 +39,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams := make(map[string]string)
 		indexParams[common.IndexTypeKey] = "AISAQ"
 		params.Save(params.CommonCfg.AiSAQCfg.InlinePQ.Key, "0")
-		params.Save(params.CommonCfg.AiSAQCfg.PQCacheSize.Key, "512")
+		params.Save(params.CommonCfg.AiSAQCfg.PQCacheSize.Key, "536870912")
 		params.Save(params.CommonCfg.AiSAQCfg.Rearrange.Key, "true")
 		params.Save(params.CommonCfg.AiSAQCfg.PQReadPageCacheSize.Key, "512")
 		params.Save(params.CommonCfg.AiSAQCfg.NumEntryPoints.Key, "100")
@@ -54,9 +54,11 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, buildNumThreadsRatio)
 
-		searchCacheBudgetRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 0.0, searchCacheBudgetRatio)
+		// SearchCacheBudgetRatioKey should NOT be persisted when user didn't explicitly set it
+		// (it comes from global config and should be read live at load time).
+		_, searchCacheExists := indexParams[SearchCacheBudgetRatioKey]
+		assert.False(t, searchCacheExists,
+			"SearchCacheBudgetRatioKey should not be persisted when defaulted from global config")
 
 		pqCacheSize, err := strconv.ParseInt(indexParams[PQCacheSizeKey], 10, 0)
 		assert.NoError(t, err)
@@ -160,7 +162,7 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err2)
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str2))
 		err = FillDiskIndexParams(&params, indexParams)
-		assert.Error(t, err)
+		assert.NoError(t, err) // pq_cache_size falls back to CommonCfg.AiSAQCfg.PQCacheSize default
 		indexParams["max_degree"] = "56"
 		indexParams["search_list_size"] = "100"
 		indexParams["pq_cache_size"] = "xxx"
@@ -567,7 +569,7 @@ func TestDiskIndexParams(t *testing.T) {
 		str, err := json.Marshal(mapString)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON("DISKANN", params.AutoIndexConfig.ExtraParams.GetValue())
 		assert.NoError(t, err)
 
 		indexParams := make(map[string]string)
@@ -792,7 +794,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -802,7 +804,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"disk_pq_code_budget_gb\": 0.2, \"pq_code_budget_gb\": 0.125, \"num_threads\": 1, \"search_cache_budget_gb\": 0.20}"
 		mapString[PrepareRatioKey] = "{\"num_threads\": 8}"
-		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err = NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -815,7 +817,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.15}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -825,7 +827,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"num_threads\": 2}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err = NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 2.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -835,13 +837,13 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"num_threads\": 2"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		_, err = NewBigDataExtraParamsFromMap(mapString)
+		_, err = NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.Error(t, err)
 
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"num_threads\": 8}"
-		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err = NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 	})
@@ -850,7 +852,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.25}"
-		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -860,7 +862,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"num_threads\": 4}"
-		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err = NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 4.0, extraParams.LoadNumThreadRatio)
@@ -870,14 +872,14 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225"
-		_, err = NewBigDataExtraParamsFromMap(mapString)
+		_, err = NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.Error(t, err)
 	})
 
 	t.Run("parse with beamwidth wrong", func(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[BeamWidthRatioKey] = "aa"
-		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -888,7 +890,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 	t.Run("parse with partial", func(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -898,7 +900,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 
 	t.Run("parse with empty", func(t *testing.T) {
 		mapString := make(map[string]string)
-		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -907,7 +909,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 	})
 
 	t.Run("parse with nil", func(t *testing.T) {
-		extraParams, err := NewBigDataExtraParamsFromMap(nil)
+		extraParams, err := NewBigDataExtraParamsFromMap("DISKANN", nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -923,7 +925,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 					"beamwidth_ratio": "8.0"
 				}
 			`
-		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		extraParams, err := NewBigDataExtraParamsFromJSON("DISKANN", jsonStr)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -938,7 +940,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 					"build_ratio": "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 				}
 			`
-		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		extraParams, err := NewBigDataExtraParamsFromJSON("DISKANN", jsonStr)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -952,7 +954,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 				{
 				}
 			`
-		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		extraParams, err := NewBigDataExtraParamsFromJSON("DISKANN", jsonStr)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
@@ -966,7 +968,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 				{	x
 				}
 			`
-		_, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		_, err := NewBigDataExtraParamsFromJSON("DISKANN", jsonStr)
 		assert.Error(t, err)
 	})
 
@@ -974,7 +976,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		jsonStr := `
 				""
 			`
-		_, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		_, err := NewBigDataExtraParamsFromJSON("DISKANN", jsonStr)
 		assert.Error(t, err)
 	})
 }
@@ -1288,6 +1290,131 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 		}
 		assert.Equal(t, strconv.Itoa(expectedBeam), indexParams[BeamWidthKey],
 			"should use persisted beamwidth_ratio, not global config")
+	})
+
+	t.Run("config changes propagate to indexes without explicit search_cache_budget_gb_ratio", func(t *testing.T) {
+		// This tests the fix for the frozen search_cache_budget_gb_ratio bug:
+		// When a DISKANN index is created WITHOUT the user explicitly setting
+		// search_cache_budget_gb_ratio, changing the global config and reloading
+		// should use the NEW config value (not the old frozen default).
+		const (
+			testDim     = int64(128)
+			testNumRows = int64(100000)
+		)
+
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+
+		// Step 1: Create index with initial config (user does NOT specify search_cache_budget_gb_ratio)
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.10")
+		indexParams := map[string]string{
+			common.IndexTypeKey: "DISKANN",
+		}
+		err := FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		// Verify: SearchCacheBudgetRatioKey should NOT be persisted
+		_, exists := indexParams[SearchCacheBudgetRatioKey]
+		assert.False(t, exists,
+			"SearchCacheBudgetRatioKey should not be persisted when defaulted from global config")
+
+		// Step 2: Simulate "time passes" — admin changes the config
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.25")
+
+		// Step 3: Load the index (simulates QueryNode loading existing index)
+		indexParams[common.DimKey] = strconv.FormatInt(testDim, 10)
+		err = SetDiskIndexLoadParams(&params, indexParams, testNumRows)
+		assert.NoError(t, err)
+
+		// Step 4: Verify the NEW config value (0.25) is used, not the old one (0.10)
+		expectedCacheBudget := fmt.Sprintf("%f",
+			float32(getRowDataSizeOfFloatVector(testNumRows, testDim))*float32(0.25)/(1<<30))
+		assert.Equal(t, expectedCacheBudget, indexParams[SearchCacheBudgetKey],
+			"should use the NEW global config value (0.25), not the old frozen one (0.10)")
+	})
+
+	t.Run("user-specified search_cache_budget_gb_ratio is persisted and sticky", func(t *testing.T) {
+		// When user explicitly sets search_cache_budget_gb_ratio in CreateIndex,
+		// it should be persisted and NOT overridden by subsequent config changes.
+		const (
+			testDim     = int64(128)
+			testNumRows = int64(100000)
+		)
+
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+
+		// Step 1: Create index with user-specified ratio
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.10")
+		indexParams := map[string]string{
+			common.IndexTypeKey:       "DISKANN",
+			SearchCacheBudgetRatioKey: "0.50", // user explicitly sets this
+		}
+		err := FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		// Verify: SearchCacheBudgetRatioKey IS persisted with user's value
+		val, exists := indexParams[SearchCacheBudgetRatioKey]
+		assert.True(t, exists,
+			"SearchCacheBudgetRatioKey should be persisted when user explicitly set it")
+		assert.Equal(t, "0.50", val)
+
+		// Step 2: Admin changes config
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.25")
+
+		// Step 3: Load the index
+		indexParams[common.DimKey] = strconv.FormatInt(testDim, 10)
+		err = SetDiskIndexLoadParams(&params, indexParams, testNumRows)
+		assert.NoError(t, err)
+
+		// Step 4: Verify the USER's value (0.50) is used, not the new config (0.25)
+		expectedCacheBudget := fmt.Sprintf("%f",
+			float32(getRowDataSizeOfFloatVector(testNumRows, testDim))*float32(0.50)/(1<<30))
+		assert.Equal(t, expectedCacheBudget, indexParams[SearchCacheBudgetKey],
+			"should use the user-specified value (0.50), not the changed config (0.25)")
+	})
+
+	t.Run("AISAQ config changes propagate to indexes without explicit search_cache_budget_gb_ratio", func(t *testing.T) {
+		// Same test as above but for AISAQ index type.
+		const (
+			testDim     = int64(128)
+			testNumRows = int64(100000)
+		)
+
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+
+		// Step 1: Create AISAQ index without user specifying search_cache_budget_gb_ratio
+		params.Save(params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.Key, "0.05")
+		params.Save(params.CommonCfg.AiSAQCfg.PQCacheSize.Key, "512")
+		params.Save(params.CommonCfg.AiSAQCfg.InlinePQ.Key, "0")
+		params.Save(params.CommonCfg.AiSAQCfg.Rearrange.Key, "true")
+		params.Save(params.CommonCfg.AiSAQCfg.PQReadPageCacheSize.Key, "512")
+		params.Save(params.CommonCfg.AiSAQCfg.NumEntryPoints.Key, "100")
+		indexParams := map[string]string{
+			common.IndexTypeKey: "AISAQ",
+		}
+		err := FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		// Verify: SearchCacheBudgetRatioKey should NOT be persisted
+		_, exists := indexParams[SearchCacheBudgetRatioKey]
+		assert.False(t, exists,
+			"SearchCacheBudgetRatioKey should not be persisted for AISAQ when defaulted from global config")
+
+		// Step 2: Admin changes the config
+		params.Save(params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.Key, "0.20")
+
+		// Step 3: Load the index
+		indexParams[common.DimKey] = strconv.FormatInt(testDim, 10)
+		err = SetDiskIndexLoadParams(&params, indexParams, testNumRows)
+		assert.NoError(t, err)
+
+		// Step 4: Verify the NEW config value (0.20) is used, not the old one (0.05)
+		expectedCacheBudget := fmt.Sprintf("%f",
+			float32(getRowDataSizeOfFloatVector(testNumRows, testDim))*float32(0.20)/(1<<30))
+		assert.Equal(t, expectedCacheBudget, indexParams[SearchCacheBudgetKey],
+			"should use the NEW AISAQ config value (0.20), not the old frozen one (0.05)")
 	})
 }
 

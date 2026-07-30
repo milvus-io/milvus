@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/vecindex"
 )
 
 const (
@@ -75,7 +76,7 @@ func IsConfigableIndexParam(key string) bool {
 func getDiskPQDims(diskPQCodeBudgetGBRatio float64, dim int64, dataType schemapb.DataType) (int, error) {
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
-		return int(float32(dim) / (8 * float32(diskPQCodeBudgetGBRatio))), nil
+		return int((float32(dim) * float32(diskPQCodeBudgetGBRatio)) / 8), nil
 	case schemapb.DataType_FloatVector:
 		return int(float32(dim) * (float32(diskPQCodeBudgetGBRatio) * 4)), nil
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -99,6 +100,7 @@ type BigDataIndexExtraParams struct {
 	HasDiskPQCodeBudgetGBRatio    bool // true when explicitly configured (vs defaulted)
 	BuildNumThreadsRatio          float64
 	SearchCacheBudgetGBRatio      float64
+	HasSearchCacheBudgetGBRatio   bool // true when explicitly configured (vs defaulted)
 	AiSAQSearchCacheBudgetGBRatio float64
 	LoadNumThreadRatio            float64
 	BeamWidthRatio                float64
@@ -116,17 +118,22 @@ const (
 	DefaultBeamWidthRatio                = 4.0
 )
 
-func NewBigDataExtraParamsFromJSON(jsonStr string) (*BigDataIndexExtraParams, error) {
+func NewBigDataExtraParamsFromJSON(indexType string, jsonStr string) (*BigDataIndexExtraParams, error) {
 	buffer, err := funcutil.JSONToMap(jsonStr)
 	if err != nil {
 		return nil, err
 	}
-	return NewBigDataExtraParamsFromMap(buffer)
+	return NewBigDataExtraParamsFromMap(indexType, buffer)
 }
 
-func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraParams, error) {
+func NewBigDataExtraParamsFromMap(indexType string, value map[string]string) (*BigDataIndexExtraParams, error) {
 	ret := &BigDataIndexExtraParams{}
-	ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+	if vecindex.IsDiskANN(indexType) {
+		ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+	}
+	if vecindex.IsAISAQ(indexType) {
+		ret.SearchCacheBudgetGBRatio = DefaultAiSAQSearchCacheBudgetGBRatio
+	}
 	setSearchCache := false
 	var err error
 	buildRatio, ok := value[BuildRatioKey]
@@ -162,6 +169,7 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 		SearchCacheBudgetGBRatio, ok := valueMap1["search_cache_budget_gb"]
 		if ok {
 			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
+			ret.HasSearchCacheBudgetGBRatio = true
 			setSearchCache = true
 		}
 	}
@@ -179,6 +187,7 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 		SearchCacheBudgetGBRatio, ok := valueMap2["search_cache_budget_gb"]
 		if ok && !setSearchCache {
 			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
+			ret.HasSearchCacheBudgetGBRatio = true
 		}
 		LoadNumThreadRatio, ok := valueMap2["num_threads"]
 		if !ok {
@@ -211,13 +220,17 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	var diskPQCodeBudgetGBRatio string
 	var buildNumThreadsRatio string
 	var searchCacheBudgetGBRatio string
+	// Track whether search_cache_budget_gb_ratio was explicitly set (by user or AutoIndex config)
+	// vs defaulted from global config. Only persist when explicitly set so that config changes
+	// propagate to existing indexes at load time.
+	hasSearchCacheBudgetGBRatio := false
 
 	indexType, ok := indexParams[common.IndexTypeKey]
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("type param indexType not exist")
 	}
 
-	if indexType == "AISAQ" {
+	if vecindex.IsAISAQ(indexType) {
 		return FillAiSAQIndexParams(params, indexParams)
 	}
 
@@ -232,13 +245,15 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("index param search_list_size not exist")
 		}
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(indexType, params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+		// AutoIndex ExtraParams are operator-managed; always persist them.
+		hasSearchCacheBudgetGBRatio = true
 		// Only set diskPQCodeBudgetGBRatio if explicitly configured in ExtraParams.
 		// A zero value means "no disk PQ" (Knowhere stores uncompressed vectors on SSD),
 		// but we must not write an empty string which would cause ParseFloat("") errors downstream.
@@ -268,6 +283,9 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		searchCacheBudgetGBRatio, ok = indexParams[SearchCacheBudgetRatioKey]
 		if !ok {
 			searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+		} else {
+			// User explicitly provided the ratio in CreateIndex request — persist it.
+			hasSearchCacheBudgetGBRatio = true
 		}
 		buildNumThreadsRatio, ok = indexParams[NumBuildThreadRatioKey]
 		if !ok {
@@ -279,7 +297,12 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	indexParams[SearchListSizeKey] = searchListSize
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
 	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
-	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	// Only persist SearchCacheBudgetRatioKey when explicitly set by user or AutoIndex config.
+	// When it comes from global config defaults, omit it so SetDiskIndexLoadParams reads
+	// the live config value — allowing config changes to propagate without index rebuild.
+	if hasSearchCacheBudgetGBRatio {
+		indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	}
 	// Only persist DiskPQCodeBudgetRatioKey when explicitly provided.
 	// An empty string would cause ParseFloat("") errors in SetDiskIndexBuildParams;
 	// omitting the key lets Knowhere use its default (disk_pq_dims=0, no disk PQ).
@@ -306,6 +329,14 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 	var rearrange string
 	var numEntryPoints string
 	var pqCacheSizeBytes string
+	// Track whether search_cache_budget_gb_ratio was explicitly set (by user or AutoIndex config)
+	// vs defaulted from global config. Only persist when explicitly set so that config changes
+	// propagate to existing indexes at load time.
+	hasSearchCacheBudgetGBRatio := false
+	indexType, ok := indexParams[common.IndexTypeKey]
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("type param indexType not exist")
+	}
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
@@ -318,12 +349,14 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		if !ok {
 			return merr.WrapErrServiceInternalMsg("index param search_list_size not exist")
 		}
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(indexType, params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+		// AutoIndex ExtraParams are operator-managed; always persist them.
+		hasSearchCacheBudgetGBRatio = true
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
 		// For AISAQ, disk PQ is expected (default ratio is 0.25).
 		// Only write it when the ratio is non-zero; zero means no disk PQ.
@@ -332,7 +365,7 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		}
 		pqCacheSize, ok = indexParams[PQCacheSizeKey]
 		if !ok {
-			return merr.WrapErrServiceInternalMsg("index param pq_cache_size not exist")
+			pqCacheSize = params.CommonCfg.AiSAQCfg.PQCacheSize.GetValue()
 		}
 		// Read optional AISAQ-specific params from AutoIndex config if present.
 		aisVectorsBeamWidth = indexParams[VectorsBeamWidthKey]
@@ -361,6 +394,9 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		searchCacheBudgetGBRatio, ok = indexParams[SearchCacheBudgetRatioKey]
 		if !ok {
 			searchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
+		} else {
+			// User explicitly provided the ratio in CreateIndex request — persist it.
+			hasSearchCacheBudgetGBRatio = true
 		}
 		buildNumThreadsRatio, ok = indexParams[NumBuildThreadRatioKey]
 		if !ok {
@@ -396,11 +432,16 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 	if err != nil {
 		return merr.WrapErrServiceInternalMsg("Error converting pqCacheSize string to int")
 	}
-	pqCacheSizeBytes = strconv.Itoa(pqCacheSizeInt * 1024 * 1024)
+	pqCacheSizeBytes = strconv.Itoa(pqCacheSizeInt)
 	indexParams[MaxDegreeKey] = maxDegree
 	indexParams[SearchListSizeKey] = searchListSize
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
-	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	// Only persist SearchCacheBudgetRatioKey when explicitly set by user or AutoIndex config.
+	// When it comes from global config defaults, omit it so SetDiskIndexLoadParams reads
+	// the live config value — allowing config changes to propagate without index rebuild.
+	if hasSearchCacheBudgetGBRatio {
+		indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	}
 	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
 	indexParams[PQCacheSizeKey] = pqCacheSizeBytes
 	// Only persist optional params when they have non-empty values.
@@ -440,23 +481,23 @@ func GetIndexParams(indexParams []*commonpb.KeyValuePair, key string) string {
 // UpdateDiskIndexBuildParams update index params for `buildIndex` (override search cache size in `CreateIndex`)
 func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
 	existedVal := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
-	indexType := GetIndexParams(indexParams, "index_type")
+	indexType := GetIndexParams(indexParams, common.IndexTypeKey)
 
 	var searchCacheBudgetGBRatio string
 	var configuredSearchCacheBudgetGBRatio string
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(indexType, params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			// AutoIndexConfig is server-side configuration, not request input.
 			return indexParams, merr.WrapErrServiceInternalMsg("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
 		}
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
 	} else if len(existedVal) == 0 {
-		switch indexType {
-		case "DISKANN":
+		if vecindex.IsDiskANN(indexType) {
 			configuredSearchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
-		case "AISAQ":
+		}
+		if vecindex.IsAISAQ(indexType) {
 			configuredSearchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
 		}
 		paramVal, err := strconv.ParseFloat(configuredSearchCacheBudgetGBRatio, 64)
@@ -465,7 +506,8 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 		}
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
 	} else {
-		if indexType == "DISKANN" || indexType == "AISAQ" {
+		if vecindex.IsDiskANN(indexType) ||
+			vecindex.IsAISAQ(indexType) {
 			paramVal, err := strconv.ParseFloat(existedVal, 64)
 			if err != nil {
 				return indexParams, merr.WrapErrServiceInternalMsg("index param search_cache_budget_gb_ratio not exist in existedVal")
@@ -540,7 +582,8 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64,
 		return merr.WrapErrServiceInternalMsg("type param indexType not exist")
 	}
 
-	if indexType == "AISAQ" || indexType == "DISKANN" {
+	if vecindex.IsDiskANN(indexType) ||
+		vecindex.IsAISAQ(indexType) {
 		diskPQCodeBudgetGBRatioStr, ok := indexParams[DiskPQCodeBudgetRatioKey]
 		var diskPQCodeBudgetGBRatio float64
 		if !ok || diskPQCodeBudgetGBRatioStr == "" {
@@ -608,17 +651,17 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 			return err
 		}
 	} else if params.AutoIndexConfig.Enable.GetAsBool() {
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(indexType, params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}
 		searchCacheBudgetGBRatio = extraParams.SearchCacheBudgetGBRatio
 	} else {
 		var configuredSearchCacheBudgetGBRatio string
-		switch indexType {
-		case "DISKANN":
+		if vecindex.IsDiskANN(indexType) {
 			configuredSearchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
-		case "AISAQ":
+		}
+		if vecindex.IsAISAQ(indexType) {
 			configuredSearchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
 		}
 		searchCacheBudgetGBRatio, err = strconv.ParseFloat(configuredSearchCacheBudgetGBRatio, 64)
@@ -633,7 +676,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 			return err
 		}
 	} else if params.AutoIndexConfig.Enable.GetAsBool() {
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(indexType, params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}
@@ -651,7 +694,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 			return err
 		}
 	} else if params.AutoIndexConfig.Enable.GetAsBool() {
-		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(indexType, params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}
