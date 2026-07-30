@@ -24,6 +24,7 @@
 #include "common/EasyAssert.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -167,7 +168,7 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             return milvus::FailureCStatus(milvus::ConfigInvalid,
                                           "Invalid mode");
         }
-        milvus::storage::FileWriteWorkerPool::GetInstance().Configure(
+        milvus::storage::LocalFileIOPool::GetInstance().Configure(
             c_disk_write_config.nr_threads);
         // configure rate limiter
         milvus::storage::io::WriteRateLimiter::GetInstance().Configure(

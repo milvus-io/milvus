@@ -18,14 +18,17 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -33,16 +36,20 @@
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
 #include "folly/Executor.h"
+#include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/Task.h"
 #include "folly/coro/WithCancellation.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/futures/Future.h"
 #include "folly/futures/Promise.h"
+#include "folly/system/ThreadName.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -352,6 +359,7 @@ class AsyncLoadPipelineTest : public ::testing::Test {
 
     void
     TearDown() override {
+        storage::LocalFileIOPool::GetInstance().Configure(0);
         budget_.SetCapacityBytes(0);
     }
 
@@ -782,6 +790,541 @@ TEST_F(AsyncLoadPipelineTest, FollyPoolRunsQueuedHighLoadBeforeLowLoad) {
     EXPECT_EQ(std::move(high).get().size(), 1);
     EXPECT_EQ(std::move(low).get().size(), 1);
     EXPECT_EQ(read_order, (std::vector<int64_t>{2, 1}));
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       FinalizesOnLoadExecutorWhenLocalFileIOIsNotRequested) {
+    storage::LocalFileIOPool::GetInstance().Configure(1);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    bool finalized_on_load_executor = false;
+
+    auto results = folly::coro::blockingWait(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [this, &finalized_on_load_executor](const auto& tables, int64_t) {
+            EXPECT_FALSE(tables.empty());
+            finalized_on_load_executor = executor_.IsRunning();
+            return std::make_unique<GroupChunk>();
+        },
+        Options()));
+
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_TRUE(finalized_on_load_executor);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       FallsBackToLoadExecutorWhenLocalFileIOPoolIsDisabled) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(0);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    bool finalized_on_load_executor = false;
+    auto options = Options();
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+
+    auto results = folly::coro::blockingWait(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [this, &finalized_on_load_executor](const auto&, int64_t) {
+            finalized_on_load_executor = executor_.IsRunning();
+            return std::make_unique<GroupChunk>();
+        },
+        std::move(options)));
+
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_TRUE(finalized_on_load_executor);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       DisablingLocalFileIOPoolDoesNotWaitForRemoteRead) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    reader->DeferNextRead();
+    auto read_started_promise = std::make_shared<std::promise<void>>();
+    auto read_started = read_started_promise->get_future();
+    reader->SetOnAsyncCall(
+        [read_started_promise]() { read_started_promise->set_value(); });
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    bool finalized_on_load_executor = false;
+    auto options = Options();
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+    auto load = Start(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [this, &finalized_on_load_executor](const auto&, int64_t) {
+            finalized_on_load_executor = executor_.IsRunning();
+            return std::make_unique<GroupChunk>();
+        },
+        std::move(options)));
+
+    ASSERT_EQ(read_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto configure_started_promise = std::make_shared<std::promise<void>>();
+    auto configure_started = configure_started_promise->get_future();
+    auto configure =
+        std::async(std::launch::async, [&pool, configure_started_promise]() {
+            configure_started_promise->set_value();
+            pool.Configure(0);
+        });
+    if (configure_started.wait_for(std::chrono::seconds(2)) !=
+        std::future_status::ready) {
+        reader->CompleteDeferredRead();
+        EXPECT_EQ(std::move(load).get().size(), 1);
+        configure.get();
+        FAIL() << "local file I/O pool configuration thread did not start";
+    }
+    auto configure_status = configure.wait_for(std::chrono::seconds(2));
+    if (configure_status != std::future_status::ready) {
+        reader->CompleteDeferredRead();
+        EXPECT_EQ(std::move(load).get().size(), 1);
+        configure.get();
+        FAIL() << "disabling the local file I/O pool waited for remote read";
+    }
+    configure.get();
+
+    reader->CompleteDeferredRead();
+    EXPECT_EQ(std::move(load).get().size(), 1);
+    EXPECT_TRUE(finalized_on_load_executor);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       DisablingLocalFileIOPoolDrainsQueuedFinalization) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+    auto* worker_executor =
+        dynamic_cast<folly::CPUThreadPoolExecutor*>(io_executor.get());
+    ASSERT_NE(worker_executor, nullptr);
+
+    auto blocker_started_promise = std::make_shared<std::promise<void>>();
+    auto blocker_started = blocker_started_promise->get_future();
+    auto release_blocker_promise = std::make_shared<std::promise<void>>();
+    auto release_blocker = release_blocker_promise->get_future().share();
+    bool blocker_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!blocker_released) {
+            release_blocker_promise->set_value();
+        }
+    });
+    io_executor->add([blocker_started_promise, release_blocker]() {
+        blocker_started_promise->set_value();
+        release_blocker.wait();
+    });
+    ASSERT_EQ(blocker_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    bool finalized = false;
+    auto options = Options();
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+    auto load = Start(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [&finalized](const auto&, int64_t) {
+            finalized = true;
+            return std::make_unique<GroupChunk>();
+        },
+        std::move(options)));
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (worker_executor->getPendingTaskCount() == 0 && !load.isReady() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_GT(worker_executor->getPendingTaskCount(), 0);
+    EXPECT_FALSE(load.isReady());
+
+    io_executor.reset();
+    auto configure_started_promise = std::make_shared<std::promise<void>>();
+    auto configure_started = configure_started_promise->get_future();
+    auto configure =
+        std::async(std::launch::async, [&pool, configure_started_promise]() {
+            configure_started_promise->set_value();
+            pool.Configure(0);
+        });
+    if (configure_started.wait_for(std::chrono::seconds(2)) !=
+        std::future_status::ready) {
+        release_blocker_promise->set_value();
+        blocker_released = true;
+        release_guard.dismiss();
+        EXPECT_EQ(std::move(load).get().size(), 1);
+        configure.get();
+        FAIL() << "local file I/O pool configuration thread did not start";
+    }
+    EXPECT_EQ(configure.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+
+    release_blocker_promise->set_value();
+    blocker_released = true;
+    release_guard.dismiss();
+    EXPECT_EQ(std::move(load).get().size(), 1);
+    EXPECT_TRUE(finalized);
+    EXPECT_NO_THROW(configure.get());
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       LocalFileIOPoolRunsQueuedHighFinalizationBeforeLowFinalization) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+    auto blocker_started_promise = std::make_shared<std::promise<void>>();
+    auto blocker_started = blocker_started_promise->get_future();
+    auto release_blocker_promise = std::make_shared<std::promise<void>>();
+    auto release_blocker = release_blocker_promise->get_future().share();
+    bool blocker_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!blocker_released) {
+            release_blocker_promise->set_value();
+        }
+    });
+    io_executor->add([blocker_started_promise, release_blocker]() {
+        blocker_started_promise->set_value();
+        release_blocker.wait();
+    });
+    ASSERT_EQ(blocker_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    std::vector<int64_t> finalize_order;
+    auto make_load = [this, &finalize_order, &io_executor](
+                         milvus::proto::common::LoadPriority priority,
+                         int64_t marker) {
+        auto reader = std::make_shared<FakeChunkReader>(&executor_);
+        std::vector<CellSpec> cells{{.cid = marker,
+                                     .file_idx = 0,
+                                     .local_rg_offset = 0,
+                                     .rg_count = 1,
+                                     .memory_size = 1}};
+        auto options = Options(priority);
+        options.finalization_executor_provider = [&io_executor]() {
+            return io_executor.copy();
+        };
+        return Start(LoadCellsAsync(
+            nullptr,
+            std::move(cells),
+            std::move(reader),
+            [&finalize_order](const auto&, int64_t cid) {
+                finalize_order.push_back(cid);
+                return std::make_unique<GroupChunk>();
+            },
+            std::move(options)));
+    };
+
+    auto low = make_load(milvus::proto::common::LoadPriority::LOW, 1);
+    auto high = make_load(milvus::proto::common::LoadPriority::HIGH, 2);
+    EXPECT_FALSE(low.isReady());
+    EXPECT_FALSE(high.isReady());
+
+    release_blocker_promise->set_value();
+    blocker_released = true;
+    release_guard.dismiss();
+    EXPECT_EQ(std::move(high).get().size(), 1);
+    EXPECT_EQ(std::move(low).get().size(), 1);
+    EXPECT_EQ(finalize_order, (std::vector<int64_t>{2, 1}));
+}
+
+TEST_F(AsyncLoadPipelineTest, FinalizesOnLocalFileIOPoolWhenRequested) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    bool finalized_on_io_pool = false;
+    auto options = Options();
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+
+    auto results = folly::coro::blockingWait(LoadCellsAsync(
+        nullptr,
+        std::move(cells),
+        reader,
+        [this, &finalized_on_io_pool](const auto& tables, int64_t) {
+            EXPECT_FALSE(tables.empty());
+            auto thread_name = folly::getCurrentThreadName().value_or("");
+            finalized_on_io_pool = !executor_.IsRunning() &&
+                                   thread_name.rfind("MILVUS_LF_IO_", 0) == 0;
+            return std::make_unique<GroupChunk>();
+        },
+        std::move(options)));
+
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_TRUE(finalized_on_io_pool);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       QueuesFinalizationWithoutBlockingLoadExecutorOrReleasingBudget) {
+    budget_.SetCapacityBytes(1);
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+
+    auto io_started_promise = std::make_shared<std::promise<void>>();
+    auto io_started = io_started_promise->get_future();
+    auto release_io_promise = std::make_shared<std::promise<void>>();
+    auto release_io = release_io_promise->get_future().share();
+    folly::CPUThreadPoolExecutor load_executor(1);
+    bool io_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!io_released) {
+            release_io_promise->set_value();
+        }
+    });
+    io_executor->add([io_started_promise, release_io]() {
+        io_started_promise->set_value();
+        release_io.wait();
+    });
+    ASSERT_EQ(io_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    reader->DeferNextRead();
+    auto read_started_promise = std::make_shared<std::promise<void>>();
+    auto read_started = read_started_promise->get_future();
+    reader->SetOnAsyncCall(
+        [read_started_promise]() { read_started_promise->set_value(); });
+    auto finalized = std::make_shared<std::atomic<bool>>(false);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto options = Options();
+    options.executor = &load_executor;
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+    auto load = std::move(LoadCellsAsync(
+                              nullptr,
+                              std::move(cells),
+                              reader,
+                              [finalized](const auto&, int64_t) {
+                                  finalized->store(true);
+                                  return std::make_unique<GroupChunk>();
+                              },
+                              options))
+                    .semi()
+                    .via(folly::getKeepAliveToken(&load_executor));
+
+    ASSERT_EQ(read_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    reader->CompleteDeferredRead();
+    auto marker_promise = std::make_shared<std::promise<void>>();
+    auto marker = marker_promise->get_future();
+    load_executor.add([marker_promise]() { marker_promise->set_value(); });
+
+    EXPECT_EQ(marker.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_FALSE(finalized->load());
+    EXPECT_FALSE(load.isReady());
+    auto next_lease_promise =
+        std::make_shared<std::promise<storage::TransientBudgetLease>>();
+    auto next_lease_future = next_lease_promise->get_future();
+    auto next_budget =
+        budget_.AcquireAsync(1, storage::TransientBudgetPriority::High)
+            .toUnsafeFuture()
+            .thenValueInline(
+                [next_lease_promise](storage::TransientBudgetLease lease) {
+                    next_lease_promise->set_value(std::move(lease));
+                });
+    EXPECT_EQ(next_lease_future.wait_for(std::chrono::milliseconds(0)),
+              std::future_status::timeout);
+
+    release_io_promise->set_value();
+    io_released = true;
+    release_guard.dismiss();
+    EXPECT_EQ(std::move(load).get().size(), 1);
+    EXPECT_TRUE(finalized->load());
+    ASSERT_EQ(next_lease_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto next_lease = next_lease_future.get();
+    next_lease.Release();
+    std::move(next_budget).get();
+}
+
+TEST_F(AsyncLoadPipelineTest, SkipsQueuedFinalizationAfterCancellation) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+
+    auto io_started_promise = std::make_shared<std::promise<void>>();
+    auto io_started = io_started_promise->get_future();
+    auto release_io_promise = std::make_shared<std::promise<void>>();
+    auto release_io = release_io_promise->get_future().share();
+    folly::CPUThreadPoolExecutor load_executor(1);
+    bool io_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!io_released) {
+            release_io_promise->set_value();
+        }
+    });
+    io_executor->add([io_started_promise, release_io]() {
+        io_started_promise->set_value();
+        release_io.wait();
+    });
+    ASSERT_EQ(io_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    reader->DeferNextRead();
+    auto read_started_promise = std::make_shared<std::promise<void>>();
+    auto read_started = read_started_promise->get_future();
+    reader->SetOnAsyncCall(
+        [read_started_promise]() { read_started_promise->set_value(); });
+    auto finalized = std::make_shared<std::atomic<bool>>(false);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    auto options = Options();
+    options.executor = &load_executor;
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+    auto load = std::move(LoadCellsAsync(
+                              &ctx,
+                              std::move(cells),
+                              reader,
+                              [finalized](const auto&, int64_t) {
+                                  finalized->store(true);
+                                  return std::make_unique<GroupChunk>();
+                              },
+                              options))
+                    .semi()
+                    .via(folly::getKeepAliveToken(&load_executor));
+
+    ASSERT_EQ(read_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    reader->CompleteDeferredRead();
+    auto marker_promise = std::make_shared<std::promise<void>>();
+    auto marker = marker_promise->get_future();
+    load_executor.add([marker_promise]() { marker_promise->set_value(); });
+    ASSERT_EQ(marker.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    source.requestCancellation();
+
+    release_io_promise->set_value();
+    io_released = true;
+    release_guard.dismiss();
+    try {
+        std::move(load).get();
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_FALSE(finalized->load());
+}
+
+TEST_F(AsyncLoadPipelineTest, PreservesFinalizerErrorAcrossLocalFileIOPool) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+
+    auto options = Options();
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+    try {
+        folly::coro::blockingWait(LoadCellsAsync(
+            nullptr,
+            std::move(cells),
+            reader,
+            [](const auto&, int64_t) -> std::unique_ptr<GroupChunk> {
+                throw SegcoreError(ErrorCode::StorageError, "finalize failed");
+            },
+            std::move(options)));
+        FAIL() << "expected finalizer error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageError);
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest, PreservesFileWriteErrorAcrossLocalFileIOPool) {
+    if (access("/dev/full", W_OK) != 0) {
+        GTEST_SKIP() << "/dev/full is unavailable";
+    }
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto previous_mode = storage::FileWriter::GetMode();
+    auto previous_buffer_size = storage::FileWriter::GetBufferSize();
+    auto restore_writer_config = folly::makeGuard([&]() {
+        storage::FileWriter::SetMode(previous_mode);
+        storage::FileWriter::SetBufferSize(previous_buffer_size);
+    });
+    storage::FileWriter::SetMode(storage::FileWriter::WriteMode::BUFFERED);
+    storage::FileWriter::SetBufferSize(
+        storage::FileWriter::DEFAULT_BUFFER_SIZE);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+
+    auto options = Options();
+    options.finalization_executor_provider = [&pool]() {
+        return pool.GetExecutor();
+    };
+    try {
+        folly::coro::blockingWait(LoadCellsAsync(
+            nullptr,
+            std::move(cells),
+            reader,
+            [](const auto&, int64_t) -> std::unique_ptr<GroupChunk> {
+                storage::FileWriter writer("/dev/full");
+                const char data = 'x';
+                writer.Write(&data, sizeof(data));
+                writer.Finish();
+                return std::make_unique<GroupChunk>();
+            },
+            std::move(options)));
+        FAIL() << "expected file write failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileWriteFailed);
+    }
 }
 
 TEST_F(AsyncLoadPipelineTest, SupportsSinglePriorityCustomExecutor) {

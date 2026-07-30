@@ -16,18 +16,14 @@
 
 #pragma once
 
-#include <folly/executors/CPUThreadPoolExecutor.h>
-#include <folly/executors/thread_factory/NamedThreadFactory.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -192,7 +188,8 @@ class WriteRateLimiter {
 
 /**
  * FileWriter is a class that sequentially writes data to new files, designed specifically for saving temporary data downloaded from remote storage.
- * It supports both buffered and direct I/O, and can use an additional thread pool to write data to files.
+ * It supports both buffered and direct I/O. All methods execute synchronously
+ * on the calling thread.
  * FileWriter is not thread-safe, so you should take care of the thread safety when using the same FileWriter object in multiple threads.
  * For now, only QueryNode uses FileWriter to write data to files. If you want to use it in DataNode, you need to add it to the configuration.
  *
@@ -274,8 +271,6 @@ class FileWriter {
     std::string filename_{""};
     size_t file_size_{0};
 
-    bool use_writer_pool_{false};
-
     // for direct io
     bool use_direct_io_{false};
     void* aligned_buf_{nullptr};
@@ -332,90 +327,6 @@ class PositionedFileWriter {
 
     io::Priority priority_;
     io::WriteRateLimiter& rate_limiter_;
-};
-
-class FileWriteWorkerPool {
- public:
-    FileWriteWorkerPool() = default;
-
-    static FileWriteWorkerPool&
-    GetInstance() {
-        static FileWriteWorkerPool instance;
-        return instance;
-    }
-
-    static void
-    Configure(int nr_worker) {
-        auto& instance = GetInstance();
-        instance.SetWorker(nr_worker);
-    }
-
-    void
-    SetWorker(int nr_worker) {
-        if (nr_worker < 0) {
-            LOG_WARN(
-                "Invalid number of worker, expected: > 0, got: {}, "
-                "set to 0",
-                nr_worker);
-            nr_worker = 0;
-        } else if (nr_worker > std::thread::hardware_concurrency()) {
-            LOG_WARN(
-                "Invalid number of worker, expected: <= {}, got: {}, "
-                "set to {}",
-                std::thread::hardware_concurrency(),
-                nr_worker,
-                std::thread::hardware_concurrency());
-            nr_worker = std::thread::hardware_concurrency();
-        }
-        std::shared_ptr<folly::CPUThreadPoolExecutor> old_executor = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(executor_mutex_);
-            old_executor = executor_;
-            if (nr_worker > 0) {
-                executor_ = std::make_shared<folly::CPUThreadPoolExecutor>(
-                    nr_worker,
-                    std::make_shared<folly::NamedThreadFactory>(
-                        "MILVUS_FL_WR_"));
-            } else {
-                executor_ = nullptr;
-            }
-        }
-        if (old_executor != nullptr) {
-            old_executor->stop();
-            old_executor->join();
-        }
-        LOG_INFO("Set the number of write worker to {}", nr_worker);
-    }
-
-    bool
-    AddTask(std::function<void()> task) {
-        std::lock_guard<std::mutex> lock(executor_mutex_);
-        if (executor_ == nullptr) {
-            return false;
-        }
-        executor_->add(std::move(task));
-        return true;
-    }
-
-    bool
-    HasPool() const {
-        // no lock here, so it's not thread-safe
-        // but it's ok because we still can write without the pool
-        return executor_ != nullptr;
-    }
-
-    ~FileWriteWorkerPool() {
-        std::lock_guard<std::mutex> lock(executor_mutex_);
-        if (executor_ != nullptr) {
-            executor_->stop();
-            executor_->join();
-            executor_ = nullptr;
-        }
-    }
-
- private:
-    std::shared_ptr<folly::CPUThreadPoolExecutor> executor_{nullptr};
-    std::mutex executor_mutex_{};
 };
 
 }  // namespace milvus::storage

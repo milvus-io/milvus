@@ -15,24 +15,17 @@
 // limitations under the License.
 
 #include <errno.h>
-#include "common/FastMem.h"
 #include <fcntl.h>
-#include <folly/Try.h>
-#include <folly/futures/Future.h>
-#include <folly/futures/Promise.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cassert>
 #include <cstdlib>
-#include <exception>
+#include <thread>
 #include <utility>
 
-#include "folly/ExceptionWrapper.h"
-#include "folly/ScopeGuard.h"
-#include "folly/Unit.h"
-#include "folly/futures/Future.h"
-#include "folly/futures/Promise.h"
+#include "common/FastMem.h"
 #include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 
 namespace milvus::storage {
 namespace {
@@ -120,8 +113,6 @@ FileWriter::FileWriter(std::string filename, io::Priority priority)
         priority_ == io::Priority::HIGH ? WriteMode::BUFFERED : GetMode();
 
     use_direct_io_ = mode == WriteMode::DIRECT;
-    use_writer_pool_ = FileWriteWorkerPool::GetInstance().HasPool();
-
     // allocate an internal aligned buffer for both modes to batch writes
     size_t buf_size = GetBufferSize();
     AssertInfo(
@@ -302,38 +293,8 @@ FileWriter::Write(const void* data, size_t nbyte) {
         return;
     }
 
-    if (!use_writer_pool_) {
-        WriteInternal(data, nbyte);
-        return;
-    }
-
-    auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-    auto future = promise->getFuture();
-    auto task = [this, data, nbyte, promise]() {
-        try {
-            WriteInternal(data, nbyte);
-            promise->setValue(folly::Unit{});
-        } catch (...) {
-            promise->setException(
-                folly::exception_wrapper(std::current_exception()));
-        }
-    };
-
-    // try to add the task to the writer pool
-    // fallback to write the data directly if the task cannot be added to the pool
-    if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
-        try {
-            std::move(future).get();
-        } catch (const std::exception& e) {
-            Cleanup();
-            ThrowInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      e.what());
-        }
-    } else {
-        WriteInternal(data, nbyte);
-    }
+    auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
+    WriteInternal(data, nbyte);
 }
 
 void
@@ -368,48 +329,23 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
-    const bool needs_finish_task =
+    const bool needs_finish_io =
         offset_ != 0 ||
         (fdatasync_on_finish_ && !use_direct_io_ && file_size_ != 0);
-    if (needs_finish_task) {
-        const auto finish_file = [this]() {
-            // Keep the final flush and sync in the same worker-pool task so
-            // diskWriteNumThreads limits both operations.
-            if (offset_ != 0) {
-                if (use_direct_io_) {
-                    FlushWithDirectIO();
-                } else {
-                    FlushWithBufferedIO();
-                }
-            }
-            if (fdatasync_on_finish_ && !use_direct_io_) {
-                SyncFileData();
-            }
-        };
-        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-        auto future = promise->getFuture();
-        auto task = [finish_file, promise]() {
-            try {
-                finish_file();
-                promise->setValue(folly::Unit{});
-            } catch (...) {
-                promise->setException(
-                    folly::exception_wrapper(std::current_exception()));
-            }
-        };
+    if (needs_finish_io) {
+        auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
 
-        if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
-            try {
-                std::move(future).get();
-            } catch (const std::exception& e) {
-                Cleanup();
-                ThrowInfo(ErrorCode::FileWriteFailed,
-                          "Failed to finish file: {}, error: {}",
-                          filename_,
-                          e.what());
+        // Keep the final flush and sync under the same permit so the local
+        // file I/O concurrency limit covers both operations.
+        if (offset_ != 0) {
+            if (use_direct_io_) {
+                FlushWithDirectIO();
+            } else {
+                FlushWithBufferedIO();
             }
-        } else {
-            finish_file();
+        }
+        if (fdatasync_on_finish_ && !use_direct_io_) {
+            SyncFileData();
         }
     }
 

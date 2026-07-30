@@ -16,13 +16,16 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <numeric>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,6 +35,8 @@
 #include "common/GroupChunk.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "folly/ScopeGuard.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "milvus-storage/common/extend_status.h"
@@ -42,6 +47,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/ThreadPools.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -302,6 +308,11 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
 
         test_data_ = std::make_unique<milvus::test::V3SegmentTestData>(
             schema_, n_batch_, per_batch_, dim_, TestLocalPath, base_path_);
+    }
+
+    void
+    TearDown() override {
+        storage::LocalFileIOPool::GetInstance().Configure(0);
     }
 
  protected:
@@ -1228,6 +1239,14 @@ TEST_P(ManifestGroupTranslatorTest, TestGetCellsOrderPreservation) {
 
 TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
     auto use_mmap = GetParam();
+    auto count_mmap_files = [this]() {
+        size_t count = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(mmap_dir_)) {
+            count += entry.is_regular_file() ? 1 : 0;
+        }
+        return count;
+    };
     auto sync_translator = MakeTranslator(0, use_mmap, false);
     auto async_translator = MakeTranslator(0, use_mmap, true);
     ASSERT_EQ(sync_translator->num_cells(), async_translator->num_cells());
@@ -1236,8 +1255,22 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
     std::iota(cids.begin(), cids.end(), 0);
     std::reverse(cids.begin(), cids.end());
 
+    auto mmap_files_before_sync = count_mmap_files();
     auto sync_cells = sync_translator->get_cells(nullptr, cids);
+    auto mmap_files_before_async = count_mmap_files();
+    if (use_mmap) {
+        EXPECT_GT(mmap_files_before_async, mmap_files_before_sync);
+    } else {
+        EXPECT_EQ(mmap_files_before_async, mmap_files_before_sync);
+    }
+    storage::LocalFileIOPool::GetInstance().Configure(1);
     auto async_cells = async_translator->get_cells(nullptr, cids);
+    auto mmap_files_after_async = count_mmap_files();
+    if (use_mmap) {
+        EXPECT_GT(mmap_files_after_async, mmap_files_before_async);
+    } else {
+        EXPECT_EQ(mmap_files_after_async, mmap_files_before_async);
+    }
     ASSERT_EQ(sync_cells.size(), async_cells.size());
     for (size_t i = 0; i < sync_cells.size(); ++i) {
         EXPECT_EQ(sync_cells[i].first, async_cells[i].first);
@@ -1256,6 +1289,71 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
                       0);
         }
     }
+}
+
+TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
+    auto use_mmap = GetParam();
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+    auto* worker_executor =
+        dynamic_cast<folly::CPUThreadPoolExecutor*>(io_executor.get());
+    ASSERT_NE(worker_executor, nullptr);
+
+    auto blocker_started_promise = std::make_shared<std::promise<void>>();
+    auto blocker_started = blocker_started_promise->get_future();
+    auto release_blocker_promise = std::make_shared<std::promise<void>>();
+    auto release_blocker = release_blocker_promise->get_future().share();
+    io_executor->add([blocker_started_promise, release_blocker]() {
+        blocker_started_promise->set_value();
+        release_blocker.wait();
+    });
+    if (blocker_started.wait_for(std::chrono::seconds(5)) !=
+        std::future_status::ready) {
+        release_blocker_promise->set_value();
+        FAIL() << "local file I/O blocker did not start";
+    }
+
+    auto translator = MakeTranslator(0, use_mmap, true);
+    std::vector<cachinglayer::cid_t> cids{0};
+    using CellResult =
+        std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>;
+    std::future<std::vector<CellResult>> load;
+    bool blocker_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!blocker_released) {
+            release_blocker_promise->set_value();
+        }
+    });
+    load = std::async(std::launch::async, [&translator, &cids]() {
+        return translator->get_cells(nullptr, cids);
+    });
+
+    if (use_mmap) {
+        auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (worker_executor->getPendingTaskCount() == 0 &&
+               load.wait_for(std::chrono::milliseconds(0)) !=
+                   std::future_status::ready &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        EXPECT_GT(worker_executor->getPendingTaskCount(), 0);
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+    } else {
+        EXPECT_EQ(load.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        EXPECT_EQ(worker_executor->getPendingTaskCount(), 0);
+    }
+
+    release_blocker_promise->set_value();
+    blocker_released = true;
+    release_guard.dismiss();
+    auto cells = load.get();
+    ASSERT_EQ(cells.size(), 1);
+    EXPECT_EQ(cells.front().first, cids.front());
 }
 
 TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {

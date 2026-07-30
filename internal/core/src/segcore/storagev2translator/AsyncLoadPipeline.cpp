@@ -158,11 +158,41 @@ FinalizeWindow(int64_t segment_id,
 }
 
 folly::Future<WindowLoadResult>
+FinalizeWindowOnExecutor(int64_t segment_id,
+                         folly::CancellationToken cancellation_token,
+                         AsyncReadWindow window,
+                         std::shared_ptr<CellFinalizeFunc> finalize_cell,
+                         storage::TransientBudgetLease lease,
+                         ChunkReadResult batches_result,
+                         folly::Executor::KeepAlive<> finalization_executor,
+                         int8_t executor_priority) {
+    return ViaWithExecutorPriority(folly::makeFuture(),
+                                   std::move(finalization_executor),
+                                   executor_priority)
+        .thenValue(
+            [segment_id,
+             cancellation_token = std::move(cancellation_token),
+             window = std::move(window),
+             finalize_cell = std::move(finalize_cell),
+             lease = std::move(lease),
+             batches_result = std::move(batches_result)](folly::Unit) mutable {
+                (void)lease;
+                return FinalizeWindow(segment_id,
+                                      cancellation_token,
+                                      std::move(window),
+                                      *finalize_cell,
+                                      std::move(batches_result));
+            });
+}
+
+folly::Future<WindowLoadResult>
 LoadWindowFuture(int64_t segment_id,
                  std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                  AsyncReadWindow window,
                  std::shared_ptr<CellFinalizeFunc> finalize_cell,
                  folly::Executor::KeepAlive<> executor,
+                 std::function<folly::Executor::KeepAlive<>()>
+                     finalization_executor_provider,
                  int8_t executor_priority,
                  storage::TransientBudgetPriority budget_priority,
                  folly::CancellationToken cancellation_token) {
@@ -177,6 +207,8 @@ LoadWindowFuture(int64_t segment_id,
                     window = std::move(window),
                     finalize_cell = std::move(finalize_cell),
                     executor = std::move(executor),
+                    finalization_executor_provider =
+                        std::move(finalization_executor_provider),
                     executor_priority,
                     cancellation_token](
                        storage::TransientBudgetLease lease) mutable {
@@ -185,20 +217,38 @@ LoadWindowFuture(int64_t segment_id,
             auto read_future = chunk_reader->get_chunks_async(
                 window.chunk_indices, /*parallelism=*/1);
             return ViaWithExecutorPriority(std::move(read_future),
-                                           std::move(executor),
+                                           executor.copy(),
                                            executor_priority)
                 .thenTry([segment_id,
                           window = std::move(window),
                           finalize_cell = std::move(finalize_cell),
                           lease = std::move(lease),
+                          executor = std::move(executor),
+                          finalization_executor_provider =
+                              std::move(finalization_executor_provider),
+                          executor_priority,
                           cancellation_token](
                              folly::Try<ChunkReadResult>&& read_try) mutable {
-                    (void)lease;
-                    return FinalizeWindow(segment_id,
-                                          cancellation_token,
-                                          std::move(window),
-                                          *finalize_cell,
-                                          std::move(read_try).value());
+                    auto batches_result = std::move(read_try).value();
+                    auto finalization_executor =
+                        finalization_executor_provider
+                            ? finalization_executor_provider()
+                            : folly::Executor::KeepAlive<>{};
+                    if (!finalization_executor) {
+                        finalization_executor = executor.copy();
+                    }
+                    return ViaWithExecutorPriority(
+                        FinalizeWindowOnExecutor(
+                            segment_id,
+                            cancellation_token,
+                            std::move(window),
+                            std::move(finalize_cell),
+                            std::move(lease),
+                            std::move(batches_result),
+                            std::move(finalization_executor),
+                            executor_priority),
+                        std::move(executor),
+                        executor_priority);
                 });
         });
 }
@@ -209,6 +259,8 @@ LoadWindowAsync(int64_t segment_id,
                 AsyncReadWindow window,
                 std::shared_ptr<CellFinalizeFunc> finalize_cell,
                 folly::Executor::KeepAlive<> executor,
+                std::function<folly::Executor::KeepAlive<>()>
+                    finalization_executor_provider,
                 int8_t executor_priority,
                 storage::TransientBudgetPriority budget_priority,
                 folly::CancellationToken cancellation_token) {
@@ -218,6 +270,7 @@ LoadWindowAsync(int64_t segment_id,
                          std::move(window),
                          std::move(finalize_cell),
                          std::move(executor),
+                         std::move(finalization_executor_provider),
                          executor_priority,
                          budget_priority,
                          cancellation_token));
@@ -231,6 +284,8 @@ LoadCellsAsyncImpl(
     int64_t segment_id,
     int64_t read_window_bytes,
     folly::Executor::KeepAlive<> executor_keep_alive,
+    std::function<folly::Executor::KeepAlive<>()>
+        finalization_executor_provider,
     int8_t executor_priority,
     storage::TransientBudgetPriority budget_priority,
     folly::CancellationToken context_cancellation_token) {
@@ -271,6 +326,7 @@ LoadCellsAsyncImpl(
                                         std::move(window),
                                         shared_finalizer,
                                         executor_keep_alive.copy(),
+                                        finalization_executor_provider,
                                         executor_priority,
                                         budget_priority,
                                         cancellation_token));
@@ -406,6 +462,8 @@ LoadCellsAsync(milvus::OpContext* ctx,
     auto executor =
         options.executor ? options.executor : GetAsyncLoadExecutor();
     auto executor_keep_alive = folly::getKeepAliveToken(executor);
+    auto finalization_executor_provider =
+        std::move(options.finalization_executor_provider);
     auto executor_priority = ExecutorPriority(options.load_priority);
     auto budget_priority = BudgetPriority(options.load_priority);
     auto context_cancellation_token =
@@ -417,6 +475,7 @@ LoadCellsAsync(milvus::OpContext* ctx,
                               options.segment_id,
                               options.read_window_bytes,
                               std::move(executor_keep_alive),
+                              std::move(finalization_executor_provider),
                               executor_priority,
                               budget_priority,
                               std::move(context_cancellation_token));
