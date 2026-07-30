@@ -229,6 +229,18 @@ SetStorageV2AsyncLoadEnabled(bool enabled) {
 }
 
 void
+SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes) {
+    milvus::segcore::storagev2translator::
+        SetStorageV2AsyncLoadReadWindowSizeBytes(bytes);
+}
+
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes() {
+    return milvus::segcore::storagev2translator::
+        StorageV2AsyncLoadReadWindowSizeBytes();
+}
+
+void
 LogOpenSSLFIPSStatus() {
     std::call_once(fipsFlag, []() {
         LOG_INFO("Milvus FIPS in OpenSSL: {}",
