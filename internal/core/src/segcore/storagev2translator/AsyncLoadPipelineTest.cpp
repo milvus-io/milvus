@@ -36,9 +36,9 @@
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/Task.h"
 #include "folly/coro/WithCancellation.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/futures/Future.h"
 #include "folly/futures/Promise.h"
-#include "futures/Executor.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
@@ -65,7 +65,7 @@ class InlineRecordingExecutor : public folly::Executor {
  public:
     void
     add(folly::Func func) override {
-        Run(std::move(func), futures::ExecutePriority::NORMAL);
+        Run(std::move(func), folly::Executor::MID_PRI);
     }
 
     void
@@ -125,7 +125,7 @@ class InlineRecordingExecutor : public folly::Executor {
 thread_local InlineRecordingExecutor*
     InlineRecordingExecutor::running_executor_ = nullptr;
 thread_local int8_t InlineRecordingExecutor::running_priority_ =
-    futures::ExecutePriority::NORMAL;
+    folly::Executor::MID_PRI;
 
 class KeepAliveRecordingExecutor : public folly::Executor {
  public:
@@ -229,7 +229,7 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
                                                      executor_->IsRunning());
             deferred_continuation_priority_.store(
                 executor_ ? executor_->CurrentPriority()
-                          : futures::ExecutePriority::NORMAL);
+                          : folly::Executor::MID_PRI);
             return result;
         });
     }
@@ -335,7 +335,7 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     std::atomic<bool> called_on_executor_{false};
     std::atomic<bool> deferred_continuation_on_executor_{false};
     std::atomic<int8_t> deferred_continuation_priority_{
-        futures::ExecutePriority::NORMAL};
+        folly::Executor::MID_PRI};
     std::atomic<size_t> parallelism_{0};
     bool observe_deferred_continuation_{false};
     std::vector<std::vector<int64_t>> requested_indices_;
@@ -500,7 +500,7 @@ TEST_F(AsyncLoadPipelineTest,
                       nullptr, std::move(cells), reader, Finalizer(), options))
             .semi()
             .via(folly::getKeepAliveToken(&caller_executor),
-                 futures::ExecutePriority::HIGH);
+                 folly::Executor::HI_PRI);
 
     ASSERT_FALSE(future.isReady());
     ASSERT_EQ(reader->AsyncCalls(), 1);
@@ -509,8 +509,7 @@ TEST_F(AsyncLoadPipelineTest,
 
     EXPECT_EQ(results.size(), 1);
     EXPECT_TRUE(reader->DeferredContinuationRanOnExecutor());
-    EXPECT_EQ(reader->DeferredContinuationPriority(),
-              futures::ExecutePriority::LOW);
+    EXPECT_EQ(reader->DeferredContinuationPriority(), folly::Executor::LO_PRI);
 }
 
 TEST_F(AsyncLoadPipelineTest,
@@ -530,14 +529,14 @@ TEST_F(AsyncLoadPipelineTest,
                       nullptr, std::move(cells), reader, Finalizer(), options))
             .semi()
             .via(folly::getKeepAliveToken(&caller_executor),
-                 futures::ExecutePriority::HIGH);
+                 folly::Executor::HI_PRI);
 
     ASSERT_FALSE(load.isReady());
     ASSERT_EQ(reader->AsyncCalls(), 1);
 
     bool release_on_load_executor = false;
     bool release_on_caller_executor = false;
-    int8_t release_priority = futures::ExecutePriority::NORMAL;
+    int8_t release_priority = folly::Executor::MID_PRI;
     auto release_observer =
         budget_.AcquireAsync(1, storage::TransientBudgetPriority::High)
             .toUnsafeFuture()
@@ -565,7 +564,7 @@ TEST_F(AsyncLoadPipelineTest,
     std::move(release_observer).get();
     EXPECT_TRUE(release_on_load_executor);
     EXPECT_FALSE(release_on_caller_executor);
-    EXPECT_EQ(release_priority, futures::ExecutePriority::LOW);
+    EXPECT_EQ(release_priority, folly::Executor::LO_PRI);
 }
 
 TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
@@ -719,27 +718,70 @@ TEST_F(AsyncLoadPipelineTest, WaitsForStorageFutureBeforeFinalizing) {
     EXPECT_EQ(finalized, 1);
 }
 
-TEST_F(AsyncLoadPipelineTest, MapsLoadPriorityToBudgetAndExecutor) {
-    auto reader = std::make_shared<FakeChunkReader>(&executor_);
-    std::vector<CellSpec> cells{{.cid = 0,
-                                 .file_idx = 0,
-                                 .local_rg_offset = 0,
-                                 .rg_count = 1,
-                                 .memory_size = 1}};
+TEST_F(AsyncLoadPipelineTest, MapsLoadPriorityToFollyExecutorPriorities) {
+    auto run = [this](milvus::proto::common::LoadPriority priority) {
+        auto reader = std::make_shared<FakeChunkReader>(&executor_);
+        std::vector<CellSpec> cells{{.cid = 0,
+                                     .file_idx = 0,
+                                     .local_rg_offset = 0,
+                                     .rg_count = 1,
+                                     .memory_size = 1}};
 
-    auto results = folly::coro::blockingWait(
-        LoadCellsAsync(nullptr,
-                       std::move(cells),
-                       reader,
-                       Finalizer(),
-                       Options(milvus::proto::common::LoadPriority::LOW)));
+        auto results = folly::coro::blockingWait(LoadCellsAsync(
+            nullptr, std::move(cells), reader, Finalizer(), Options(priority)));
+        EXPECT_EQ(results.size(), 1);
+    };
 
-    EXPECT_EQ(results.size(), 1);
+    run(milvus::proto::common::LoadPriority::HIGH);
+    run(milvus::proto::common::LoadPriority::LOW);
+
     auto priorities = executor_.Priorities();
-    EXPECT_NE(std::find(priorities.begin(),
-                        priorities.end(),
-                        futures::ExecutePriority::LOW),
-              priorities.end());
+    EXPECT_NE(
+        std::find(
+            priorities.begin(), priorities.end(), folly::Executor::HI_PRI),
+        priorities.end());
+    EXPECT_NE(
+        std::find(
+            priorities.begin(), priorities.end(), folly::Executor::LO_PRI),
+        priorities.end());
+}
+
+TEST_F(AsyncLoadPipelineTest, FollyPoolRunsQueuedHighLoadBeforeLowLoad) {
+    folly::CPUThreadPoolExecutor executor(
+        0, folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(2));
+    std::vector<int64_t> read_order;
+    auto make_load = [this, &executor, &read_order](
+                         milvus::proto::common::LoadPriority priority,
+                         int64_t marker) {
+        auto reader = std::make_shared<FakeChunkReader>(nullptr);
+        reader->SetOnAsyncCall(
+            [&read_order, marker]() { read_order.push_back(marker); });
+        std::vector<CellSpec> cells{{.cid = marker,
+                                     .file_idx = 0,
+                                     .local_rg_offset = 0,
+                                     .rg_count = 1,
+                                     .memory_size = 1}};
+        auto options = Options(priority);
+        options.executor = &executor;
+        return Start(LoadCellsAsync(
+            nullptr,
+            std::move(cells),
+            std::move(reader),
+            [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
+            options));
+    };
+
+    auto low = make_load(milvus::proto::common::LoadPriority::LOW, 1);
+    auto high = make_load(milvus::proto::common::LoadPriority::HIGH, 2);
+    EXPECT_FALSE(low.isReady());
+    EXPECT_FALSE(high.isReady());
+    EXPECT_TRUE(read_order.empty());
+
+    executor.setNumThreads(1);
+
+    EXPECT_EQ(std::move(high).get().size(), 1);
+    EXPECT_EQ(std::move(low).get().size(), 1);
+    EXPECT_EQ(read_order, (std::vector<int64_t>{2, 1}));
 }
 
 TEST_F(AsyncLoadPipelineTest, SupportsSinglePriorityCustomExecutor) {
