@@ -42,6 +42,13 @@ func (h *hookConfig) GetAll() map[string]string {
 	return h.hookBase.mgr.GetConfigs()
 }
 
+// GetConfigsView returns hook configurations with sensitive values redacted.
+func (h *hookConfig) GetConfigsView() map[string]string {
+	configs := h.GetAll()
+	h.hookBase.mgr.RedactSensitiveConfigValues(configs)
+	return configs
+}
+
 func (h *hookConfig) Save(key string, value string) error {
 	return h.hookBase.Save(key, value)
 }

@@ -209,6 +209,108 @@ func TestGetConfigAndSource(t *testing.T) {
 	assert.Contains(t, v, RuntimeSource)
 }
 
+func TestIsSensitiveConfigKey(t *testing.T) {
+	mgr := NewManager()
+	sensitiveKeys := []string{
+		"password",
+		"passphrase",
+		"secret",
+		"token",
+		"credential",
+		"apiKey",
+		"accessKey",
+		"userName",
+		"pulsar.authParams",
+		"trace.otlp.headers",
+	}
+
+	for _, key := range sensitiveKeys {
+		t.Run(key, func(t *testing.T) {
+			assert.True(t, mgr.IsSensitiveConfigKey(key))
+		})
+	}
+}
+
+func TestGetConfigsViewRedactsSensitiveValues(t *testing.T) {
+	realSensitiveKeys := []string{
+		"minio.accessKeyID",
+		"minio.secretAccessKey",
+		"minio.gcpCredentialJSON",
+		"credential.aksk1.access_key_id",
+		"credential.aksk1.secret_access_key",
+		"credential.apikey1.apikey",
+		"credential.gcp1.credential_json",
+		"cipherPlugin.kms.credentials.aws.roleARN",
+		"cipherPlugin.kms.credentials.aws.externalID",
+		"function.textEmbedding.providers.azure_openai.credential",
+		"function.textEmbedding.providers.bedrock.credential",
+		"function.textEmbedding.providers.cohere.credential",
+		"function.textEmbedding.providers.dashscope.credential",
+		"function.textEmbedding.providers.gemini.credential",
+		"function.textEmbedding.providers.huggingface.credential",
+		"function.textEmbedding.providers.openai.credential",
+		"function.textEmbedding.providers.siliconflow.credential",
+		"function.textEmbedding.providers.tei.credential",
+		"function.textEmbedding.providers.vertexai.credential",
+		"function.textEmbedding.providers.voyageai.credential",
+		"function.rerank.model.providers.cohere.credential",
+		"function.rerank.model.providers.huggingface.credential",
+		"function.rerank.model.providers.siliconflow.credential",
+		"function.rerank.model.providers.tei.credential",
+		"function.rerank.model.providers.vllm.credential",
+		"function.rerank.model.providers.voyageai.credential",
+		"etcd.auth.userName",
+		"etcd.auth.password",
+		"kafka.saslUsername",
+		"kafka.saslPassword",
+		"kafka.ssl.tlsKeyPassword",
+		"common.security.defaultRootPassword",
+		"pulsar.authParams",
+		"trace.otlp.headers",
+	}
+	dynamicSensitiveKeys := []string{
+		"dynamic/auth-token",
+		"dynamic.client-secret",
+		"dynamic.private-key-passphrase",
+		"dynamic.credential",
+	}
+	sensitiveKeys := append(realSensitiveKeys, dynamicSensitiveKeys...)
+
+	assertRedacted := func(t *testing.T, mgr *Manager) {
+		configs := mgr.GetConfigsView()
+		rawConfigs := mgr.GetConfigs()
+		for _, key := range sensitiveKeys {
+			t.Run(key, func(t *testing.T) {
+				_, rawValue, err := mgr.GetConfig(key)
+				require.NoError(t, err)
+				assert.Equal(t, "plain-text-sensitive-value", rawValue)
+				assert.Equal(t, "plain-text-sensitive-value", rawConfigs[formatKey(key)])
+				assert.Equal(t, "*****", configs[formatKey(key)])
+			})
+		}
+	}
+
+	t.Run("configuration source", func(t *testing.T) {
+		mgr := NewManager()
+		envSource := NewEnvSource(formatKey)
+		for _, key := range sensitiveKeys {
+			envSource.configs.Insert(formatKey(key), "plain-text-sensitive-value")
+		}
+		require.NoError(t, mgr.AddSource(envSource))
+
+		assertRedacted(t, mgr)
+	})
+
+	t.Run("runtime overlay", func(t *testing.T) {
+		mgr := NewManager()
+		for _, key := range sensitiveKeys {
+			mgr.SetConfig(key, "plain-text-sensitive-value")
+		}
+
+		assertRedacted(t, mgr)
+	})
+}
+
 func TestDeadlock(t *testing.T) {
 	mgr, _ := Init()
 

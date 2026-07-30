@@ -21,48 +21,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-func TestHideSensitive(t *testing.T) {
-	visibleConfigs := map[string]string{
-		"dummy":      "secretAccessKey",
-		"Foo":        "password",
-		"api":        "apikey",
-		"access":     "XXX",
-		"key":        "XXX",
-		"credential": "XXX",
+func TestGetConfigsOnlySerializesInput(t *testing.T) {
+	configs := map[string]string{
+		"minio.secretAccessKey": "caller-owned-value",
 	}
-	invisibleConfigs := map[string]string{
-		"MyPassword":                          "123456",
-		"your_secret_access_Key":              "ABCD",
-		"SECRETACCESSKEY2":                    "XXX",
-		"minio.secretAccessKey":               "secretAccessKey",
-		"common.security.defaultRootPassword": "milvus",
-		"credentialaksk1secretaccesskey":      "XXX",
-		"credential.aksk1.secret_access_key":  "XXX",
-		"credentialapikey1apikey":             "apikey",
-		"credential.apikey1.apikey":           "apikey",
-		"credentialgcp1credentialjson":        "credential",
-		"credential.gcp1.credentialjson":      "credential",
-	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
 
-	copiedConfigs := make(map[string]string)
-	for k, v := range visibleConfigs {
-		copiedConfigs[k] = v
-	}
-	hideSensitive(copiedConfigs)
-	for k, v := range visibleConfigs {
-		assert.Contains(t, copiedConfigs, k)
-		assert.Equal(t, copiedConfigs[k], v)
-	}
+	handler := getConfigs(configs)
+	handler(c)
 
-	copiedConfigs = make(map[string]string)
-	for k, v := range invisibleConfigs {
-		copiedConfigs[k] = v
-	}
-	hideSensitive(copiedConfigs)
-	for k := range invisibleConfigs {
-		assert.Contains(t, copiedConfigs, k)
-		assert.Equal(t, copiedConfigs[k], sensitiveMark)
-	}
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "caller-owned-value", configs["minio.secretAccessKey"])
+	assert.JSONEq(t, `{"minio.secretAccessKey":"caller-owned-value"}`, w.Body.String())
 }
 
 func TestGetConfigs(t *testing.T) {

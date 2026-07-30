@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,6 +310,61 @@ func TestHandleGetConfig(t *testing.T) {
 	mgr.SetConfig("test.getconfig.key1", "val1")
 	mgr.SetConfig("test.getconfig.key2", "val2")
 	mgr.SetConfig("test.getconfig.key3", "val3")
+	realSensitiveKeys := []string{
+		"minio.accessKeyID",
+		"minio.secretAccessKey",
+		"minio.gcpCredentialJSON",
+		"credential.aksk1.access_key_id",
+		"credential.aksk1.secret_access_key",
+		"credential.apikey1.apikey",
+		"credential.gcp1.credential_json",
+		"cipherPlugin.kms.credentials.aws.roleARN",
+		"cipherPlugin.kms.credentials.aws.externalID",
+		"function.textEmbedding.providers.azure_openai.credential",
+		"function.textEmbedding.providers.bedrock.credential",
+		"function.textEmbedding.providers.cohere.credential",
+		"function.textEmbedding.providers.dashscope.credential",
+		"function.textEmbedding.providers.gemini.credential",
+		"function.textEmbedding.providers.huggingface.credential",
+		"function.textEmbedding.providers.openai.credential",
+		"function.textEmbedding.providers.siliconflow.credential",
+		"function.textEmbedding.providers.tei.credential",
+		"function.textEmbedding.providers.vertexai.credential",
+		"function.textEmbedding.providers.voyageai.credential",
+		"function.rerank.model.providers.cohere.credential",
+		"function.rerank.model.providers.huggingface.credential",
+		"function.rerank.model.providers.siliconflow.credential",
+		"function.rerank.model.providers.tei.credential",
+		"function.rerank.model.providers.vllm.credential",
+		"function.rerank.model.providers.voyageai.credential",
+		"etcd.auth.userName",
+		"etcd.auth.password",
+		"kafka.saslUsername",
+		"kafka.saslPassword",
+		"kafka.ssl.tlsKeyPassword",
+		"common.security.defaultRootPassword",
+		"pulsar.authParams",
+		"trace.otlp.headers",
+	}
+	dynamicSensitiveKeys := []string{
+		"dynamic/auth-token",
+		"dynamic.client-secret",
+		"dynamic.private-key-passphrase",
+		"dynamic.credential",
+	}
+	sensitiveKeys := append(realSensitiveKeys, dynamicSensitiveKeys...)
+	t.Cleanup(func() {
+		for _, key := range append([]string{
+			"test.getconfig.key1",
+			"test.getconfig.key2",
+			"test.getconfig.key3",
+		}, sensitiveKeys...) {
+			mgr.ResetConfig(key)
+		}
+	})
+	for _, key := range sensitiveKeys {
+		mgr.SetConfig(key, "plain-text-sensitive-value")
+	}
 
 	type configResult struct {
 		Key    string `json:"key"`
@@ -408,17 +464,24 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "keys")
 	})
 
-	t.Run("sensitive keys are redacted", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password", nil)
+	t.Run("sensitive keys are denied", func(t *testing.T) {
+		keys := append(append([]string{}, sensitiveKeys...), "test.getconfig.key1")
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys="+strings.Join(keys, ","), nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		configs := parseResponse(t, w)
-		require.Len(t, configs, 3)
-		assert.Contains(t, configs[0].Error, "sensitive")
-		assert.Equal(t, "val1", configs[1].Value)
-		assert.Contains(t, configs[2].Error, "sensitive")
+		require.Len(t, configs, len(keys))
+		for i, key := range sensitiveKeys {
+			assert.Equal(t, key, configs[i].Key)
+			assert.Equal(t, "access to sensitive config key is denied", configs[i].Error)
+			assert.Empty(t, configs[i].Value)
+			assert.Empty(t, configs[i].Source)
+		}
+		assert.Equal(t, "test.getconfig.key1", configs[len(sensitiveKeys)].Key)
+		assert.Equal(t, "val1", configs[len(sensitiveKeys)].Value)
+		assert.Empty(t, configs[len(sensitiveKeys)].Error)
 	})
 
 	t.Run("all empty keys should fail", func(t *testing.T) {

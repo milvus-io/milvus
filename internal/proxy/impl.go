@@ -6717,7 +6717,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
 	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetConfigsView()))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))

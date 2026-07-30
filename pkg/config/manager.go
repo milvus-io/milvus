@@ -33,7 +33,19 @@ import (
 const (
 	TombValue     = "TOMB_VAULE"
 	RuntimeSource = "RuntimeSource"
+	redactedValue = "*****"
 )
+
+var sensitiveConfigSubstrings = []string{
+	"password",
+	"passphrase",
+	"secret",
+	"token",
+	"credential",
+	"apikey",
+	"accesskey",
+	"username",
+}
 
 type Filter func(key string) (string, bool)
 
@@ -173,6 +185,32 @@ func (m *Manager) GetConfig(key string) (string, string, error) {
 	return sourceName, v, err
 }
 
+// IsSensitiveConfigKey returns whether a configuration value should be hidden from public views.
+func (m *Manager) IsSensitiveConfigKey(key string) bool {
+	normalizedKey := strings.NewReplacer("/", "", "_", "", ".", "", "-", "").Replace(strings.ToLower(key))
+	for _, substring := range sensitiveConfigSubstrings {
+		if strings.Contains(normalizedKey, substring) {
+			return true
+		}
+	}
+
+	switch normalizedKey {
+	case "pulsarauthparams", "traceotlpheaders":
+		return true
+	default:
+		return false
+	}
+}
+
+// RedactSensitiveConfigValues replaces sensitive values in configs with the public-view mask.
+func (m *Manager) RedactSensitiveConfigValues(configs map[string]string) {
+	for key := range configs {
+		if m.IsSensitiveConfigKey(key) {
+			configs[key] = redactedValue
+		}
+	}
+}
+
 // GetConfigs returns all the key values
 func (m *Manager) GetConfigs() map[string]string {
 	config := make(map[string]string)
@@ -217,6 +255,7 @@ func (m *Manager) GetConfigsView() map[string]string {
 		return true
 	})
 
+	m.RedactSensitiveConfigValues(config)
 	return config
 }
 
