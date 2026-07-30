@@ -19,12 +19,85 @@
 #include <mutex>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayValue.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
 using namespace milvus::cachinglayer;
+
+namespace chunked_column_detail {
+
+inline std::pair<std::vector<ArrayValueView>, FixedVector<bool>>
+BuildArrayValueViews(const ColumnarArrayChunk& chunk,
+                     bool nullable,
+                     std::optional<std::pair<int64_t, int64_t>> offset_len) {
+    int64_t start_offset = 0;
+    int64_t len = chunk.RowNums();
+    if (offset_len.has_value()) {
+        start_offset = offset_len->first;
+        len = offset_len->second;
+        AssertInfo(start_offset >= 0 && start_offset < chunk.RowNums(),
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+        AssertInfo(len > 0 && len <= chunk.RowNums(),
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+        AssertInfo(start_offset + len <= chunk.RowNums(),
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+    }
+
+    std::vector<ArrayValueView> views;
+    views.reserve(len);
+    FixedVector<bool> valid_data;
+    if (nullable) {
+        valid_data.reserve(len);
+    }
+    for (int64_t i = 0; i < len; ++i) {
+        const auto row = start_offset + i;
+        auto view = chunk.View(row);
+        if (nullable) {
+            valid_data.push_back(!view.is_null());
+        }
+        views.push_back(std::move(view));
+    }
+    return {std::move(views), std::move(valid_data)};
+}
+
+inline std::pair<std::vector<ArrayValueView>, FixedVector<bool>>
+BuildArrayValueViewsByOffsets(const ColumnarArrayChunk& chunk,
+                              bool nullable,
+                              const FixedVector<int32_t>& offsets) {
+    std::vector<ArrayValueView> views;
+    views.reserve(offsets.size());
+    FixedVector<bool> valid_data;
+    if (nullable) {
+        valid_data.reserve(offsets.size());
+    }
+    for (auto offset : offsets) {
+        AssertInfo(offset >= 0 && offset < chunk.RowNums(),
+                   "Retrieve array value view with out-of-bound offset:{} "
+                   "for chunk rows:{}",
+                   offset,
+                   chunk.RowNums());
+        auto view = chunk.View(offset);
+        if (nullable) {
+            valid_data.push_back(!view.is_null());
+        }
+        views.push_back(std::move(view));
+    }
+    return {std::move(views), std::move(valid_data)};
+}
+
+}  // namespace chunked_column_detail
 
 class ChunkedColumnInterface {
  public:
@@ -108,6 +181,19 @@ class ChunkedColumnInterface {
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    // ArrayValueView is non-owning. The returned PinWrapper keeps the backing
+    // ColumnarArrayChunk alive for the lifetime of the views.
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayValueViews only supported for recursive ARRAY "
+                  "columns");
+    }
+
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(
@@ -128,6 +214,16 @@ class ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(milvus::OpContext* op_ctx,
+                             int64_t chunk_id,
+                             const FixedVector<int32_t>& offsets) const {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayValueViewsByOffsets only supported for recursive "
+                  "ARRAY columns");
+    }
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>

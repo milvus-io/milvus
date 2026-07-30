@@ -35,6 +35,7 @@
 
 #include "common/Common.h"
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
 #include "common/PrometheusClient.h"
 #include "common/QueryResult.h"
@@ -62,6 +63,7 @@
 #include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -725,6 +727,233 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(result->offset_size(), 1);
     EXPECT_EQ(result->offset(0), 2);
+}
+
+TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
+    auto schema = std::make_shared<Schema>();
+    const auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const auto nested_int_fid = FieldId(int64_fid.get() + 1);
+    proto::schema::TypeSchema nested_int_type;
+    nested_int_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("struct_array[nested_values]"),
+                               nested_int_fid,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               false,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(nested_int_type))));
+
+    const auto nested_string_fid = FieldId(int64_fid.get() + 2);
+    proto::schema::TypeSchema nested_string_type;
+    nested_string_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::VarChar);
+    schema->AddField(
+        FieldMeta(FieldName("struct_array[nested_strings]"),
+                  nested_string_fid,
+                  DataType::ARRAY,
+                  DataType::ARRAY,
+                  false,
+                  std::nullopt,
+                  std::string{},
+                  LOCAL_FORMAT_RAW,
+                  std::make_optional(std::move(nested_string_type))));
+
+    constexpr int64_t row_count = 4;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids = {0, 1, 2, 3};
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    auto* nested_int_field = insert_data->add_fields_data();
+    nested_int_field->set_field_id(nested_int_fid.get());
+    nested_int_field->set_field_name("struct_array[nested_values]");
+    nested_int_field->set_type(proto::schema::DataType::Array);
+    auto* nested_int_rows =
+        nested_int_field->mutable_scalars()->mutable_array_data();
+    nested_int_rows->set_element_type(proto::schema::DataType::Array);
+    auto append_int_row =
+        [nested_int_rows](const std::vector<std::vector<int32_t>>& children) {
+            auto* row = nested_int_rows->add_data()->mutable_array_data();
+            row->set_element_type(proto::schema::DataType::Int32);
+            for (const auto& child_values : children) {
+                auto* child = row->add_data()->mutable_int_data();
+                for (const auto value : child_values) {
+                    child->add_data(value);
+                }
+            }
+        };
+    append_int_row({{1, 2}, {3, 4}});
+    append_int_row({{5, 6}, {7}});
+    append_int_row({{8}});
+    append_int_row({{9, 10}, {11, 12}, {13}});
+
+    auto* nested_string_field = insert_data->add_fields_data();
+    nested_string_field->set_field_id(nested_string_fid.get());
+    nested_string_field->set_field_name("struct_array[nested_strings]");
+    nested_string_field->set_type(proto::schema::DataType::Array);
+    auto* nested_string_rows =
+        nested_string_field->mutable_scalars()->mutable_array_data();
+    nested_string_rows->set_element_type(proto::schema::DataType::Array);
+    auto append_string_row =
+        [nested_string_rows](
+            const std::vector<std::vector<std::string>>& children) {
+            auto* row = nested_string_rows->add_data()->mutable_array_data();
+            row->set_element_type(proto::schema::DataType::VarChar);
+            for (const auto& child_values : children) {
+                auto* child = row->add_data()->mutable_string_data();
+                for (const auto& value : child_values) {
+                    child->add_data(value);
+                }
+            }
+        };
+    append_string_row({{"abc", "x"}, {"efg"}});
+    append_string_row({{"abc"}, {"abc", "efg"}});
+    append_string_row({{}});
+    append_string_row({{"tail"}, {"abc", "efg"}, {"zzz"}});
+    insert_data->set_num_rows(row_count);
+
+    struct TestCase {
+        std::string expression;
+        std::vector<int64_t> expected_offsets;
+    };
+    const std::vector<TestCase> cases = {
+        {"match_any(struct_array, "
+         "array_length($[nested_values]) == 2)",
+         {0, 1, 3}},
+        {"match_all(struct_array, "
+         "array_length($[nested_values]) == 2)",
+         {0}},
+        {"match_least(struct_array, "
+         "array_length($[nested_values]) == 2, threshold=2)",
+         {0, 3}},
+        {"match_most(struct_array, "
+         "array_length($[nested_values]) == 2, threshold=1)",
+         {1, 2}},
+        {"match_exact(struct_array, "
+         "array_length($[nested_values]) == 2, threshold=2)",
+         {0, 3}},
+        {"match_any(struct_array, "
+         "array_contains($[nested_values], 7))",
+         {1}},
+        {"match_all(struct_array, "
+         "array_contains_any($[nested_values], [1, 4]))",
+         {0}},
+        {"match_any(struct_array, "
+         "array_contains_all($[nested_values], [9, 10]))",
+         {3}},
+        {"match_any(struct_array, "
+         "array_contains($[nested_strings], \"efg\"))",
+         {0, 1, 3}},
+        {"match_all(struct_array, "
+         "array_contains_any($[nested_strings], [\"abc\", \"tail\"]))",
+         {1}},
+        {"match_any(struct_array, "
+         "array_contains_all($[nested_strings], [\"abc\", \"efg\"]))",
+         {1, 3}},
+        {"match_all(struct_array, "
+         "array_contains_all($[nested_strings], []))",
+         {0, 1, 2, 3}},
+        {"match_any(struct_array, "
+         "array_contains_any($[nested_strings], []))",
+         {}},
+    };
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto check_segment = [&](SegmentInternalInterface* segment,
+                             const char* segment_name) {
+        for (const auto& test : cases) {
+            SCOPED_TRACE(std::string(segment_name) + ": " + test.expression);
+            const auto plan_bytes = schema_handle.Parse(test.expression);
+            auto plan = CreateRetrievePlanByExpr(
+                schema, plan_bytes.data(), plan_bytes.size());
+            ASSERT_NE(plan, nullptr);
+
+            auto result = segment->Retrieve(
+                nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+            ASSERT_NE(result, nullptr);
+            ASSERT_EQ(result->offset_size(), test.expected_offsets.size());
+            for (size_t i = 0; i < test.expected_offsets.size(); ++i) {
+                EXPECT_EQ(result->offset(i), test.expected_offsets[i]);
+            }
+        }
+
+        const std::string offset_expression =
+            "match_any(struct_array, "
+            "array_contains_all($[nested_values], [9, 10]))";
+        const auto plan_bytes = schema_handle.Parse(offset_expression);
+        auto plan = CreateRetrievePlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        ASSERT_NE(plan, nullptr);
+        auto* filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get();
+        exec::OffsetVector offsets = {3, 1, 0};
+        auto output = test::gen_filter_res(
+            filter_node, segment, row_count, MAX_TIMESTAMP, &offsets);
+        ASSERT_EQ(output->size(), offsets.size());
+        TargetBitmapView output_data(output->GetRawData(), output->size());
+        EXPECT_TRUE(output_data[0]);
+        EXPECT_FALSE(output_data[1]);
+        EXPECT_FALSE(output_data[2]);
+
+        const std::string length_offset_expression =
+            "match_all(struct_array, "
+            "array_length($[nested_values]) == 2)";
+        const auto length_plan_bytes =
+            schema_handle.Parse(length_offset_expression);
+        auto length_plan = CreateRetrievePlanByExpr(
+            schema, length_plan_bytes.data(), length_plan_bytes.size());
+        ASSERT_NE(length_plan, nullptr);
+        auto* length_filter_node =
+            length_plan->plan_node_->plannodes_->sources()[0]
+                ->sources()[0]
+                .get();
+        exec::OffsetVector length_offsets = {3, 1, 0};
+        auto length_output = test::gen_filter_res(length_filter_node,
+                                                  segment,
+                                                  row_count,
+                                                  MAX_TIMESTAMP,
+                                                  &length_offsets);
+        ASSERT_EQ(length_output->size(), length_offsets.size());
+        TargetBitmapView length_output_data(length_output->GetRawData(),
+                                            length_output->size());
+        EXPECT_FALSE(length_output_data[0]);
+        EXPECT_FALSE(length_output_data[1]);
+        EXPECT_TRUE(length_output_data[2]);
+    };
+
+    std::vector<idx_t> row_ids = {0, 1, 2, 3};
+    std::vector<Timestamp> timestamps = {0, 1, 2, 3};
+    {
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        config.set_chunk_rows(2);
+        auto growing =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        const auto reserved_offset = growing->PreInsert(row_count);
+        growing->Insert(reserved_offset,
+                        row_count,
+                        row_ids.data(),
+                        timestamps.data(),
+                        insert_data.get());
+        ASSERT_GT(growing->num_chunk(nested_int_fid), 1);
+        check_segment(growing.get(), "growing multi-chunk");
+    }
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = new InsertRecordProto(*insert_data);
+    generated_data.row_ids_ = row_ids;
+    generated_data.timestamps_ = timestamps;
+    auto sealed = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    check_segment(sealed.get(), "sealed");
 }
 
 namespace {

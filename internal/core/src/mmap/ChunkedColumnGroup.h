@@ -405,6 +405,31 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViews(milvus::OpContext* op_ctx,
+                    int64_t chunk_id,
+                    std::optional<std::pair<int64_t, int64_t>> offset_len =
+                        std::nullopt) const override {
+        if (!IsChunkedArrayColumnDataType(data_type_) ||
+            !field_meta_.has_element_schema()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] ArrayValueViews only supports recursive "
+                      "ARRAY columns");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
+        AssertInfo(array_chunk != nullptr,
+                   "[StorageV2] recursive ARRAY chunk {} must use "
+                   "ColumnarArrayChunk",
+                   chunk_id);
+        auto content = chunked_column_detail::BuildArrayValueViews(
+            *array_chunk, field_meta_.is_nullable(), offset_len);
+        return PinWrapper<
+            std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
+            std::move(chunk_wrapper), std::move(content));
+    }
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(milvus::OpContext* op_ctx,
                      int64_t chunk_id,
@@ -469,6 +494,31 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             std::move(chunk_wrapper),
             static_cast<ArrayChunk*>(chunk.get())->ViewsByOffsets(offsets));
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override {
+        if (!IsChunkedArrayColumnDataType(data_type_) ||
+            !field_meta_.has_element_schema()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] ArrayValueViewsByOffsets only supports "
+                      "recursive ARRAY columns");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
+        AssertInfo(array_chunk != nullptr,
+                   "[StorageV2] recursive ARRAY chunk {} must use "
+                   "ColumnarArrayChunk",
+                   chunk_id);
+        auto content = chunked_column_detail::BuildArrayValueViewsByOffsets(
+            *array_chunk, field_meta_.is_nullable(), offsets);
+        return PinWrapper<
+            std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
+            std::move(chunk_wrapper), std::move(content));
     }
 
     std::pair<size_t, size_t>

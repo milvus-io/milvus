@@ -419,7 +419,15 @@ class ColumnarArrayChunk final : public Chunk {
         const auto element_type = GetElementType(type);
         using ValueType = std::decay_t<T>;
 
-        if constexpr (std::is_same_v<ValueType, bool>) {
+        if constexpr (std::is_same_v<ValueType, std::string_view> ||
+                      std::is_same_v<ValueType, std::string>) {
+            AssertInfo(IsStringDataType(element_type),
+                       "requested string from array element type {}",
+                       element_type);
+            const auto& chunk = static_cast<const StringChunk&>(child);
+            const auto value = chunk[static_cast<int>(index)];
+            return T(value.data(), value.size());
+        } else if constexpr (std::is_same_v<ValueType, bool>) {
             AssertInfo(element_type == DataType::BOOL,
                        "requested bool from array element type {}",
                        element_type);
@@ -427,46 +435,34 @@ class ColumnarArrayChunk final : public Chunk {
             return *reinterpret_cast<const uint8_t*>(
                        chunk.ValueAt(static_cast<int64_t>(index))) != 0;
         } else if constexpr (std::is_same_v<ValueType, int> ||
+                             std::is_same_v<ValueType, int64_t> ||
                              std::is_same_v<ValueType, int8_t> ||
                              std::is_same_v<ValueType, int16_t> ||
-                             std::is_same_v<ValueType, int32_t>) {
-            AssertInfo(element_type == DataType::INT8 ||
-                           element_type == DataType::INT16 ||
-                           element_type == DataType::INT32,
-                       "requested int from array element type {}",
-                       element_type);
+                             std::is_same_v<ValueType, int32_t> ||
+                             std::is_same_v<ValueType, float> ||
+                             std::is_same_v<ValueType, double>) {
             const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return static_cast<T>(*reinterpret_cast<const int32_t*>(
-                chunk.ValueAt(static_cast<int64_t>(index))));
-        } else if constexpr (std::is_same_v<ValueType, int64_t>) {
-            AssertInfo(element_type == DataType::INT64,
-                       "requested int64 from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const int64_t*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, float>) {
-            AssertInfo(element_type == DataType::FLOAT,
-                       "requested float from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const float*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, double>) {
-            AssertInfo(element_type == DataType::DOUBLE,
-                       "requested double from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const double*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, std::string_view> ||
-                             std::is_same_v<ValueType, std::string>) {
-            AssertInfo(IsStringDataType(element_type),
-                       "requested string from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const StringChunk&>(child);
-            const auto value = chunk[static_cast<int>(index)];
-            return T(value.data(), value.size());
+            const auto* value = chunk.ValueAt(static_cast<int64_t>(index));
+            switch (element_type) {
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int32_t*>(value));
+                case DataType::INT64:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int64_t*>(value));
+                case DataType::FLOAT:
+                    return static_cast<T>(
+                        *reinterpret_cast<const float*>(value));
+                case DataType::DOUBLE:
+                    return static_cast<T>(
+                        *reinterpret_cast<const double*>(value));
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported array element type {}",
+                              element_type);
+            }
         } else {
             static_assert(AlwaysFalse<T>,
                           "unsupported ArrayValueView value type");
