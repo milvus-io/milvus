@@ -23,7 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/json"
@@ -165,4 +167,34 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		_, err = etcdCli.Delete(ctx, k)
 		assert.NoError(t, err)
 	}
+}
+
+func TestProxyManager_StopInterruptsReWatchRetry(t *testing.T) {
+	paramtable.Init()
+
+	// Every re-watch attempt fails with a retriable auth-token error, so the
+	// bounded retry would otherwise sleep through its full backoff budget on
+	// the component ctx. Stop() closes closeCh, which must abort the retry
+	// promptly and let startWatchEtcd return quietly instead of stalling
+	// Stop() (or panicking after the retries are exhausted).
+	mockWatch := mockey.Mock((*ProxyWatcher).WatchProxy).Return(rpctypes.ErrInvalidAuthToken).Build()
+	defer mockWatch.UnPatch()
+
+	pm := NewProxyWatcher(nil)
+
+	// A compacted response is retriable and sends the loop into the re-watch
+	// retry path without needing a real etcd.
+	watchCh := make(chan clientv3.WatchResponse, 1)
+	watchCh <- clientv3.WatchResponse{CompactRevision: 1}
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		pm.Stop()
+	}()
+
+	start := time.Now()
+	assert.NotPanics(t, func() {
+		pm.startWatchEtcd(context.Background(), watchCh)
+	})
+	assert.Less(t, time.Since(start), 5*time.Second)
 }

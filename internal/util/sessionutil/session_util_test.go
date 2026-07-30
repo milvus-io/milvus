@@ -209,8 +209,11 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	defer s.Stop()
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
+		wctx, wcancel := context.WithCancel(s.ctx)
 		return &sessionWatcher{
 			s:        s,
+			ctx:      wctx,
+			cancel:   wcancel,
 			prefix:   "test",
 			rewatch:  rewatch,
 			eventCh:  make(chan *SessionEvent, 10),
@@ -347,6 +350,44 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		w := getWatcher(s, nil)
 		err := w.handleWatchErr(errors.New("some fatal error"))
 		assert.Error(t, err)
+	})
+
+	t.Run("cancel-reason shaped auth error triggers rewatch", func(t *testing.T) {
+		// The etcd server delivers auth-token watch cancellations as
+		// CancelReason text; clientv3 rebuilds it as a plain error that no
+		// longer matches the sentinel via errors.Is. The watcher must still
+		// classify it as retriable and re-establish the watch.
+		rewatched := false
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			rewatched = true
+			return nil
+		})
+		err := w.handleWatchErr(v3rpc.Error(errors.New(v3rpc.ErrGRPCInvalidAuthToken.Error())))
+		assert.NoError(t, err)
+		assert.True(t, rewatched)
+		assert.NotNil(t, w.rch)
+	})
+
+	t.Run("Stop interrupts rewatch retry", func(t *testing.T) {
+		// Keep every rewatch attempt failing with a retriable error so the
+		// bounded retry would otherwise run its full backoff budget on the
+		// session ctx. Stop() cancels the watcher ctx, which must abort the
+		// retry promptly and make the teardown quiet instead of panicking.
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			return v3rpc.ErrInvalidAuthToken
+		})
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			w.Stop()
+		}()
+		start := time.Now()
+		wresp := clientv3.WatchResponse{
+			CompactRevision: 1,
+		}
+		assert.NotPanics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
+		assert.Less(t, time.Since(start), 5*time.Second)
 	})
 }
 

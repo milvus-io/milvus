@@ -152,12 +152,33 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 					// On success WatchProxy spawns a new startWatchEtcd goroutine, so
 					// this goroutine returns and hands the watch over to it (not a
 					// recursive call that would accumulate goroutines).
-					err2 := retry.Do(ctx, func() error {
+					//
+					// The retry must observe the watcher lifetime, not just the
+					// component ctx: Stop() closes closeCh and then blocks in
+					// wg.Wait(), so a retry bound only to ctx would stall Stop()
+					// and could re-establish a watch after the watcher stopped.
+					// Bridge closeCh into a child ctx that gates the retry (and
+					// its backoff sleeps); WatchProxy itself still runs on the
+					// component ctx so a successfully re-established watch is not
+					// torn down when the bridge is released.
+					reCtx, reCancel := context.WithCancel(ctx)
+					go func() {
+						defer reCancel()
+						select {
+						case <-p.closeCh.CloseCh():
+						case <-reCtx.Done():
+						}
+					}()
+					err2 := retry.Do(reCtx, func() error {
+						if p.closeCh.IsClosed() {
+							return merr.WrapErrServiceInternal("proxy watcher is stopped")
+						}
 						return p.WatchProxy(ctx)
 					}, retry.RetryErr(etcd.IsRetriableWatchErr))
+					reCancel()
 					if err2 != nil {
-						if ctx.Err() != nil {
-							logger.Warn("stop re-watching proxy due to context done", zap.Error(err2))
+						if ctx.Err() != nil || p.closeCh.IsClosed() {
+							logger.Warn("stop re-watching proxy due to shutdown", zap.Error(err2))
 							return
 						}
 						logger.Error("re watch proxy failed after retries, exit",

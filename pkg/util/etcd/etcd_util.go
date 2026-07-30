@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,10 +71,33 @@ func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, rpctypes.ErrCompacted) ||
+	if errors.Is(err, rpctypes.ErrCompacted) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
-		errors.Is(err, rpctypes.ErrAuthOldRevision)
+		errors.Is(err, rpctypes.ErrAuthOldRevision) {
+		return true
+	}
+	// A server-side watch cancellation loses the sentinel identity: etcd's
+	// serverWatchStream puts ErrGRPC*.Error() — the full "rpc error: code =
+	// Unauthenticated desc = ..." string — into WatchResponse.CancelReason, and
+	// clientv3 rebuilds it via errors.New / status.Error before v3rpc.Error,
+	// whose lookup table is keyed by the bare description only. The rebuilt
+	// error therefore never maps back to a sentinel and errors.Is above is
+	// false. Match the sentinel descriptions inside the message to cover this
+	// transport shape (including the substream path that nests it inside a
+	// FailedPrecondition status).
+	msg := err.Error()
+	for _, sentinel := range []error{
+		rpctypes.ErrGRPCCompacted,
+		rpctypes.ErrGRPCInvalidAuthToken,
+		rpctypes.ErrGRPCUserEmpty,
+		rpctypes.ErrGRPCAuthOldRevision,
+	} {
+		if strings.Contains(msg, rpctypes.ErrorDesc(sentinel)) {
+			return true
+		}
+	}
+	return false
 }
 
 type ClientOption func(*clientv3.Config)

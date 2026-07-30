@@ -791,7 +791,12 @@ type SessionEvent struct {
 }
 
 type sessionWatcher struct {
-	s         *Session
+	s *Session
+	// ctx is the watcher-owned context (child of the session context), canceled
+	// by Stop(). Every watcher-side etcd call — the watch itself, the re-watch
+	// retry and its GetSessions — must use it, so Stop() interrupts in-flight
+	// recovery instead of waiting on the session context.
+	ctx       context.Context
 	cancel    context.CancelFunc
 	rch       clientv3.WatchChan
 	eventCh   chan *SessionEvent
@@ -859,9 +864,10 @@ func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) 
 	ctx, cancel := context.WithCancel(s.ctx)
 	w := &sessionWatcher{
 		s:        s,
+		ctx:      ctx,
 		cancel:   cancel,
 		eventCh:  make(chan *SessionEvent, 100),
-		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		rch:      s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
 		prefix:   prefix,
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return true },
@@ -880,9 +886,10 @@ func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, r
 	ctx, cancel := context.WithCancel(s.ctx)
 	w := &sessionWatcher{
 		s:        s,
+		ctx:      ctx,
 		cancel:   cancel,
 		eventCh:  make(chan *SessionEvent, 100),
-		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		rch:      s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
 		prefix:   prefix,
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return r(s.Version) },
@@ -892,15 +899,17 @@ func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, r
 }
 
 func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
-	log := log.Ctx(w.s.ctx)
+	log := log.Ctx(w.ctx)
 	if wresp.Err() != nil {
 		err := w.handleWatchErr(wresp.Err())
 		if err != nil {
-			// On graceful shutdown s.ctx is canceled, the etcd watch delivers a
-			// final response carrying context.Canceled, and re-watching fails for
-			// the same reason. That is normal teardown, not a fault: exit quietly
-			// instead of crashing the process.
-			if w.s.ctx.Err() != nil {
+			// On teardown the watcher ctx is canceled — either directly by
+			// Stop() or via the parent session ctx on graceful shutdown — the
+			// etcd watch delivers a final response carrying context.Canceled,
+			// and re-watching fails for the same reason. That is normal
+			// teardown, not a fault: exit quietly instead of crashing the
+			// process.
+			if w.ctx.Err() != nil {
 				log.Warn("stop watching session service due to context done", zap.Error(err))
 				return
 			}
@@ -957,7 +966,7 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 	// stream. Any other error closes the channel. See etcd.IsRetriableWatchErr.
 	if !etcd.IsRetriableWatchErr(err) {
 		// close event channel
-		log.Ctx(w.s.ctx).Warn("Watch service found error", zap.Error(err))
+		log.Ctx(w.ctx).Warn("Watch service found error", zap.Error(err))
 		w.closeEventCh()
 		return err
 	}
@@ -965,9 +974,10 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 	// Re-establish the watch with a bounded retry. handleReWatch issues a unary
 	// request first, which refreshes the etcd auth token via clientv3's unary
 	// retry interceptor. Only keep retrying transient errors (e.g. a still-stale
-	// auth token); a non-transient failure aborts immediately.
-	if reErr := retry.Do(w.s.ctx, w.handleReWatch, retry.RetryErr(etcd.IsRetriableWatchErr)); reErr != nil {
-		log.Ctx(w.s.ctx).Warn("re-watch session service failed", zap.String("prefix", w.prefix), zap.Error(reErr))
+	// auth token); a non-transient failure aborts immediately. The retry runs on
+	// the watcher ctx so Stop() interrupts it.
+	if reErr := retry.Do(w.ctx, w.handleReWatch, retry.RetryErr(etcd.IsRetriableWatchErr)); reErr != nil {
+		log.Ctx(w.ctx).Warn("re-watch session service failed", zap.String("prefix", w.prefix), zap.Error(reErr))
 		w.closeEventCh()
 		return reErr
 	}
@@ -979,16 +989,16 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // them through the rewatch hook, then opens a fresh watch stream from the new
 // revision.
 func (w *sessionWatcher) handleReWatch() error {
-	sessions, revision, err := w.s.GetSessions(w.s.ctx, w.prefix)
+	sessions, revision, err := w.s.GetSessions(w.ctx, w.prefix)
 	if err != nil {
 		return err
 	}
 	if w.rewatch == nil {
-		log.Ctx(w.s.ctx).Warn("re-watch session service but no rewatch logic provided", zap.String("prefix", w.prefix))
+		log.Ctx(w.ctx).Warn("re-watch session service but no rewatch logic provided", zap.String("prefix", w.prefix))
 	} else if err = w.rewatch(sessions); err != nil {
 		return err
 	}
-	w.rch = w.s.etcdCli.Watch(w.s.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+	w.rch = w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return nil
 }
 
