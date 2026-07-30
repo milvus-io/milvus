@@ -766,12 +766,22 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                 search_info.search_params_[DISK_ANN_QUERY_LIST];
         }
         // set beamwidth
+        const auto default_beamwidth =
+            (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN)
+                ? int(search_beamwidth_)
+                : int(aisaq_search_beamwidth_);
+
         if (search_config.contains(DISK_ANN_QUERY_BEAMWIDTH)) {
             auto beamwidth = GetValueFromConfig<int>(search_config,
                                                      DISK_ANN_QUERY_BEAMWIDTH);
-            search_config[DISK_ANN_QUERY_BEAMWIDTH] = beamwidth.value();
-        } else {
-            search_config[DISK_ANN_QUERY_BEAMWIDTH] = int(search_beamwidth_);
+            if (beamwidth.has_value()) {
+                AssertInfo(beamwidth.value() <= 16,
+                           "beamwidth {} out of range 16",
+                           beamwidth.value());
+                search_config[DISK_ANN_QUERY_BEAMWIDTH] = beamwidth.value();
+            } else {
+                search_config[DISK_ANN_QUERY_BEAMWIDTH] = default_beamwidth;
+            }
         }
         if (search_config.contains(DISK_ANN_QUERY_PQ_BEAMWIDTH)) {
             auto vectors_beamwidth = GetValueFromConfig<int>(
@@ -989,7 +999,12 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         auto beamwidth = GetValueFromConfig<std::string>(
             load_config, DISK_ANN_QUERY_BEAMWIDTH);
         if (beamwidth.has_value()) {
-            search_beamwidth_ = std::atoi(beamwidth.value().c_str());
+            auto search_beamwidth = std::atoi(beamwidth.value().c_str());
+            if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+                search_beamwidth_ = search_beamwidth;
+            } else {  // AISAQ
+                aisaq_search_beamwidth_ = search_beamwidth;
+            }
         }
     }
 

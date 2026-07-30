@@ -402,57 +402,48 @@ type aisaqConfig struct {
 
 func (p *aisaqConfig) init(base *BaseTable) {
 	p.MaxDegree = ParamItem{
-		Key:          "common.AiSAQIndex.MaxDegree",
-		Version:      "2.0.0",
+		Key:          "common.AiSAQIndex.maxDegree",
+		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(DefaultMaxDegree),
 		Export:       true,
 	}
 	p.MaxDegree.Init(base.mgr)
 
 	p.SearchListSize = ParamItem{
-		Key:          "common.AiSAQIndex.SearchListSize",
-		Version:      "2.0.0",
+		Key:          "common.AiSAQIndex.searchListSize",
+		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(DefaultSearchListSize),
 		Export:       true,
 	}
 	p.SearchListSize.Init(base.mgr)
 
 	p.PQCodeBudgetGBRatio = ParamItem{
-		Key:          "common.AiSAQIndex.PQCodeBudgetGBRatio",
-		Version:      "2.0.0",
+		Key:          "common.AiSAQIndex.pqCodeBudgetGBRatio",
+		Version:      "3.0.0",
 		DefaultValue: fmt.Sprintf("%f", DefaultPQCodeBudgetGBRatio),
 		Export:       true,
 	}
 	p.PQCodeBudgetGBRatio.Init(base.mgr)
 
 	p.DiskPQCodeBudgetGBRatio = ParamItem{
-		Key:          "common.AiSAQIndex.DiskPQCodeBudgetGBRatio",
-		Version:      "2.0.0",
+		Key:          "common.AiSAQIndex.diskPQCodeBudgetGBRatio",
+		Version:      "3.0.0",
 		DefaultValue: fmt.Sprintf("%f", DefaultDiskPQCodeBudgetGBRatio),
 		Export:       true,
 	}
 	p.DiskPQCodeBudgetGBRatio.Init(base.mgr)
 
 	p.SearchCacheBudgetGBRatio = ParamItem{
-		Key:          "common.AiSAQIndex.SearchCacheBudgetGBRatio",
-		Version:      "2.0.0",
+		Key:          "common.AiSAQIndex.searchCacheBudgetGBRatio",
+		Version:      "3.0.0",
 		DefaultValue: fmt.Sprintf("%f", DefaultAiSAQSearchCacheBudgetGBRatio),
 		Export:       true,
 	}
 	p.SearchCacheBudgetGBRatio.Init(base.mgr)
 
-	p.BeamWidthRatio = ParamItem{
-		Key:          "common.AiSAQIndex.BeamWidthRatio",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultBeamWidthRatio),
-		Doc:          "",
-		Export:       true,
-	}
-	p.BeamWidthRatio.Init(base.mgr)
-
 	p.InlinePQ = ParamItem{
 		Key:          "common.AiSAQIndex.inlinePQ",
-		Version:      "2.5.0",
+		Version:      "3.0.0",
 		Doc:          "Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by the node size.",
 		DefaultValue: "-1",
 		PanicIfEmpty: false,
@@ -462,8 +453,8 @@ func (p *aisaqConfig) init(base *BaseTable) {
 
 	p.PQCacheSize = ParamItem{
 		Key:          "common.AiSAQIndex.pqCacheSize",
-		Version:      "2.5.0",
-		Doc:          "compressed vectors cache DRAM size in MiB.",
+		Version:      "3.0.0",
+		Doc:          "compressed vectors cache DRAM size in bytes.",
 		DefaultValue: "0",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -472,7 +463,7 @@ func (p *aisaqConfig) init(base *BaseTable) {
 
 	p.Rearrange = ParamItem{
 		Key:          "common.AiSAQIndex.rearrange",
-		Version:      "2.5.0",
+		Version:      "3.0.0",
 		Doc:          "Enable vectors rearrangement during build.",
 		DefaultValue: "true",
 		PanicIfEmpty: false,
@@ -482,7 +473,7 @@ func (p *aisaqConfig) init(base *BaseTable) {
 
 	p.PQReadPageCacheSize = ParamItem{
 		Key:          "common.AiSAQIndex.pqReadPageCacheSize",
-		Version:      "2.5.0",
+		Version:      "3.0.0",
 		Doc:          "compressed vectors read cache DRAM size in bytes per thread.",
 		DefaultValue: "0",
 		PanicIfEmpty: false,
@@ -492,7 +483,7 @@ func (p *aisaqConfig) init(base *BaseTable) {
 
 	p.NumEntryPoints = ParamItem{
 		Key:          "common.AiSAQIndex.numEntryPoints",
-		Version:      "2.5.0",
+		Version:      "3.0.0",
 		Doc:          "Number of entry points that should be generated to be used as a search start points",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
