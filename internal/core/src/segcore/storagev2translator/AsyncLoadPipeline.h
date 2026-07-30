@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -53,6 +54,13 @@ struct AsyncLoadPipelineOptions {
     // custom executor must support Folly KeepAlive, or otherwise outlive the
     // returned task and all work started by it.
     folly::Executor* executor{nullptr};
+    // Empty means finalization runs on executor. Mmap callers may provide a
+    // dedicated local-file executor so Arrow-to-local materialization and the
+    // blocking file operations run as one scheduled task. The provider is
+    // called after remote reads complete so they do not keep that executor
+    // alive while waiting on storage.
+    std::function<folly::Executor::KeepAlive<>()>
+        finalization_executor_provider{};
 };
 
 using AsyncCellResult =

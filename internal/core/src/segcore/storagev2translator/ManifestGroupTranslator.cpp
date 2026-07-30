@@ -56,6 +56,7 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -660,6 +661,11 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         .read_window_bytes = FieldDataReadWindowBytes(),
         .load_priority = load_priority_,
     };
+    if (use_mmap_) {
+        options.finalization_executor_provider = []() {
+            return storage::LocalFileIOPool::GetInstance().GetExecutor();
+        };
+    }
     return folly::coro::blockingWait(LoadCellsAsync(
         ctx,
         std::move(cell_specs),
@@ -669,7 +675,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
             return load_group_chunk(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         },
-        options));
+        std::move(options)));
 }
 
 std::unique_ptr<milvus::GroupChunk>

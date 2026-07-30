@@ -899,11 +899,11 @@ Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will b
 		Key:          "common.diskWriteNumThreads",
 		Version:      "2.6.0",
 		DefaultValue: "0",
-		Doc: `This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
-It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
-For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
-The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
-In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
+		Doc: `This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
+Storage V2 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
+The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
+For example, set this parameter to 1 to serialize these local file writes.
+The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
