@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -74,7 +75,7 @@ func TestHistoricalScannerSwitchesAfterAlterWALTimeTick(t *testing.T) {
 		return ok
 	})).Return(innerScanner, nil).Once()
 
-	outputCh := make(chan message.ImmutableMessage, 2)
+	outputCh := make(chan message.ImmutableMessage, 3)
 	switchedCh := make(chan message.WALName, 1)
 	scanner := &historicalScanner{
 		switchableScannerImpl: switchableScannerImpl{
@@ -110,7 +111,17 @@ func TestHistoricalScannerSwitchesAfterAlterWALTimeTick(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	timeTick := newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
+	timeTickBeforeBarrier := newTestTimeTickMessage(99, rmq.NewRmqID(3), rmq.NewRmqID(2))
+	messageCh <- timeTickBeforeBarrier
+	require.Equal(t, uint64(99), (<-outputCh).TimeTick())
+
+	select {
+	case result := <-resultCh:
+		t.Fatalf("historical scanner switched below the TimeTick barrier: %v", result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	timeTick := newTestTimeTickMessage(100, rmq.NewRmqID(4), rmq.NewRmqID(3))
 	messageCh <- timeTick
 	require.Equal(t, message.MessageTypeTimeTick, (<-outputCh).MessageType())
 
@@ -155,6 +166,60 @@ func TestHistoricalScannerRejectsUnsupportedMigrationChain(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, next)
 	assert.Contains(t, err.Error(), "unsupported WAL migration chain")
+}
+
+func TestHistoricalScannerRetriesAfterMidStreamReaderFailure(t *testing.T) {
+	currentWAL := mock_walimpls.NewMockWALImpls(t)
+	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
+
+	transientErr := errors.New("transient historical reader failure")
+	failedMessages := make(chan message.ImmutableMessage, 1)
+	failedMessages <- newTestTimeTickMessage(90, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	close(failedMessages)
+	failedScanner := mock_walimpls.NewMockScannerImpls(t)
+	failedScanner.EXPECT().Chan().Return(failedMessages).Maybe()
+	failedScanner.EXPECT().Error().Return(transientErr).Once()
+	failedScanner.EXPECT().Close().Return(nil).Once()
+
+	recoveredMessages := make(chan message.ImmutableMessage, 2)
+	recoveredMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	recoveredMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
+	recoveredScanner := mock_walimpls.NewMockScannerImpls(t)
+	recoveredScanner.EXPECT().Chan().Return(recoveredMessages).Maybe()
+	recoveredScanner.EXPECT().Close().Return(nil).Once()
+
+	historicalWAL := mock_walimpls.NewMockWALImpls(t)
+	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	historicalWAL.EXPECT().Close().Return().Once()
+	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
+		return ok
+	})).Return(failedScanner, nil).Once()
+	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
+		return ok
+	})).Return(recoveredScanner, nil).Once()
+
+	outputCh := make(chan message.ImmutableMessage, 3)
+	scanner := &historicalScanner{
+		switchableScannerImpl: switchableScannerImpl{
+			scannerName: "historical-retry-test",
+			logger:      mlog.With(),
+			innerWAL:    currentWAL,
+			msgChan:     outputCh,
+		},
+		historicalWAL: historicalWAL,
+		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+	}
+
+	next, err := scanner.Do(context.Background())
+	require.NoError(t, err)
+	_, ok := next.(*catchupScanner)
+	require.True(t, ok)
+	assert.Equal(t, uint64(90), (<-outputCh).TimeTick())
+	assert.Equal(t, message.MessageTypeAlterWAL, (<-outputCh).MessageType())
+	assert.Equal(t, message.MessageTypeTimeTick, (<-outputCh).MessageType())
 }
 
 func TestOldVersionLastConfirmedTracker_DefaultWindowSize(t *testing.T) {

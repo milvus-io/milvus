@@ -118,7 +118,7 @@ func TestScannerAdaptorPropagatesHistoricalMigrationError(t *testing.T) {
 	assert.Error(t, scanner.Close())
 }
 
-func TestScannerAdaptorBridgesHistoricalAndCurrentWAL(t *testing.T) {
+func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 	resource.InitForTest(t)
 	channel := types.PChannelInfo{Name: "cross-wal-test", AccessMode: types.AccessModeRO}
 
@@ -132,6 +132,7 @@ func TestScannerAdaptorBridgesHistoricalAndCurrentWAL(t *testing.T) {
 	currentWAL := mock_walimpls.NewMockWALImpls(t)
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentWAL.EXPECT().Close().Return().Once()
 	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
 		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
 		return ok
@@ -147,18 +148,26 @@ func TestScannerAdaptorBridgesHistoricalAndCurrentWAL(t *testing.T) {
 	historicalWAL := mock_walimpls.NewMockWALImpls(t)
 	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
 	historicalWAL.EXPECT().Close().Return().Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(historicalScanner, nil).Once()
+	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartAfter)
+		return ok
+	})).Return(historicalScanner, nil).Once()
 
-	scanner := newScannerAdaptor(
-		"cross-wal",
-		currentWAL,
-		historicalWAL,
-		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1))},
-		metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
-		func() {},
-		false,
-	)
-	defer scanner.Close()
+	roWAL := adaptImplsToROWAL(currentWAL, func() {}, func(
+		_ context.Context,
+		walName message.WALName,
+		gotChannel types.PChannelInfo,
+	) (walimpls.ROWALImpls, error) {
+		assert.Equal(t, message.WALNameRocksmq, walName)
+		assert.Equal(t, channel, gotChannel)
+		return historicalWAL, nil
+	})
+	defer roWAL.Close()
+
+	scanner, err := roWAL.Read(context.Background(), wal.ReadOption{
+		DeliverPolicy: options.DeliverPolicyStartAfter(rmq.NewRmqID(1)),
+	})
+	require.NoError(t, err)
 
 	var timeTicks []uint64
 	deadline := time.After(time.Second)
