@@ -451,11 +451,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 	return nil
 }
 
-func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {
-	return validateMaxLengthParams(collectionName, field.GetName(), field.GetDataType(), field.GetTypeParams())
-}
-
-func validateMaxLengthParams(collectionName string, fieldName string, dataType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {
+func validateMaxLengthPerRow(collectionName string, fieldName string, dataType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {
 	exist := false
 	for _, param := range typeParams {
 		if param.Key != common.MaxLengthKey {
@@ -487,11 +483,7 @@ func validateMaxLengthParams(collectionName string, fieldName string, dataType s
 	return nil
 }
 
-func getMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchema) (int64, error) {
-	return getMaxCapacityFromParams(collectionName, field.GetName(), field.GetTypeParams())
-}
-
-func getMaxCapacityFromParams(collectionName string, fieldName string, typeParams []*commonpb.KeyValuePair) (int64, error) {
+func getMaxCapacityPerRow(collectionName string, fieldName string, typeParams []*commonpb.KeyValuePair) (int64, error) {
 	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
 	exist := false
 	var maxCapacityPerRow int64
@@ -518,7 +510,7 @@ func getMaxCapacityFromParams(collectionName string, fieldName string, typeParam
 }
 
 func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchema) error {
-	_, err := getMaxCapacityPerRow(collectionName, field)
+	_, err := getMaxCapacityPerRow(collectionName, field.GetName(), field.GetTypeParams())
 	if err != nil {
 		return err
 	}
@@ -592,7 +584,7 @@ func validateTypeSchema(collectionName string, fieldName string, typeSchema *sch
 		if kind.ArrayElement == nil {
 			return merr.WrapErrParameterMissingMsg("array element should be specified for nested array field %s", fieldName)
 		}
-		if _, err := getMaxCapacityFromParams(collectionName, fieldName, typeSchema.GetTypeParams()); err != nil {
+		if _, err := getMaxCapacityPerRow(collectionName, fieldName, typeSchema.GetTypeParams()); err != nil {
 			return err
 		}
 		return validateTypeSchema(collectionName, fieldName, kind.ArrayElement)
@@ -601,7 +593,7 @@ func validateTypeSchema(collectionName string, fieldName string, typeSchema *sch
 			return err
 		}
 		if kind.LeafType == schemapb.DataType_VarChar {
-			if err := validateMaxLengthParams(collectionName, fieldName, kind.LeafType, typeSchema.GetTypeParams()); err != nil {
+			if err := validateMaxLengthPerRow(collectionName, fieldName, kind.LeafType, typeSchema.GetTypeParams()); err != nil {
 				return err
 			}
 		}
@@ -643,7 +635,7 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 		return err
 	}
 	if field.GetElementType() == schemapb.DataType_VarChar {
-		if err := validateMaxLengthPerRow(collectionName, field); err != nil {
+		if err := validateMaxLengthPerRow(collectionName, field.GetName(), field.GetDataType(), field.GetTypeParams()); err != nil {
 			return err
 		}
 	}
@@ -725,7 +717,7 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	// valid max length per row parameters
 	// if max_length not specified, return error
 	if field.DataType == schemapb.DataType_VarChar {
-		err = validateMaxLengthPerRow(schema.Name, field)
+		err = validateMaxLengthPerRow(schema.Name, field.GetName(), field.GetDataType(), field.GetTypeParams())
 		if err != nil {
 			return err
 		}
@@ -806,7 +798,7 @@ func validateStructArrayFieldMaxCapacity(structArrayField *schemapb.StructArrayF
 	var expectedMaxCapacity int64
 	hasExpectedMaxCapacity := false
 	for _, subField := range structArrayField.Fields {
-		maxCapacity, err := getMaxCapacityPerRow(collectionName, subField)
+		maxCapacity, err := getMaxCapacityPerRow(collectionName, subField.GetName(), subField.GetTypeParams())
 		if err != nil {
 			return err
 		}
@@ -2151,7 +2143,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
 								}
-								if subFieldSchema.GetElementType() == schemapb.DataType_Array {
+								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
 									return len(row.GetArrayData().GetData()), nil
 								}
 								switch subFieldSchema.GetElementType() {

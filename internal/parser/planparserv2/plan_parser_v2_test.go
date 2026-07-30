@@ -2966,19 +2966,15 @@ func Test_ArrayLengthRejectsNestedArray(t *testing.T) {
 		Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: nestedType},
 	}
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:     10000,
-		Name:        "NestedArrayField",
-		DataType:    schemapb.DataType_Array,
-		ElementType: schemapb.DataType_Array,
-		TypeSchema:  nestedFieldType,
+		FieldID:    10000,
+		Name:       "NestedArrayField",
+		TypeSchema: nestedFieldType,
 	})
 	schema.StructArrayFields[0].Fields = append(
 		[]*schemapb.FieldSchema{{
-			FieldID:     10001,
-			Name:        "struct_array[nested]",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Array,
-			TypeSchema:  nestedFieldType,
+			FieldID:    10001,
+			Name:       "struct_array[nested]",
+			TypeSchema: nestedFieldType,
 		}},
 		schema.StructArrayFields[0].Fields...,
 	)

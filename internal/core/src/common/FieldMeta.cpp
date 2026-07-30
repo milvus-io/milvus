@@ -49,15 +49,15 @@ ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
                "type_schema kind is not set for field {}",
                field_name);
     AssertInfo(proto::schema::DataType_IsValid(type_schema.leaf_type()),
-               "type_schema leaf type {} is not valid for field {}",
+               "type_schema leaf_type {} is not valid for field {}",
                static_cast<int>(type_schema.leaf_type()),
                field_name);
     const auto leaf_type = DataType(type_schema.leaf_type());
     AssertInfo(leaf_type != DataType::NONE,
-               "type_schema leaf type NONE is not valid for field {}",
+               "type_schema leaf_type NONE is not valid for field {}",
                field_name);
     AssertInfo(leaf_type != DataType::ARRAY,
-               "type_schema data type ARRAY must use array_element for field "
+               "type_schema leaf_type ARRAY must use array_element for field "
                "{}",
                field_name);
     return {leaf_type, DataType::NONE};
@@ -72,14 +72,14 @@ FieldMeta::ValidateFieldTypeSchema(const proto::schema::TypeSchema& type_schema,
                                    const std::string& field_name) {
     const auto schema_types = ValidateTypeSchemaNode(type_schema, field_name);
     AssertInfo(schema_types.data_type == data_type,
-               "type_schema data type {} does not match data_type {} for "
+               "type_schema root type {} does not match data_type {} for "
                "field {}",
                schema_types.data_type,
                data_type,
                field_name);
     AssertInfo(schema_types.element_type == element_type,
-               "type_schema element type {} does not match element_type {} "
-               "for field {}",
+               "type_schema direct element type {} does not match "
+               "element_type {} for field {}",
                schema_types.element_type,
                element_type,
                field_name);

@@ -152,7 +152,7 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 				Kind: &schemapb.TypeSchema_ArrayElement{},
 			},
 		})
-		require.ErrorContains(t, err, "array element should be specified")
+		require.ErrorContains(t, err, "array_element should be specified")
 	})
 
 	t.Run("invalid leaf type", func(t *testing.T) {
@@ -161,6 +161,25 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 			DataType:   schemapb.DataType(999),
 			TypeSchema: leaf(schemapb.DataType(999)),
 		})
-		require.ErrorContains(t, err, "leaf type 999 is not valid")
+		require.ErrorContains(t, err, "leaf_type 999 is not valid")
 	})
+}
+
+func TestIsNestedArrayTypeSchema(t *testing.T) {
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType},
+		}
+	}
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		}
+	}
+
+	require.False(t, IsNestedArrayTypeSchema(nil))
+	require.False(t, IsNestedArrayTypeSchema(leaf(schemapb.DataType_Int64)))
+	require.False(t, IsNestedArrayTypeSchema(array(leaf(schemapb.DataType_Int64))))
+	require.True(t, IsNestedArrayTypeSchema(array(array(leaf(schemapb.DataType_Int64)))))
+	require.True(t, IsNestedArrayTypeSchema(array(array(array(leaf(schemapb.DataType_Int64))))))
 }

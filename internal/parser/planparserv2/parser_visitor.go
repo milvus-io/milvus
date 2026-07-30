@@ -2658,22 +2658,22 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			return err
 		}
 	}
+	if columnInfo != nil && !isStructArrayParent {
+		// StructArray parents are not represented as FieldSchema and remain
+		// supported. Recursive Array fields must be rejected before execution
+		// reaches the legacy ArrayView path in segcore.
+		field, fieldErr := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+		if fieldErr == nil && typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+			return merr.WrapErrParameterInvalidMsg(
+				"array_length operation is not supported on nested array field %s", field.GetName())
+		}
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) &&
 			!typeutil.IsArrayType(columnInfo.GetDataType()) &&
 			!typeutil.IsVectorArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
 			"array_length operation are only supported on json, array or array-of-vector fields now, got: %s", ctx.GetText())
-	}
-	if typeutil.IsArrayType(columnInfo.GetDataType()) && !isStructArrayParent {
-		// StructArray parents are not represented as FieldSchema and remain
-		// supported. Recursive Array fields must be rejected before execution
-		// reaches the legacy ArrayView path in segcore.
-		field, fieldErr := v.schema.GetFieldFromID(columnInfo.GetFieldId())
-		if fieldErr == nil && field.GetElementType() == schemapb.DataType_Array {
-			return merr.WrapErrParameterInvalidMsg(
-				"array_length operation is not supported on nested array field %s", field.GetName())
-		}
 	}
 
 	expr := &planpb.Expr{

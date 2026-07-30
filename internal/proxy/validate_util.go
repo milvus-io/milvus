@@ -1284,7 +1284,7 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		expectStr := fmt.Sprintf("need %s array", elementTypeStr)
 		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
 	}
-	if fieldSchema.GetElementType() == schemapb.DataType_Array {
+	if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
 		return v.checkNestedArrayFieldData(data, fieldSchema)
 	}
 	if v.checkMaxCap {

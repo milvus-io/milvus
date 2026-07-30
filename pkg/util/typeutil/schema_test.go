@@ -5378,8 +5378,6 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 	recursiveArrayField := func() *schemapb.FieldSchema {
 		return &schemapb.FieldSchema{
 			Name:          "nested_array",
-			DataType:      schemapb.DataType_Array,
-			ElementType:   schemapb.DataType_Array,
 			ExternalField: "nested_array_col",
 			TypeSchema: &schemapb.TypeSchema{
 				Kind: &schemapb.TypeSchema_ArrayElement{

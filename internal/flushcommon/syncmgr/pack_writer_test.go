@@ -247,10 +247,8 @@ func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 	}
 	nestedArrayField := func() *schemapb.FieldSchema {
 		return &schemapb.FieldSchema{
-			FieldID:     103,
-			Name:        "nested_array",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Array,
+			FieldID: 103,
+			Name:    "nested_array",
 			TypeSchema: &schemapb.TypeSchema{
 				Kind: &schemapb.TypeSchema_ArrayElement{
 					ArrayElement: &schemapb.TypeSchema{

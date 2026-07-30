@@ -220,7 +220,7 @@ func FillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 // add-function-field bound-index path enforces identical rules at every DDL
 // boundary, including callers that reach rootcoord directly.
 func ValidateFieldIndexParams(field *schemapb.FieldSchema, indexParamsMap map[string]string) error {
-	if field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_Array {
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 		return merr.WrapErrParameterInvalidMsg("indexing recursive ARRAY field %s is not supported", field.GetName())
 	}
 

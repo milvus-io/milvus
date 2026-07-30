@@ -39,13 +39,14 @@ func hasNonReplacePartialOp(req *milvuspb.UpsertRequest) bool {
 	return false
 }
 
+// TODO: Recursive Array fields do not support ARRAY_APPEND or ARRAY_REMOVE.
+//
 // validateFieldPartialUpdateOps validates FieldPartialUpdateOp entries
 // attached to an UpsertRequest. It enforces:
 //
 //   - Each op targets a field present in the collection schema.
 //   - Array-specific ops (ARRAY_APPEND, ARRAY_REMOVE) require the target
 //     field to have DataType_Array.
-//   - Recursive Array fields do not support ARRAY_APPEND or ARRAY_REMOVE.
 //   - The target field must not be the primary key.
 //   - The FieldData carried in fields_data must declare a matching
 //     ElementType when the op targets an Array field.
@@ -124,14 +125,14 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 
 		switch op {
 		case schemapb.FieldPartialUpdateOp_ARRAY_APPEND, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+			if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+				return false, merr.WrapErrParameterInvalidMsg(
+					"op %s is not supported for recursive ARRAY field %q", op.String(), name)
+			}
 			if fieldSchema.GetDataType() != schemapb.DataType_Array {
 				return false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("op %s requires Array field, but field %q is %s",
 						op.String(), name, fieldSchema.GetDataType().String()))
-			}
-			if fieldSchema.GetElementType() == schemapb.DataType_Array {
-				return false, merr.WrapErrParameterInvalidMsg(
-					"op %s is not supported for recursive ARRAY field %q", op.String(), name)
 			}
 		default:
 			return false, merr.WrapErrParameterInvalidMsg(

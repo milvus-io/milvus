@@ -109,7 +109,7 @@ func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) (
 		if kind.ArrayElement == nil {
 			return schemapb.DataType_None, schemapb.DataType_None,
 				merr.WrapErrParameterInvalidMsg(
-					"type_schema array element should be specified for field %s", fieldName)
+					"type_schema array_element should be specified for field %s", fieldName)
 		}
 		childType, _, err := validateTypeSchemaNode(fieldName, kind.ArrayElement)
 		if err != nil {
@@ -120,13 +120,13 @@ func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) (
 		if _, ok := schemapb.DataType_name[int32(kind.LeafType)]; !ok || kind.LeafType == schemapb.DataType_None {
 			return schemapb.DataType_None, schemapb.DataType_None,
 				merr.WrapErrParameterInvalidMsg(
-					"type_schema leaf type %s is not valid for field %s",
+					"type_schema leaf_type %s is not valid for field %s",
 					kind.LeafType.String(), fieldName)
 		}
 		if kind.LeafType == schemapb.DataType_Array {
 			return schemapb.DataType_None, schemapb.DataType_None,
 				merr.WrapErrParameterInvalidMsg(
-					"type_schema data type Array must use array_element for field %s", fieldName)
+					"type_schema leaf_type Array must use array_element for field %s", fieldName)
 		}
 		return kind.LeafType, schemapb.DataType_None, nil
 	default:
@@ -136,9 +136,23 @@ func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) (
 	}
 }
 
-// ValidateFieldTypeSchema verifies that the compatibility data_type and
-// element_type fields describe the same root and direct child types as the
-// recursive type_schema.
+// IsNestedArrayTypeSchema reports whether typeSchema describes an Array whose
+// direct element is another Array.
+func IsNestedArrayTypeSchema(typeSchema *schemapb.TypeSchema) bool {
+	if typeSchema == nil {
+		return false
+	}
+	elementSchema := typeSchema.GetArrayElement()
+	if elementSchema == nil {
+		return false
+	}
+	_, ok := elementSchema.GetKind().(*schemapb.TypeSchema_ArrayElement)
+	return ok
+}
+
+// ValidateFieldTypeSchema validates type_schema and, when the compatibility
+// data_type is set, verifies that data_type and element_type describe the same
+// root and direct child types as type_schema.
 func ValidateFieldTypeSchema(field *schemapb.FieldSchema) error {
 	typeSchema := field.GetTypeSchema()
 	if typeSchema == nil {
@@ -149,14 +163,17 @@ func ValidateFieldTypeSchema(field *schemapb.FieldSchema) error {
 	if err != nil {
 		return err
 	}
+	if field.GetDataType() == schemapb.DataType_None {
+		return nil
+	}
 	if dataType != field.GetDataType() {
 		return merr.WrapErrParameterInvalidMsg(
-			"type_schema data type %s does not match data_type %s for field %s",
+			"type_schema root type %s does not match data_type %s for field %s",
 			dataType.String(), field.GetDataType().String(), field.GetName())
 	}
 	if elementType != field.GetElementType() {
 		return merr.WrapErrParameterInvalidMsg(
-			"type_schema element type %s does not match element_type %s for field %s",
+			"type_schema direct element type %s does not match element_type %s for field %s",
 			elementType.String(), field.GetElementType().String(), field.GetName())
 	}
 

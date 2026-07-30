@@ -90,7 +90,7 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 // ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
 func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
-		if isNestedArrayField(field) {
+		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 			return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
 		if isNullableArrayOfVectorField(field) {
@@ -100,7 +100,7 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
-			if isNestedArrayField(field) {
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 				return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())
 			}
@@ -112,11 +112,6 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 	}
 
 	return nil
-}
-
-func isNestedArrayField(field *schemapb.FieldSchema) bool {
-	return field.GetDataType() == schemapb.DataType_Array &&
-		field.GetElementType() == schemapb.DataType_Array
 }
 
 func isNullableArrayOfVectorField(field *schemapb.FieldSchema) bool {
