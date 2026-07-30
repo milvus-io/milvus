@@ -95,12 +95,11 @@ func (s *BalancerSnapshot) ShardStatsMap() map[qviews.ShardID]*coordview.ShardSt
 	return s.ShardViewSnapshot.StatsMap()
 }
 
-// BalanceNode combines a QueryNode's identity, health and capacity with
-// cross-shard aggregated load derived from the ShardViewRegistry.
+// BalanceNode combines a QueryNode's identity and health with cross-shard
+// aggregated row load derived from the ShardViewRegistry.
 //
-// UpMemLoad / PendingMemLoad / SegmentCount are snapshotted values; the Policy
-// tracks within-batch effects in a separate predictedLoad map cloned from
-// these values.
+// UpRowCount and PendingRowCount are snapshotted values; the Policy tracks
+// within-batch effects in a separate steady-state row map.
 type BalanceNode struct {
 	// Identity & health (Node Manager).
 	NodeID        int64
@@ -108,40 +107,39 @@ type BalanceNode struct {
 	Stopping      bool
 	ResourceGroup string
 
-	// Capacity (node registration / config).
-	MemoryCapacity int64
-	// MemoryUsage is the most recent actual memory usage reported by the node
-	// via SyncResponse. Not used for hard constraints (we use MemLoad + pending
-	// instead) but useful for anomaly detection.
-	MemoryUsage int64
-
-	// UpMemLoad is the sum of MemSize across all Up-view segments on this
-	// node, aggregated across all shards.
-	UpMemLoad int64
-	// PendingMemLoad is the sum of MemSize across all Preparing/Ready-view
+	// UpRowCount is the sum of RowNum across all Up-view segments on this node,
+	// aggregated across all shards.
+	UpRowCount int64
+	// PendingRowCount is the sum of RowNum across all Preparing/Ready-view
 	// segments on this node (in-flight loads).
-	PendingMemLoad int64
-	// SegmentCount is the total number of Up-view segments on this node
-	// (for count-based balance metrics).
-	SegmentCount int
+	PendingRowCount int64
 }
 
 // BalanceConfig is the tunable parameter set for the allocation algorithm.
 type BalanceConfig struct {
-	// Scoring weights. Weights differ by orders of magnitude to enforce
-	// strict priority ordering (Stickiness >> Memory Balance >> Count Balance).
-	StickinessBaseWeight float64
-	MemoryWeight         float64
-	SegmentCountWeight   float64
+	// Normalized scoring weights. Each component is bounded in [0, 1] before
+	// its weight is applied.
+	StickinessWeight float64
+	NodeLoadWeight   float64
+	FanoutWeight     float64
 
-	// BaselineSegmentSize normalizes size-proportional stickiness so the
-	// stickiness bonus of a typical segment equals StickinessBaseWeight.
-	BaselineSegmentSize int64
-
-	// Optional-balance thresholds (Phase 3).
-	BalanceThreshold        float64 // minimum absolute score improvement
-	CostEfficiencyThreshold float64 // minimum score gain per byte migrated
+	// StickyRowsScale controls the row-proportional movement penalty.
+	StickyRowsScale int64
+	// TargetRowsPerShardNode controls the data-derived free fanout budget.
+	TargetRowsPerShardNode int64
 
 	// Full-scan interval for the reconcile loop (ticker fallback).
 	TickerInterval time.Duration
+}
+
+// DefaultBalanceConfig returns the production scoring configuration for
+// homogeneous QueryNodes. RowNum is the sole load metric.
+func DefaultBalanceConfig() *BalanceConfig {
+	return &BalanceConfig{
+		StickinessWeight:       1,
+		NodeLoadWeight:         1,
+		FanoutWeight:           1,
+		StickyRowsScale:        1_000_000,
+		TargetRowsPerShardNode: 100_000,
+	}
 }

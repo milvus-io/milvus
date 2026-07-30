@@ -25,8 +25,8 @@ const (
 	actionMust
 
 	// actionMayOptimize: the current placement is valid; the Policy may
-	// emit a migration if steady-state balance scoring finds a clearly
-	// better assignment (Phase 3 gated).
+	// emit a migration when the complete steady-state candidate differs
+	// from the current assignment.
 	actionMayOptimize
 )
 

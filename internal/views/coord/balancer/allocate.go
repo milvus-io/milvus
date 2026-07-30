@@ -9,23 +9,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-// allocate produces a QueryViewAtCoordBuilder for shardID against the current
-// snapshot and predictedLoad tracker. It returns nil if the shard cannot be
+type allocationResult struct {
+	builder     *qviews.QueryViewAtCoordBuilder
+	assignments map[int64]int64
+	rowsByNode  map[int64]int64
+}
+
+// allocate produces a complete candidate for shardID against the supplied
+// steady-state base rows. It returns nil if the shard cannot be
 // allocated (missing DataView, missing replica, or any segment has no
 // eligible node).
 //
-// Segments are processed in largest-first order (by MemSize). After each
-// assignment, predictedLoad is updated so later segments in this shard — and
-// later shards in this batch, when Policy reuses the tracker — see the
-// accumulated effect.
+// Segments are processed by RowNum descending and SegmentID ascending. A
+// shard-local allocationContext tracks partial rows and opened nodes.
 //
 // This is the Phase 2 "allocation" step; Phase 1 classification and Phase 3
-// threshold gating live in classify.go / policy_impl.go respectively.
+// exact assignment-change emission live in classify.go / policy_impl.go.
 func allocate(
 	snap *BalancerSnapshot,
 	shardID qviews.ShardID,
-	predicted map[int64]*BalanceNode,
-) *qviews.QueryViewAtCoordBuilder {
+	baseRows map[int64]int64,
+) *allocationResult {
 	desired := snap.ConfigForShard(shardID)
 	if desired == nil {
 		return nil
@@ -51,23 +55,31 @@ func allocate(
 			entries = append(entries, segEntry{
 				segmentID:   segID,
 				partitionID: p.GetPartitionId(),
-				load:        segmentLoad(segmentInfoFor(snap, segID, p.GetPartitionId())),
+				load:        segmentRows(segmentInfoFor(snap, segID, p.GetPartitionId())),
 			})
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].load > entries[j].load
+		if entries[i].load != entries[j].load {
+			return entries[i].load > entries[j].load
+		}
+		return entries[i].segmentID < entries[j].segmentID
 	})
 
 	// Current per-node segment states for stickiness / avoidance lookup.
 	current := currentSegmentStates(snap, shardID)
+	ctx := newAllocationContext(snap.Nodes, replica.ResourceGroup, baseRows, shardTotalLoad(snap, shardID), len(entries), snap.Config)
+	if len(ctx.eligible) == 0 && len(entries) > 0 {
+		return nil
+	}
 
 	// Fresh assignments map: nodeID → partitionID → []segmentID.
 	assignments := make(map[int64]map[int64][]int64)
+	flatAssignments := make(map[int64]int64, len(entries))
 
 	for _, e := range entries {
 		segInfo := segmentInfoFor(snap, e.segmentID, e.partitionID)
-		nodeID, ok := pickNode(predicted, segInfo, current[e.segmentID], replica.ResourceGroup, snap.Config)
+		nodeID, ok := pickNode(ctx, segInfo, current[e.segmentID])
 		if !ok {
 			return nil
 		}
@@ -75,13 +87,8 @@ func allocate(
 			assignments[nodeID] = make(map[int64][]int64)
 		}
 		assignments[nodeID][e.partitionID] = append(assignments[nodeID][e.partitionID], e.segmentID)
-
-		// Track the allocation on predictedLoad so subsequent segments (and
-		// subsequent shards) see the accumulated effect.
-		if node, present := predicted[nodeID]; present {
-			node.PendingMemLoad += segmentLoad(segInfo)
-			node.SegmentCount++
-		}
+		flatAssignments[e.segmentID] = nodeID
+		ctx.assign(nodeID, segmentRows(segInfo))
 	}
 
 	dataVersion, _ := snap.DataVersionForCollection(desired.CollectionID)
@@ -92,7 +99,11 @@ func allocate(
 	)
 	builder.SetAssignments(assignments)
 	builder.SetLoadInfoVersion(snap.LoadConfigSnapshot.ConfigVersion(desired.CollectionID))
-	return builder
+	return &allocationResult{
+		builder:     builder,
+		assignments: flatAssignments,
+		rowsByNode:  ctx.assignedRows,
+	}
 }
 
 type segmentNodeStates map[int64]map[int64]coordview.SegmentState
@@ -116,7 +127,7 @@ func currentSegmentStates(snap *BalancerSnapshot, shardID qviews.ShardID) segmen
 }
 
 // currentSegmentNodes returns segmentID -> best node from the shard's merged
-// states, used for optional-migration cost accounting. The best node follows
+// states. The best node follows
 // the same state priority as ShardStats: Up > Ready > Preparing >
 // Unrecoverable.
 func currentSegmentNodes(snap *BalancerSnapshot, shardID qviews.ShardID) map[int64]int64 {
@@ -168,15 +179,4 @@ func syntheticDataView(
 		DataVersion:  dv.IntoProto(),
 		Shards:       []*viewpb.DataViewOfShard{shard},
 	}
-}
-
-// clonePredictedLoad returns a deep-enough copy of the Nodes map so the Policy
-// can mutate it across shards without altering the source snapshot.
-func clonePredictedLoad(nodes map[int64]*BalanceNode) map[int64]*BalanceNode {
-	out := make(map[int64]*BalanceNode, len(nodes))
-	for id, n := range nodes {
-		clone := *n // shallow copy is fine: BalanceNode has no reference fields.
-		out[id] = &clone
-	}
-	return out
 }

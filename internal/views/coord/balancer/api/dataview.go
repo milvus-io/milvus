@@ -110,16 +110,14 @@ func (emptySegmentSnapshot) Get(int64) (*SegmentInfo, bool) {
 }
 
 // SegmentInfo carries the minimum per-segment metadata the Balancer needs.
-// Index type, vector dimension, compression and other attributes are folded
-// into DataCoord's MemSize estimate; the Balancer treats MemSize as opaque
-// bytes.
 type SegmentInfo struct {
 	SegmentID   int64
 	PartitionID int64
+	// MemSize is retained in the snapshot for compatibility and diagnostics.
+	// The row-count balance policy does not consume it.
 	// MemSize is the estimated in-memory footprint in bytes once this segment
-	// is loaded onto a QueryNode. Primary load metric.
+	// is loaded onto a QueryNode.
 	MemSize int64
-	// RowNum is the segment row count. Used as fallback when MemSize is zero
-	// (e.g., DataCoord has not yet produced an estimate for a new segment).
+	// RowNum is the segment row count and the sole balance load metric.
 	RowNum int64
 }

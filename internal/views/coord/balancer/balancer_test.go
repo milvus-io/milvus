@@ -36,8 +36,8 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 				},
 			}},
 			segments: map[int64]*SegmentInfo{
-				101: {SegmentID: 101, PartitionID: 100, MemSize: 600},
-				102: {SegmentID: 102, PartitionID: 100, MemSize: 200},
+				101: {SegmentID: 101, PartitionID: 100, RowNum: 600},
+				102: {SegmentID: 102, PartitionID: 100, RowNum: 200},
 			},
 		},
 		policyTestConfig(),
@@ -73,7 +73,7 @@ func TestBalancer_ReconcileDirtyCollectionExpandsTrackedShards(t *testing.T) {
 				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
 			}},
 			segments: map[int64]*SegmentInfo{
-				101: {SegmentID: 101, PartitionID: 100, MemSize: 100},
+				101: {SegmentID: 101, PartitionID: 100, RowNum: 100},
 			},
 		},
 		policyTestConfig(),
@@ -108,7 +108,7 @@ func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
 				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
 			}},
 			segments: map[int64]*SegmentInfo{
-				101: {SegmentID: 101, PartitionID: 100, MemSize: 100},
+				101: {SegmentID: 101, PartitionID: 100, RowNum: 100},
 			},
 		},
 		policyTestConfig(),
@@ -142,7 +142,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
 			}},
 			segments: map[int64]*SegmentInfo{
-				101: {SegmentID: 101, PartitionID: 100, MemSize: 100},
+				101: {SegmentID: 101, PartitionID: 100, RowNum: 100},
 			},
 		},
 		policyTestConfig(),

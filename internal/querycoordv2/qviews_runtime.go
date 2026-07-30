@@ -128,7 +128,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		shardViewRegistry,
 		nodeProvider,
 		deps.dataViewProvider,
-		&balancer.BalanceConfig{},
+		balancer.DefaultBalanceConfig(),
 	)
 	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(builder, shardViewRegistry, nil))
 	if deps.balancerFactory != nil {
