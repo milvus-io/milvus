@@ -69,6 +69,16 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+
+	previousReadWindow := GetStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		pt.Reset(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key)
+		UpdateStorageV2AsyncLoadReadWindowSizeBytes(previousReadWindow)
+	})
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "0"))
+	assert.EqualValues(t, 0, GetStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "1048576"))
+	assert.EqualValues(t, 1048576, GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
@@ -296,6 +306,18 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 		UpdateLoadTransientBudgetBytes(0)
 		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
 	})
+}
+
+func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
+	previous := GetStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		UpdateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	UpdateStorageV2AsyncLoadReadWindowSizeBytes(0)
+	assert.EqualValues(t, 0, GetStorageV2AsyncLoadReadWindowSizeBytes())
+	UpdateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
+	assert.EqualValues(t, 16*1024*1024, GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
 func TestInitStorageV2FileSystem(t *testing.T) {

@@ -29,6 +29,7 @@
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 
@@ -312,8 +313,9 @@ LoadCellsAsyncImpl(
                    cell.file_idx);
     }
 
-    read_window_bytes =
-        read_window_bytes > 0 ? read_window_bytes : FieldDataReadWindowBytes();
+    if (read_window_bytes < 0) {
+        read_window_bytes = StorageV2AsyncLoadReadWindowSizeBytes();
+    }
     auto windows = BuildAsyncReadWindows(cells, read_window_bytes);
     auto shared_finalizer =
         std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
@@ -370,8 +372,8 @@ GetAsyncLoadExecutor() {
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
                       int64_t read_window_bytes) {
-    AssertInfo(read_window_bytes > 0,
-               "[StorageV2] async read window must be positive, got {}",
+    AssertInfo(read_window_bytes >= 0,
+               "[StorageV2] async read window must be non-negative, got {}",
                read_window_bytes);
     if (cells.empty()) {
         return {};
@@ -419,9 +421,10 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
         bool split = false;
         if (!current.cells.empty()) {
             auto would_exceed =
+                read_window_bytes > 0 &&
                 cell.memory_size >
-                read_window_bytes -
-                    std::min(current_memory_bytes, read_window_bytes);
+                    read_window_bytes -
+                        std::min(current_memory_bytes, read_window_bytes);
             split = cell.file_idx != current_file ||
                     cell.local_rg_offset != current_end || would_exceed;
         }
