@@ -1519,21 +1519,28 @@ func TestValidateImportFilePaths(t *testing.T) {
 		// registry only after the milvus#51894 review flagged the omission.
 		{"woodpecker wal", "files", "files/wp/0/1/2.log", nil, true, ""},
 
-		// Declared as C++ literals and joined onto GetRootPath(). They are rooted
-		// at localStorage.path, so they are denied only when that is also the
-		// ChunkManager root -- i.e. storageType=local.
-		{"cpp raw_datas", "/var/lib/milvus/data", "/var/lib/milvus/data/raw_datas/449_100/0", nil, true, "local"},
-		{"cpp ngram_log", "/var/lib/milvus/data", "/var/lib/milvus/data/ngram_log/1/2/3", nil, true, "local"},
-		{"cpp temp index build", "/var/lib/milvus/data", "/var/lib/milvus/data/tmp/HNSW/1/2/3", nil, true, "local"},
-		{"cpp rtree index", "/var/lib/milvus/data", "/var/lib/milvus/data/rtree-index/1/2", nil, true, "local"},
+		// The node-local cache subtree is at the storage root under
+		// storageType=local, so it is denied there.
 		{"local cache dir", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/x", nil, true, "local"},
 
-		// ...and must NOT be denied on a remote root, where Milvus never writes
-		// them. <minio.rootPath>/tmp/ is a plausible staging location, so denying
-		// it there would silently break existing imports on upgrade.
+		// Everything segcore writes lives INSIDE that subtree, because its
+		// ChunkManager is initialized with pathutil.GetPath(LocalChunkPath, nodeID)
+		// = {localStorage.path}/cache/{nodeID}/local_chunk. The cache entry
+		// therefore already covers raw_datas / ngram_log / tmp / rtree-index; they
+		// must not be registered at the root as well.
+		{"segcore raw_datas under the cache subtree", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/raw_datas/449_100/0", nil, true, "local"},
+		{"segcore temp index under the cache subtree", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/tmp/HNSW/1", nil, true, "local"},
+
+		// ...and the root-level names must stay ALLOWED, since Milvus never writes
+		// them there. Denying <root>/tmp/ would break a caller staging imports in
+		// a directory of that name while claiming it is Milvus-internal.
+		{"local root, tmp is not internal", "/var/lib/milvus/data", "/var/lib/milvus/data/tmp/data.parquet", nil, false, "local"},
+		{"local root, raw_datas is not internal", "/var/lib/milvus/data", "/var/lib/milvus/data/raw_datas/a.json", nil, false, "local"},
 		{"remote root, tmp staging", "files", "files/tmp/data.parquet", nil, false, "remote"},
+
+		// The cache entry itself is local-only: on a remote root Milvus does not
+		// write it, so a caller directory of that name must pass.
 		{"remote root, cache-named dir", "files", "files/cache/mine.json", nil, false, "remote"},
-		{"remote root, raw_datas-named dir", "files", "files/raw_datas/a.json", nil, false, "remote"},
 
 		// Woodpecker writes under BOTH roots, so it stays denied on remote.
 		{"remote root, woodpecker still denied", "files", "files/wp/0/1/2.log", nil, true, "remote"},
