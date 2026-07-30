@@ -296,8 +296,18 @@ FMIndex::ComputeByteSize() {
 TargetBitmap
 FMIndex::DocsToBitmap(const std::vector<uint64_t>& docs) const {
     TargetBitmap bitset(total_rows_);
+    const auto rows = static_cast<uint64_t>(total_rows_);
     for (auto d : docs) {
-        bitset.set(d);
+        // Defence in depth behind the locate call sites' own bound checks. The
+        // library caps document ids at document_count(), which load validation
+        // pins to total_rows_ — so an id equal to total_rows_ is the failure
+        // shape to stop here. TargetBitmap's range check is an assert, compiled
+        // out under NDEBUG, and its storage is rounded up to whole 64-bit words:
+        // for total_rows_ % 64 == 0 an unfiltered set(total_rows_) would write
+        // past the allocation rather than into padding.
+        if (d < rows) {
+            bitset.set(d);
+        }
     }
     return bitset;
 }

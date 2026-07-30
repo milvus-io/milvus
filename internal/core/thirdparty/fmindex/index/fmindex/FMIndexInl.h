@@ -796,7 +796,22 @@ FMIndex::LocatePrefixDocs(const uint8_t* pattern, size_t plen) const {
     auto sp = wm_.map2(static_cast<uint32_t>(sep_id_), r.first, r.second);
     size_t sbase = c_[sep_id_] - first_[sep_id_];
     for (size_t i = sbase + sp.first; i < sbase + sp.second; ++i) {
-        docs.push_back(docOf(locateRow(i) + 1));
+        // Bound the located position exactly as locateInternal / MatchingDocs /
+        // LocateDocsBatch do. On a well-formed index this never rejects: the
+        // position is a separator at doc_start_[d]-1, so +1 is a document start
+        // and doc_start_ is validated to end at text_len_. It matters because
+        // load-time validation cannot tie a sampled value to the row it was
+        // sampled from (that would need the suffix array the sampling exists to
+        // avoid), so a blob whose sampled-SA array disagrees with sampled_bv_
+        // can make locateRow overshoot. docOf would then return
+        // n_doc_bounds_ - 1 == total_rows_, and DocsToBitmap's TargetBitmap is
+        // sized to total_rows_ — an out-of-range document id must not reach it.
+        // Note the check must be applied AFTER the +1: text_len_ is itself a
+        // legitimate sampled position (the sentinel), and text_len_ + 1 is not.
+        uint64_t doc_start = locateRow(i) + 1;
+        if (doc_start < text_len_) {
+            docs.push_back(docOf(doc_start));
+        }
     }
     // Sentinel-preceded row (at most one): the sentinel is cyclically followed by
     // position 0, so a match means document 0 begins with P. No locate needed.
@@ -851,9 +866,14 @@ FMIndex::LocateSuffixDocs(const uint8_t* pattern, size_t plen) const {
     // Every row in the "pattern<sep>" interval is a genuine document-end hit, so
     // we locate exactly the answer set — no occurrence is located and discarded.
     // The located SA position is where the pattern begins; its document ends with
-    // the pattern by construction.
+    // the pattern by construction. The bound check is the same one the other
+    // locate call sites apply, and never rejects on a well-formed index; see
+    // LocatePrefixDocs for why an index that loaded cleanly can still overshoot.
     for (size_t i = r.first; i < r.second; ++i) {
-        docs.push_back(docOf(locateRow(i)));
+        uint64_t pos = locateRow(i);
+        if (pos < text_len_) {
+            docs.push_back(docOf(pos));
+        }
     }
     std::sort(docs.begin(), docs.end());
     docs.erase(std::unique(docs.begin(), docs.end()), docs.end());

@@ -412,6 +412,100 @@ TEST(FMIndex, LibraryRejectsCorruptHeaderMetadata) {
     EXPECT_FALSE(index::fmindex::FMIndex::Deserialize(blob).valid());
 }
 
+// Load-time validation constrains the sampled-SA array only element-wise (range
+// + divisibility) and by count; it cannot tie a sampled value to the row it was
+// sampled from, because that would need the suffix array the sampling exists to
+// avoid. So a blob can load cleanly and still drive locateRow past text_len_,
+// at which point docOf saturates at document_count() — one past the last valid
+// document id. The two document-anchored locate paths must bound-check like the
+// other four call sites do, or that id escapes into DocsToBitmap's
+// TargetBitmap(total_rows_) and, when total_rows_ % 64 == 0, writes past the
+// allocation (its own range check is an assert, gone under NDEBUG).
+TEST(FMIndex, LibraryDocLocateBoundsOutOfRangePositions) {
+    std::vector<std::string> data{"alpha", "beta", "gamma", "delta"};
+    std::vector<std::string_view> docs(data.begin(), data.end());
+    index::fmindex::FMIndex built;
+    // Sample rate 1 makes every row sampled, so locateRow returns a stored
+    // sample value with zero LF steps — the tampered value reaches the call
+    // sites verbatim. force_wide pins samples to 8 bytes so the trailing
+    // sections are exactly sized with no alignment padding between them.
+    built.Build(docs,
+                /*sa_sample_rate=*/1,
+                /*case_insensitive=*/false,
+                /*force_wide=*/true);
+    const std::string clean = built.Serialize();
+
+    size_t text_len = docs.size();  // one separator per document
+    for (const auto& d : docs) {
+        text_len += d.size();
+    }
+    // Trailing payload sections: sampled-SA values (n_samples * 8) then the
+    // document boundaries (n_docs * 8).
+    const size_t n_samples = text_len + 1;  // rate 1: text_len/1 + 1
+    const size_t n_docs = docs.size() + 1;  // boundaries, not documents
+    ASSERT_GT(clean.size(), (n_samples + n_docs) * sizeof(uint64_t));
+    const size_t docs_off = clean.size() - n_docs * sizeof(uint64_t);
+    const size_t samples_off = docs_off - n_samples * sizeof(uint64_t);
+
+    // Pin the assumed layout before poking at it: the boundary list runs
+    // 0 .. text_len. If serialization ever moves these sections, this fails
+    // loudly here instead of silently tampering with unrelated bytes.
+    auto read_u64 = [&clean](size_t off) {
+        uint64_t v = 0;
+        std::memcpy(&v, clean.data() + off, sizeof(v));
+        return v;
+    };
+    ASSERT_EQ(read_u64(docs_off), 0u);
+    ASSERT_EQ(read_u64(clean.size() - sizeof(uint64_t)), text_len);
+
+    auto p = [](const char* s) { return reinterpret_cast<const uint8_t*>(s); };
+    auto load_view = [](const std::string& blob) {
+        std::vector<uint64_t> backing((blob.size() + 7) / 8);
+        std::memcpy(backing.data(), blob.data(), blob.size());
+        auto idx = index::fmindex::FMIndex::LoadView(
+            reinterpret_cast<const uint8_t*>(backing.data()), blob.size());
+        return std::make_pair(std::move(idx), std::move(backing));
+    };
+
+    // Baseline: the guards must not reject anything on a well-formed index.
+    {
+        auto [ok, backing] = load_view(clean);
+        ASSERT_TRUE(ok.valid());
+        EXPECT_EQ(ok.LocatePrefixDocs(p("gam"), 3), (std::vector<uint64_t>{2}));
+        EXPECT_EQ(ok.LocateSuffixDocs(p("lta"), 3), (std::vector<uint64_t>{3}));
+        EXPECT_EQ(ok.LocatePrefixDocs(p("alp"), 3), (std::vector<uint64_t>{0}));
+    }
+
+    // Every sample now claims the sentinel position. text_len is <= text_len and
+    // divisible by rate 1, and neither the count nor sampled_bv_ changed, so
+    // this passes load validation unchanged — which is the point.
+    std::string tampered = clean;
+    for (size_t i = 0; i < n_samples; ++i) {
+        const uint64_t v = text_len;
+        std::memcpy(tampered.data() + samples_off + i * sizeof(uint64_t),
+                    &v,
+                    sizeof(v));
+    }
+
+    auto [bad, bad_backing] = load_view(tampered);
+    ASSERT_TRUE(bad.valid()) << "load validation cannot catch this; the bound "
+                                "check at the locate call sites is the fix";
+
+    // Suffix hits locate to text_len (== text_len, out of range) and must be
+    // dropped entirely rather than mapped to document_count().
+    EXPECT_TRUE(bad.LocateSuffixDocs(p("lta"), 3).empty());
+    // Prefix adds one before mapping, so it must be checked after the +1.
+    for (const char* pat : {"gam", "bet", "del", "alp"}) {
+        for (const auto& got : {bad.LocatePrefixDocs(p(pat), 3),
+                                bad.LocateSuffixDocs(p(pat), 3)}) {
+            for (uint64_t d : got) {
+                EXPECT_LT(d, bad.document_count())
+                    << "out-of-range document id escaped locate for " << pat;
+            }
+        }
+    }
+}
+
 TEST(FMIndex, UnsupportedSchemaUsesDataTypeInvalidCode) {
     storage::FileManagerContext ctx;
     ctx.fieldDataMeta.field_id = 101;
