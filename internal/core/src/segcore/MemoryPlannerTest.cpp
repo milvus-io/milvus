@@ -36,7 +36,7 @@
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
 using namespace milvus::segcore;
@@ -216,8 +216,8 @@ TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
     EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(), 8 * MB);
 }
 
-TEST(LoadMemoryOverheadGroupTest, KeepsHandleAcrossPolicySwitches) {
-    auto& owner = milvus::storage::LoadMemoryOverheadGroup::GetInstance();
+TEST(LoadMemoryOverheadControllerTest, KeepsHandleAcrossPolicySwitches) {
+    auto& owner = milvus::storage::LoadMemoryOverheadController::GetInstance();
     auto workers = milvus::ThreadPools::GetLoadExecutorWorkers();
     auto budget_bytes =
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()

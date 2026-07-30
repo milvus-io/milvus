@@ -21,7 +21,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -112,7 +112,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                           milvus::storage::MaxEntryStreamTaskBytes(),
                           milvus::storage::kFileStreamBufferMultiplier);
             auto memory_group =
-                milvus::storage::LoadMemoryOverheadGroup::GetInstance()
+                milvus::storage::LoadMemoryOverheadController::GetInstance()
                     .GetOrCreate(milvus::ThreadPools::GetLoadExecutorWorkers());
             meta_.loading_overhead_config =
                 milvus::cachinglayer::LoadingOverheadConfig{

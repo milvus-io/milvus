@@ -31,7 +31,7 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::storage {
@@ -170,8 +170,8 @@ class TransientMemoryBudget {
         auto old_capacity = CapacityBytes();
         auto expanding =
             old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
-        auto& overhead_group = LoadMemoryOverheadGroup::GetInstance();
-        if (expanding && !overhead_group.UpdateBudgetBytes(bytes)) {
+        auto& overhead_controller = LoadMemoryOverheadController::GetInstance();
+        if (expanding && !overhead_controller.UpdateBudgetBytes(bytes)) {
             return;
         }
         {
@@ -179,7 +179,7 @@ class TransientMemoryBudget {
             capacity_bytes_ = bytes;
         }
         if (!expanding) {
-            overhead_group.UpdateBudgetBytes(bytes);
+            overhead_controller.UpdateBudgetBytes(bytes);
         }
         cv_.notify_all();
     }

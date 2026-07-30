@@ -53,7 +53,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -391,8 +391,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
         auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
         auto memory_group =
-            milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
-                executor_workers);
+            milvus::storage::LoadMemoryOverheadController::GetInstance()
+                .GetOrCreate(executor_workers);
         meta_.loading_overhead_config =
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
@@ -400,7 +400,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 use_mmap_
                     ? std::make_optional(
                           milvus::cachinglayer::LoadingOverheadGroupBinding{
-                              milvus::storage::LoadFileOverheadGroup::
+                              milvus::storage::LoadFileOverheadController::
                                   GetInstance()
                                       .GetOrCreate(executor_workers),
                               max_file_runtime_unit})

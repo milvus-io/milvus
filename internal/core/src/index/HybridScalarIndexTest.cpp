@@ -56,7 +56,7 @@
 #include "storage/PayloadReader.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/PluginLoader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -963,7 +963,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
     budget.SetCapacityBytes(0);
     auto memory_group =
-        storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
+        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
             milvus::ThreadPools::GetLoadExecutorWorkers());
 
     std::map<std::string, std::string> index_params{

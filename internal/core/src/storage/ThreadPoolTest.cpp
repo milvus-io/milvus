@@ -16,17 +16,40 @@
 
 #include <atomic>
 #include <chrono>
+#include <concepts>
 #include <future>
+#include <limits>
 #include <string>
 #include <system_error>
 
 #include <folly/ScopeGuard.h>
 #include "gtest/gtest.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus {
+
+static_assert(
+    std::same_as<storage::LoadMemoryOverheadController,
+                 storage::LoadOverheadController<
+                     cachinglayer::LoadingOverheadDimension::kMemory>>);
+static_assert(std::same_as<storage::LoadFileOverheadController,
+                           storage::LoadOverheadController<
+                               cachinglayer::LoadingOverheadDimension::kFile>>);
+
+template <typename T>
+concept SupportsBudgetUpdate =
+    requires(T& owner) { owner.UpdateBudgetBytes(size_t{0}); };
+
+static_assert(SupportsBudgetUpdate<storage::LoadMemoryOverheadController>);
+static_assert(!SupportsBudgetUpdate<storage::LoadFileOverheadController>);
+
+TEST(LoadOverheadControllerTest, RejectsBudgetBeyondPolicyRange) {
+    auto& controller = storage::LoadMemoryOverheadController::GetInstance();
+    EXPECT_ANY_THROW(
+        controller.UpdateBudgetBytes(std::numeric_limits<size_t>::max()));
+}
 
 class ThreadPoolTest : public testing::Test {
  protected:
@@ -144,9 +167,9 @@ TEST_F(ThreadPoolTest, DynamicMaxThreadsSizeUpdate) {
     EXPECT_EQ(pool.GetMaxThreadNum(), 8);
 }
 
-TEST_F(ThreadPoolTest, LoadFileOverheadGroupIsLazyAndStable) {
-    auto& file_owner = storage::LoadFileOverheadGroup::GetInstance();
-    auto& memory_owner = storage::LoadMemoryOverheadGroup::GetInstance();
+TEST_F(ThreadPoolTest, LoadFileOverheadControllerIsLazyAndStable) {
+    auto& file_owner = storage::LoadFileOverheadController::GetInstance();
+    auto& memory_owner = storage::LoadMemoryOverheadController::GetInstance();
     auto executor_workers = ThreadPools::GetLoadExecutorWorkers();
     auto cleanup = folly::makeGuard([&file_owner, executor_workers]() {
         EXPECT_TRUE(file_owner.UpdateExecutorWorkers(executor_workers));

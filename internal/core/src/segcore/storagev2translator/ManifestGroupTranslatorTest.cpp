@@ -36,7 +36,7 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/LoadOverheadGroup.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -289,8 +289,8 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
 
     auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
     auto memory_group =
-        milvus::storage::LoadMemoryOverheadGroup::GetInstance().GetOrCreate(
-            executor_workers);
+        milvus::storage::LoadMemoryOverheadController::GetInstance()
+            .GetOrCreate(executor_workers);
     ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(
         translator->meta()->loading_overhead_config->memory.has_value());
@@ -305,10 +305,9 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     if (use_mmap) {
         ASSERT_TRUE(
             translator->meta()->loading_overhead_config->file.has_value());
-        EXPECT_EQ(
-            translator->meta()->loading_overhead_config->file->group,
-            milvus::storage::LoadFileOverheadGroup::GetInstance().GetOrCreate(
-                executor_workers));
+        EXPECT_EQ(translator->meta()->loading_overhead_config->file->group,
+                  milvus::storage::LoadFileOverheadController::GetInstance()
+                      .GetOrCreate(executor_workers));
         ASSERT_TRUE(
             translator->meta()
                 ->loading_overhead_config->file->max_runtime_unit.has_value());
