@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -135,6 +136,20 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		if merr.IsNonRetryableErr(err) {
+			// Deterministic failure (e.g. a reserved PK range too small for the
+			// file): fail the task now and keep the precise reason, instead of
+			// leaving it Pending to be rescheduled until the job's import timeout
+			// overwrites the reason with a generic message.
+			if updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+				UpdateState(datapb.ImportTaskStateV2_Failed),
+				UpdateReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import task failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			return
+		}
+		t.retryTimes++
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
