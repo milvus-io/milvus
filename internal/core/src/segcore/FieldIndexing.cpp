@@ -12,9 +12,15 @@
 #include <string.h>
 #include "common/FastMem.h"
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <exception>
+#include <functional>
+#include <future>
+#include <limits>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -43,6 +49,7 @@
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "monitor/Monitor.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
@@ -50,9 +57,43 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::segcore {
 using std::unique_ptr;
+
+std::function<void(VectorFieldIndexing::GrowingBuildPhase)>
+    VectorFieldIndexing::growing_build_test_hook_ = nullptr;
+
+namespace {
+
+void
+CallBuildHook(VectorFieldIndexing::GrowingBuildPhase phase) {
+    if (VectorFieldIndexing::growing_build_test_hook_) {
+        VectorFieldIndexing::growing_build_test_hook_(phase);
+    }
+}
+
+double
+ElapsedMs(const std::chrono::steady_clock::time_point& since) {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - since)
+        .count();
+}
+
+// Executor for async growing-index first builds. Sized to the knowhere
+// build pool ratio so this layer never out-submits it; tasks spend most
+// of their life blocked on the knowhere pool, which is why we do not
+// reuse ThreadPools::LOW (that would starve segment load). See spec §4.5.
+milvus::ThreadPool&
+GrowingIndexBuildPool() {
+    static milvus::ThreadPool pool(
+        SegcoreConfig::default_config().get_growing_index_build_pool_ratio(),
+        "growing_index_build");
+    return pool;
+}
+
+}  // namespace
 
 void
 IndexingRecord::AppendingIndex(int64_t reserved_offset,
@@ -173,6 +214,24 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
           SegmentType::Growing,
           IsSparseFloatVectorDataType(field_meta.get_data_type()))) {
     recreate_index(field_meta.get_data_type(), field_raw_data);
+}
+
+VectorFieldIndexing::~VectorFieldIndexing() {
+    // Queued task: abandon it, no wait -- once scheduled it exits after
+    // reading only the shared control block. Running task: join it; worst
+    // case one full first-build (knowhere Build is not interruptible;
+    // cancelled is honored at phase boundaries only). Safe to join:
+    // IndexingRecord (SegmentGrowingImpl.h) is declared after InsertRecord, so
+    // we are destroyed first and field_raw_data outlives this join.
+    if (build_ctrl_) {
+        build_ctrl_->cancelled.store(true);
+        if (build_ctrl_->TryAbandon()) {
+            return;
+        }
+    }
+    if (build_task_.valid()) {
+        build_task_.wait();
+    }
 }
 
 void
@@ -582,17 +641,49 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                "field_raw_data can't cast to "
                "ConcurrentVector<SparseFloatVector> type");
 
-    if (!built_) {
-        try {
-            BuildFirstIndexSparse(field_raw_data, new_data_dim);
-        } catch (SegcoreError& error) {
-            LOG_ERROR("growing sparse index build error: {}", error.what());
-            recreate_index(get_data_type(), field_raw_data);
-            return;
+    if (!segcore_config_.get_enable_async_growing_index_build()) {
+        // Legacy synchronous path, byte-for-byte the pre-change behavior.
+        if (!built_) {
+            try {
+                BuildFirstIndexSparse(field_raw_data, new_data_dim);
+            } catch (SegcoreError& error) {
+                LOG_ERROR("growing sparse index build error: {}", error.what());
+                recreate_index(get_data_type(), field_raw_data);
+                return;
+            }
         }
+        AddBatchSparse(
+            reserved_offset, size, new_data_dim, field_raw_data, data_source);
+        return;
     }
-    AddBatchSparse(
-        reserved_offset, size, new_data_dim, field_raw_data, data_source);
+
+    // Async path. Reading state_ and acting on it must be one critical
+    // section: a lock-free read races the background finalizer and can
+    // publish sync_with_index_=true while this batch is missing from the
+    // index -- later kSynced batches would then compute a negative source
+    // offset in AddBatchSparse (out-of-bounds read). See spec §4.2.
+    std::lock_guard<std::mutex> lock(append_mutex_);
+    switch (state_.load()) {
+        case GrowingIndexState::kNotBuilt:
+            StartBuildLocked(
+                field_raw_data, reserved_offset + size, new_data_dim);
+            break;
+        case GrowingIndexState::kBuilding:
+            // pending_upto_ is written after this batch's set_data_raw
+            // completed (SegmentGrowingImpl::Insert step ordering), so it is
+            // an exact raw-data watermark for the catch-up task.
+            pending_upto_.store(reserved_offset + size);
+            break;
+        case GrowingIndexState::kSynced:
+            AddBatchSparse(reserved_offset,
+                           size,
+                           new_data_dim,
+                           field_raw_data,
+                           data_source);
+            break;
+        case GrowingIndexState::kDisabled:
+            break;
+    }
 }
 
 void
@@ -607,16 +698,270 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");
-    if (!built_) {
-        try {
-            BuildFirstIndexDense(field_raw_data);
-        } catch (SegcoreError& error) {
-            LOG_ERROR("growing index build error: {}", error.what());
-            recreate_index(get_data_type(), field_raw_data);
+    if (!segcore_config_.get_enable_async_growing_index_build()) {
+        // Legacy synchronous path, byte-for-byte the pre-change behavior.
+        if (!built_) {
+            try {
+                BuildFirstIndexDense(field_raw_data);
+            } catch (SegcoreError& error) {
+                LOG_ERROR("growing index build error: {}", error.what());
+                recreate_index(get_data_type(), field_raw_data);
+                return;
+            }
+        }
+        AddBatchDense(reserved_offset, size, field_raw_data, data_source);
+        return;
+    }
+
+    // Async path; see the note in AppendSegmentIndexSparse for why state_ must
+    // be read and acted on inside append_mutex_.
+    std::lock_guard<std::mutex> lock(append_mutex_);
+    switch (state_.load()) {
+        case GrowingIndexState::kNotBuilt:
+            StartBuildLocked(
+                field_raw_data, reserved_offset + size, /*new_data_dim=*/0);
+            break;
+        case GrowingIndexState::kBuilding:
+            pending_upto_.store(reserved_offset + size);
+            break;
+        case GrowingIndexState::kSynced:
+            AddBatchDense(reserved_offset, size, field_raw_data, data_source);
+            break;
+        case GrowingIndexState::kDisabled:
+            break;
+    }
+}
+
+void
+VectorFieldIndexing::StartBuildLocked(const VectorBase* field_raw_data,
+                                      int64_t upto,
+                                      int64_t new_data_dim) {
+    // state_ must be published before Submit: the task may start running on
+    // another thread immediately and drive state_ all the way to kSynced, and
+    // a later store of kBuilding here would be a back edge.
+    state_.store(GrowingIndexState::kBuilding);
+    pending_upto_.store(upto);
+    build_ctrl_ = std::make_shared<BuildTaskCtrl>();
+    try {
+        build_task_ = GrowingIndexBuildPool().Submit(
+            [this, ctrl = build_ctrl_, field_raw_data, new_data_dim] {
+                // CAS on the control block BEFORE touching `this`: if the
+                // destructor abandoned us while queued, `this` is gone and we
+                // must return reading nothing but ctrl.
+                if (!ctrl->TryStart()) {
+                    return;
+                }
+                BuildAsync(field_raw_data, new_data_dim);
+            });
+    } catch (std::exception& error) {
+        // The task was never queued, so nothing else can observe state_ here.
+        // Degrade exactly like a build failure: brute-force scan stays correct.
+        LOG_WARN(
+            "failed to submit async growing index build, disabling interim "
+            "index for this field: {}",
+            error.what());
+        build_ctrl_->cancelled.store(true);
+        build_ctrl_->TryAbandon();
+        state_.store(GrowingIndexState::kDisabled);
+        milvus::monitor::internal_core_growing_index_build_failures.Increment();
+    }
+}
+
+void
+VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
+                                int64_t new_data_dim) {
+    milvus::monitor::internal_core_growing_index_inflight_builds.Increment();
+    try {
+        CallBuildHook(GrowingBuildPhase::kBeforeBuild);
+        if (!IsCancelled()) {
+            // Nullable growing vector fields always use mapping storage
+            // (InsertRecord::append_data passes the two together), and
+            // PhysicalTarget's logical->physical conversion depends on it.
+            // get_valid_data() is O(1) in this branch: a non-mapping vector
+            // holds no validity bitmap pointer at all.
+            AssertInfo(field_raw_data->is_mapping_storage() ||
+                           field_raw_data->get_valid_data().empty(),
+                       "nullable growing vector without mapping storage is not "
+                       "supported by async growing index build");
+            auto build_start = std::chrono::steady_clock::now();
+            // Phase 1: no lock held -- while state_ == kBuilding insert never
+            // touches index_, which is the core invariant of the state machine.
+            // Rows [0, get_build_threshold()) are guaranteed already written:
+            // AppendingIndex only reaches us once the raw watermark crossed the
+            // threshold, and set_data_raw precedes AppendingIndex.
+            if (IsSparseFloatVectorDataType(get_data_type())) {
+                BuildFirstIndexSparse(field_raw_data, new_data_dim);
+            } else {
+                BuildFirstIndexDense(field_raw_data);
+            }
+            milvus::monitor::internal_core_growing_index_build_latency.Observe(
+                ElapsedMs(build_start));
+            CallBuildHook(GrowingBuildPhase::kAfterBuild);
+            CatchUp(field_raw_data);
+        }
+    } catch (std::exception& error) {
+        LOG_WARN(
+            "async growing index build failed, disabling interim index for "
+            "this field, falling back to brute-force scan permanently: {}",
+            error.what());
+        std::lock_guard<std::mutex> lock(append_mutex_);
+        // Legal here because the index has NOT taken raw-data ownership yet:
+        // sync_with_index_ was never set, so HasRawData() stayed false and
+        // try_remove_chunks never cleared the source chunks (unlike the
+        // post-sync recreate_index documented as a design defect in
+        // AddBatch*). Recreate only to free the half-built index memory.
+        recreate_index(get_data_type(), field_raw_data);
+        built_ = false;
+        index_cur_.store(0);
+        state_.store(GrowingIndexState::kDisabled);
+        milvus::monitor::internal_core_growing_index_build_failures.Increment();
+    }
+    milvus::monitor::internal_core_growing_index_inflight_builds.Decrement();
+}
+
+void
+VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
+    auto catchup_start = std::chrono::steady_clock::now();
+    int64_t catchup_from = static_cast<int64_t>(index_cur_.load());
+    int64_t min_gap = std::numeric_limits<int64_t>::max();
+    int stall_rounds = 0;
+    for (;;) {
+        if (IsCancelled()) {
+            // Segment tearing down: stay kBuilding, never publish.
             return;
         }
+        int64_t target = PhysicalTarget(field_raw_data, pending_upto_.load());
+        int64_t gap = target - static_cast<int64_t>(index_cur_.load());
+        if (gap > 0 && stall_rounds < kMaxStallRounds) {
+            AddRange(field_raw_data, target, /*interruptible=*/true);
+            CallBuildHook(GrowingBuildPhase::kAfterCatchupRound);
+            // Stall = the gap stopped shrinking (the writer outpaces Add
+            // throughput). Compare against the best gap seen so far rather
+            // than only the previous round, so an oscillating gap still
+            // converges on the fallback. After kMaxStallRounds fall through to
+            // a forced locked finalize -- one long block, but the synchronous
+            // legacy path would block insert forever in this region.
+            stall_rounds = (gap >= min_gap) ? stall_rounds + 1 : 0;
+            min_gap = std::min(min_gap, gap);
+            continue;
+        }
+        CallBuildHook(GrowingBuildPhase::kBeforeFinalize);
+        std::lock_guard<std::mutex> lock(append_mutex_);
+        if (IsCancelled()) {
+            return;
+        }
+        // Under append_mutex_ no insert can advance pending_upto_; the only
+        // rows to absorb are those that slipped in between our last read and
+        // the lock -- at most about one insert batch.
+        int64_t pending = pending_upto_.load();
+        int64_t final_target = PhysicalTarget(field_raw_data, pending);
+        AddRange(field_raw_data, final_target, /*interruptible=*/false);
+        // get_valid_data() materializes an O(rows) copy, so it is fetched once
+        // here and never inside the catch-up loop.
+        auto valid_data = field_raw_data->get_valid_data();
+        if (!valid_data.empty()) {
+            AssertInfo(static_cast<int64_t>(valid_data.size()) >= pending,
+                       "validity bitmap ({} rows) shorter than the raw-data "
+                       "watermark ({} rows)",
+                       valid_data.size(),
+                       pending);
+            int64_t index_logical = index_->GetOffsetMapping().GetTotalCount();
+            if (pending > index_logical) {
+                index_->UpdateValidData(valid_data.data() + index_logical,
+                                        pending - index_logical);
+            }
+        }
+        // Atomic with the final AddRange under the same lock: readers that
+        // observe sync_with_index_==true are guaranteed the index covers
+        // every row whose AppendingIndex call has returned.
+        sync_with_index_.store(true);
+        state_.store(GrowingIndexState::kSynced);
+        milvus::monitor::internal_core_growing_index_catchup_latency.Observe(
+            ElapsedMs(catchup_start));
+        milvus::monitor::internal_core_growing_index_catchup_rows.Observe(
+            static_cast<double>(static_cast<int64_t>(index_cur_.load()) -
+                                catchup_from));
+        return;
     }
-    AddBatchDense(reserved_offset, size, field_raw_data, data_source);
+}
+
+int64_t
+VectorFieldIndexing::PhysicalTarget(const VectorBase* vec,
+                                    int64_t logical_upto) const {
+    if (!vec->is_mapping_storage()) {
+        return logical_upto;
+    }
+    // get_logical_offset is monotone in the physical offset (rows are appended
+    // in order), so the first physical offset whose logical offset reaches
+    // logical_upto is exactly the number of valid rows below the watermark.
+    int64_t lo = 0;
+    int64_t hi = vec->get_valid_count();
+    while (lo < hi) {
+        int64_t mid = lo + (hi - lo) / 2;
+        if (vec->get_logical_offset(mid) >= logical_upto) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    return lo;
+}
+
+void
+VectorFieldIndexing::AddRange(const VectorBase* field_raw_data,
+                              int64_t target,
+                              bool interruptible) {
+    auto conf = get_build_params(get_data_type());
+    if (IsSparseFloatVectorDataType(get_data_type())) {
+        using value_type = knowhere::sparse::SparseRow<SparseValueType>;
+        while (static_cast<int64_t>(index_cur_.load()) < target) {
+            if (interruptible && IsCancelled()) {
+                return;
+            }
+            int64_t from = static_cast<int64_t>(index_cur_.load());
+            int64_t to = std::min(target, from + kCatchupSparseRows);
+            std::vector<value_type> staging;
+            auto rows = static_cast<const value_type*>(
+                CopySparseRows(field_raw_data, from, to, staging));
+            // Dim semantics must match today's Add path, which passes the
+            // triggering proto batch's dim (its max index + 1). knowhere only
+            // uses it to widen its running max_dim_, so the max over this
+            // slice is the value-identical reconstruction for chunk-sourced
+            // slices that do not align with batch boundaries.
+            int64_t slice_dim = 0;
+            for (int64_t i = 0; i < to - from; ++i) {
+                slice_dim = std::max(slice_dim, rows[i].dim());
+            }
+            auto dataset = knowhere::GenDataSet(to - from, slice_dim, rows);
+            dataset->SetIsSparse(true);
+            index_->AddWithDataset(dataset, conf);
+            index_cur_.fetch_add(to - from);
+        }
+        return;
+    }
+    size_t vec_length;
+    if (get_data_type() == DataType::VECTOR_FLOAT) {
+        vec_length = get_dim() * sizeof(float);
+    } else if (get_data_type() == DataType::VECTOR_FLOAT16) {
+        vec_length = get_dim() * sizeof(float16);
+    } else {
+        vec_length = get_dim() * sizeof(bfloat16);
+    }
+    int64_t budget_rows = std::max<int64_t>(
+        1, kCatchupStagingBytes / static_cast<int64_t>(vec_length));
+    while (static_cast<int64_t>(index_cur_.load()) < target) {
+        if (interruptible && IsCancelled()) {
+            return;
+        }
+        int64_t from = static_cast<int64_t>(index_cur_.load());
+        int64_t to = std::min(target, from + budget_rows);
+        std::unique_ptr<char[]> staging;
+        auto data_ptr =
+            CopyDenseRows(field_raw_data, from, to, vec_length, staging);
+        auto dataset = knowhere::GenDataSet(to - from, get_dim(), data_ptr);
+        index_->AddWithDataset(dataset, conf);
+        index_cur_.fetch_add(to - from);
+    }
 }
 
 knowhere::Json

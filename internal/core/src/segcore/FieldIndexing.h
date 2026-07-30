@@ -16,8 +16,12 @@
 #include <index/ScalarIndex.h>
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <future>
+#include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -273,11 +277,45 @@ class VectorFieldIndexing : public FieldIndexing {
  public:
     using FieldIndexing::FieldIndexing;
 
+    // Write-side lifecycle of the growing interim index (spec §4.1). Only
+    // kNotBuilt -> kBuilding -> (kSynced | kDisabled) transitions exist; there
+    // are no back edges, so a (segment, field) builds at most once. This state
+    // is invisible to the read path, which keeps consuming built_ /
+    // sync_with_index_ with their pre-change meaning.
+    enum class GrowingIndexState : uint8_t {
+        kNotBuilt,  // no index yet, raw data lives entirely in ConcurrentVector
+        kBuilding,  // background first build / catch-up in progress
+        kSynced,    // index covers every row whose AppendingIndex has returned
+        kDisabled,  // build failed, permanently degraded to brute-force scan
+    };
+
+    // Phase boundaries of the background task, exposed for tests only.
+    enum class GrowingBuildPhase {
+        kBeforeBuild,
+        kAfterBuild,
+        kAfterCatchupRound,
+        kBeforeFinalize
+    };
+
+    // Test-only observation / fault-injection hook, called on the background
+    // build thread at phase boundaries. Set it before the first insert and
+    // clear it after every segment that could have queued a task is destroyed;
+    // it is a process-wide static, so a stale hook leaks across tests.
+    static std::function<void(GrowingBuildPhase)> growing_build_test_hook_;
+
     explicit VectorFieldIndexing(const FieldMeta& field_meta,
                                  const FieldIndexMeta& field_index_meta,
                                  int64_t segment_max_row_count,
                                  const SegcoreConfig& segcore_config,
                                  const VectorBase* field_raw_data);
+
+    ~VectorFieldIndexing() override;
+
+    // For tests/diagnostics only; the read path must not branch on this.
+    GrowingIndexState
+    get_growing_index_state() const {
+        return state_.load();
+    }
 
     void
     AppendSegmentIndexDense(int64_t reserved_offset,
@@ -355,6 +393,10 @@ class VectorFieldIndexing : public FieldIndexing {
     // Copy dense physical rows [from, to) into contiguous memory; when the
     // range falls entirely within a single chunk, returns the chunk pointer
     // directly and leaves staging unallocated (zero-copy fast path).
+    // NOTE: the fast-path pointer aliases live chunk memory, so it is only
+    // valid while the chunks are unreclaimed — guaranteed before the index
+    // synchronizes, because HasRawData() stays false (and therefore
+    // try_remove_chunks is a no-op) until sync_with_index_ flips.
     const void*
     CopyDenseRows(const VectorBase* vec,
                   int64_t from,
@@ -364,6 +406,8 @@ class VectorFieldIndexing : public FieldIndexing {
 
     // Sparse counterpart of CopyDenseRows: copies physical rows [from, to)
     // element-wise; single-chunk ranges are returned without copying.
+    // NOTE: the same aliasing caveat as CopyDenseRows applies to the
+    // single-chunk fast path.
     const void*
     CopySparseRows(const VectorBase* vec,
                    int64_t from,
@@ -401,6 +445,73 @@ class VectorFieldIndexing : public FieldIndexing {
                    const VectorBase* field_raw_data,
                    const void* data_source);
 
+    // ---- async first build (spec §4.4-§4.7) ----------------------------------
+
+    // Publishes kBuilding + the initial watermark and submits the background
+    // task. Must be called with append_mutex_ held and only from kNotBuilt.
+    // new_data_dim is meaningful for sparse only (see BuildFirstIndexSparse).
+    void
+    StartBuildLocked(const VectorBase* field_raw_data,
+                     int64_t upto,
+                     int64_t new_data_dim);
+
+    // Background task body: first build, then catch up, then publish. Any
+    // failure lands in kDisabled — never retried.
+    void
+    BuildAsync(const VectorBase* field_raw_data, int64_t new_data_dim);
+
+    // Phase 2: drain the raw-data watermark into the index, then flip
+    // sync_with_index_ atomically with the last Add under append_mutex_.
+    void
+    CatchUp(const VectorBase* field_raw_data);
+
+    // Adds physical rows [index_cur_, target) to the index in staging-budget
+    // sized slices, checking IsCancelled() between slices when `interruptible`.
+    // The finalize call passes interruptible=false: publishing
+    // sync_with_index_ requires the whole range to be absorbed, so a cancel
+    // there can only be honored by bailing out before taking the lock.
+    // knowhere failures propagate to BuildAsync's handler.
+    void
+    AddRange(const VectorBase* field_raw_data,
+             int64_t target,
+             bool interruptible);
+
+    // Logical watermark -> physical row count. Identity for non-mapping
+    // storage; for mapping storage a binary search over the monotone
+    // physical -> logical map.
+    int64_t
+    PhysicalTarget(const VectorBase* vec, int64_t logical_upto) const;
+
+    static constexpr int64_t kCatchupStagingBytes = 8 << 20;
+    static constexpr int64_t kCatchupSparseRows = 4096;
+    static constexpr int kMaxStallRounds = 8;
+
+    // Destructor/task handshake (spec §4.6). The task CASes kQueued->kRunning
+    // on the control block BEFORE touching `this`; the destructor CASes
+    // kQueued->kAbandoned. Exactly one wins: abandoned tasks return touching
+    // only the shared_ptr-kept control block (no UAF, no destructor wait);
+    // running tasks are joined (<= one build).
+    struct BuildTaskCtrl {
+        enum class Phase : uint8_t { kQueued, kRunning, kAbandoned };
+        std::atomic<Phase> phase{Phase::kQueued};
+        std::atomic<bool> cancelled{false};
+        bool
+        TryStart() {
+            auto e = Phase::kQueued;
+            return phase.compare_exchange_strong(e, Phase::kRunning);
+        }
+        bool
+        TryAbandon() {
+            auto e = Phase::kQueued;
+            return phase.compare_exchange_strong(e, Phase::kAbandoned);
+        }
+    };
+
+    bool
+    IsCancelled() const {
+        return build_ctrl_ != nullptr && build_ctrl_->cancelled.load();
+    }
+
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
@@ -408,6 +519,18 @@ class VectorFieldIndexing : public FieldIndexing {
     // whether all insertd data has been added to growing index and can be
     // searched.
     std::atomic<bool> sync_with_index_;
+    // Write-side state machine; see GrowingIndexState.
+    std::atomic<GrowingIndexState> state_{GrowingIndexState::kNotBuilt};
+    // Monotonic logical raw-data watermark: the largest reserved_offset + size
+    // whose set_data_raw has completed. Written under append_mutex_ by insert,
+    // read lock-free by the background task.
+    std::atomic<int64_t> pending_upto_{0};
+    // Serializes every mutation of index_ plus the state_ read-and-act on the
+    // insert side (spec §4.2).
+    std::mutex append_mutex_;
+    // Assigned exactly once, under append_mutex_, on kNotBuilt -> kBuilding.
+    std::shared_ptr<BuildTaskCtrl> build_ctrl_;
+    std::future<void> build_task_;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
