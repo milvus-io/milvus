@@ -300,9 +300,15 @@ Scan outputs:
 Data scan supports:
 
 - row range;
-- value kind (`FixedWidth`, `StringView`, `JsonView`, `ArrayView`);
+- value kind (`FixedWidth`, `StringView`, `JsonView`, `ArrayView`,
+  `VectorArrayView`);
 - validity;
 - validity-only projection.
+
+Scan cursors are streaming. Implementations that materialize per-row views or
+wrappers must honor `ScanOptions::max_batch_rows` and create only the next
+bounded batch in `Next()`. Fixed-width zero-copy cursors may expose a larger
+natural source batch because doing so does not allocate one wrapper per row.
 
 Row-id scan supports:
 

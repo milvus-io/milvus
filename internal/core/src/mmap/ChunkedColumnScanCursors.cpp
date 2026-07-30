@@ -169,14 +169,19 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
                        int64_t length,
                        DataType data_type,
                        ChunkedColumnInterface::ScanProjection projection,
-                       ChunkedColumnInterface::ScanValueKind value_kind)
+                       ChunkedColumnInterface::ScanValueKind value_kind,
+                       int64_t max_batch_rows)
         : column_(column),
           op_ctx_(op_ctx),
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind),
+          max_batch_rows_(max_batch_rows),
           scan_pos_(start_offset),
           scan_end_(start_offset + length) {
+        AssertInfo(max_batch_rows_ > 0,
+                   "view data scan max batch rows must be positive, got {}",
+                   max_batch_rows_);
     }
 
     bool
@@ -189,8 +194,11 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
 
         auto [chunk_id, offset] = column_->GetChunkIDByOffset(scan_pos_);
         const auto chunk_rows = column_->chunk_row_nums(chunk_id);
-        const auto rows_to_return = std::min<int64_t>(
-            {chunk_rows - static_cast<int64_t>(offset), scan_end_ - scan_pos_});
+        auto rows_to_return = std::min<int64_t>(
+            chunk_rows - static_cast<int64_t>(offset), scan_end_ - scan_pos_);
+        if (projection_ != ChunkedColumnInterface::ScanProjection::NoData) {
+            rows_to_return = std::min(rows_to_return, max_batch_rows_);
+        }
         AssertInfo(rows_to_return > 0,
                    "invalid view data scan batch at offset {}",
                    scan_pos_);
@@ -417,6 +425,7 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     DataType data_type_;
     ChunkedColumnInterface::ScanProjection projection_;
     ChunkedColumnInterface::ScanValueKind value_kind_;
+    int64_t max_batch_rows_;
     int64_t scan_pos_;
     int64_t scan_end_;
 };
@@ -455,7 +464,8 @@ MakeDataScanCursor(const ChunkedColumnInterface* column,
                    int64_t length,
                    DataType data_type,
                    ChunkedColumnInterface::ScanProjection projection,
-                   ChunkedColumnInterface::ScanValueKind value_kind) {
+                   ChunkedColumnInterface::ScanValueKind value_kind,
+                   int64_t max_batch_rows) {
     std::optional<ChunkedColumnInterface::ScanValueKind> column_kind;
     if (ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
         column_kind = ChunkedColumnInterface::ScanValueKind::FixedWidth;
@@ -517,7 +527,8 @@ MakeDataScanCursor(const ChunkedColumnInterface* column,
                                                     length,
                                                     data_type,
                                                     projection,
-                                                    resolved_kind);
+                                                    resolved_kind,
+                                                    max_batch_rows);
     }
 
     return nullptr;
@@ -539,7 +550,8 @@ ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
                                       options.length,
                                       *data_type,
                                       options.projection,
-                                      options.value_kind);
+                                      options.value_kind,
+                                      options.max_batch_rows);
 }
 
 }  // namespace milvus

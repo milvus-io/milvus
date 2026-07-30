@@ -615,12 +615,15 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
                         ChunkedColumnInterface::ScanOptions::ForNoData(
                             0,
                             kVectorArrayRows,
-                            ChunkedColumnInterface::ScanValueKind::FixedWidth));
+                            ChunkedColumnInterface::ScanValueKind::FixedWidth,
+                            /*max_batch_rows=*/2));
     ASSERT_NE(cursor, nullptr);
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(&batch));
     EXPECT_TRUE(batch.values.empty());
+    // Validity-only scans do not materialize per-row view wrappers, so the
+    // materialized-data cap must not split their natural chunk batch.
     EXPECT_EQ(batch.size, kVectorArrayRows);
     EXPECT_TRUE(batch.validity.IsValid(0));
     EXPECT_FALSE(batch.validity.IsValid(1));
@@ -812,6 +815,63 @@ TEST(ChunkedColumnInterfaceTest, VarcharPrimaryKeyUsesStringViewScanCursor) {
         EXPECT_EQ(scanned[i], values[i]);
     }
     EXPECT_FALSE(cursor->Next(&batch));
+}
+
+TEST(ChunkedColumnInterfaceTest,
+     MaterializedViewDataScanStreamsBoundedBatches) {
+    const std::vector<std::string> values{
+        "alpha", "beta", "gamma", "delta", "epsilon"};
+    auto buffer = BuildStringChunkBuffer(values);
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        std::make_unique<StringChunk>(static_cast<int32_t>(values.size()),
+                                      buffer.data(),
+                                      buffer.size(),
+                                      /*nullable=*/false,
+                                      std::move(guard)));
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size())},
+        "bounded_varchar_scan",
+        std::move(chunks));
+    FieldMeta field_meta(FieldName("varchar"),
+                         FieldId(kTestFieldId),
+                         DataType::VARCHAR,
+                         /*nullable=*/false,
+                         std::nullopt);
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    auto column =
+        MakeChunkedColumnBase(DataType::VARCHAR, std::move(slot), field_meta);
+
+    constexpr int64_t kMaxBatchRows = 2;
+    auto cursor =
+        column->Scan(nullptr,
+                     ChunkedColumnInterface::ScanOptions::ForData(
+                         0,
+                         static_cast<int64_t>(values.size()),
+                         ChunkedColumnInterface::ScanProjection::Data,
+                         ChunkedColumnInterface::ScanValueKind::StringView,
+                         kMaxBatchRows));
+    ASSERT_NE(cursor, nullptr);
+
+    std::vector<std::string> scanned;
+    std::vector<int64_t> batch_starts;
+    std::vector<int64_t> batch_sizes;
+    ChunkedColumnInterface::ScanBatch batch;
+    while (cursor->Next(&batch)) {
+        batch_starts.emplace_back(batch.row_id_start);
+        batch_sizes.emplace_back(batch.size);
+        EXPECT_LE(batch.size, kMaxBatchRows);
+        const auto* batch_values = batch.values.data_as<std::string_view>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            scanned.emplace_back(batch_values[i]);
+        }
+    }
+
+    EXPECT_EQ(batch_starts, (std::vector<int64_t>{0, 2, 4}));
+    EXPECT_EQ(batch_sizes, (std::vector<int64_t>{2, 2, 1}));
+    EXPECT_EQ(scanned, values);
 }
 
 }  // namespace milvus

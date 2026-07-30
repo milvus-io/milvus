@@ -566,13 +566,20 @@ class SegmentExpr : public Expr {
             current_data_global_pos_,
             active_count_ - current_data_global_pos_,
             projection,
-            DataScanValueKind<T>());
+            DataScanValueKind<T>(),
+            batch_size_);
         data_scan_cursor_ = data_scan_column_->Scan(op_ctx_, options);
         if (data_scan_cursor_ == nullptr) {
             data_scan_skip_index_.reset();
             data_scan_column_.reset();
             return false;
         }
+        // Once this expression has bound a column scan, its stable cursor is
+        // the segment-global row position. Keep using that coordinate after a
+        // short-circuit reset: the saved chunk id/offset belong to the retained
+        // column generation and must not be interpreted through a concurrently
+        // published replacement before the next Scan() rebases them.
+        data_scan_mode_entered_ = true;
         // Commit the chunk cursor only after Scan() succeeds. Capability
         // probing must remain side-effect free for non-scan providers such as
         // growing segments.
@@ -754,8 +761,7 @@ class SegmentExpr : public Expr {
     int64_t
     GetNextBatchSize() {
         EnsureExecPathDetermined();
-        if (exec_path_ == ExprExecPath::JsonStats ||
-            data_scan_cursor_ != nullptr) {
+        if (exec_path_ == ExprExecPath::JsonStats || data_scan_mode_entered_) {
             return std::min(batch_size_,
                             active_count_ - current_data_global_pos_);
         }
@@ -1235,7 +1241,8 @@ class SegmentExpr : public Expr {
             scan_start,
             scan_length,
             ChunkedColumnInterface::ScanProjection::Data,
-            DataScanValueKind<T>());
+            DataScanValueKind<T>(),
+            batch_size_);
         auto cursor = column->Scan(op_ctx_, options);
         if (cursor == nullptr) {
             return -1;
@@ -3248,6 +3255,10 @@ class SegmentExpr : public Expr {
     int64_t current_index_chunk_pos_{0};
     int64_t size_per_chunk_{0};
     bool data_scan_initialized_{false};
+    // Remains true after ResetDataScanCursor(). It records that chunk-local
+    // coordinates may belong to an older published column generation, so batch
+    // sizing must stay on current_data_global_pos_ until the expression ends.
+    bool data_scan_mode_entered_{false};
     // ScanCursor implementations retain a raw column pointer, so the
     // expression must keep the published column generation alive for the
     // cursor's full lifetime. This matters for callers without a segment read

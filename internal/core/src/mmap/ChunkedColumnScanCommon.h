@@ -119,9 +119,10 @@ class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
 
-    // Return the next natural batch from the underlying source. ScanOptions
-    // does not carry an upper-layer batch-size hint; callers should consume
-    // the returned batch directly or keep their own position inside it.
+    // Return the next batch from the underlying source. Materializing cursors
+    // must honor ScanOptions::max_batch_rows so one Next() call cannot allocate
+    // view wrappers for an arbitrarily large storage chunk. Zero-copy cursors
+    // may still expose a larger natural source batch.
     virtual bool
     Next(ScanBatch* out) = 0;
 };
@@ -134,38 +135,50 @@ enum class ScanProjection {
 };
 
 struct ScanOptions {
+    static constexpr int64_t kDefaultMaxBatchRows = 8192;
+
     ScanOptions() = default;
 
     ScanOptions(int64_t start_offset,
                 int64_t length,
                 ScanProjection projection = ScanProjection::Data,
-                ScanValueKind value_kind = ScanValueKind::Default)
+                ScanValueKind value_kind = ScanValueKind::Default,
+                int64_t max_batch_rows = kDefaultMaxBatchRows)
         : start_offset(start_offset),
           length(length),
           projection(projection),
-          value_kind(value_kind) {
+          value_kind(value_kind),
+          max_batch_rows(max_batch_rows) {
     }
 
     static ScanOptions
     ForData(int64_t start_offset,
             int64_t length,
             ScanProjection projection = ScanProjection::Data,
-            ScanValueKind value_kind = ScanValueKind::Default) {
-        return ScanOptions(start_offset, length, projection, value_kind);
+            ScanValueKind value_kind = ScanValueKind::Default,
+            int64_t max_batch_rows = kDefaultMaxBatchRows) {
+        return ScanOptions(
+            start_offset, length, projection, value_kind, max_batch_rows);
     }
 
     static ScanOptions
     ForNoData(int64_t start_offset,
               int64_t length,
-              ScanValueKind value_kind = ScanValueKind::Default) {
-        return ForData(
-            start_offset, length, ScanProjection::NoData, value_kind);
+              ScanValueKind value_kind = ScanValueKind::Default,
+              int64_t max_batch_rows = kDefaultMaxBatchRows) {
+        return ForData(start_offset,
+                       length,
+                       ScanProjection::NoData,
+                       value_kind,
+                       max_batch_rows);
     }
 
     int64_t start_offset = 0;
     int64_t length = 0;
     ScanProjection projection = ScanProjection::Data;
     ScanValueKind value_kind = ScanValueKind::Default;
+    // Upper bound for batches that allocate per-row materialized views.
+    int64_t max_batch_rows = kDefaultMaxBatchRows;
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;
