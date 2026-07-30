@@ -81,6 +81,8 @@ constexpr const char* HYBRID_HIGH_CARDINALITY_INDEX_TYPE =
 // index config key
 constexpr const char* MMAP_FILE_PATH = "mmap_filepath";
 constexpr const char* ENABLE_MMAP = "enable_mmap";
+constexpr const char* ENABLE_MMAP_I2O_MAP = "enable_mmap_i2o_map";
+constexpr const char* ENABLE_MMAP_O2I_MAP = "enable_mmap_o2i_map";
 constexpr const char* WARMUP = "warmup";
 constexpr const char* INDEX_FILES = "index_files";
 constexpr const char* INDEX_SIZE = "index_size";
