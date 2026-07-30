@@ -18,9 +18,9 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"sort"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"

@@ -19,11 +19,11 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -278,7 +278,10 @@ func (m *snapshotExportManager) tryStartJob(jobID int64, maxConcurrent int) bool
 	workerCtx, cancel := context.WithCancel(m.ctx)
 	m.running[jobID] = cancel
 	m.wg.Add(1)
-	go m.runJob(workerCtx, jobID)
+	go func() {
+		defer cancel()
+		m.runJob(workerCtx, jobID)
+	}()
 	return true
 }
 
