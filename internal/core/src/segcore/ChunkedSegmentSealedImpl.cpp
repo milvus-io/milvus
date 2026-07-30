@@ -8219,7 +8219,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(
             schema_snapshot->get_storage_column_name(fid));
     }
-    const bool full_projection = *needed_columns == column_group->columns;
     auto reader =
         runtime != nullptr ? runtime->reader : CaptureReaderSnapshot();
     AssertInfo(
@@ -8268,8 +8267,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
+            column_group->columns,
             *needed_columns,
-            full_projection,
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
@@ -8371,8 +8370,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(
             schema_snapshot->get_storage_column_name(fid));
     }
-    const bool full_projection = *needed_columns == column_group->columns;
-
     auto reader = committer.runtime()->reader;
     AssertInfo(
         reader != nullptr,
@@ -8414,8 +8411,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
+            column_group->columns,
             *needed_columns,
-            full_projection,
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
