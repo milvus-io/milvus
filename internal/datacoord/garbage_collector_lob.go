@@ -256,10 +256,22 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 	return usedFiles, nil
 }
 
+// hasPendingManifest reports whether the segment's manifest path is a target
+// path that has been recorded in meta but not yet written to object storage.
+//
+// createRestoreJob pre-registers every copy target with its derived V3 manifest
+// path while the segment is still Importing, deliberately: persisting the path
+// up front is what lets dropped-segment GC remove partially copied data if the
+// DataNode restarts before reporting a result. The object itself only appears
+// once the copy task has replicated it.
+func hasPendingManifest(segment *SegmentInfo) bool {
+	return segment.GetIsImporting() || segment.GetState() == commonpb.SegmentState_Importing
+}
+
 // collectLOBFilesFromSegment extracts LOB file paths from a segment's manifest
 // and adds them to the usedFiles set.
-// Returns error if the manifest cannot be read, so the caller can abort GC
-// and avoid deleting files that may still be referenced.
+// Returns error if a committed segment's manifest cannot be read, so the caller
+// can abort GC and avoid deleting files that may still be referenced.
 func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segment *SegmentInfo, usedFiles typeutil.Set[string]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -271,6 +283,18 @@ func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segm
 
 	lobFiles, err := lobCtx.cache.Get(ctx, manifestPath, lobCtx.storageConfig)
 	if err != nil {
+		// A still-importing segment's manifest is expected to be missing until
+		// its copy lands. Aborting the round for that would let a single pending
+		// V3 restore stall LOB reclamation cluster-wide for as long as it runs,
+		// so contribute no files — exactly the state this segment had before the
+		// target path was pre-registered. Freshly copied objects stay protected
+		// by GCLOBSafetyWindow rather than by this enumeration.
+		if hasPendingManifest(segment) {
+			mlog.RatedInfo(ctx, 60, "skip LOB collection for segment whose manifest is not materialized yet",
+				mlog.Int64("segmentID", segment.GetID()),
+				mlog.String("manifestPath", manifestPath))
+			return nil
+		}
 		return merr.WrapErrServiceInternalErr(err, "failed to get LOB files from manifest for segment %d (path=%s)", segment.GetID(), manifestPath)
 	}
 
