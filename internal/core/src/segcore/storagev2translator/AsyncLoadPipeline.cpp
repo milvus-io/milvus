@@ -78,17 +78,6 @@ class PriorityThreadPoolExecutor : public folly::Executor {
 };
 
 size_t
-LoadingBudgetBytes(const CellSpec& cell) {
-    auto bytes = cell.loading_overhead_size > 0 ? cell.loading_overhead_size
-                                                : cell.memory_size;
-    AssertInfo(bytes > 0,
-               "[StorageV2] async cell {} has invalid loading budget {}",
-               cell.cid,
-               bytes);
-    return static_cast<size_t>(bytes);
-}
-
-size_t
 SaturatingAdd(size_t left, size_t right) {
     if (right > std::numeric_limits<size_t>::max() - left) {
         return std::numeric_limits<size_t>::max();
@@ -378,7 +367,7 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
     int64_t current_end = 0;
     size_t current_file = 0;
 
-    auto flush = [&]() {
+    auto append_window = [&]() {
         if (!current.cells.empty()) {
             windows.push_back(std::move(current));
             current = {};
@@ -398,7 +387,7 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
                     cell.local_rg_offset != current_end || would_exceed;
         }
         if (split) {
-            flush();
+            append_window();
         }
         if (current.cells.empty()) {
             current_file = cell.file_idx;
@@ -406,8 +395,11 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
 
         current.cells.push_back(cell);
         current.request_indices.push_back(indexed.request_index);
-        current.budget_bytes =
-            SaturatingAdd(current.budget_bytes, LoadingBudgetBytes(cell));
+        auto overhead_bytes = cell.loading_overhead_size > 0
+                                  ? cell.loading_overhead_size
+                                  : cell.memory_size;
+        current.budget_bytes = SaturatingAdd(
+            current.budget_bytes, static_cast<size_t>(overhead_bytes));
         for (int64_t i = 0; i < cell.rg_count; ++i) {
             current.chunk_indices.push_back(cell.local_rg_offset + i);
         }
@@ -418,7 +410,7 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
                 : current_memory_bytes + cell.memory_size;
         current_end = cell.local_rg_offset + cell.rg_count;
     }
-    flush();
+    append_window();
     return windows;
 }
 

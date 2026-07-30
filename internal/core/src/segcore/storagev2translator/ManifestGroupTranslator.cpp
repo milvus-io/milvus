@@ -565,7 +565,7 @@ ManifestGroupTranslator::get_cells(
     }
 
     if (enable_async_load_) {
-        return get_cells_async(ctx, std::move(cell_specs));
+        return get_cells_via_async_pipeline(ctx, std::move(cell_specs));
     }
     return get_cells_legacy(ctx, cids, std::move(cell_specs));
 }
@@ -653,7 +653,7 @@ ManifestGroupTranslator::get_cells_legacy(
 }
 
 std::vector<ManifestGroupTranslator::CellResult>
-ManifestGroupTranslator::get_cells_async(
+ManifestGroupTranslator::get_cells_via_async_pipeline(
     milvus::OpContext* ctx, std::vector<milvus::segcore::CellSpec> cell_specs) {
     AsyncLoadPipelineOptions options{
         .segment_id = segment_id_,
