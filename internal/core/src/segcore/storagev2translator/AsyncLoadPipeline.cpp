@@ -25,11 +25,12 @@
 #include "common/EasyAssert.h"
 #include "folly/coro/Collect.h"
 #include "folly/coro/FutureUtil.h"
-#include "futures/Executor.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/ThreadPools.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -48,32 +49,14 @@ using WindowLoadResult = std::vector<WindowCellResult>;
 using ChunkReadResult =
     arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>;
 
-class PriorityThreadPoolExecutor : public folly::Executor {
+class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
  public:
-    void
-    add(folly::Func func) override {
-        Submit(milvus::ThreadPoolPriority::HIGH, std::move(func));
-    }
-
-    void
-    addWithPriority(folly::Func func, int8_t priority) override {
-        auto pool_priority = priority >= futures::ExecutePriority::LOW
-                                 ? milvus::ThreadPoolPriority::LOW
-                                 : milvus::ThreadPoolPriority::HIGH;
-        Submit(pool_priority, std::move(func));
-    }
-
-    uint8_t
-    getNumPriorities() const override {
-        return 2;
-    }
-
- private:
-    static void
-    Submit(milvus::ThreadPoolPriority priority, folly::Func func) {
-        auto task = std::make_shared<folly::Func>(std::move(func));
-        ThreadPools::GetThreadPool(priority).Submit(
-            [task = std::move(task)]() mutable { (*task)(); });
+    PriorityThreadPoolExecutor()
+        : folly::CPUThreadPoolExecutor(
+              std::max(1, milvus::CPU_NUM),
+              folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(2),
+              std::make_shared<folly::NamedThreadFactory>(
+                  "MILVUS_ASYNC_LOAD_")) {
     }
 };
 
@@ -88,8 +71,8 @@ SaturatingAdd(size_t left, size_t right) {
 int8_t
 ExecutorPriority(milvus::proto::common::LoadPriority priority) {
     return priority == milvus::proto::common::LoadPriority::LOW
-               ? futures::ExecutePriority::LOW
-               : futures::ExecutePriority::HIGH;
+               ? folly::Executor::LO_PRI
+               : folly::Executor::HI_PRI;
 }
 
 template <typename FutureLike>
