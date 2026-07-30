@@ -319,8 +319,8 @@ type commonConfig struct {
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
-	VisibilityFilterEnabled   ParamItem `refreshable:"false"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
+	VisibilityFilterEnabled   ParamItem `refreshable:"false"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
@@ -1201,15 +1201,6 @@ The default value is 1, which is enough for most cases.`,
 	}
 	p.TraceLogMode.Init(base.mgr)
 
-	p.VisibilityFilterEnabled = ParamItem{
-		Key:          "common.visibilityFilterEnabled",
-		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc:          "whether to apply row visibility filtering (timestamp, delete, and TTL) on querynode. When disabled, all rows are returned regardless of insert/delete timestamps.",
-		Export:       true,
-	}
-	p.VisibilityFilterEnabled.Init(base.mgr)
-
 	p.BloomFilterEnabled = ParamItem{
 		Key:          "common.bloomFilterEnabled",
 		Version:      "3.0.0",
@@ -1218,6 +1209,16 @@ The default value is 1, which is enough for most cases.`,
 		Export:       true,
 	}
 	p.BloomFilterEnabled.Init(base.mgr)
+
+	p.VisibilityFilterEnabled = ParamItem{
+		Key:          "common.visibilityFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: "Deprecated: row visibility filtering (timestamp, delete, and TTL) is always enforced and can no longer be disabled. " +
+			"The key is kept so existing configurations stay recognized; setting it to false fails querynode startup with an explicit error.",
+		Export: false,
+	}
+	p.VisibilityFilterEnabled.Init(base.mgr)
 
 	p.BloomFilterSize = ParamItem{
 		Key:          "common.bloomFilterSize",

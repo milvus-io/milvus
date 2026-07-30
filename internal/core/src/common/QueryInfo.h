@@ -65,6 +65,22 @@ struct SearchInfo {
     bool global_refine_enable_{false};
     float search_topk_ratio_{0.0f};
     float refine_topk_ratio_{0.0f};
+    // Number of rows visible to a growing-segment search, in logical row space.
+    // Growing plans decide it ONCE from get_active_count(timestamp) and carry
+    // it down so no kernel re-derives it. Sealed plans leave it unset: their
+    // indexes are immutable and retain the empty-bitset fast path.
+    //
+    // Re-deriving it is not safe on a growing segment: a concurrent insert
+    // publishes rows into the column storage (and into a nullable field's
+    // offset mapping) before ack_responder_ advances, so a later read sees
+    // rows this search must not touch. Reduce then validates offsets against
+    // the acknowledged count and rejects them ("invalid offset ... rows num
+    // ..."), or, if the ack catches up first, silently returns rows newer
+    // than the query's MVCC timestamp.
+    //
+    // -1 means "not supplied" (sealed searches and direct callers). Growing
+    // kernels fall back to computing it themselves for direct calls.
+    int64_t active_count_{-1};
 
     bool
     element_level() const {

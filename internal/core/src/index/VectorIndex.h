@@ -31,6 +31,8 @@
 #include "common/Types.h"
 #include "common/BitsetView.h"
 #include "common/OffsetMapping.h"
+#include "common/GrowingOffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
