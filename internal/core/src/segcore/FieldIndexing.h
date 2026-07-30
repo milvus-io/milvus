@@ -21,6 +21,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 #include "IndexConfigGenerator.h"
 #include "cachinglayer/CacheSlot.h"
@@ -31,6 +32,7 @@
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "glog/logging.h"
 #include "index/VectorIndex.h"
@@ -349,6 +351,56 @@ class VectorFieldIndexing : public FieldIndexing {
  private:
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
+
+    // Copy dense physical rows [from, to) into contiguous memory; when the
+    // range falls entirely within a single chunk, returns the chunk pointer
+    // directly and leaves staging unallocated (zero-copy fast path).
+    const void*
+    CopyDenseRows(const VectorBase* vec,
+                  int64_t from,
+                  int64_t to,
+                  size_t vec_length,
+                  std::unique_ptr<char[]>& staging) const;
+
+    // Sparse counterpart of CopyDenseRows: copies physical rows [from, to)
+    // element-wise; single-chunk ranges are returned without copying.
+    const void*
+    CopySparseRows(const VectorBase* vec,
+                   int64_t from,
+                   int64_t to,
+                   std::vector<knowhere::sparse::SparseRow<SparseValueType>>&
+                       staging) const;
+
+    // First build: BuildWithDataset over physical rows [0, get_build_threshold()),
+    // UpdateValidData for mapping storage, then mark built_ = true and advance
+    // index_cur_. Failures are thrown, not caught here — the caller decides the
+    // failure/recovery strategy.
+    void
+    BuildFirstIndexDense(const VectorBase* field_raw_data);
+    // Same as BuildFirstIndexDense, for sparse float vectors. new_data_dim is
+    // the dimension of the data that triggered this build (see
+    // AppendSegmentIndexSparse), used for the GenDataSet call exactly as the
+    // pre-refactor code did.
+    void
+    BuildFirstIndexSparse(const VectorBase* field_raw_data,
+                          int64_t new_data_dim);
+
+    // Append data to an already-built index. Moved verbatim from the former
+    // "add" branch of AppendSegmentIndexDense/Sparse, including the
+    // non-nullable/nullable split, sync_with_index_.store(true), and the
+    // internal try/catch + recreate_index recovery.
+    void
+    AddBatchDense(int64_t reserved_offset,
+                  int64_t size,
+                  const VectorBase* field_raw_data,
+                  const void* data_source);
+    void
+    AddBatchSparse(int64_t reserved_offset,
+                   int64_t size,
+                   int64_t new_data_dim,
+                   const VectorBase* field_raw_data,
+                   const void* data_source);
+
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
