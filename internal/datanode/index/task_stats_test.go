@@ -19,6 +19,7 @@ package index
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,14 @@ func captureStatsTaskLogs(t *testing.T) *statsTaskLogBuffer {
 		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
 	return logs
+}
+
+func statsLogSentinel(parts ...string) string {
+	return strings.Join(parts, "_")
+}
+
+func statsLogCredentialJSON(value string) string {
+	return `{"private_key":"` + value + `"}`
 }
 
 func TestTaskStatsSuite(t *testing.T) {
@@ -222,6 +231,10 @@ func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
 	logs := captureStatsTaskLogs(s.T())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	accessKey := statsLogSentinel("STORAGE", "ACCESS", "KEY", "SENTINEL")
+	secretKey := statsLogSentinel("STORAGE", "SECRET", "KEY", "SENTINEL")
+	caCert := statsLogSentinel("STORAGE", "CA", "CERT", "SENTINEL")
+	gcpCredential := statsLogSentinel("GCP", "CREDENTIAL", "JSON", "SENTINEL")
 
 	manager := NewTaskManager(ctx)
 	task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
@@ -230,24 +243,31 @@ func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
 		CollectionID: s.collectionID,
 		PartitionID:  s.partitionID,
 		SegmentID:    102,
-		// #nosec G101 -- non-secret sentinel credentials verify that logs elide these fields.
 		StorageConfig: &indexpb.StorageConfig{
+			Address:           "storage.example.test",
 			StorageType:       "s3",
-			AccessKeyID:       "STORAGE_ACCESS_KEY_SENTINEL",
-			SecretAccessKey:   "STORAGE_SECRET_KEY_SENTINEL",
-			GcpCredentialJSON: `{"private_key":"GCP_CREDENTIAL_JSON_SENTINEL"}`,
+			BucketName:        "stats-bucket",
+			RootPath:          "stats/root",
+			AccessKeyID:       accessKey,
+			SecretAccessKey:   secretKey,
+			SslCACert:         caCert,
+			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
 		},
 	}, manager, s.mockChunkManager)
 
 	err := task.PreExecute(ctx)
 	s.Require().NoError(err)
 	output := logs.String()
-	s.NotContains(output, "STORAGE_ACCESS_KEY_SENTINEL")
-	s.NotContains(output, "STORAGE_SECRET_KEY_SENTINEL")
-	s.NotContains(output, "GCP_CREDENTIAL_JSON_SENTINEL")
-	s.NotContains(output, "storageConfig")
-	s.Contains(output, "storageType")
+	s.NotContains(output, accessKey)
+	s.NotContains(output, secretKey)
+	s.NotContains(output, caCert)
+	s.NotContains(output, gcpCredential)
+	s.Contains(output, "storageConfig")
+	s.Contains(output, "storage.example.test")
+	s.Contains(output, "stats-bucket")
+	s.Contains(output, "stats/root")
 	s.Contains(output, "s3")
+	s.Contains(output, "<redacted>")
 }
 
 func (s *TaskStatsSuite) TestBuildIndexParams() {

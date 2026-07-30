@@ -143,6 +143,25 @@ func (st *statsTask) IsVectorIndex() bool {
 	return false
 }
 
+func redactStorageConfigForLog(config *indexpb.StorageConfig) *indexpb.StorageConfig {
+	if config == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(config).(*indexpb.StorageConfig)
+	for _, secret := range []*string{
+		&redacted.AccessKeyID,
+		&redacted.SecretAccessKey,
+		&redacted.SslCACert,
+		&redacted.GcpCredentialJSON,
+	} {
+		if *secret != "" {
+			*secret = "<redacted>"
+		}
+	}
+	return redacted
+}
+
 func (st *statsTask) PreExecute(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-PreExecute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()
@@ -182,7 +201,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		mlog.FieldSegmentID(st.req.GetSegmentID()),
 		mlog.Int64("storageVersion", st.req.GetStorageVersion()),
 		mlog.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
-		mlog.String("storageType", st.req.GetStorageConfig().GetStorageType()),
+		mlog.Any("storageConfig", redactStorageConfigForLog(st.req.GetStorageConfig())),
 	)
 	return nil
 }

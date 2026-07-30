@@ -160,6 +160,80 @@ func sortedKeys(m map[string]bool) []string {
 	return keys
 }
 
+func redactErrorMessage(err error, values ...string) string {
+	message := err.Error()
+	redactions := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value != "" {
+			redactions[value] = struct{}{}
+			redactions[strings.ToLower(value)] = struct{}{}
+		}
+	}
+
+	ordered := make([]string, 0, len(redactions))
+	for value := range redactions {
+		ordered = append(ordered, value)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return len(ordered[i]) > len(ordered[j])
+	})
+	for _, value := range ordered {
+		message = strings.ReplaceAll(message, strconv.Quote(value), strconv.Quote("<redacted>"))
+		if len(value) >= 8 {
+			message = strings.ReplaceAll(message, value, "<redacted>")
+		}
+	}
+	return message
+}
+
+func externalSourceErrorValues(source string) []string {
+	values := []string{source}
+	u, _ := url.Parse(source)
+	if u == nil {
+		return values
+	}
+	values = append(values, u.Scheme)
+	if u.User != nil {
+		values = append(values, u.User.Username())
+		if password, ok := u.User.Password(); ok {
+			values = append(values, password)
+		}
+	}
+	return values
+}
+
+func externalSpecErrorValues(spec string) []string {
+	values := []string{spec}
+	decoder := json.NewDecoder(strings.NewReader(spec))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return values
+	}
+
+	var collect func(any)
+	collect = func(value any) {
+		switch typed := value.(type) {
+		case string:
+			values = append(values, typed)
+		case json.Number:
+			values = append(values, typed.String())
+		case bool:
+			values = append(values, strconv.FormatBool(typed))
+		case []any:
+			for _, item := range typed {
+				collect(item)
+			}
+		case map[string]any:
+			for _, item := range typed {
+				collect(item)
+			}
+		}
+	}
+	collect(decoded)
+	return values
+}
+
 // ValidateExternalSource requires a fully-qualified URI: non-empty,
 // allowlisted scheme (SSRF guard), non-empty host, no embedded userinfo.
 // Accepts two URI shapes — Milvus form (host=endpoint, path[0]=bucket) and
@@ -173,7 +247,7 @@ func ValidateExternalSource(source string) error {
 	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("external_source is not a valid URL")
+		return merr.WrapErrParameterInvalidMsg("external_source is not a valid URL: %s", redactErrorMessage(err, source))
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "" {
@@ -197,14 +271,17 @@ func ValidateExternalSource(source string) error {
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
 func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
-		return merr.WrapErrParameterInvalidMsg("external_source is invalid")
+		return merr.WrapErrParameterInvalidMsg("external_source is invalid: %s",
+			redactErrorMessage(err, externalSourceErrorValues(externalSource)...))
 	}
 	spec, err := ParseExternalSpec(externalSpec)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("external_spec is invalid")
+		return merr.WrapErrParameterInvalidMsg("external_spec is invalid: %s",
+			redactErrorMessage(err, externalSpecErrorValues(externalSpec)...))
 	}
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
-		return merr.WrapErrParameterInvalidMsg("external_spec is invalid")
+		return merr.WrapErrParameterInvalidMsg("external_spec is invalid: %s",
+			redactErrorMessage(err, externalSpecErrorValues(externalSpec)...))
 	}
 	return nil
 }

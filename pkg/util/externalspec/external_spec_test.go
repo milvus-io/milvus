@@ -203,6 +203,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		assert.NotContains(t, err.Error(), "SOURCE_ACCESS_ERROR_SENTINEL")
 		assert.NotContains(t, err.Error(), "SOURCE_SECRET_ERROR_SENTINEL")
 		assert.Contains(t, err.Error(), "external_source is invalid")
+		assert.Contains(t, err.Error(), "must not embed credentials")
 	})
 
 	t.Run("malformed_source_redacted", func(t *testing.T) {
@@ -210,12 +211,14 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "SOURCE_PARSE_ERROR_SENTINEL")
 		assert.Contains(t, err.Error(), "external_source is invalid")
+		assert.Contains(t, err.Error(), "not a valid URL")
 	})
 
 	t.Run("invalid_spec_redacts", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{bad json`)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
+		assert.Contains(t, err.Error(), "invalid external spec JSON")
 	})
 
 	t.Run("invalid_format_value_redacted", func(t *testing.T) {
@@ -223,19 +226,25 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "FORMAT_VALUE_SECRET_SENTINEL")
 		assert.Contains(t, err.Error(), "external_spec is invalid")
+		assert.Contains(t, err.Error(), "unsupported format")
+		assert.Contains(t, err.Error(), "<redacted>")
 	})
 
 	t.Run("invalid_extfs_value_redacted", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_secret_sentinel"}}`)
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"CLOUD_PROVIDER_SECRET_SENTINEL"}}`)
 		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "CLOUD_PROVIDER_SECRET_SENTINEL")
 		assert.NotContains(t, err.Error(), "cloud_provider_secret_sentinel")
 		assert.Contains(t, err.Error(), "external_spec is invalid")
+		assert.Contains(t, err.Error(), "not supported")
+		assert.Contains(t, err.Error(), "<redacted>")
 	})
 
 	t.Run("missing_credentials_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
+		assert.Contains(t, err.Error(), "cloud_provider is required")
 	})
 
 	t.Run("missing_region_for_aws_scheme_rejected", func(t *testing.T) {

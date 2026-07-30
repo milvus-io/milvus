@@ -1166,6 +1166,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	assert.NotContains(t, err.Error(), rawToken)
 	assert.NotContains(t, err.Error(), encodedToken)
 	output := logs.String()
+	assert.Contains(t, output, "fail to verify apikey")
 	assert.NotContains(t, output, rawToken)
 	assert.NotContains(t, output, encodedToken)
 }
