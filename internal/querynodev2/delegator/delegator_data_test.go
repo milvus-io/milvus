@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -307,48 +308,66 @@ func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
 	s.Require().NoError(function.GetManager().Update(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
 }
 
-func (s *DelegatorDataSuite) TestProcessInsert() {
-	validInsertData := func() *InsertData {
-		return &InsertData{
-			RowIDs:        []int64{0, 1},
-			PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-			Timestamps:    []uint64{10, 10},
-			PartitionID:   500,
-			StartPosition: &msgpb.MsgPosition{},
-			InsertRecord: &segcorepb.InsertRecord{
-				FieldsData: []*schemapb.FieldData{
-					{
-						Type:      schemapb.DataType_Int64,
-						FieldName: "id",
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{
-										Data: []int64{1, 2},
-									},
+func validInsertData() *InsertData {
+	return &InsertData{
+		RowIDs:        []int64{0, 1},
+		PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+		Timestamps:    []uint64{10, 10},
+		PartitionID:   500,
+		StartPosition: &msgpb.MsgPosition{},
+		InsertRecord: &segcorepb.InsertRecord{
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "id",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{
+									Data: []int64{1, 2},
 								},
 							},
 						},
-						FieldId: 100,
 					},
-					{
-						Type:      schemapb.DataType_FloatVector,
-						FieldName: "vector",
-						Field: &schemapb.FieldData_Vectors{
-							Vectors: &schemapb.VectorField{
-								Dim: 128,
-								Data: &schemapb.VectorField_FloatVector{
-									FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
-								},
-							},
-						},
-						FieldId: 101,
-					},
+					FieldId: 100,
 				},
-				NumRows: 2,
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "vector",
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 128,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
+							},
+						},
+					},
+					FieldId: 101,
+				},
 			},
-		}
+			NumRows: 2,
+		},
 	}
+}
+
+type processInsertResult struct {
+	panicValue any
+}
+
+func processInsertAsync(sd *shardDelegator, insertRecords map[int64]*InsertData) <-chan processInsertResult {
+	done := make(chan processInsertResult, 1)
+	go func() {
+		var result processInsertResult
+		defer func() {
+			result.panicValue = recover()
+			done <- result
+		}()
+		sd.ProcessInsert(insertRecords)
+	}()
+	return done
+}
+
+func (s *DelegatorDataSuite) TestProcessInsert() {
 
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
@@ -380,37 +399,285 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 	})
 
 	s.Run("insert_bad_data", func() {
+		badInsertData := validInsertData()
+		badInsertData.InsertRecord.FieldsData = badInsertData.InsertRecord.FieldsData[:1]
 		s.Panics(func() {
 			s.delegator.ProcessInsert(map[int64]*InsertData{
-				100: {
-					RowIDs:        []int64{0, 1},
-					PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-					Timestamps:    []uint64{10, 10},
-					PartitionID:   500,
-					StartPosition: &msgpb.MsgPosition{},
-					InsertRecord: &segcorepb.InsertRecord{
-						FieldsData: []*schemapb.FieldData{
-							{
-								Type:      schemapb.DataType_Int64,
-								FieldName: "id",
-								Field: &schemapb.FieldData_Scalars{
-									Scalars: &schemapb.ScalarField{
-										Data: &schemapb.ScalarField_LongData{
-											LongData: &schemapb.LongArray{
-												Data: []int64{1, 2},
-											},
-										},
-									},
-								},
-								FieldId: 100,
-							},
-						},
-						NumRows: 2,
-					},
-				},
+				100: badInsertData,
 			})
 		})
 	})
+}
+
+func (s *DelegatorDataSuite) TestProcessInsertRunsDistinctSegmentsConcurrently() {
+	const (
+		firstSegmentID  = int64(101)
+		secondSegmentID = int64(102)
+	)
+
+	entered := make(chan int64, 2)
+	release := make(chan struct{})
+	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		entered <- segment.ID()
+		<-release
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+
+	var notifyCount atomic.Int32
+	notifiedChannels := make(chan string, 2)
+	s.delegator.leaderViewUpdatedCallback = func(channel string) {
+		notifiedChannels <- channel
+		notifyCount.Add(1)
+	}
+	defer func() { s.delegator.leaderViewUpdatedCallback = nil }()
+
+	done := processInsertAsync(s.delegator, map[int64]*InsertData{
+		firstSegmentID:  validInsertData(),
+		secondSegmentID: validInsertData(),
+	})
+
+	enteredIDs := make([]int64, 0, 2)
+	for len(enteredIDs) < 2 {
+		select {
+		case segmentID := <-entered:
+			enteredIDs = append(enteredIDs, segmentID)
+		case <-time.After(500 * time.Millisecond):
+			close(release)
+			result := <-done
+			s.Nil(result.panicValue)
+			s.Fail("distinct segment inserts did not overlap")
+			return
+		}
+	}
+	close(release)
+
+	select {
+	case result := <-done:
+		s.Nil(result.panicValue)
+	case <-time.After(5 * time.Second):
+		s.FailNow("ProcessInsert did not finish after releasing inserts")
+	}
+	s.ElementsMatch([]int64{firstSegmentID, secondSegmentID}, enteredIDs)
+	s.NotNil(s.manager.Segment.GetGrowing(firstSegmentID))
+	s.NotNil(s.manager.Segment.GetGrowing(secondSegmentID))
+	s.Equal(int32(1), notifyCount.Load())
+	s.Equal(s.vchannelName, <-notifiedChannels)
+}
+
+func (s *DelegatorDataSuite) TestProcessInsertMixedSkipAndSuccess() {
+	const (
+		excludedSegmentID = int64(201)
+		releasedSegmentID = int64(202)
+		successSegmentID  = int64(203)
+	)
+	s.delegator.AddExcludedSegments(map[int64]uint64{excludedSegmentID: 1})
+
+	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		if segment.ID() == releasedSegmentID {
+			return merr.WrapErrSegmentNotLoaded(releasedSegmentID, "test segment released")
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+
+	s.NotPanics(func() {
+		s.delegator.ProcessInsert(map[int64]*InsertData{
+			excludedSegmentID: validInsertData(),
+			releasedSegmentID: validInsertData(),
+			successSegmentID:  validInsertData(),
+		})
+	})
+	s.Nil(s.manager.Segment.GetGrowing(excludedSegmentID))
+	s.Nil(s.manager.Segment.GetGrowing(releasedSegmentID))
+	s.NotNil(s.manager.Segment.GetGrowing(successSegmentID))
+}
+
+func (s *DelegatorDataSuite) TestProcessInsertWaitsForAllTasksBeforePanickingOnError() {
+	const (
+		errorSegmentID   = int64(301)
+		blockedSegmentID = int64(302)
+	)
+
+	unexpectedErr := errors.New("unexpected insert error")
+	errorEntered := make(chan struct{})
+	blockedEntered := make(chan struct{})
+	releaseBlocked := make(chan struct{})
+	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		switch segment.ID() {
+		case errorSegmentID:
+			close(errorEntered)
+			return unexpectedErr
+		case blockedSegmentID:
+			close(blockedEntered)
+			<-releaseBlocked
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	var notifyCount atomic.Int32
+	s.delegator.leaderViewUpdatedCallback = func(string) { notifyCount.Add(1) }
+	defer func() { s.delegator.leaderViewUpdatedCallback = nil }()
+
+	done := processInsertAsync(s.delegator, map[int64]*InsertData{
+		errorSegmentID:   validInsertData(),
+		blockedSegmentID: validInsertData(),
+	})
+
+	waitSignal := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		case <-time.After(500 * time.Millisecond):
+			return false
+		}
+	}
+	errorStarted := waitSignal(errorEntered)
+	blockedStarted := waitSignal(blockedEntered)
+	panickedBeforeRelease := false
+	if errorStarted && blockedStarted {
+		select {
+		case <-done:
+			panickedBeforeRelease = true
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	close(releaseBlocked)
+
+	var result processInsertResult
+	select {
+	case result = <-done:
+	case <-time.After(5 * time.Second):
+		s.FailNow("ProcessInsert did not finish after releasing blocked insert")
+	}
+	s.True(errorStarted, "erroring insert did not start while the other insert was blocked")
+	s.True(blockedStarted, "blocked insert did not start while the erroring insert ran")
+	s.False(panickedBeforeRelease, "ProcessInsert panicked before all segment tasks completed")
+	s.Same(unexpectedErr, result.panicValue)
+	s.Equal(int32(1), notifyCount.Load(), "leader view callback must run before propagating the batch error")
+}
+
+func (s *DelegatorDataSuite) TestProcessInsertPreservesWorkerPanicValueAfterAllTasks() {
+	const (
+		panicSegmentID   = int64(401)
+		blockedSegmentID = int64(402)
+	)
+
+	panicValue := &struct{ name string }{name: "unique worker panic"}
+	panicEntered := make(chan struct{})
+	blockedEntered := make(chan struct{})
+	releaseBlocked := make(chan struct{})
+	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		switch segment.ID() {
+		case panicSegmentID:
+			close(panicEntered)
+			panic(panicValue)
+		case blockedSegmentID:
+			close(blockedEntered)
+			<-releaseBlocked
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	var notifyCount atomic.Int32
+	s.delegator.leaderViewUpdatedCallback = func(string) { notifyCount.Add(1) }
+	defer func() { s.delegator.leaderViewUpdatedCallback = nil }()
+
+	done := processInsertAsync(s.delegator, map[int64]*InsertData{
+		panicSegmentID:   validInsertData(),
+		blockedSegmentID: validInsertData(),
+	})
+
+	waitSignal := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		case <-time.After(500 * time.Millisecond):
+			return false
+		}
+	}
+	panicStarted := waitSignal(panicEntered)
+	blockedStarted := waitSignal(blockedEntered)
+	panickedBeforeRelease := false
+	if panicStarted && blockedStarted {
+		select {
+		case <-done:
+			panickedBeforeRelease = true
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	close(releaseBlocked)
+
+	var result processInsertResult
+	select {
+	case result = <-done:
+	case <-time.After(5 * time.Second):
+		s.FailNow("ProcessInsert did not finish after releasing blocked insert")
+	}
+	s.True(panicStarted, "panicking insert did not start while the other insert was blocked")
+	s.True(blockedStarted, "blocked insert did not start while the panicking insert ran")
+	s.False(panickedBeforeRelease, "ProcessInsert propagated worker panic before all tasks completed")
+	s.Same(panicValue, result.panicValue)
+	s.Equal(int32(1), notifyCount.Load(), "leader view callback must run before propagating the worker panic")
+}
+
+func (s *DelegatorDataSuite) TestProcessInsertRegistersParallelBM25Stats() {
+	s.genCollectionWithFunction()
+	const (
+		firstSegmentID  = int64(501)
+		secondSegmentID = int64(502)
+		bm25FieldID     = int64(101)
+	)
+
+	firstStats := storage.NewBM25Stats()
+	firstStats.Append(map[uint32]float32{1: 1}, map[uint32]float32{2: 1})
+	secondStats := storage.NewBM25Stats()
+	secondStats.Append(map[uint32]float32{3: 1}, map[uint32]float32{4: 1}, map[uint32]float32{5: 1})
+	firstInsert := validInsertData()
+	firstInsert.BM25Stats = map[int64]*storage.BM25Stats{bm25FieldID: firstStats}
+	secondInsert := validInsertData()
+	secondInsert.BM25Stats = map[int64]*storage.BM25Stats{bm25FieldID: secondStats}
+
+	entered := make(chan int64, 2)
+	release := make(chan struct{})
+	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		entered <- segment.ID()
+		<-release
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+
+	done := processInsertAsync(s.delegator, map[int64]*InsertData{
+		firstSegmentID:  firstInsert,
+		secondSegmentID: secondInsert,
+	})
+	enteredIDs := make([]int64, 0, 2)
+	for len(enteredIDs) < 2 {
+		select {
+		case segmentID := <-entered:
+			enteredIDs = append(enteredIDs, segmentID)
+		case <-time.After(500 * time.Millisecond):
+			close(release)
+			<-done
+			s.Fail("BM25 segment inserts did not overlap")
+			return
+		}
+	}
+	close(release)
+
+	select {
+	case result := <-done:
+		s.Nil(result.panicValue)
+	case <-time.After(5 * time.Second):
+		s.FailNow("ProcessInsert did not finish BM25 inserts")
+	}
+	s.ElementsMatch([]int64{firstSegmentID, secondSegmentID}, enteredIDs)
+	s.NotNil(s.manager.Segment.GetGrowing(firstSegmentID))
+	s.NotNil(s.manager.Segment.GetGrowing(secondSegmentID))
+	oracle := s.getIDFOracleForTest()
+	fieldStats, err := oracle.current.GetStats(bm25FieldID)
+	s.Require().NoError(err)
+	s.Equal(int64(5), fieldStats.NumRow())
 }
 
 func (s *DelegatorDataSuite) TestProcessDelete() {
