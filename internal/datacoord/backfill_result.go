@@ -190,10 +190,9 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 		}
 		out[fid] = &datapb.FieldBinlog{
 			FieldID: fid,
-			// ChildFields carries the real field IDs that index creation
-			// (getSegmentBinlogFields) and backfill-compaction detection
-			// (getMissingFunctions) rely on. Without it the new group is
-			// invisible to both paths; it also lets the operator's strip
+			// ChildFields carries the real field IDs that backfill-compaction
+			// detection (getMissingFunctions) relies on. Without it the new
+			// group is invisible to that path; it also lets the operator's strip
 			// logic reference-count the field out of the old groups.
 			// The backfill invariant guarantees len(g.FieldIDs) == 1.
 			ChildFields: []int64{fid},
