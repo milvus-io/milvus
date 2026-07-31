@@ -46,6 +46,7 @@ const (
 	FieldBookID    = "book_id"
 	FieldBookIntro = "book_intro"
 	FieldVarchar   = "varchar_field"
+	FieldNarrowInt = "narrow_int"
 )
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
@@ -147,6 +148,16 @@ func generateCollectionSchema(primaryDataType schemapb.DataType, autoID bool, is
 		Fields:             fields,
 		EnableDynamicField: isDynamic,
 	}
+}
+
+func generateNarrowIntegerCollectionSchema(dataType schemapb.DataType) *schemapb.CollectionSchema {
+	schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 100,
+		Name:     FieldNarrowInt,
+		DataType: dataType,
+	})
+	return schema
 }
 
 func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *schemapb.CollectionSchema {
@@ -1018,7 +1029,7 @@ func TestCheckAndSetData(t *testing.T) {
 		}{
 			{
 				name: "int8", dataType: schemapb.DataType_Int8, min: math.MinInt8, max: math.MaxInt8,
-				invalidValues: []int64{-129, 128, 256, 1000, 65535},
+				invalidValues: []int64{-129, 128, 200, 256, 1000, 65535},
 			},
 			{
 				name: "int16", dataType: schemapb.DataType_Int16, min: math.MinInt16, max: math.MaxInt16,
@@ -1032,41 +1043,42 @@ func TestCheckAndSetData(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				const fieldName = "narrow_int"
-				schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
-				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-					FieldID:  common.StartOfUserFieldID + 100,
-					Name:     fieldName,
-					DataType: test.dataType,
-				})
+				schema := generateNarrowIntegerCollectionSchema(test.dataType)
 
 				for _, value := range []int64{test.min, test.max} {
-					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%d}]}`, fieldName, value))
-					rows, validData, err := checkAndSetData(body, schema, false)
-					require.NoError(t, err)
-					require.Len(t, rows, 1)
-					assert.EqualValues(t, value, rows[0][fieldName])
+					literal := strconv.FormatInt(value, 10)
+					for _, valueJSON := range []string{literal, strconv.Quote(literal)} {
+						body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%s}]}`, FieldNarrowInt, valueJSON))
+						rows, validData, err := checkAndSetData(body, schema, false)
+						require.NoError(t, err)
+						require.Len(t, rows, 1)
+						assert.EqualValues(t, value, rows[0][FieldNarrowInt])
 
-					fieldsData, err := anyToColumns(rows, validData, schema, true, false)
-					require.NoError(t, err)
-					var narrowFieldData *schemapb.FieldData
-					for _, fieldData := range fieldsData {
-						if fieldData.GetFieldName() == fieldName {
-							narrowFieldData = fieldData
-							break
+						fieldsData, err := anyToColumns(rows, validData, schema, true, false)
+						require.NoError(t, err)
+						var narrowFieldData *schemapb.FieldData
+						for _, fieldData := range fieldsData {
+							if fieldData.GetFieldName() == FieldNarrowInt {
+								narrowFieldData = fieldData
+								break
+							}
 						}
+						require.NotNil(t, narrowFieldData)
+						assert.Equal(t, []int32{int32(value)}, narrowFieldData.GetScalars().GetIntData().GetData())
 					}
-					require.NotNil(t, narrowFieldData)
-					assert.Equal(t, []int32{int32(value)}, narrowFieldData.GetScalars().GetIntData().GetData())
 				}
 
 				for _, value := range test.invalidValues {
-					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%d}]}`, fieldName, value))
-					_, _, err := checkAndSetData(body, schema, false)
-					require.Error(t, err)
-					assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-					assert.Contains(t, err.Error(), fieldName)
-					assert.Contains(t, err.Error(), fmt.Sprintf("[%d, %d]", test.min, test.max))
+					literal := strconv.FormatInt(value, 10)
+					for _, valueJSON := range []string{literal, strconv.Quote(literal)} {
+						body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%s}]}`, FieldNarrowInt, valueJSON))
+						_, _, err := checkAndSetData(body, schema, false)
+						require.Error(t, err)
+						assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+						assert.Contains(t, err.Error(), fmt.Sprintf("actual=%d", value))
+						assert.Contains(t, err.Error(), FieldNarrowInt)
+						assert.Contains(t, err.Error(), fmt.Sprintf("[%d, %d]", test.min, test.max))
+					}
 				}
 			})
 		}
