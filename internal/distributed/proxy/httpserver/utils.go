@@ -619,23 +619,29 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int8:
-					result, err := cast.ToInt8E(dataString)
+					result, err := strconv.ParseInt(dataString, 0, 8)
 					if err != nil {
-						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
+							schemapb.DataType_name[int32(fieldType)], dataString,
+							fmt.Sprintf("field %s value must be an integer in range [%d, %d]", fieldName, math.MinInt8, math.MaxInt8))
 					}
-					reallyData[fieldName] = result
+					reallyData[fieldName] = int8(result)
 				case schemapb.DataType_Int16:
-					result, err := cast.ToInt16E(dataString)
+					result, err := strconv.ParseInt(dataString, 0, 16)
 					if err != nil {
-						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
+							schemapb.DataType_name[int32(fieldType)], dataString,
+							fmt.Sprintf("field %s value must be an integer in range [%d, %d]", fieldName, math.MinInt16, math.MaxInt16))
 					}
-					reallyData[fieldName] = result
+					reallyData[fieldName] = int16(result)
 				case schemapb.DataType_Int32:
-					result, err := cast.ToInt32E(dataString)
+					result, err := strconv.ParseInt(dataString, 0, 32)
 					if err != nil {
-						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
+							schemapb.DataType_name[int32(fieldType)], dataString,
+							fmt.Sprintf("field %s value must be an integer in range [%d, %d]", fieldName, math.MinInt32, math.MaxInt32))
 					}
-					reallyData[fieldName] = result
+					reallyData[fieldName] = int32(result)
 				case schemapb.DataType_Int64:
 					result, err := json.Number(dataString).Int64()
 					if err != nil {

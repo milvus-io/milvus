@@ -1008,6 +1008,70 @@ func TestAnyToColumns(t *testing.T) {
 }
 
 func TestCheckAndSetData(t *testing.T) {
+	t.Run("integer range validation", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			dataType      schemapb.DataType
+			min           int64
+			max           int64
+			invalidValues []int64
+		}{
+			{
+				name: "int8", dataType: schemapb.DataType_Int8, min: math.MinInt8, max: math.MaxInt8,
+				invalidValues: []int64{-129, 128, 256, 1000, 65535},
+			},
+			{
+				name: "int16", dataType: schemapb.DataType_Int16, min: math.MinInt16, max: math.MaxInt16,
+				invalidValues: []int64{-32769, 32768, 65535, 100000},
+			},
+			{
+				name: "int32", dataType: schemapb.DataType_Int32, min: math.MinInt32, max: math.MaxInt32,
+				invalidValues: []int64{-2147483649, 2147483648, 4294967295},
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				const fieldName = "narrow_int"
+				schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID:  common.StartOfUserFieldID + 100,
+					Name:     fieldName,
+					DataType: test.dataType,
+				})
+
+				for _, value := range []int64{test.min, test.max} {
+					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%d}]}`, fieldName, value))
+					rows, validData, err := checkAndSetData(body, schema, false)
+					require.NoError(t, err)
+					require.Len(t, rows, 1)
+					assert.EqualValues(t, value, rows[0][fieldName])
+
+					fieldsData, err := anyToColumns(rows, validData, schema, true, false)
+					require.NoError(t, err)
+					var narrowFieldData *schemapb.FieldData
+					for _, fieldData := range fieldsData {
+						if fieldData.GetFieldName() == fieldName {
+							narrowFieldData = fieldData
+							break
+						}
+					}
+					require.NotNil(t, narrowFieldData)
+					assert.Equal(t, []int32{int32(value)}, narrowFieldData.GetScalars().GetIntData().GetData())
+				}
+
+				for _, value := range test.invalidValues {
+					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%d}]}`, fieldName, value))
+					_, _, err := checkAndSetData(body, schema, false)
+					require.Error(t, err)
+					assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.Contains(t, err.Error(), fieldName)
+					assert.Contains(t, err.Error(), fmt.Sprintf("[%d, %d]", test.min, test.max))
+				}
+			})
+		}
+	})
+
 	t.Run("invalid field name with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
