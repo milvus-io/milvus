@@ -53,14 +53,15 @@ struct AsyncLoadPipelineOptions {
         milvus::proto::common::LoadPriority::HIGH};
     // A single-priority custom executor is scheduled through add(). Executors
     // reporting multiple priorities must implement addWithPriority(). Every
-    // custom executor must support Folly KeepAlive, or otherwise outlive the
-    // returned task and all work started by it.
+    // custom executor must defer submitted work because Folly Task does not
+    // support inline-like executors. It must support Folly KeepAlive, or
+    // otherwise outlive the returned task and all work started by it.
     folly::Executor* executor{nullptr};
     // Empty means finalization runs on executor. Mmap callers may provide a
-    // dedicated local-file executor so Arrow-to-local materialization and the
-    // blocking file operations run as one scheduled task. The provider is
-    // called after remote reads complete so they do not keep that executor
-    // alive while waiting on storage.
+    // dedicated non-inline local-file executor so Arrow-to-local
+    // materialization and the blocking file operations run as one scheduled
+    // task. The provider is called after remote reads complete so they do not
+    // keep that executor alive while waiting on storage.
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider{};
 };
