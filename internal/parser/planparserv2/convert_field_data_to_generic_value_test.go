@@ -140,7 +140,6 @@ func Test_ConvertToGenericValue(t *testing.T) {
 				"empty_array": {
 					Val: &planpb.GenericValue_ArrayVal{
 						ArrayVal: &planpb.Array{
-							Array:       []*planpb.GenericValue{},
 							SameType:    true,
 							ElementType: schemapb.DataType_None,
 						},
@@ -170,7 +169,6 @@ func Test_ConvertToGenericValue(t *testing.T) {
 								{
 									Val: &planpb.GenericValue_ArrayVal{
 										ArrayVal: &planpb.Array{
-											Array:       []*planpb.GenericValue{},
 											SameType:    true,
 											ElementType: schemapb.DataType_None,
 										},
