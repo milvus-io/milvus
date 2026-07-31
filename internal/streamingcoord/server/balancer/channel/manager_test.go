@@ -3,11 +3,14 @@ package channel
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -503,6 +506,90 @@ func TestStreamingEnableChecker(t *testing.T) {
 	m.RegisterStreamingEnabledNotifier(n2)
 	assert.Error(t, n.Context().Err())
 	assert.Error(t, n2.Context().Err())
+}
+
+func TestMarkStreamingHasEnabledDoesNotHoldLockWhileWaiting(t *testing.T) {
+	ctx := context.Background()
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	require.NoError(t, err)
+
+	n := syncutil.NewAsyncTaskNotifier[struct{}]()
+	m.RegisterStreamingEnabledNotifier(n)
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- m.WaitUntilStreamingEnabled(ctx)
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	listenerCanceled := make(chan struct{})
+	releaseListener := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseListener)
+		})
+	}
+	t.Cleanup(release)
+
+	go func() {
+		<-n.Context().Done()
+		close(listenerCanceled)
+		<-releaseListener
+		n.Finish(struct{}{})
+	}()
+
+	markDone := make(chan error, 1)
+	go func() {
+		markDone <- m.MarkStreamingHasEnabled(ctx)
+	}()
+	<-listenerCanceled
+
+	select {
+	case err := <-waitDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		release()
+		require.NoError(t, <-markDone)
+		t.Fatal("streaming-enable waiters were not notified after the version was persisted")
+	}
+
+	readDone := make(chan bool, 1)
+	go func() {
+		readDone <- m.IsStreamingEnabledOnce()
+	}()
+
+	select {
+	case enabled := <-readDone:
+		assert.True(t, enabled)
+	case <-time.After(time.Second):
+		release()
+		require.NoError(t, <-markDone)
+		t.Fatal("ChannelManager lock is held while waiting for a streaming-enable listener")
+	}
+
+	select {
+	case err := <-markDone:
+		t.Fatalf("MarkStreamingHasEnabled returned before listener finished: %v", err)
+	default:
+	}
+
+	release()
+	require.NoError(t, <-markDone)
 }
 
 func TestChannelManagerWatch(t *testing.T) {
