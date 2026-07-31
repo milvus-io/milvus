@@ -20,7 +20,9 @@
 #include <string>
 #include <vector>
 
+#include "common/GrowingOffsetMapping.h"
 #include "common/OffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "index/VectorIndexValidDataUtils.h"
 #include "storage/MmapChunkManager.h"
 
@@ -256,7 +258,7 @@ class TestVectorIndex : public index::VectorIndex {
 // ---------- Default (disabled) state ----------
 
 TEST(OffsetMapping, DefaultIsDisabledAndPassThrough) {
-    OffsetMapping mapping;
+    NoOpOffsetMapping mapping;
     EXPECT_FALSE(mapping.IsEnabled());
     EXPECT_EQ(mapping.GetValidCount(), 0);
     EXPECT_EQ(mapping.GetTotalCount(), 0);

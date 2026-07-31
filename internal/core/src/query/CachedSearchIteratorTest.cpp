@@ -115,15 +115,22 @@ class CachedSearchIteratorTest
                     search_info,
                     bitset);
 
-            case ConstructorType::VectorBase:
+            case ConstructorType::VectorBase: {
+                // The snapshot only has to outlive the constructor: it walks
+                // every chunk through it before returning, and the iterators
+                // it produces are then owned by the returned object, whose
+                // chunks this test never reclaims.
+                auto chunks = vector_base_->acquire_chunks();
                 return std::make_unique<CachedSearchIterator>(
                     search_dataset_,
                     vector_base_.get(),
+                    chunks,
                     nb_,
                     search_info,
                     std::map<std::string, std::string>{},
                     bitset,
                     data_type_);
+            }
 
             case ConstructorType::ChunkedColumn:
                 return std::make_unique<CachedSearchIterator>(
@@ -709,9 +716,11 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          nullptr),
                      SegcoreError);
     } else if (std::get<0>(GetParam()) == ConstructorType::VectorBase) {
+        auto chunks = vector_base_->acquire_chunks();
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          dataset::SearchDataset{},
                          vector_base_.get(),
+                         chunks,
                          nb_,
                          search_info,
                          std::map<std::string, std::string>{},
@@ -719,9 +728,12 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          data_type_),
                      SegcoreError);
 
+        // Null column: rejected before the snapshot is ever consulted, so an
+        // unacquired snapshot is the honest thing to pass here.
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          search_dataset_,
                          nullptr,
+                         ChunkSnapshot{},
                          nb_,
                          search_info,
                          std::map<std::string, std::string>{},
@@ -732,6 +744,7 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          search_dataset_,
                          vector_base_.get(),
+                         chunks,
                          0,
                          search_info,
                          std::map<std::string, std::string>{},

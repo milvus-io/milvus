@@ -23,8 +23,10 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/GrowingOffsetMapping.h"
 #include "common/OffsetMapping.h"
 #include "common/OpContext.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
