@@ -1215,6 +1215,47 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
                   Geometry(ctx, geometry_wkt[i].c_str()).to_wkb_string());
     }
 
+    FixedVector<int32_t> geometry_offsets{1, 0};
+    auto offset_views = geometry_column.StringViewsByOffsets(
+        nullptr, 0, geometry_offsets);
+    ASSERT_EQ(offset_views.get().first.size(), geometry_offsets.size());
+    EXPECT_EQ(offset_views.get().first[0],
+              Geometry(ctx, geometry_wkt[1].c_str()).to_wkb_string());
+    EXPECT_EQ(offset_views.get().first[1],
+              Geometry(ctx, geometry_wkt[0].c_str()).to_wkb_string());
+
+    std::vector<std::string> bulk_geometry_values;
+    geometry_column.BulkRawStringAt(
+        nullptr,
+        [&](std::string_view value, size_t index, bool valid) {
+            ASSERT_EQ(index, bulk_geometry_values.size());
+            ASSERT_TRUE(valid);
+            bulk_geometry_values.emplace_back(value);
+        },
+        nullptr,
+        geometry_wkt.size());
+    ASSERT_EQ(bulk_geometry_values.size(), geometry_wkt.size());
+    for (size_t i = 0; i < bulk_geometry_values.size(); ++i) {
+        EXPECT_EQ(bulk_geometry_values[i],
+                  Geometry(ctx, geometry_wkt[i].c_str()).to_wkb_string());
+    }
+
+    const std::vector<int64_t> taken_geometry_offsets{1, 0};
+    bulk_geometry_values.clear();
+    geometry_column.BulkRawStringAt(
+        nullptr,
+        [&](std::string_view value, size_t index, bool valid) {
+            ASSERT_EQ(index, bulk_geometry_values.size());
+            ASSERT_TRUE(valid);
+            bulk_geometry_values.emplace_back(value);
+        },
+        taken_geometry_offsets.data(),
+        taken_geometry_offsets.size());
+    EXPECT_EQ(bulk_geometry_values,
+              (std::vector<std::string>{
+                  Geometry(ctx, geometry_wkt[1].c_str()).to_wkb_string(),
+                  Geometry(ctx, geometry_wkt[0].c_str()).to_wkb_string()}));
+
     std::filesystem::remove_all(dir);
 }
 

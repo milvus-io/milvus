@@ -1275,6 +1275,14 @@ VortexColumn::StringViews(
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::StringViews only supports variable fields");
     }
+    if (!SupportsDirectDataScan()) {
+        auto chunk = MaterializeChunk(op_ctx, chunk_id, offset_len);
+        auto views =
+            static_cast<StringChunk*>(chunk.get())->StringViews(std::nullopt);
+        return PinWrapper<
+            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            chunk, std::move(views));
+    }
     auto [holder, views] =
         ScanStringLikeViewsFromFile(op_ctx, chunk_id, offset_len);
     return PinWrapper<
@@ -1350,6 +1358,24 @@ VortexColumn::StringViewsByOffsets(milvus::OpContext* op_ctx,
         if (unique_offsets.empty() || unique_offsets.back() != offset) {
             unique_offsets.emplace_back(offset);
         }
+    }
+
+    if (!SupportsDirectDataScan()) {
+        auto chunk = TakeFromFile(op_ctx, chunk_id, unique_offsets);
+        auto unique_views =
+            static_cast<StringChunk*>(chunk.get())->StringViews(std::nullopt);
+        for (const auto& [offset, original_index] : entries) {
+            auto it = std::lower_bound(
+                unique_offsets.begin(), unique_offsets.end(), offset);
+            auto take_offset = std::distance(unique_offsets.begin(), it);
+            views.first[original_index] = unique_views.first[take_offset];
+            views.second[original_index] =
+                field_meta_.is_nullable() ? unique_views.second[take_offset]
+                                          : true;
+        }
+        return PinWrapper<
+            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            chunk, std::move(views));
     }
 
     auto take = TakeArrowFromFile(op_ctx, chunk_id, unique_offsets);
@@ -2521,6 +2547,35 @@ VortexColumn::BulkStringLikeAt(
     const std::function<void(std::string_view, size_t, bool)>& fn,
     const int64_t* offsets,
     int64_t count) const {
+    if (!SupportsDirectDataScan()) {
+        if (offsets == nullptr) {
+            int64_t global_offset = 0;
+            for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
+                auto chunk = MaterializeChunk(op_ctx, chunk_id);
+                auto views = static_cast<StringChunk*>(chunk.get())
+                                 ->StringViews(std::nullopt);
+                for (int64_t i = 0;
+                     i < static_cast<int64_t>(views.first.size());
+                     ++i) {
+                    fn(views.first[i],
+                       global_offset + i,
+                       IsNullable() ? views.second[i] : true);
+                }
+                global_offset += files_[chunk_id].rows;
+            }
+            return;
+        }
+
+        auto result = TakeOwn(op_ctx, offsets, count);
+        for (int64_t i = 0; i < count; ++i) {
+            auto chunk = static_cast<StringChunk*>(result.chunks[i].get());
+            fn((*chunk)[result.offsets[i]],
+               i,
+               chunk->isValid(result.offsets[i]));
+        }
+        return;
+    }
+
     if (offsets == nullptr) {
         int64_t global_offset = 0;
         for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
