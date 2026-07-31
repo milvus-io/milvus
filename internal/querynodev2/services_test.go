@@ -1003,6 +1003,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 		snapshotVersion := int64(101)
+		indexInfoVersion := int64(201)
 		indexInfos := []*indexpb.IndexInfo{
 			{
 				FieldID: 101,
@@ -1024,7 +1025,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 					suite.Empty(info.GetIndexInfos())
 				}
 			}).Return(nil)
-		delegator.EXPECT().UpdateIndexInfoList(indexInfos, snapshotVersion).Once()
+		delegator.EXPECT().UpdateIndexInfoList(indexInfos, indexInfoVersion).Once()
 		// data
 		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		req := &querypb.LoadSegmentsRequest{
@@ -1032,13 +1033,14 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 				MsgID:    rand.Int63(),
 				TargetID: suite.node.session.ServerID,
 			},
-			CollectionID:  suite.collectionID,
-			DstNodeID:     suite.node.session.ServerID,
-			Infos:         suite.genSegmentLoadInfos(schema, nil),
-			Schema:        schema,
-			NeedTransfer:  true,
-			Version:       snapshotVersion,
-			IndexInfoList: indexInfos,
+			CollectionID:     suite.collectionID,
+			DstNodeID:        suite.node.session.ServerID,
+			Infos:            suite.genSegmentLoadInfos(schema, nil),
+			Schema:           schema,
+			NeedTransfer:     true,
+			Version:          snapshotVersion,
+			IndexInfoVersion: indexInfoVersion,
+			IndexInfoList:    indexInfos,
 		}
 
 		// LoadSegment
@@ -1052,13 +1054,14 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 		snapshotVersion := int64(102)
+		indexInfoVersion := int64(202)
 
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Run(func(_ context.Context, req *querypb.LoadSegmentsRequest) {
 				suite.Empty(req.GetIndexInfoList())
 				suite.Empty(req.GetInfos()[0].GetIndexInfos())
 			}).Return(nil)
-		delegator.EXPECT().UpdateIndexInfoList([]*indexpb.IndexInfo(nil), snapshotVersion).Once()
+		delegator.EXPECT().UpdateIndexInfoList([]*indexpb.IndexInfo(nil), indexInfoVersion).Once()
 
 		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		status, err := suite.node.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
@@ -1077,10 +1080,11 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 					Level:         datapb.SegmentLevel_L1,
 				},
 			},
-			Schema:       schema,
-			NeedTransfer: true,
-			LoadScope:    querypb.LoadScope_Reopen,
-			Version:      snapshotVersion,
+			Schema:           schema,
+			NeedTransfer:     true,
+			LoadScope:        querypb.LoadScope_Reopen,
+			Version:          snapshotVersion,
+			IndexInfoVersion: indexInfoVersion,
 		})
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())

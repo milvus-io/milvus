@@ -104,6 +104,31 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	return seg, nil
 }
 
+// UpdateGrowingSegmentIndexMeta atomically publishes the latest index
+// configuration used for metric resolution and brute-force search. The
+// construction-time interim index remains immutable and is bypassed by segcore
+// when its parameters no longer match this snapshot.
+func UpdateGrowingSegmentIndexMeta(segment CSegment, loadInfo *querypb.SegmentLoadInfo, maxIndexRowCount int64) error {
+	if segment == nil || loadInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("growing segment and load info are required")
+	}
+	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(loadInfo)
+	segLoadInfo.MaxIndexRowCount = maxIndexRowCount
+	blob, err := proto.Marshal(segLoadInfo)
+	if err != nil {
+		return err
+	}
+	if len(blob) == 0 {
+		return merr.WrapErrServiceInternalMsg("growing segment index load info blob is empty")
+	}
+	status := C.UpdateGrowingSegmentIndexMeta(
+		C.CSegmentInterface(segment.RawPointer()),
+		(*C.uint8_t)(unsafe.Pointer(&blob[0])),
+		C.int64_t(len(blob)),
+	)
+	return ConsumeCStatusIntoError(&status)
+}
+
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
 type cSegmentImpl struct {
 	id  int64

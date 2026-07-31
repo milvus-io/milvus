@@ -250,6 +250,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		loadMeta,
 		loadInfo,
 		indexInfos,
+		ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst),
 	)
 
 	// get segment's replica first, then get shard leader by replica
@@ -618,6 +619,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 	if err != nil {
 		return err
 	}
+	indexInfoVersion := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -639,7 +641,7 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 				Version:     action.Version(),
 			},
 		},
-		Version:       time.Now().UnixNano(),
+		Version:       indexInfoVersion,
 		IndexInfoList: indexInfo,
 	}
 

@@ -356,6 +356,32 @@ ClearSegmentData(CSegmentInterface c_segment) {
     s->ClearData();
 }
 
+CStatus
+UpdateGrowingSegmentIndexMeta(CSegmentInterface c_segment,
+                              const uint8_t* load_info_blob,
+                              int64_t load_info_length) {
+    try {
+        AssertInfo(c_segment != nullptr, "segment pointer is null");
+        AssertInfo(load_info_blob != nullptr && load_info_length > 0,
+                   "segment load info is empty");
+        auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto growing = dynamic_cast<milvus::segcore::SegmentGrowingImpl*>(segment);
+        AssertInfo(growing != nullptr,
+                   "index metadata can only be updated on a growing segment");
+
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        AssertInfo(load_info.ParseFromArray(load_info_blob, load_info_length),
+                   "failed to parse segment load info");
+        growing->UpdateIndexMeta(
+            milvus::segcore::BuildSegmentIndexMeta(&load_info));
+        return milvus::SuccessCStatus();
+    } catch (milvus::SegcoreError& e) {
+        return milvus::FailureCStatus(e.get_error_code(), e.what());
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 void
 DeleteSearchResult(CSearchResult search_result) {
     SCOPE_CGO_CALL_METRIC();

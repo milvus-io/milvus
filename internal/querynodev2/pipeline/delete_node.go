@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
@@ -41,6 +42,13 @@ type deleteNode struct {
 
 	manager   *DataManager
 	delegator delegator.ShardDelegator
+}
+
+// schemaBarrierUpdater is a rolling-upgrade compatibility extension implemented
+// by the real shard delegator. New QueryNodes ignore the barrier for local
+// ordering, but forward it to old workers that still require it.
+type schemaBarrierUpdater interface {
+	UpdateSchemaWithBarrier(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
 }
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
@@ -110,7 +118,12 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 		// times to ride out rolling restarts and RPC blips, and only panic (for WAL
 		// replay) if it still fails. TSafe is never advanced on that path.
 		err := retry.Handle(ctx, func() (bool, error) {
-			err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema)
+			var err error
+			if updater, ok := dNode.delegator.(schemaBarrierUpdater); ok {
+				err = updater.UpdateSchemaWithBarrier(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs)
+			} else {
+				err = dNode.delegator.UpdateSchema(ctx, nodeMsg.schema)
+			}
 			if err == nil {
 				return false, nil
 			}

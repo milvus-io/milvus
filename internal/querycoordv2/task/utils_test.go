@@ -94,12 +94,14 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 		},
 		&querypb.SegmentLoadInfo{},
 		nil,
+		int64(1234),
 	)
 
 	s.True(req.GetNeedTransfer())
 	s.Equal(task.CollectionID(), req.CollectionID)
 	s.Equal(task.ReplicaID(), req.ReplicaID)
 	s.Equal(action.Node(), req.GetDstNodeID())
+	s.Equal(int64(1234), req.GetIndexInfoVersion())
 	for _, field := range req.GetSchema().GetFields() {
 		mmapEnable, ok := common.IsMmapDataEnabled(field.GetTypeParams()...)
 		s.False(mmapEnable)

@@ -146,10 +146,17 @@ func WithIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64) ShardDele
 	}
 }
 
+func EffectiveIndexInfoVersion(indexInfoVersion, legacyVersion int64) int64 {
+	if indexInfoVersion != 0 {
+		return indexInfoVersion
+	}
+	return legacyVersion
+}
+
 // setFieldIndexes replaces the channel's index configuration. Only the configuration
 // half of FieldIndexInfo is populated; index files belong to a specific segment and
 // are never collection-wide.
-func (sd *shardDelegator) setFieldIndexes(indexInfos []*indexpb.IndexInfo, version int64) {
+func (sd *shardDelegator) setFieldIndexes(indexInfos []*indexpb.IndexInfo, version int64) bool {
 	fieldIndexes := make([]*querypb.FieldIndexInfo, 0, len(indexInfos))
 	for _, info := range indexInfos {
 		if info == nil {
@@ -165,27 +172,71 @@ func (sd *shardDelegator) setFieldIndexes(indexInfos []*indexpb.IndexInfo, versi
 	}
 	sd.fieldIndexMut.Lock()
 	defer sd.fieldIndexMut.Unlock()
-	if sd.fieldIndexVersionSet && version <= sd.fieldIndexVersion {
-		return
+	if sd.fieldIndexVersionSet {
+		if version < sd.fieldIndexVersion {
+			return false
+		}
+		if version == sd.fieldIndexVersion {
+			// Keep the first payload for a version authoritative, but allow an
+			// idempotent retry to refresh segments after a transient failure.
+			return true
+		}
 	}
 	sd.fieldIndexVersion = version
 	sd.fieldIndexVersionSet = true
 	sd.fieldIndexes = fieldIndexes
+	return true
 }
 
 // UpdateIndexInfoList publishes an authoritative collection-index snapshot for
 // future stream-created growing segments. Request-level versions order complete
 // snapshots; per-segment distribution versions must never be used here.
 func (sd *shardDelegator) UpdateIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64) {
-	sd.setFieldIndexes(indexInfos, version)
+	if err := sd.UpdateIndexInfoListWithError(indexInfos, version); err != nil {
+		sd.getLogger(context.TODO()).Warn(context.TODO(), "failed to refresh growing segment index configuration", mlog.Err(err))
+	}
+}
+
+// UpdateIndexInfoListWithError is an optional concrete extension used by the
+// QueryNode RPC boundary so refresh failures can be returned without changing
+// the long-standing ShardDelegator interface (and all rolling/test adapters).
+func (sd *shardDelegator) UpdateIndexInfoListWithError(indexInfos []*indexpb.IndexInfo, version int64) error {
+	sd.fieldIndexUpdateMut.Lock()
+	defer sd.fieldIndexUpdateMut.Unlock()
+
+	if !sd.setFieldIndexes(indexInfos, version) {
+		return nil
+	}
+	fieldIndexes, _ := sd.getFieldIndexesSnapshot()
+	for _, segment := range sd.segmentManager.GetBy(
+		segments.WithChannel(sd.vchannelName),
+		segments.WithType(segments.SegmentTypeGrowing),
+	) {
+		local, ok := segment.(*segments.LocalSegment)
+		if !ok {
+			continue
+		}
+		if err := local.UpdateGrowingIndexConfig(context.TODO(), fieldIndexes); err != nil {
+			if errors.Is(err, merr.ErrSegmentNotLoaded) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // getFieldIndexes returns the channel's index configuration for stamping into a
 // growing segment's load info.
 func (sd *shardDelegator) getFieldIndexes() []*querypb.FieldIndexInfo {
+	indexes, _ := sd.getFieldIndexesSnapshot()
+	return indexes
+}
+
+func (sd *shardDelegator) getFieldIndexesSnapshot() ([]*querypb.FieldIndexInfo, int64) {
 	sd.fieldIndexMut.RLock()
 	defer sd.fieldIndexMut.RUnlock()
-	return sd.fieldIndexes
+	return sd.fieldIndexes, sd.fieldIndexVersion
 }
 
 type idfOracleHolder struct {
@@ -241,6 +292,7 @@ type shardDelegator struct {
 	// segment has no index files, just the params (metric type, index type) its
 	// interim index is built from.
 	fieldIndexMut        sync.RWMutex
+	fieldIndexUpdateMut  sync.Mutex
 	fieldIndexes         []*querypb.FieldIndexInfo
 	fieldIndexVersion    int64
 	fieldIndexVersionSet bool
@@ -304,79 +356,6 @@ func (sd *shardDelegator) getIDFOracle() IDFOracle {
 
 func (sd *shardDelegator) publishIDFOracle(idfOracle IDFOracle) {
 	sd.idfOracle.Store(&idfOracleHolder{oracle: idfOracle})
-}
-
-// UpdateDelegatorSchema synchronizes this delegator's channel-local FunctionRunner,
-// IDF runtime, schema version, and load barrier with the shared Collection snapshot.
-func (sd *shardDelegator) UpdateDelegatorSchema(ctx context.Context) error {
-	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
-		return err
-	}
-	defer sd.lifetime.Done()
-
-	_, collectionVersion, schemaBarrierTs := sd.collection.SchemaSnapshot()
-	sd.schemaChangeMutex.RLock()
-	upToDate := sd.collectionVersion.Load() >= collectionVersion && sd.schemaBarrierTs >= schemaBarrierTs
-	sd.schemaChangeMutex.RUnlock()
-	if upToDate {
-		return nil
-	}
-
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
-
-	return sd.updateDelegatorSchemaLocked(ctx)
-}
-
-// updateDelegatorSchemaLocked requires schemaChangeMutex to be held for writing.
-func (sd *shardDelegator) updateDelegatorSchemaLocked(ctx context.Context) error {
-	schema, collectionVersion, schemaBarrierTs := sd.collection.SchemaSnapshot()
-	currentVersion := sd.collectionVersion.Load()
-	if currentVersion > collectionVersion {
-		return nil
-	}
-	if currentVersion == collectionVersion {
-		if sd.schemaBarrierTs < schemaBarrierTs {
-			sd.schemaBarrierTs = schemaBarrierTs
-		}
-		return nil
-	}
-
-	newSet := newBM25FunctionSet(schema)
-	if newSet.HasIncompatibleCommonFunction(sd.bm25Functions) {
-		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
-	}
-	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		return err
-	}
-
-	idfOracle := sd.getIDFOracle()
-	if idfOracle == nil {
-		if len(newSet) > 0 {
-			idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
-			idfOracle.Start()
-			sd.distribution.SetIDFOracle(idfOracle)
-			if current := sd.distribution.current.Load(); current != nil {
-				idfOracle.SetNext(current)
-			}
-			sd.publishIDFOracle(idfOracle)
-		}
-	} else if !newSet.Equal(sd.bm25Functions) {
-		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
-			return err
-		}
-	}
-
-	sd.bm25Functions = newSet
-	sd.collectionVersion.Store(collectionVersion)
-	if sd.schemaBarrierTs < schemaBarrierTs {
-		sd.schemaBarrierTs = schemaBarrierTs
-	}
-	sd.getLogger(ctx).Info(ctx, "delegator runtime schema updated",
-		mlog.Uint64("schemaVersion", collectionVersion),
-		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
-	)
-	return nil
 }
 
 func (sd *shardDelegator) notifyLeaderViewUpdated() {
@@ -1412,6 +1391,14 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 }
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
+	return sd.UpdateSchemaWithBarrier(ctx, schema, 0)
+}
+
+// UpdateSchemaWithBarrier keeps schema_barrier_ts alive only as a wire
+// compatibility field. This delegator orders all local state by schema.Version,
+// while old workers reached during a rolling upgrade still use the barrier to
+// reject stale in-flight loads.
+func (sd *shardDelegator) UpdateSchemaWithBarrier(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	log := sd.getLogger(ctx)
 	// Accept schema updates while Initializing, not just Working: the pipeline may
 	// consume a schema-change WAL message during the ConsumeMsgStream -> delegator.Start
@@ -1462,8 +1449,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: sd.collectionID,
-		Schema:       schema,
+		CollectionID:    sd.collectionID,
+		Schema:          schema,
+		SchemaBarrierTs: schemaBarrierTs,
 		// Schema freshness is guarded by schema.Version, the single monotonic
 		// schema version, in collectionManager.
 	},
@@ -1502,9 +1490,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema); err != nil {
 		return err
 	}
-	if err := sd.updateDelegatorSchemaLocked(ctx); err != nil {
-		return err
-	}
 
 	// Publish the manager schema after the delegator schema update. Queries use
 	// the previous function schema until this point.
@@ -1539,7 +1524,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		mlog.Uint64("servedSchemaVersion", sd.servedSchemaVersion),
 		mlog.Int("sealedNum", len(sealed)),
 		mlog.Int("growingNum", len(growing)),
-		mlog.Int("bm25FunctionNum", len(newBM25FunctionSet(schema))),
+		mlog.Int("bm25FunctionNum", len(newSet)),
 	)
 	return nil
 }
@@ -1717,12 +1702,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		catchingUpStreamingData:       atomic.NewBool(catchingUpStreamingData),
 		skipStreamingForExternalTable: skipStreamingForExternalTable,
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
-		schemaBarrierTs:               schemaBarrierTs,
 	}
 	for _, opt := range opts {
 		opt(sd)
 	}
-	sd.bm25Functions = newBM25FunctionSet(schema)
 
 	hasBM25Field := lo.ContainsBy(initSchema.GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
 		return tf.GetType() == schemapb.FunctionType_BM25
@@ -1734,7 +1717,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.distribution.SetIDFOracle(idfOracle)
 		sd.publishIDFOracle(idfOracle)
 	}
-	sd.collectionVersion.Store(schemaVersion)
 
 	// Register growing-source segments as optional local flush sources. Metadata
 	// commit is still owned by WAL flusher / WriteBuffer.

@@ -1591,7 +1591,7 @@ SegmentGrowingImpl::search_batch_pks(
 
 MetricType
 SegmentGrowingImpl::ResolveMetricType(FieldId field_id) const {
-    return ResolveMetricTypeFromIndexMeta(index_meta_, field_id);
+    return ResolveMetricTypeFromIndexMeta(get_index_meta_snapshot(), field_id);
 }
 
 void

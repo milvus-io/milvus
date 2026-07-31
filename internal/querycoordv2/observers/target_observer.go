@@ -592,7 +592,7 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 			ResourceGroup:   replica.GetResourceGroup(),
 			SchemaBarrierTs: schemaBarrierTs,
 		},
-		Version:       time.Now().UnixNano(),
+		Version:       action.GetTargetVersion(),
 		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))

@@ -131,7 +131,12 @@ func packLoadSegmentRequest(
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo []*indexpb.IndexInfo,
+	indexInfoVersions ...int64,
 ) *querypb.LoadSegmentsRequest {
+	var indexInfoVersion int64
+	if len(indexInfoVersions) > 0 {
+		indexInfoVersion = indexInfoVersions[0]
+	}
 	loadScope := querypb.LoadScope_Full
 	if action.Type() == ActionTypeStatsUpdate {
 		loadScope = querypb.LoadScope_Stats
@@ -153,17 +158,18 @@ func packLoadSegmentRequest(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
 			commonpbutil.WithMsgID(task.ID()),
 		),
-		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
-		Schema:         finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:       loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		CollectionID:   task.CollectionID(),
-		ReplicaID:      task.ReplicaID(),
-		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		DstNodeID:      action.Node(),
-		Version:        time.Now().UnixNano(),
-		NeedTransfer:   true,
-		IndexInfoList:  indexInfo,
-		LoadScope:      loadScope,
+		Infos:            []*querypb.SegmentLoadInfo{loadInfo},
+		Schema:           finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:         loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		CollectionID:     task.CollectionID(),
+		ReplicaID:        task.ReplicaID(),
+		DeltaPositions:   []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		DstNodeID:        action.Node(),
+		Version:          time.Now().UnixNano(),
+		NeedTransfer:     true,
+		IndexInfoList:    indexInfo,
+		IndexInfoVersion: indexInfoVersion,
+		LoadScope:        loadScope,
 	}
 }
 
@@ -191,6 +197,10 @@ func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCo
 		DbName:        collectionInfo.GetDbName(),
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
+		// Kept for one rolling-upgrade window. New QueryNodes order schema state by
+		// schema.Version, but old QueryNodes still use this timestamp to fence load
+		// results that started before a schema change.
+		SchemaBarrierTs: collectionInfo.GetUpdateTimestamp(),
 	}
 }
 

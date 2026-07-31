@@ -441,6 +441,17 @@ ReduceHelper::RefineDistances() {
     if (placeholder_group_ == nullptr || placeholder_group_->empty()) {
         return;
     }
+    // A refine-capable segment may return before vector search when filtering
+    // produces no candidates. In that case neither the plan nor the result has
+    // to carry a metric, and there are no distances whose orientation matters.
+    // Treat the all-empty result set as a successful no-op.
+    if (std::all_of(search_results_.begin(),
+                    search_results_.end(),
+                    [](const SearchResult* result) {
+                        return result == nullptr || result->distances_.empty();
+                    })) {
+        return;
+    }
     auto& placeholder = placeholder_group_->at(0);
     auto field_id = search_info.field_id_;
     // Take the metric from the segments rather than from the plan: each segment

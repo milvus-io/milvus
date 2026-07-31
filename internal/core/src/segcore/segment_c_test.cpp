@@ -1457,6 +1457,42 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
     DeleteSearchResult(growing_result);
     DeleteSearchPlan(growing_plan);
 
+    // A growing segment can predate the collection index snapshot (for
+    // example, while add_function_field is propagating). Publishing the latest
+    // metadata must make an omitted-metric search usable without rebuilding
+    // the segment's construction-time IndexingRecord.
+    auto growing_without_meta =
+        CreateGrowingWithFieldDataLoaded(schema,
+                                         BuildSegmentIndexMeta(nullptr),
+                                         SegcoreConfig::default_config(),
+                                         dataset);
+    auto load_info_blob = load_info.SerializeAsString();
+    auto update_status = UpdateGrowingSegmentIndexMeta(
+        growing_without_meta.get(),
+        reinterpret_cast<const uint8_t*>(load_info_blob.data()),
+        load_info_blob.size());
+    ASSERT_EQ(update_status.error_code, Success);
+    auto* growing_impl =
+        dynamic_cast<SegmentGrowingImpl*>(growing_without_meta.get());
+    ASSERT_NE(growing_impl, nullptr);
+    EXPECT_FALSE(growing_impl->CanUseInterimIndex(FieldId(100)));
+    EXPECT_EQ(growing_impl->GetCurrentIndexParams(FieldId(100)).at(
+                  knowhere::meta::METRIC_TYPE),
+              knowhere::metric::IP);
+
+    CSearchResult updated_growing_result = nullptr;
+    auto [updated_growing_status, updated_growing_plan] = run_search(
+        growing_without_meta.get(),
+        knowhere::metric::IP,
+        true,
+        &updated_growing_result);
+    ASSERT_EQ(updated_growing_status.error_code, Success);
+    ASSERT_NE(updated_growing_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(updated_growing_result),
+                 knowhere::metric::IP);
+    DeleteSearchResult(updated_growing_result);
+    DeleteSearchPlan(updated_growing_plan);
+
     CSearchResult growing_mismatch_result = nullptr;
     auto [growing_mismatch_status, growing_mismatch_plan] = run_search(
         growing.get(), knowhere::metric::L2, false, &growing_mismatch_result);

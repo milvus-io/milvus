@@ -222,6 +222,38 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return std::atomic_load_explicit(&schema_, std::memory_order_acquire);
     }
 
+    void
+    UpdateIndexMeta(IndexMetaPtr index_meta) {
+        std::atomic_store_explicit(
+            &index_meta_, std::move(index_meta), std::memory_order_release);
+    }
+
+    IndexMetaPtr
+    get_index_meta_snapshot() const {
+        return std::atomic_load_explicit(&index_meta_,
+                                         std::memory_order_acquire);
+    }
+
+    bool
+    CanUseInterimIndex(FieldId field_id) const {
+        auto current = get_index_meta_snapshot();
+        if (current == nullptr || !current->HasField(field_id) ||
+            !indexing_record_.has_field_index_meta(field_id)) {
+            return false;
+        }
+        return current->GetFieldIndexMeta(field_id).GetIndexParams() ==
+               indexing_record_.get_field_index_meta(field_id).GetIndexParams();
+    }
+
+    std::map<std::string, std::string>
+    GetCurrentIndexParams(FieldId field_id) const {
+        auto current = get_index_meta_snapshot();
+        if (current == nullptr || !current->HasField(field_id)) {
+            return {};
+        }
+        return current->GetFieldIndexMeta(field_id).GetIndexParams();
+    }
+
     FieldId
     get_primary_key_field_id() const {
         return primary_key_field_id_;

@@ -166,8 +166,11 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
+		var creationIndexVersion int64
 		if growing == nil {
 			var err error
+			fieldIndexes, indexVersion := sd.getFieldIndexesSnapshot()
+			creationIndexVersion = indexVersion
 			// TODO: It's a wired implementation that growing segment have load info.
 			// we should separate the growing segment and sealed segment by type system.
 			growing, err = segments.NewSegment(
@@ -187,7 +190,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					// A QueryCoord-packed load info carries IndexInfos; this one is
 					// assembled here, so stamp the channel's index configuration in
 					// rather than leaving the segment to look one up globally.
-					IndexInfos: sd.getFieldIndexes(),
+					IndexInfos: fieldIndexes,
 				},
 			)
 			if err != nil {
@@ -236,6 +239,14 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
+				if _, currentIndexVersion := sd.getFieldIndexesSnapshot(); currentIndexVersion > creationIndexVersion {
+					if local, ok := growing.(*segments.LocalSegment); ok {
+						if err := local.UpdateGrowingIndexConfig(context.Background(), sd.getFieldIndexes()); err != nil {
+							sd.growingSegmentLock.Unlock()
+							panic(err)
+						}
+					}
+				}
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
 					SegmentID:     segmentID,

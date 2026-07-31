@@ -1757,6 +1757,44 @@ TEST(SearchResultExport, GlobalRefine_SkipsDisabledSegmentsDuringRefine) {
     EXPECT_FLOAT_EQ(disabled_segment.distances_[0], 0.5f);
 }
 
+TEST(SearchResultExport, GlobalRefine_AllEmptyResultsNeedNoMetric) {
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+
+    Plan plan(schema);
+    plan.plan_node_ = std::make_unique<VectorPlanNode>();
+    plan.plan_node_->search_info_.field_id_ = field_id;
+    plan.plan_node_->search_info_.global_refine_enable_ = true;
+
+    milvus::query::Placeholder placeholder;
+    placeholder.num_of_queries_ = 1;
+    placeholder.blob_.resize(sizeof(float) * 4, 0);
+    milvus::query::PlaceholderGroup placeholder_group;
+    placeholder_group.push_back(std::move(placeholder));
+
+    SearchResult empty_result;
+    empty_result.total_nq_ = 1;
+    empty_result.unity_topK_ = 0;
+    empty_result.topk_per_nq_prefix_sum_ = {0, 0};
+
+    std::vector<SearchResult*> search_results{&empty_result};
+    int64_t slice_nqs[] = {1};
+    int64_t slice_topks[] = {1};
+    TestReduceHelper helper(search_results,
+                            &plan,
+                            &placeholder_group,
+                            slice_nqs,
+                            slice_topks,
+                            1,
+                            nullptr);
+
+    // The plan and result intentionally omit metric_type. With zero hits there
+    // are no distances to refine, so this must be a no-op rather than an assert.
+    helper.RefineDistancesForTest();
+    EXPECT_TRUE(empty_result.distances_.empty());
+}
+
 // End-to-end: build a real sealed segment with IVF_FLAT interim index,
 // run segment->Search to get a real SearchResult, then drive
 // ReduceHelper::PreReduce() with refine-enabled forced on. This exercises

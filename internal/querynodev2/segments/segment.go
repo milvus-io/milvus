@@ -1333,6 +1333,33 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	return nil
 }
 
+// UpdateGrowingIndexConfig refreshes search configuration for an existing
+// growing segment without mutating its construction-time interim IndexingRecord.
+func (s *LocalSegment) UpdateGrowingIndexConfig(ctx context.Context, indexInfos []*querypb.FieldIndexInfo) error {
+	if s.Type() != SegmentTypeGrowing {
+		return nil
+	}
+	if !s.ptrLock.PinIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during index config update")
+	}
+	defer s.ptrLock.Unpin()
+
+	loadInfo := typeutil.Clone(s.LoadInfo())
+	loadInfo.IndexInfos = make([]*querypb.FieldIndexInfo, 0, len(indexInfos))
+	for _, info := range indexInfos {
+		loadInfo.IndexInfos = append(loadInfo.IndexInfos, typeutil.Clone(info))
+	}
+	if err := segcore.UpdateGrowingSegmentIndexMeta(
+		s.csegment,
+		loadInfo,
+		estimateMaxIndexRowCount(ctx, s.collection.Schema()),
+	); err != nil {
+		return err
+	}
+	s.loadInfo.Store(loadInfo)
+	return nil
+}
+
 type ReleaseScope int
 
 const (

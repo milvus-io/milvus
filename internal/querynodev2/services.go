@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -74,6 +75,19 @@ const legacyLoadScopeIndex = querypb.LoadScope(2)
 
 type segmentDetacher interface {
 	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
+}
+
+type indexInfoListErrorUpdater interface {
+	UpdateIndexInfoListWithError(indexInfos []*indexpb.IndexInfo, version int64) error
+}
+
+func updateDelegatorIndexInfoList(d delegator.ShardDelegator, indexInfos []*indexpb.IndexInfo, indexInfoVersion, legacyVersion int64) error {
+	version := delegator.EffectiveIndexInfoVersion(indexInfoVersion, legacyVersion)
+	if updater, ok := d.(indexInfoListErrorUpdater); ok {
+		return updater.UpdateIndexInfoListWithError(indexInfos, version)
+	}
+	d.UpdateIndexInfoList(indexInfos, version)
+	return nil
 }
 
 // GetComponentStates returns information about whether the node is healthy
@@ -262,7 +276,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		queryView,
 		node.binlogSaver,
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
-		delegator.WithIndexInfoList(req.GetIndexInfoList(), req.GetVersion()),
+		delegator.WithIndexInfoList(req.GetIndexInfoList(), delegator.EffectiveIndexInfoVersion(req.GetTargetVersion(), req.GetVersion())),
 	)
 	if err != nil {
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))
@@ -535,7 +549,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			log.Warn(ctx, "delegator failed to load segments", mlog.Err(err))
 			return merr.Status(err), nil
 		}
-		delegator.UpdateIndexInfoList(req.GetIndexInfoList(), req.GetVersion())
+		if err := updateDelegatorIndexInfoList(delegator, req.GetIndexInfoList(), req.GetIndexInfoVersion(), req.GetVersion()); err != nil {
+			return merr.Status(err), nil
+		}
 
 		return merr.Success(), nil
 	}
@@ -1579,10 +1595,12 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		return merr.Status(err), nil
 	}
 	// Version zero means this request did not carry an index snapshot (for
-	// example Remove or UpdatePartitionStats). A non-zero request version orders
-	// the complete snapshot, including an empty list that drops the final index.
+	// example Remove or UpdatePartitionStats). The collection target version
+	// orders the complete snapshot, including an empty list that drops an index.
 	if req.GetVersion() != 0 {
-		shardDelegator.UpdateIndexInfoList(req.GetIndexInfoList(), req.GetVersion())
+		if err := updateDelegatorIndexInfoList(shardDelegator, req.GetIndexInfoList(), 0, req.GetVersion()); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	// in case of target node offline, when try to remove segment from leader's distribution, use wildcardNodeID(-1) to skip nodeID check
