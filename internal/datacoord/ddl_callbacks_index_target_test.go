@@ -6,7 +6,7 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,15 +18,27 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
+	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/stretchr/testify/assert"
 )
 
-func (s *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
-	header := result.Message.Header()
-	if err := s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds()); err != nil {
-		return err
-	}
-	s.refreshCollectionIndexTarget(ctx, header.GetCollectionId())
+type refreshingMixCoord struct {
+	*mockMixCoord
+	collectionID atomic.Int64
+}
+
+func (m *refreshingMixCoord) RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error {
+	m.collectionID.Store(collectionID)
 	return nil
+}
+
+func TestRefreshCollectionIndexTarget(t *testing.T) {
+	mixCoord := &refreshingMixCoord{mockMixCoord: &mockMixCoord{}}
+	callbacks := &DDLCallbacks{Server: &Server{mixCoord: mixCoord}}
+
+	callbacks.refreshCollectionIndexTarget(context.Background(), 1000)
+
+	assert.Equal(t, int64(1000), mixCoord.collectionID.Load())
 }

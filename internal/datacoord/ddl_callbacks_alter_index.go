@@ -31,5 +31,14 @@ func (s *DDLCallbacks) alterIndexV2AckCallback(ctx context.Context, result messa
 	indexModels := lo.Map(indexes, func(index *indexpb.FieldIndex, _ int) *model.Index {
 		return model.UnmarshalIndexModel(index)
 	})
-	return s.meta.indexMeta.AlterIndex(ctx, indexModels...)
+	if err := s.meta.indexMeta.AlterIndex(ctx, indexModels...); err != nil {
+		return err
+	}
+	collectionIDs := lo.Uniq(lo.Map(indexes, func(index *indexpb.FieldIndex, _ int) int64 {
+		return index.GetIndexInfo().GetCollectionID()
+	}))
+	for _, collectionID := range collectionIDs {
+		s.refreshCollectionIndexTarget(ctx, collectionID)
+	}
+	return nil
 }

@@ -52,6 +52,8 @@ func (op *targetOp) String() string {
 		return "ReleaseCollection"
 	case ReleasePartition:
 		return "ReleasePartition"
+	case RefreshIndexSnapshot:
+		return "RefreshIndexSnapshot"
 	default:
 		return "Unknown"
 	}
@@ -62,6 +64,7 @@ const (
 	ReleaseCollection
 	ReleasePartition
 	UpdatePartition
+	RefreshIndexSnapshot
 )
 
 type targetUpdateRequest struct {
@@ -277,6 +280,11 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 					}
 					ob.keylocks.Unlock(req.CollectionID)
 				}
+			case RefreshIndexSnapshot:
+				ob.keylocks.Lock(req.CollectionID)
+				err := ob.updateNextTarget(ctx, req.CollectionID)
+				ob.keylocks.Unlock(req.CollectionID)
+				req.Notifier <- err
 			}
 			mlog.Info(ctx, "manually trigger update target done",
 				mlog.FieldCollectionID(req.CollectionID),
@@ -356,6 +364,30 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 		ReadyNotifier: readyCh,
 	}
 	return readyCh, <-notifier
+}
+
+// RefreshCollectionIndexTarget rebuilds the next target after an index DDL
+// mutation. Unlike the periodic refresh, this request is ordered after the DDL
+// callback and waits until the target has captured the new index snapshot.
+func (ob *TargetObserver) RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error {
+	notifier := make(chan error, 1)
+
+	select {
+	case ob.updateChan <- targetUpdateRequest{
+		CollectionID: collectionID,
+		opType:       RefreshIndexSnapshot,
+		Notifier:     notifier,
+	}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	select {
+	case err := <-notifier:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (ob *TargetObserver) UpdatePartition(collectionID int64, partitionID int64) (chan struct{}, error) {
@@ -543,7 +575,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		return false
 	}
 
-	indexInfo, indexInfoVersion, snapshotPresent := meta.GetCollectionIndexInfoSnapshot(ob.targetMgr, ctx, collectionID, meta.NextTarget)
+	indexInfo, indexInfoVersion, snapshotPresent := meta.GetCollectionIndexInfoSnapshot(ctx, ob.targetMgr, collectionID, meta.NextTarget)
 	if snapshotPresent {
 		if indexInfoVersion != newVersion {
 			mlog.Warn(ctx, "next target changed while reading index snapshot",

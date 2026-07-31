@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -85,7 +86,7 @@ type targetIndexBroker interface {
 	ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error)
 }
 
-func GetCollectionIndexInfoSnapshot(targetMgr TargetManagerInterface, ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
+func GetCollectionIndexInfoSnapshot(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
 	provider, ok := targetMgr.(collectionIndexInfoProvider)
 	if !ok {
 		return nil, 0, false
@@ -96,6 +97,12 @@ func GetCollectionIndexInfoSnapshot(targetMgr TargetManagerInterface, ctx contex
 type TargetManager struct {
 	broker Broker
 	meta   *Meta
+	// updateLocks serializes every target transition for a collection, including
+	// the complete read-build-publish sequence. updateCollectionTarget only
+	// serializes the final map write, which is too late: a slower stale broker
+	// read or a partition-removal clone could otherwise finish last, receive a
+	// newer wall-clock version, and replace a fresher snapshot.
+	updateLocks *lock.KeyLock[int64]
 
 	// all read segment/channel operation happens on current -> only current target are visible to outer
 	// all add segment/channel operation happens on next -> changes can only happen on next target
@@ -106,10 +113,11 @@ type TargetManager struct {
 
 func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	return &TargetManager{
-		broker:  broker,
-		meta:    meta,
-		current: newTarget(),
-		next:    newTarget(),
+		broker:      broker,
+		meta:        meta,
+		updateLocks: lock.NewKeyLock[int64](),
+		current:     newTarget(),
+		next:        newTarget(),
 	}
 }
 
@@ -117,6 +125,9 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	newTarget := mgr.next.getCollectionTarget(collectionID)
@@ -154,6 +165,9 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	var vChannelInfos []*datapb.VchannelInfo
 	var segmentInfos []*datapb.SegmentInfo
 	err := retry.Handle(ctx, func() (bool, error) {
@@ -251,6 +265,9 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 
 // RemoveCollection removes all channels and segments in the given collection
 func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int64) {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	mlog.Info(ctx, "remove collection from targets",
 		mlog.FieldCollectionID(collectionID))
 
@@ -276,6 +293,9 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 // NOTE: this doesn't remove any channel even the given one is the only partition
 // Deprecated: use RemovePartitionFromNextTarget instead @weiliu1031
 func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int64, partitionIDs ...int64) {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	log := mlog.With(mlog.FieldCollectionID(collectionID),
 		mlog.Int64s("PartitionIDs", partitionIDs))
 
@@ -316,6 +336,9 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 // NOTE: don't edit current target directly, it will be updated by target observer, which push the new next target as current target
 // need the full progress to update next target to current target, so the query view on delegator could be updated when current target is updated
 func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, collectionID int64, partitionIDs ...int64) {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	log := mlog.With(mlog.FieldCollectionID(collectionID),
 		mlog.Int64s("PartitionIDs", partitionIDs))
 

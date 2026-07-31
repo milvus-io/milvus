@@ -744,7 +744,7 @@ func (ex *Executor) getCollectionInfo(ctx context.Context, collectionID int64) (
 }
 
 func (ex *Executor) getIndexInfoSnapshot(ctx context.Context, collectionID int64, scope meta.TargetScope) ([]*indexpb.IndexInfo, int64, error) {
-	if indexInfos, version, ok := meta.GetCollectionIndexInfoSnapshot(ex.targetMgr, ctx, collectionID, scope); ok {
+	if indexInfos, version, ok := meta.GetCollectionIndexInfoSnapshot(ctx, ex.targetMgr, collectionID, scope); ok {
 		return indexInfos, version, nil
 	}
 

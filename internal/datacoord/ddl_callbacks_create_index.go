@@ -32,5 +32,6 @@ func (s *DDLCallbacks) createIndexV2AckCallback(ctx context.Context, result mess
 	case s.notifyIndexChan <- index.IndexInfo.CollectionID:
 	default:
 	}
+	s.refreshCollectionIndexTarget(ctx, index.GetIndexInfo().GetCollectionID())
 	return nil
 }

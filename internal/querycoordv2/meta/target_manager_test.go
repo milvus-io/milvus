@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,6 +77,30 @@ type targetIndexBrokerMock struct {
 
 func (broker *targetIndexBrokerMock) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
 	return broker.ListIndexes(ctx, collectionID)
+}
+
+type concurrentTargetIndexBroker struct {
+	*MockBroker
+	listCalls       atomic.Int32
+	firstStarted    chan struct{}
+	releaseFirst    chan struct{}
+	secondCompleted chan struct{}
+	firstSnapshot   []*indexpb.IndexInfo
+	secondSnapshot  []*indexpb.IndexInfo
+}
+
+func (broker *concurrentTargetIndexBroker) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+	if broker.listCalls.Add(1) == 1 {
+		close(broker.firstStarted)
+		select {
+		case <-broker.releaseFirst:
+			return broker.firstSnapshot, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	close(broker.secondCompleted)
+	return broker.secondSnapshot, nil
 }
 
 func (suite *TargetManagerSuite) SetupSuite() {
@@ -291,6 +316,56 @@ func (suite *TargetManagerSuite) TestIndexSnapshotBoundToTargetVersion() {
 	suite.True(present)
 	suite.Equal(index1, snapshot1)
 	suite.Greater(version1, version0)
+}
+
+func (suite *TargetManagerSuite) TestConcurrentTargetReadsCannotPublishOutOfOrder() {
+	collectionID := suite.collections[0]
+	channels := []*datapb.VchannelInfo{{
+		CollectionID: collectionID,
+		ChannelName:  suite.channels[collectionID][0],
+	}}
+	segments := []*datapb.SegmentInfo{{
+		ID:            suite.segments[collectionID][suite.partitions[collectionID][0]][0],
+		CollectionID:  collectionID,
+		PartitionID:   suite.partitions[collectionID][0],
+		InsertChannel: suite.channels[collectionID][0],
+	}}
+	firstSnapshot := []*indexpb.IndexInfo{{IndexID: 10, IndexName: "stale"}}
+	secondSnapshot := []*indexpb.IndexInfo{{IndexID: 11, IndexName: "fresh"}}
+	baseBroker := NewMockBroker(suite.T())
+	baseBroker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil).Twice()
+	broker := &concurrentTargetIndexBroker{
+		MockBroker:      baseBroker,
+		firstStarted:    make(chan struct{}),
+		releaseFirst:    make(chan struct{}),
+		secondCompleted: make(chan struct{}),
+		firstSnapshot:   firstSnapshot,
+		secondSnapshot:  secondSnapshot,
+	}
+	mgr := NewTargetManager(broker, suite.meta)
+
+	errs := make(chan error, 2)
+	go func() { errs <- mgr.UpdateCollectionNextTarget(suite.ctx, collectionID) }()
+	<-broker.firstStarted
+	secondInvoked := make(chan struct{})
+	go func() {
+		close(secondInvoked)
+		errs <- mgr.UpdateCollectionNextTarget(suite.ctx, collectionID)
+	}()
+	<-secondInvoked
+
+	select {
+	case <-broker.secondCompleted:
+		suite.Fail("second target read bypassed the in-flight read")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(broker.releaseFirst)
+	suite.NoError(<-errs)
+	suite.NoError(<-errs)
+
+	snapshot, _, present := mgr.GetCollectionIndexInfoSnapshot(suite.ctx, collectionID, NextTarget)
+	suite.True(present)
+	suite.Equal(secondSnapshot, snapshot)
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {
