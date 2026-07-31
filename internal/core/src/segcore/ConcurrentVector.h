@@ -61,27 +61,39 @@ class ThreadSafeValidData {
     }
 
     void
-    set_data_raw(const std::vector<FieldDataPtr>& datas) {
+    set_data_raw(size_t offset, const std::vector<FieldDataPtr>& datas) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
+        size_t total = 0;
+        for (auto& field_data : datas) {
+            total += field_data->get_num_rows();
+        }
+        if (total == 0) {
+            return;
+        }
+        reserve_to(offset + total);
+
+        auto write_offset = offset;
         for (auto& field_data : datas) {
             auto num_row = field_data->get_num_rows();
-            reserve_to(length_ + num_row);
-            write_bits(length_, num_row, [&field_data](size_t i) {
+            write_bits(write_offset, num_row, [&field_data](size_t i) {
                 return field_data->is_valid(i);
             });
-            length_ += num_row;
+            write_offset += num_row;
         }
+        length_ = std::max(length_, write_offset);
     }
 
     void
-    set_data_raw(size_t num_rows,
+    set_data_raw(size_t offset,
+                 size_t num_rows,
                  const DataArray* data,
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        if (field_meta.is_nullable()) {
-            reserve_to(length_ + num_rows);
-            write_from(length_, num_rows, data->valid_data().data());
-            length_ += num_rows;
+        if (field_meta.is_nullable() && num_rows > 0) {
+            auto end = offset + num_rows;
+            reserve_to(end);
+            write_from(offset, num_rows, data->valid_data().data());
+            length_ = std::max(length_, end);
         }
     }
 
@@ -204,7 +216,8 @@ class ThreadSafeValidData {
     // Fixed-size (size_per_chunk_) buffers; deque keeps existing buffers put.
     std::deque<FixedVector<bool>> chunks_;
     const int64_t size_per_chunk_;
-    // number of actual elements
+    // End of the highest initialized logical range. Earlier reserved ranges
+    // may still be holes; row visibility is published by ack_responder_.
     size_t length_{0};
 };
 using ThreadSafeValidDataPtr = std::shared_ptr<ThreadSafeValidData>;
