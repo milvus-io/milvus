@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -62,11 +61,11 @@ type GcOption struct {
 
 	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
-	dataViewRefs     DataViewReferenceChecker
+	dataViewGC       DataViewGarbageCollector
 }
 
-type DataViewReferenceChecker interface {
-	ReferencedDataVersions(collectionID int64) []*viewpb.DataVersion
+type DataViewGarbageCollector interface {
+	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
 // garbageCollector handles garbage files in object storage
@@ -815,7 +814,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 }
 
 func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan gcCmd) {
-	if gc.meta == nil || gc.meta.dataViewManager == nil {
+	if gc.meta == nil || gc.option.dataViewGC == nil {
 		return
 	}
 	start := time.Now()
@@ -835,11 +834,7 @@ func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 			continue
 		}
 
-		var protected []*viewpb.DataVersion
-		if gc.option.dataViewRefs != nil {
-			protected = gc.option.dataViewRefs.ReferencedDataVersions(collectionID)
-		}
-		if err := gc.meta.dataViewManager.GarbageCollect(ctx, collectionID, protected, 1); err != nil {
+		if err := gc.option.dataViewGC.GarbageCollect(ctx, collectionID, 1); err != nil {
 			logger.Warn(ctx, "DataView GC failed", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		}
 	}

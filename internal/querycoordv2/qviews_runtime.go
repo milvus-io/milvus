@@ -65,6 +65,7 @@ type qviewsRuntimeDependencies struct {
 	queryNodeClient      nodeview.QueryNodeClient
 	resourceGroupManager nodeview.ResourceGroupManager
 	dataViewProvider     balancer.DataViewProvider
+	dataViewReferences   qviews.DataViewReferenceManager
 
 	queryNodeManager            qnmanager.ManagerClient
 	streamingCoordClient        streamingcoordclient.Client
@@ -86,6 +87,9 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	}
 	if deps.dataViewProvider == nil {
 		deps.dataViewProvider = emptyDataViewProvider{}
+	}
+	if deps.dataViewReferences == nil {
+		deps.dataViewReferences = noopDataViewReferences{}
 	}
 
 	if deps.queryNodeClient == nil {
@@ -116,7 +120,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		return nil, err
 	}
 	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient)
-	shardViewRegistry, err := coordview.RecoverShardViewRegistry(ctx, deps.queryViewCatalog, reliableSyncer)
+	shardViewRegistry, err := coordview.RecoverShardViewRegistry(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewReferences)
 	if err != nil {
 		_ = reliableSyncer.Close()
 		return nil, err
@@ -213,7 +217,7 @@ func newDefaultQViewsRuntimeDependencies(
 	queryNodeManager := qnmanager.NewManagerClient(etcdCli)
 	streamingCoordClient := streamingcoordclient.NewClient(etcdCli)
 	streamingNodeHandler := snhandler.NewHandlerClient(streamingCoordClient.Assignment())
-	return qviewsRuntimeDependencies{
+	deps := qviewsRuntimeDependencies{
 		queryCoordCatalog:           queryCoordCatalog,
 		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),
 		queryNodeClient:             queryNodeManager,
@@ -224,7 +228,23 @@ func newDefaultQViewsRuntimeDependencies(
 		streamingNodeHandler:        streamingNodeHandler,
 		streamingNodeViewSyncClient: streamingNodeHandler.QueryViewSyncClient(),
 	}
+	if references, ok := mixCoord.(qviews.DataViewReferenceManager); ok {
+		deps.dataViewReferences = references
+	}
+	return deps
 }
+
+type noopDataViewReferences struct{}
+
+func (noopDataViewReferences) PinDataView(context.Context, int64, qviews.DataVersion) error {
+	return nil
+}
+
+func (noopDataViewReferences) RecoverDataViewReference(context.Context, int64, qviews.DataVersion) (bool, error) {
+	return true, nil
+}
+
+func (noopDataViewReferences) UnpinDataView(int64, qviews.DataVersion) {}
 
 type dataViewProviderSource interface {
 	DataViewProvider() balancer.DataViewProvider

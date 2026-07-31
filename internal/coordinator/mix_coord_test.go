@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -137,6 +139,83 @@ func TestMixCoord_FlushAll(t *testing.T) {
 			assert.Equal(t, expectedErr, err)
 			assert.Nil(t, resp)
 		})
+	})
+}
+
+func TestMixCoordDropCollectionDataView(t *testing.T) {
+	mockey.PatchConvey("delegate collection data view deletion to datacoord", t, func() {
+		dataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{datacoordServer: dataCoord}
+		mockey.Mock((*datacoord.Server).DropCollectionDataView).
+			To(func(ctx context.Context, collectionID int64) error {
+				assert.Equal(t, int64(100), collectionID)
+				return nil
+			}).Build()
+
+		assert.NoError(t, coord.DropCollectionDataView(context.Background(), 100))
+	})
+}
+
+func TestMixCoordDelegatesDataViewReferences(t *testing.T) {
+	mockey.PatchConvey("delegate data view references to datacoord", t, func() {
+		dataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{datacoordServer: dataCoord}
+		version := qviews.DataVersion{StreamingVersion: 3, CompactVersion: 1}
+
+		mockey.Mock((*datacoord.Server).PinDataView).
+			To(func(ctx context.Context, collectionID int64, actual qviews.DataVersion) error {
+				assert.Equal(t, int64(100), collectionID)
+				assert.Equal(t, version, actual)
+				return nil
+			}).Build()
+		mockey.Mock((*datacoord.Server).RecoverDataViewReference).
+			Return(true, nil).Build()
+		mockey.Mock((*datacoord.Server).UnpinDataView).Return().Build()
+
+		assert.NoError(t, coord.PinDataView(context.Background(), 100, version))
+		pinned, err := coord.RecoverDataViewReference(context.Background(), 100, version)
+		assert.NoError(t, err)
+		assert.True(t, pinned)
+		coord.UnpinDataView(100, version)
+	})
+}
+
+func TestMixCoordInitializesBeforeStartingDataAndQueryCoord(t *testing.T) {
+	mockey.PatchConvey("recover query view references before datacoord can start GC", t, func() {
+		dataCoord := &datacoord.Server{}
+		queryCoord := &querycoordv2.Server{}
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			datacoordServer:  dataCoord,
+			queryCoordServer: queryCoord,
+		}
+		var initialized atomic.Int32
+		var startedTooEarly atomic.Bool
+
+		mockey.Mock((*datacoord.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*datacoord.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+
+		assert.NoError(t, coord.initDataAndQueryCoord())
+		assert.Equal(t, int32(2), initialized.Load())
+		assert.False(t, startedTooEarly.Load())
 	})
 }
 

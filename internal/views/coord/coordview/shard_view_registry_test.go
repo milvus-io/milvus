@@ -343,6 +343,51 @@ func TestRegistry_SnapshotForShards(t *testing.T) {
 	assert.Same(t, updatedStatsA, next.StatsMap()[shardA])
 }
 
+func TestRecoverShardViewRegistryRebuildsReferences(t *testing.T) {
+	catalog := newMockCatalog()
+	view := buildTestViewWithVersion(1, 3, 1, 2)
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+	refs := &testDataViewReferences{recoverPin: true}
+
+	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), refs)
+	require.NoError(t, err)
+	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 3, CompactVersion: 1}}, refs.recovered)
+}
+
+func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
+	catalog := newMockCatalog()
+	view := buildTestViewWithVersion(1, 3, 1, 2)
+	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+	refs := &testDataViewReferences{recoverPin: false}
+	s := newMockSyncer()
+
+	registry, err := RecoverShardViewRegistry(context.Background(), catalog, s, refs)
+	require.NoError(t, err)
+	manager := registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta()))
+	require.NotNil(t, manager)
+	manager.mu.Lock()
+	require.Equal(t, qviews.QueryViewStateDropping, manager.views[testVersion(3, 1, 2)].State())
+	manager.mu.Unlock()
+	require.Empty(t, refs.unpins)
+}
+
+func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
+	catalog := newMockCatalog()
+	viewA := buildTestViewWithVersion(1, 3, 1, 1)
+	viewA.Meta.ReplicaId = 1
+	viewA.Meta.Vchannel = "v0"
+	viewB := buildTestViewWithVersion(1, 4, 1, 1)
+	viewB.Meta.ReplicaId = 2
+	viewB.Meta.Vchannel = "v1"
+	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
+	refs := &testDataViewReferences{recoverPin: true, failRecoverAfter: 1}
+
+	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), refs)
+	require.EqualError(t, err, "recover failed")
+	require.Len(t, refs.unpins, 1)
+}
+
 func TestRegistry_SnapshotStatsForMultipleShards(t *testing.T) {
 	catalog := newMockCatalog()
 	s := newMockSyncer()
