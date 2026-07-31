@@ -17,24 +17,23 @@
 package tikv
 
 import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/config"
-	"github.com/tikv/client-go/v2/txnkv"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-func GetTiKVClient(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
-	config.UpdateGlobal(func(conf *config.Config) {
-		applyTiKVClientConfig(cfg, conf)
-	})
+func TestApplyTiKVClientConfigEnable1PC(t *testing.T) {
+	cfg := &paramtable.TiKVConfig{}
+	cfg.Init(paramtable.NewBaseTable())
 
-	return txnkv.NewClient([]string{cfg.Endpoints.GetValue()})
-}
+	conf := config.DefaultConfig()
+	conf.EnableAsyncCommit = true
 
-func applyTiKVClientConfig(cfg *paramtable.TiKVConfig, conf *config.Config) {
-	if cfg.TiKVUseSSL.GetAsBool() {
-		conf.Security = config.NewSecurity(cfg.TiKVTLSCACert.GetValue(), cfg.TiKVTLSCert.GetValue(), cfg.TiKVTLSKey.GetValue(), []string{})
-	}
-	conf.Enable1PC = true
-	conf.EnableAsyncCommit = false
+	applyTiKVClientConfig(cfg, &conf)
+
+	assert.True(t, conf.Enable1PC)
+	assert.False(t, conf.EnableAsyncCommit)
 }
