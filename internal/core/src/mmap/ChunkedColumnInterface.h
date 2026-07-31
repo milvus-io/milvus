@@ -37,9 +37,7 @@ class ChunkedColumnInterface {
  public:
     using ScanValueKind = milvus::ScanValueKind;
     using ValueEncoding = milvus::ValueEncoding;
-    using ValidityEncoding = milvus::ValidityEncoding;
     using ValueView = milvus::ValueView;
-    using ValidityView = milvus::ValidityView;
     using ScanBatch = milvus::ScanBatch;
     using ScanCursor = milvus::ScanCursor;
     using ScanProjection = milvus::ScanProjection;

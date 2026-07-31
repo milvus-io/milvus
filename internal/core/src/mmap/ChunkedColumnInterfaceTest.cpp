@@ -381,28 +381,12 @@ struct ProxyVectorArrayColumnFactory {
     }
 };
 
-}  // namespace
-
-TEST(ChunkedColumnScanCommonTest, BitmapValidityMaterializesEvaluatorMask) {
-    const std::array<uint8_t, 2> bitmap{0b10101101, 0b00000001};
-    ChunkedColumnInterface::ValidityView validity;
-    validity.encoding = ChunkedColumnInterface::ValidityEncoding::Bitmap;
-    validity.data = bitmap.data();
-    validity.offset = 2;
-    validity.size = 7;
-    validity.nullable = true;
-
-    FixedVector<bool> scratch;
-    const auto* mask = validity.bool_data(scratch);
-    ASSERT_NE(mask, nullptr);
-    ASSERT_EQ(scratch.size(), 7);
-    const std::array<bool, 7> expected{
-        true, true, false, true, false, true, true};
-    for (size_t i = 0; i < expected.size(); ++i) {
-        EXPECT_EQ(mask[i], expected[i]);
-        EXPECT_EQ(validity.IsValid(i), expected[i]);
-    }
+bool
+IsScanRowValid(const ChunkedColumnInterface::ScanBatch& batch, int64_t offset) {
+    return batch.validity == nullptr || batch.validity[offset];
 }
+
+}  // namespace
 
 template <typename Factory>
 class ChunkedColumnInterfaceTest : public ::testing::Test {};
@@ -621,10 +605,10 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
     EXPECT_EQ(views[0].length(), 1);
     EXPECT_EQ(views[2].length(), 0);
     EXPECT_EQ(views[3].length(), 2);
-    EXPECT_TRUE(batch.validity.IsValid(0));
-    EXPECT_FALSE(batch.validity.IsValid(1));
-    EXPECT_TRUE(batch.validity.IsValid(2));
-    EXPECT_TRUE(batch.validity.IsValid(3));
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 1));
+    EXPECT_TRUE(IsScanRowValid(batch, 2));
+    EXPECT_TRUE(IsScanRowValid(batch, 3));
     EXPECT_EQ(cursor->Position(), 4);
     EXPECT_FALSE(cursor->Next(4, &batch));
 }
@@ -645,8 +629,8 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
     ASSERT_TRUE(cursor->Next(2, &batch));
     EXPECT_TRUE(batch.values.empty());
     EXPECT_EQ(batch.size, 2);
-    EXPECT_TRUE(batch.validity.IsValid(0));
-    EXPECT_FALSE(batch.validity.IsValid(1));
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 1));
     EXPECT_EQ(cursor->Position(), 2);
     ASSERT_NE(batch.owner, nullptr);
     EXPECT_EQ(batch.owner.use_count(), 1);
@@ -654,8 +638,8 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
     ASSERT_TRUE(cursor->Next(2, &batch));
     EXPECT_EQ(batch.row_id_start, 2);
     EXPECT_EQ(batch.size, 2);
-    EXPECT_TRUE(batch.validity.IsValid(0));
-    EXPECT_TRUE(batch.validity.IsValid(1));
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
     ASSERT_NE(batch.owner, nullptr);
     EXPECT_EQ(batch.owner.use_count(), 1);
     EXPECT_EQ(cursor->Position(), kVectorArrayRows);
@@ -701,16 +685,16 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_EQ(batch.values.encoding,
               ChunkedColumnInterface::ValueEncoding::FixedWidth);
     EXPECT_EQ(batch.values.data_as<int32_t>()[1], 2);
-    EXPECT_FALSE(batch.validity.IsValid(0));
-    EXPECT_TRUE(batch.validity.IsValid(1));
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
     EXPECT_EQ(cursor->Position(), 3);
 
     ASSERT_TRUE(cursor->Next(10, &batch));
     EXPECT_EQ(batch.row_id_start, 3);
     EXPECT_EQ(batch.size, 2);
     EXPECT_EQ(batch.values.data_as<int32_t>()[1], 4);
-    EXPECT_FALSE(batch.validity.IsValid(0));
-    EXPECT_TRUE(batch.validity.IsValid(1));
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
     EXPECT_EQ(cursor->Position(), 5);
 
     EXPECT_FALSE(cursor->Next(10, &batch));
@@ -734,10 +718,10 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_EQ(batch.row_id_start, 0);
     EXPECT_EQ(batch.size, 4);
     EXPECT_TRUE(batch.values.empty());
-    EXPECT_TRUE(batch.validity.IsValid(0));
-    EXPECT_FALSE(batch.validity.IsValid(1));
-    EXPECT_TRUE(batch.validity.IsValid(2));
-    EXPECT_FALSE(batch.validity.IsValid(3));
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 1));
+    EXPECT_TRUE(IsScanRowValid(batch, 2));
+    EXPECT_FALSE(IsScanRowValid(batch, 3));
     EXPECT_FALSE(cursor->Next(4, &batch));
 }
 
@@ -785,15 +769,13 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(cursor->Next(5, &batch));
     EXPECT_EQ(batch.size, 3);
     EXPECT_TRUE(batch.values.empty());
-    EXPECT_EQ(batch.validity.encoding,
-              ChunkedColumnInterface::ValidityEncoding::AllValid);
+    EXPECT_EQ(batch.validity, nullptr);
     EXPECT_TRUE(fx.fetched->empty());
 
     ASSERT_TRUE(cursor->Next(5, &batch));
     EXPECT_EQ(batch.size, 2);
     EXPECT_TRUE(batch.values.empty());
-    EXPECT_EQ(batch.validity.encoding,
-              ChunkedColumnInterface::ValidityEncoding::AllValid);
+    EXPECT_EQ(batch.validity, nullptr);
     EXPECT_TRUE(fx.fetched->empty());
     EXPECT_FALSE(cursor->Next(5, &batch));
 }
@@ -810,10 +792,9 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(3, &batch));
-    EXPECT_EQ(batch.validity.encoding,
-              ChunkedColumnInterface::ValidityEncoding::AllValid);
+    EXPECT_EQ(batch.validity, nullptr);
     for (int64_t i = 0; i < batch.size; ++i) {
-        EXPECT_TRUE(batch.validity.IsValid(i));
+        EXPECT_TRUE(IsScanRowValid(batch, i));
     }
 }
 

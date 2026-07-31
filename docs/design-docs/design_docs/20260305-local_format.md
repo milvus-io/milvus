@@ -130,10 +130,11 @@ consumes a sparse local file view behind these column-level operations.
 
 Milvus is in a transition state where two access families coexist:
 
-- `ChunkedBase` remains the raw chunk-oriented path for the existing raw local
-  format and existing chunk consumers.
-- `ChunkedColumnInterface` is the local-format-aware path used by Vortex and by
-  scan/take code that should not depend on physical chunk ownership.
+- `ChunkedBase` remains the physical raw-chunk interface for existing consumers
+  that explicitly need chunk ownership.
+- `ChunkedColumnInterface` is the local-format-aware path used by scan/take
+  code. Raw columns implement `Scan` as zero-copy views over their existing
+  chunks, while Vortex columns implement it with reader-backed cursors.
 
 Filter scan path:
 
@@ -305,11 +306,13 @@ Data scan supports:
 - validity;
 - validity-only projection.
 
-`ValidityView` has one unambiguous no-mask state: `AllValid`. A non-empty mask
-uses either `BoolArray` or storage-native `Bitmap` with a non-null data pointer.
-The expression boundary normalizes either encoded mask to the legacy evaluator
-bool-array contract before evaluating values; evaluators therefore never
-interpret a bitmap-backed NULL row as valid.
+`ScanBatch::validity` has one evaluator-facing representation: a batch-relative
+`const bool*`. A null pointer means every row in the batch is valid; otherwise
+the pointer contains one boolean per dense row or sparse row id. Each cursor
+normalizes storage-native validity before returning a batch. In particular,
+Vortex converts the current Arrow slice's validity bitmap into a
+`FixedVector<bool>`, and `ScanBatch::owner` keeps that mask and the values alive
+for the batch lifetime.
 
 Scan cursors are streaming. For dense data scans, `Position()` is the next row
 not yet returned to the expression layer. `Next(max_rows)` returns a complete
@@ -325,8 +328,10 @@ Row-id scan supports:
 - binary range predicates;
 - sparse row-id batches.
 
-If a column implementation cannot support a scan mode, it falls back to the
-raw-compatible behavior through the existing chunked path.
+Every sealed scalar column used by expression evaluation must provide the
+raw-compatible data scan. A missing sealed scan implementation is a column
+contract violation rather than a per-batch fallback. Growing and non-chunked
+segments continue to use their existing chunk access path.
 
 #### `VortexColumnGroup`
 
@@ -454,20 +459,22 @@ tracked as a separate performance area from filter pushdown.
 
 ### Nullable and Validity
 
-The `ChunkedColumnInterface` scan API uses `ValidityView` to present nullability
-uniformly.
+The `ChunkedColumnInterface` scan API presents nullability uniformly through
+`ScanBatch::validity`.
 
 Rules:
 
-- Non-nullable fields may return all-valid validity.
+- Non-nullable or all-valid batches return `nullptr`.
 - Nullable dense data scans must return validity aligned with the dense row
   range.
 - Row-id scans may return validity aligned with sparse row ids.
 - Validity-only projection is part of the scan model so callers that only need
   nullability do not need to materialize full values.
 
-The raw path may adapt its existing `bool*` validity representation into this
-model. Vortex uses Arrow bitmap/null-buffer semantics.
+Raw cursors expose their existing boolean validity directly. Vortex cursors
+convert Arrow bitmap/null-buffer semantics into a batch-local boolean mask
+before returning from `Next`; the expression layer never interprets a
+storage-native validity encoding.
 
 ### Sparse Local File and Cache Loading
 
@@ -514,9 +521,9 @@ level so all field proxies in the same physical group share the same state.
 - Existing non-Vortex segments continue to load through the raw path.
 - A schema can contain default (empty), raw, and Vortex local format fields;
   column group splitting keeps the three intents physically separate.
-- During the transition, QueryNode keeps both access paths: raw fields continue
-  to use the `ChunkedBase` chunk-oriented path, while Vortex fields use the
-  `ChunkedColumnInterface` column-oriented path.
+- During the transition, existing raw storage and non-scan chunk consumers are
+  unchanged. Sealed scalar expression evaluation uses the same
+  `ChunkedColumnInterface::Scan` contract for both raw and Vortex columns.
 - Vortex local format is only used for Storage V3 sealed segments.
 - Rolling upgrades must ensure QueryNodes understand Vortex local format before
   new Vortex column groups are loaded. Older readers cannot load Vortex physical

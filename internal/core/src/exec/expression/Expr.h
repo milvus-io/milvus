@@ -643,12 +643,11 @@ class SegmentExpr : public Expr {
                       TargetBitmapView res,
                       TargetBitmapView valid_res,
                       int64_t size) {
-        if (batch.validity.encoding ==
-            ChunkedColumnInterface::ValidityEncoding::AllValid) {
+        if (batch.validity == nullptr) {
             return;
         }
         for (int64_t i = 0; i < size; ++i) {
-            if (!batch.validity.IsValid(batch_pos + i)) {
+            if (!batch.validity[batch_pos + i]) {
                 res[i] = false;
                 valid_res[i] = false;
             }
@@ -661,12 +660,11 @@ class SegmentExpr : public Expr {
                                TargetBitmapView res,
                                TargetBitmapView valid_res,
                                int64_t size) {
-        if (batch.validity.encoding ==
-            ChunkedColumnInterface::ValidityEncoding::AllValid) {
+        if (batch.validity == nullptr) {
             return;
         }
         for (int64_t i = 0; i < size; ++i) {
-            if (!batch.validity.IsValid(offsets[i])) {
+            if (!batch.validity[offsets[i]]) {
                 res[i] = false;
                 valid_res[i] = false;
             }
@@ -1217,12 +1215,11 @@ class SegmentExpr : public Expr {
         batch_offsets.reserve(std::min<int64_t>(batch_size_, input->size()));
 
         ChunkedColumnInterface::ScanBatch batch;
-        FixedVector<bool> validity_scratch;
         while (processed_offsets < input->size() &&
                cursor->Next(batch_size_, &batch)) {
             AssertInfo(!batch.values.empty() && batch.size > 0,
                        "invalid offset data scan batch");
-            const auto* valid_data = batch.validity.bool_data(validity_scratch);
+            const auto* valid_data = batch.validity;
 
             int64_t batch_pos = 0;
             while (batch_pos < batch.size &&
@@ -1277,13 +1274,6 @@ class SegmentExpr : public Expr {
                             res + group_start,
                             valid_res + group_start,
                             values...);
-                        if (valid_data == nullptr) {
-                            ApplyScanValidityByOffsets(batch,
-                                                       batch_offsets.data(),
-                                                       res + group_start,
-                                                       valid_res + group_start,
-                                                       group_size);
-                        }
                     } else {
                         ApplyScanValidityByOffsets(batch,
                                                    batch_offsets.data(),
@@ -2014,7 +2004,6 @@ class SegmentExpr : public Expr {
         AssertInfo(data_scan_skip_index_ != nullptr,
                    "data scan skip index is not initialized");
 
-        FixedVector<bool> validity_scratch;
         while (processed_size < real_batch_size) {
             const auto expected_row = current_data_global_pos_ + processed_size;
             AssertInfo(EnsureDataScanCursorAt<T>(expected_row),
@@ -2046,7 +2035,7 @@ class SegmentExpr : public Expr {
                        chunk_id,
                        chunk_end);
             const auto* data = batch.values.data_as<T>();
-            const auto* valid_data = batch.validity.bool_data(validity_scratch);
+            const auto* valid_data = batch.validity;
             const bool skipped =
                 skip_func &&
                 skip_func(*data_scan_skip_index_, field_id_, chunk_id);
@@ -2078,13 +2067,6 @@ class SegmentExpr : public Expr {
                          res + processed_size,
                          valid_res + processed_size,
                          values...);
-                }
-                if (valid_data == nullptr) {
-                    ApplyScanValidity(batch,
-                                      0,
-                                      res + processed_size,
-                                      valid_res + processed_size,
-                                      size);
                 }
             } else {
                 ApplyScanValidity(batch,

@@ -41,12 +41,6 @@ enum class ValueEncoding {
     VectorArrayView,
 };
 
-enum class ValidityEncoding {
-    AllValid,
-    BoolArray,
-    Bitmap,
-};
-
 struct ValueView {
     ValueEncoding encoding = ValueEncoding::Empty;
     ScanValueKind kind = ScanValueKind::Default;
@@ -71,70 +65,15 @@ struct ValueView {
     }
 };
 
-struct ValidityView {
-    ValidityEncoding encoding = ValidityEncoding::AllValid;
-    const void* data = nullptr;
-    int64_t offset = 0;
-    int64_t size = 0;
-    bool nullable = false;
-
-    bool
-    IsValid(int64_t i) const {
-        AssertInfo(
-            i >= 0 && i < size, "validity offset {} out of range {}", i, size);
-        if (encoding == ValidityEncoding::AllValid) {
-            return true;
-        }
-        AssertInfo(data != nullptr,
-                   "validity data is null for encoding {}",
-                   static_cast<int>(encoding));
-        const auto pos = offset + i;
-        switch (encoding) {
-            case ValidityEncoding::BoolArray:
-                return static_cast<const bool*>(data)[pos];
-            case ValidityEncoding::Bitmap: {
-                const auto* bitmap = static_cast<const uint8_t*>(data);
-                return (bitmap[pos >> 3] >> (pos & 0x07)) & 1;
-            }
-            case ValidityEncoding::AllValid:
-                return true;
-        }
-        return true;
-    }
-
-    // Expression evaluators use a legacy bool-array contract where nullptr
-    // means every row is valid. Keep storage-native encodings at the Scan
-    // boundary and normalize them exactly once before invoking an evaluator.
-    const bool*
-    bool_data(FixedVector<bool>& scratch) const {
-        scratch.clear();
-        if (encoding == ValidityEncoding::AllValid || size == 0) {
-            return nullptr;
-        }
-        AssertInfo(data != nullptr,
-                   "validity data is null for encoding {}",
-                   static_cast<int>(encoding));
-        if (encoding == ValidityEncoding::BoolArray) {
-            return static_cast<const bool*>(data) + offset;
-        }
-        AssertInfo(encoding == ValidityEncoding::Bitmap,
-                   "cannot materialize validity encoding {} as bool data",
-                   static_cast<int>(encoding));
-
-        scratch.resize(size);
-        for (int64_t i = 0; i < size; ++i) {
-            scratch[i] = IsValid(i);
-        }
-        return scratch.data();
-    }
-};
-
 struct ScanBatch {
     // Every batch represents the dense row range
     // [row_id_start, row_id_start + size). Values are optional based on the
     // requested projection, while validity remains aligned with this range.
     ValueView values;
-    ValidityView validity;
+    // Evaluators consume validity as one bool per logical row. nullptr means
+    // every row in this batch is valid. Storage-native bitmap encodings must
+    // be normalized by the cursor before they cross this boundary.
+    const bool* validity = nullptr;
     std::shared_ptr<void> owner;
     int64_t row_id_start = 0;
     int64_t size = 0;

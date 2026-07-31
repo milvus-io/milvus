@@ -61,7 +61,7 @@ class FixedWidthDataScanCursor final
                    "data scan max rows must be positive, got {}",
                    max_rows);
         out->values = ChunkedColumnInterface::ValueView{};
-        out->validity = ChunkedColumnInterface::ValidityView{};
+        out->validity = nullptr;
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
@@ -74,7 +74,6 @@ class FixedWidthDataScanCursor final
             if (current_chunk_offset_ >= rows) {
                 ++current_chunk_id_;
                 current_chunk_offset_ = 0;
-                cached_span_.reset();
                 continue;
             }
 
@@ -85,10 +84,6 @@ class FixedWidthDataScanCursor final
 
             if (projection_ == ChunkedColumnInterface::ScanProjection::NoData &&
                 !column_->IsNullable()) {
-                out->validity.encoding =
-                    ChunkedColumnInterface::ValidityEncoding::AllValid;
-                out->validity.size = rows_to_return;
-                out->validity.nullable = false;
                 out->row_id_start = scan_pos_;
                 out->size = rows_to_return;
                 scan_pos_ += rows_to_return;
@@ -96,13 +91,12 @@ class FixedWidthDataScanCursor final
                 return true;
             }
 
-            auto& span = GetCurrentSpan();
+            auto span = column_->Span(op_ctx_, current_chunk_id_);
             AssertInfo(span.get().row_count() == rows,
                        "scan chunk {} row count mismatch, metadata {}, span {}",
                        current_chunk_id_,
                        rows,
                        span.get().row_count());
-            std::shared_ptr<void> owner;
             if (projection_ != ChunkedColumnInterface::ScanProjection::NoData) {
                 out->values.encoding =
                     ChunkedColumnInterface::ValueEncoding::FixedWidth;
@@ -119,20 +113,12 @@ class FixedWidthDataScanCursor final
                 // row; validity masks null slots instead of compacting them.
                 out->values.data = span.get().data();
                 out->values.offset = current_chunk_offset_;
-                owner = std::make_shared<PinWrapper<SpanBase>>(span);
             }
-            out->validity.size = rows_to_return;
-            out->validity.nullable = column_->IsNullable();
             if (span.get().valid_data() != nullptr) {
-                out->validity.encoding =
-                    ChunkedColumnInterface::ValidityEncoding::BoolArray;
-                out->validity.data = span.get().valid_data();
-                out->validity.offset = current_chunk_offset_;
+                out->validity = span.get().valid_data() + current_chunk_offset_;
             }
-            if (owner == nullptr) {
-                owner = std::make_shared<PinWrapper<SpanBase>>(span);
-            }
-            out->owner = std::move(owner);
+            out->owner =
+                std::make_shared<PinWrapper<SpanBase>>(std::move(span));
             out->row_id_start = scan_pos_;
             out->size = rows_to_return;
 
@@ -144,16 +130,6 @@ class FixedWidthDataScanCursor final
     }
 
  private:
-    PinWrapper<SpanBase>&
-    GetCurrentSpan() {
-        if (!cached_span_.has_value() ||
-            cached_chunk_id_ != current_chunk_id_) {
-            cached_span_ = column_->Span(op_ctx_, current_chunk_id_);
-            cached_chunk_id_ = current_chunk_id_;
-        }
-        return cached_span_.value();
-    }
-
     const ChunkedColumnInterface* column_;
     milvus::OpContext* op_ctx_;
     DataType data_type_;
@@ -163,8 +139,6 @@ class FixedWidthDataScanCursor final
     int64_t scan_end_;
     int64_t current_chunk_id_{0};
     int64_t current_chunk_offset_{0};
-    int64_t cached_chunk_id_{-1};
-    std::optional<PinWrapper<SpanBase>> cached_span_{std::nullopt};
 };
 
 class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
@@ -294,7 +268,7 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     static void
     ResetOutput(ChunkedColumnInterface::ScanBatch* out) {
         out->values = ChunkedColumnInterface::ValueView{};
-        out->validity = ChunkedColumnInterface::ValidityView{};
+        out->validity = nullptr;
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
@@ -303,28 +277,17 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     void
     FillValidity(const FixedVector<bool>& valid_data,
                  ChunkedColumnInterface::ScanBatch* out) const {
-        out->validity.size = out->size;
-        out->validity.nullable = column_->IsNullable();
         if (!column_->IsNullable() || valid_data.empty()) {
-            out->validity.encoding =
-                ChunkedColumnInterface::ValidityEncoding::AllValid;
             return;
         }
-        out->validity.encoding =
-            ChunkedColumnInterface::ValidityEncoding::BoolArray;
-        out->validity.data = valid_data.data();
-        out->validity.offset = 0;
+        out->validity = valid_data.data();
     }
 
     void
     FillNoDataBatch(int64_t chunk_id,
                     int64_t offset,
                     ChunkedColumnInterface::ScanBatch* out) const {
-        out->validity.size = out->size;
-        out->validity.nullable = column_->IsNullable();
         if (!column_->IsNullable()) {
-            out->validity.encoding =
-                ChunkedColumnInterface::ValidityEncoding::AllValid;
             return;
         }
 
@@ -332,15 +295,10 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
             column_->GetChunk(op_ctx_, chunk_id));
         const auto& valid_data = owner->chunk.get()->Valid();
         if (valid_data.empty()) {
-            out->validity.encoding =
-                ChunkedColumnInterface::ValidityEncoding::AllValid;
             return;
         }
 
-        out->validity.encoding =
-            ChunkedColumnInterface::ValidityEncoding::BoolArray;
-        out->validity.data = valid_data.data();
-        out->validity.offset = offset;
+        out->validity = valid_data.data() + offset;
         out->owner = std::move(owner);
     }
 
