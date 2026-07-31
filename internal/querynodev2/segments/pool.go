@@ -194,6 +194,11 @@ func initInsertPool() {
 		pool := conc.NewPool[struct{}](size)
 		insertPool.Store(pool)
 		pt.Watch(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, config.NewHandler("qn.insertpool.sizefactor", ResizeInsertPool))
+		// Reconcile a config update between the initial size read and watcher registration.
+		currentSize := insertPoolSize()
+		if currentSize != size {
+			resizePool(pool, currentSize, "InsertPool")
+		}
 		mlog.Info(context.TODO(), "init insertPool done", mlog.Int("size", size))
 	})
 }
