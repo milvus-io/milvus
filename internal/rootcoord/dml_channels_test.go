@@ -21,8 +21,11 @@ import (
 	"context"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -53,6 +57,61 @@ func TestDmlMsgStream(t *testing.T) {
 		assert.Equal(t, int64(0), dms.RefCnt())
 		assert.Equal(t, int64(1), dms.Used())
 	})
+}
+
+func TestDmlMsgStreamCloseWaitsForBroadcast(t *testing.T) {
+	ms := &FailMsgStream{}
+	broadcastStarted := make(chan struct{})
+	releaseBroadcast := make(chan struct{})
+	var broadcastCalls atomic.Int32
+
+	mockBroadcast := mockey.Mock((*FailMsgStream).Broadcast).To(
+		func(_ *FailMsgStream, _ context.Context, _ *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+			broadcastCalls.Add(1)
+			close(broadcastStarted)
+			<-releaseBroadcast
+			return nil, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	dms := &dmlMsgStream{
+		ms:     ms,
+		refcnt: 1,
+	}
+
+	broadcastDone := make(chan error, 1)
+	go func() {
+		_, err := dms.broadcast(context.Background(), nil)
+		broadcastDone <- err
+	}()
+	<-broadcastStarted
+
+	closeDone := make(chan struct{})
+	go func() {
+		dms.close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+		t.Fatal("dml msgstream close finished while a broadcast was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseBroadcast)
+	require.NoError(t, <-broadcastDone)
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("dml msgstream close did not finish")
+	}
+
+	_, err := dms.broadcast(context.Background(), nil)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	_, err = dms.broadcastMark(context.Background(), nil)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	dms.close()
+	assert.Equal(t, int32(1), broadcastCalls.Load())
 }
 
 func TestChannelsHeap(t *testing.T) {
