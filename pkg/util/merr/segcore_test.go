@@ -71,6 +71,12 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.ErrorIs(t, SegcoreError(2038, "x"), ErrSegcoreFollyCancel)
 		assert.ErrorIs(t, SegcoreError(2039, "x"), ErrSegcoreOutOfRange)
 		assert.ErrorIs(t, SegcoreError(2046, "x"), ErrCollectionSchemaVersionNotReady)
+		replacementErr := SegcoreError(2047, "x")
+		assert.ErrorIs(t, replacementErr, ErrNeedFullSegmentReplacement)
+		assert.Equal(t, int32(606), Code(replacementErr))
+		assert.Equal(t, SystemError, GetErrorType(replacementErr))
+		assert.False(t, Status(replacementErr).GetRetriable())
+		assert.False(t, IsSegcoreSignal(2047))
 		assert.ErrorIs(t, SegcoreError(2099, "x"), KnowhereError)
 	})
 
@@ -176,7 +182,7 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 		2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022,
 		2023, 2024, 2025, 2026, 2027, 2028, 2030, 2031, 2032, 2033, 2034,
 		2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2044, 2045,
-		2046, 2099,
+		2046, 2047, 2099,
 	}
 
 	// Regression guard: the codes we classified on purpose must stay registered

@@ -36,6 +36,165 @@
 
 namespace milvus::segcore {
 
+namespace {
+
+template <typename StatsMap>
+void
+ValidateStatsMapFieldIds(const StatsMap& stats,
+                         std::string_view kind,
+                         int64_t segment_id) {
+    for (const auto& [field_id, value] : stats) {
+        if (value.fieldid() != field_id) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{} metadata key {} disagrees with embedded field id {} "
+                      "for segment {}",
+                      kind,
+                      field_id,
+                      value.fieldid(),
+                      segment_id);
+        }
+    }
+}
+
+template <typename Repeated, typename Predicate>
+void
+PruneRepeatedByField(Repeated* values, Predicate&& keep) {
+    Repeated projected;
+    for (const auto& value : *values) {
+        if (keep(FieldId(value.fieldid()))) {
+            *projected.Add() = value;
+        }
+    }
+    values->Swap(&projected);
+}
+
+}  // namespace
+
+void
+SegmentLoadInfo::ValidateStructuralMetadata() const {
+    ValidateStatsMapFieldIds(
+        info_.textstatslogs(), "text index stats", GetSegmentID());
+    ValidateStatsMapFieldIds(
+        info_.jsonkeystatslogs(), "JSON key stats", GetSegmentID());
+}
+
+void
+SegmentLoadInfo::ProjectFieldBinlogs(
+    google::protobuf::RepeatedPtrField<proto::segcore::FieldBinlog>* logs) {
+    google::protobuf::RepeatedPtrField<proto::segcore::FieldBinlog> projected;
+    for (const auto& field_binlog : *logs) {
+        if (field_binlog.child_fields().empty()) {
+            if (HasFieldInSchema(FieldId(field_binlog.fieldid()))) {
+                *projected.Add() = field_binlog;
+            }
+            continue;
+        }
+
+        auto* retained = projected.Add();
+        *retained = field_binlog;
+        retained->clear_child_fields();
+        for (auto child_id : field_binlog.child_fields()) {
+            if (HasFieldInSchema(FieldId(child_id))) {
+                retained->add_child_fields(child_id);
+            }
+        }
+        if (retained->child_fields().empty()) {
+            projected.RemoveLast();
+        }
+    }
+    logs->Swap(&projected);
+}
+
+void
+SegmentLoadInfo::ProjectToSchema(SchemaPtr schema) {
+    AssertInfo(schema != nullptr,
+               "cannot project segment {} load info to a null schema",
+               GetSegmentID());
+    schema_ = std::move(schema);
+    ValidateStructuralMetadata();
+
+    auto keep = [this](FieldId field_id) { return HasFieldInSchema(field_id); };
+    PruneRepeatedByField(info_.mutable_index_infos(), keep);
+    ProjectFieldBinlogs(info_.mutable_binlog_paths());
+    ProjectFieldBinlogs(info_.mutable_statslogs());
+    ProjectFieldBinlogs(info_.mutable_bm25logs());
+
+    auto prune_stats = [this](auto* stats) {
+        for (auto it = stats->begin(); it != stats->end();) {
+            if (!HasFieldInSchema(FieldId(it->first))) {
+                it = stats->erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+    prune_stats(info_.mutable_textstatslogs());
+    prune_stats(info_.mutable_jsonkeystatslogs());
+
+    PruneRuntimeStateNotInSchema();
+    BuildFieldBinlogCache();
+    ValidateSchemaProjection();
+}
+
+void
+SegmentLoadInfo::ValidateSchemaProjection() const {
+    AssertInfo(schema_ != nullptr,
+               "segment {} load info has no schema projection",
+               GetSegmentID());
+    ValidateStructuralMetadata();
+
+    auto validate_field = [this](int64_t field_id, std::string_view kind) {
+        AssertInfo(HasFieldInSchema(FieldId(field_id)),
+                   "projected {} references dropped field {} for segment {}",
+                   kind,
+                   field_id,
+                   GetSegmentID());
+    };
+    for (const auto& index_info : info_.index_infos()) {
+        validate_field(index_info.fieldid(), "index metadata");
+    }
+    for (const auto& [field_id, _] : info_.textstatslogs()) {
+        validate_field(field_id, "text index stats");
+    }
+    for (const auto& [field_id, _] : info_.jsonkeystatslogs()) {
+        validate_field(field_id, "JSON key stats");
+    }
+
+    auto validate_binlogs = [&](const auto& logs, std::string_view kind) {
+        for (const auto& field_binlog : logs) {
+            if (field_binlog.child_fields().empty()) {
+                validate_field(field_binlog.fieldid(), kind);
+                continue;
+            }
+            for (auto child_id : field_binlog.child_fields()) {
+                validate_field(child_id, kind);
+            }
+        }
+    };
+    validate_binlogs(info_.binlog_paths(), "field binlog");
+    validate_binlogs(info_.statslogs(), "stats binlog");
+    validate_binlogs(info_.bm25logs(), "BM25 binlog");
+
+    for (const auto& [field_id, _] : converted_field_index_cache_) {
+        validate_field(field_id.get(), "converted index cache");
+    }
+    for (const auto& [field_id, _] : field_index_identity_cache_) {
+        validate_field(field_id.get(), "index identity cache");
+    }
+    for (const auto& [field_id, _] : json_index_path_cache_) {
+        validate_field(field_id.get(), "JSON index path cache");
+    }
+    for (const auto& field_id : field_index_has_raw_data_) {
+        validate_field(field_id.get(), "index raw-data marker");
+    }
+    for (const auto& field_id : fields_filled_with_default_) {
+        validate_field(field_id.get(), "default-filled marker");
+    }
+    for (const auto& [field_id, _] : created_text_indexes_) {
+        validate_field(field_id.get(), "raw-built text index marker");
+    }
+}
+
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 SegmentLoadInfo::GetColumnGroups() const {
     auto manifest_path = GetManifestPath();
@@ -73,6 +232,55 @@ SegmentLoadInfo::HasManifestColumn(const std::string& column_name) const {
         }
     }
     return false;
+}
+
+void
+SegmentLoadInfo::ValidateReopenRowCount(int64_t expected) const {
+    if (GetNumOfRows() != expected) {
+        ThrowInfo(kNeedFullSegmentReplacement,
+                  "online reopen cannot change row count for segment {}: "
+                  "current {}, incoming {}; use full segment replacement "
+                  "instead",
+                  GetSegmentID(),
+                  expected,
+                  GetNumOfRows());
+    }
+
+    if (HasManifestPath()) {
+        return;
+    }
+
+    for (const auto& field_binlog : GetBinlogPaths()) {
+        bool retained = false;
+        if (field_binlog.child_fields().empty()) {
+            retained = HasFieldInSchema(FieldId(field_binlog.fieldid()));
+        } else {
+            for (auto child_id : field_binlog.child_fields()) {
+                if (HasFieldInSchema(FieldId(child_id))) {
+                    retained = true;
+                    break;
+                }
+            }
+        }
+        if (!retained) {
+            continue;
+        }
+
+        int64_t actual = 0;
+        for (const auto& binlog : field_binlog.binlogs()) {
+            actual += binlog.entries_num();
+        }
+        if (actual != expected) {
+            ThrowInfo(kNeedFullSegmentReplacement,
+                      "online reopen row count mismatch for segment {}, "
+                      "field binlog group {}: expected {}, actual {}; use "
+                      "full segment replacement instead",
+                      GetSegmentID(),
+                      field_binlog.fieldid(),
+                      expected,
+                      actual);
+        }
+    }
 }
 
 LoadIndexInfo
@@ -271,25 +479,13 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
 
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
-    // Get current index IDs from the lightweight identity cache.
-    std::set<int64_t> current_index_ids;
     // Build a set of field IDs that currently have indexes loaded
     std::set<FieldId> current_indexed_fields;
-    for (const auto& [field_id, index_ids] : field_index_id_cache_) {
-        current_indexed_fields.insert(field_id);
-        for (auto index_id : index_ids) {
-            current_index_ids.insert(index_id);
-        }
-    }
-
-    std::set<int64_t> new_index_ids;
-    for (const auto& [field_id, index_ids] : new_info.field_index_id_cache_) {
-        if (!new_info.HasFieldInSchema(field_id)) {
+    for (const auto& [field_id, identities] : field_index_identity_cache_) {
+        if (identities.empty()) {
             continue;
         }
-        for (auto index_id : index_ids) {
-            new_index_ids.insert(index_id);
-        }
+        current_indexed_fields.insert(field_id);
     }
     std::unordered_map<FieldId, std::unordered_set<std::string>>
         new_json_index_paths;
@@ -313,9 +509,18 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             continue;
         }
         for (const auto& load_index_info : load_index_infos) {
-            if (current_index_ids.find(load_index_info.index_id) ==
-                current_index_ids.end()) {
-                // New index_id: check if field already has an index loaded
+            auto incoming_identity = FieldIndexIdentity::From(load_index_info);
+            auto current_field = field_index_identity_cache_.find(field_id);
+            bool identity_unchanged = false;
+            if (current_field != field_index_identity_cache_.end()) {
+                identity_unchanged =
+                    std::find(current_field->second.begin(),
+                              current_field->second.end(),
+                              incoming_identity) != current_field->second.end();
+            }
+            if (!identity_unchanged) {
+                // A stable index_id is insufficient identity: compaction can
+                // publish a new build/version/file set under the same id.
                 if (current_indexed_fields.find(field_id) !=
                     current_indexed_fields.end()) {
                     diff.indexes_to_replace[field_id].push_back(
@@ -328,22 +533,36 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     }
 
     // Find indexes to drop: fields that have indexes in current but not in new_info
-    for (const auto& [field_id, index_ids] : field_index_id_cache_) {
-        for (auto index_id : index_ids) {
-            if (!new_info.HasFieldInSchema(field_id) ||
-                new_index_ids.find(index_id) == new_index_ids.end()) {
-                auto field_paths = json_index_path_cache_.find(field_id);
-                if (field_paths != json_index_path_cache_.end()) {
-                    auto path = field_paths->second.find(index_id);
-                    if (path != field_paths->second.end()) {
-                        if (new_json_index_paths[field_id].find(path->second) ==
+    for (const auto& [field_id, identities] : field_index_identity_cache_) {
+        for (const auto& identity : identities) {
+            auto incoming_field =
+                new_info.field_index_identity_cache_.find(field_id);
+            bool index_id_still_present =
+                incoming_field != new_info.field_index_identity_cache_.end() &&
+                std::any_of(incoming_field->second.begin(),
+                            incoming_field->second.end(),
+                            [&](const FieldIndexIdentity& incoming) {
+                                return incoming.index_id == identity.index_id;
+                            });
+            auto field_paths = json_index_path_cache_.find(field_id);
+            if (field_paths != json_index_path_cache_.end()) {
+                auto path = field_paths->second.find(identity.index_id);
+                if (path != field_paths->second.end()) {
+                    // JSON indexes are runtime-owned by nested path. A new
+                    // identity may reuse the same index_id while moving to a
+                    // different path; load/replace handles the incoming path,
+                    // while finalize must explicitly retire the old one.
+                    if (!new_info.HasFieldInSchema(field_id) ||
+                        new_json_index_paths[field_id].find(path->second) ==
                             new_json_index_paths[field_id].end()) {
-                            diff.json_indexes_to_drop[field_id].insert(
-                                path->second);
-                        }
-                        continue;
+                        diff.json_indexes_to_drop[field_id].insert(
+                            path->second);
                     }
+                    continue;
                 }
+            }
+            if (!new_info.HasFieldInSchema(field_id) ||
+                !index_id_still_present) {
                 diff.indexes_to_drop.insert(field_id);
             }
         }
@@ -816,6 +1035,44 @@ CurrentJsonStatsDataFormatVersion() {
 }
 
 bool
+TextStatsFilesEqual(const proto::segcore::TextIndexStats& lhs,
+                    const proto::segcore::TextIndexStats& rhs) {
+    if (lhs.files_size() != rhs.files_size()) {
+        return false;
+    }
+    for (int i = 0; i < lhs.files_size(); ++i) {
+        if (lhs.files(i) != rhs.files(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+TextStatsLoadIdentityEqual(const proto::segcore::TextIndexStats& lhs,
+                           const proto::segcore::TextIndexStats& rhs) {
+    return lhs.fieldid() == rhs.fieldid() && lhs.version() == rhs.version() &&
+           lhs.buildid() == rhs.buildid() &&
+           lhs.current_scalar_index_version() ==
+               rhs.current_scalar_index_version() &&
+           lhs.base_path() == rhs.base_path() &&
+           lhs.log_size() == rhs.log_size() &&
+           lhs.memory_size() == rhs.memory_size() &&
+           TextStatsFilesEqual(lhs, rhs);
+}
+
+bool
+TextIndexSchemaIdentityEqual(const FieldMeta& lhs, const FieldMeta& rhs) {
+    if (lhs.get_data_type() != rhs.get_data_type() ||
+        lhs.enable_match() != rhs.enable_match() ||
+        lhs.enable_analyzer() != rhs.enable_analyzer()) {
+        return false;
+    }
+    return !lhs.enable_analyzer() ||
+           lhs.get_analyzer_params() == rhs.get_analyzer_params();
+}
+
+bool
 JsonStatsFilesEqual(const proto::segcore::JsonKeyStats& lhs,
                     const proto::segcore::JsonKeyStats& rhs) {
     if (lhs.files_size() != rhs.files_size()) {
@@ -846,13 +1103,105 @@ JsonStatsLoadIdentityEqual(const proto::segcore::JsonKeyStats& lhs,
 void
 SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
                                         SegmentLoadInfo& new_info) {
+    // Online reopen supports adding a text index, preserving an unchanged
+    // index, rebuilding a raw-built index from staged target sources, or
+    // dropping it together with its schema field. Replacing a pre-built index
+    // or changing between pre-built and raw-built sources still requires full
+    // segment replacement; reject those transitions before any load IO.
+    for (const auto& [field_id, current_stats] : GetTextStatsLogs()) {
+        auto fid = FieldId(field_id);
+        AssertInfo(HasFieldInSchema(fid),
+                   "published pre-built text index field {} is absent from "
+                   "the current schema for segment {}",
+                   field_id,
+                   GetSegmentID());
+        AssertInfo(created_text_indexes_.count(fid) == 0,
+                   "published text index field {} is marked as both "
+                   "pre-built and raw-built for segment {}",
+                   field_id,
+                   GetSegmentID());
+        if (!new_info.HasFieldInSchema(fid)) {
+            continue;
+        }
+
+        const auto* incoming_stats = new_info.GetTextStatsLog(field_id);
+        const auto& incoming_meta = new_info.schema_->operator[](fid);
+        if (incoming_stats == nullptr) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot change text index source for segment "
+                "{}, field {} from pre-built to {}; use full segment "
+                "replacement instead",
+                new_info.GetSegmentID(),
+                field_id,
+                incoming_meta.enable_match() ? "raw-built" : "none");
+        }
+        if (!TextStatsLoadIdentityEqual(current_stats, *incoming_stats)) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot replace pre-built text index identity "
+                "for segment {}, field {}; use full segment replacement "
+                "instead",
+                new_info.GetSegmentID(),
+                field_id);
+        }
+        if (!TextIndexSchemaIdentityEqual(schema_->operator[](fid),
+                                          incoming_meta)) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot change text index schema identity for "
+                "segment {}, field {}; use full segment replacement instead",
+                new_info.GetSegmentID(),
+                field_id);
+        }
+    }
+
+    for (const auto& [fid, _] : created_text_indexes_) {
+        AssertInfo(HasFieldInSchema(fid),
+                   "published raw-built text index field {} is absent from "
+                   "the current schema for segment {}",
+                   fid.get(),
+                   GetSegmentID());
+        AssertInfo(GetTextStatsLog(fid.get()) == nullptr,
+                   "published text index field {} is marked as both "
+                   "pre-built and raw-built for segment {}",
+                   fid.get(),
+                   GetSegmentID());
+        if (!new_info.HasFieldInSchema(fid)) {
+            continue;
+        }
+
+        if (new_info.GetTextStatsLog(fid.get()) != nullptr) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot change text index source for segment "
+                "{}, field {} from raw-built to pre-built; use full segment "
+                "replacement instead",
+                new_info.GetSegmentID(),
+                fid.get());
+        }
+        const auto& incoming_meta = new_info.schema_->operator[](fid);
+        if (!incoming_meta.enable_match()) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot remove raw-built text index for segment "
+                "{}, field {} while keeping the field; use full segment "
+                "replacement instead",
+                new_info.GetSegmentID(),
+                fid.get());
+        }
+        // Raw-built indexes can be rebuilt from the staged target data when
+        // analyzer/schema identity changes. The rebuild is planned after all
+        // field/index source diffs have been computed.
+    }
+
     // Build current text indexed fields (fields with loaded text index stats)
     std::set<FieldId> current_text_indexed;
     for (const auto& [field_id, stats] : GetTextStatsLogs()) {
         current_text_indexed.insert(FieldId(field_id));
     }
     // Also include text indexes created from raw data
-    for (const auto& field_id : created_text_indexes_) {
+    for (const auto& [field_id, _] : created_text_indexes_) {
         current_text_indexed.insert(field_id);
     }
 
@@ -897,6 +1246,82 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
             continue;
         }
         diff.text_indexes_to_create.insert(field_id);
+    }
+}
+
+void
+SegmentLoadInfo::PlanRawBuiltTextIndexRebuilds(
+    LoadDiff& diff, const SegmentLoadInfo& new_info) const {
+    auto pair_list_contains = [](const auto& values, FieldId field_id) {
+        for (const auto& [_, field_ids] : values) {
+            if (std::find(field_ids.begin(), field_ids.end(), field_id) !=
+                field_ids.end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto binlog_list_contains = [](const auto& values, FieldId field_id) {
+        for (const auto& [field_ids, _] : values) {
+            if (std::find(field_ids.begin(), field_ids.end(), field_id) !=
+                field_ids.end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for (const auto& [field_id, meta] : created_text_indexes_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
+
+        bool field_data_changed =
+            // A Storage V2 manifest replacement can change a TEXT field's
+            // LOB base path even when its column-group files are identical.
+            // Treat the manifest identity itself as a raw-field dependency.
+            diff.manifest_updated || diff.load_external_manifest ||
+            binlog_list_contains(diff.binlogs_to_load, field_id) ||
+            binlog_list_contains(diff.binlogs_to_replace, field_id) ||
+            pair_list_contains(diff.column_groups_to_load, field_id) ||
+            pair_list_contains(diff.column_groups_to_replace, field_id) ||
+            pair_list_contains(diff.column_groups_to_lazyload, field_id) ||
+            pair_list_contains(diff.column_groups_to_lazyreplace, field_id) ||
+            std::find(diff.fields_to_reload.begin(),
+                      diff.fields_to_reload.end(),
+                      field_id) != diff.fields_to_reload.end() ||
+            diff.field_data_to_drop.count(field_id) > 0 ||
+            std::find(diff.fields_to_fill_default.begin(),
+                      diff.fields_to_fill_default.end(),
+                      field_id) != diff.fields_to_fill_default.end();
+
+        bool scalar_index_changed =
+            diff.indexes_to_load.count(field_id) > 0 ||
+            diff.indexes_to_replace.count(field_id) > 0 ||
+            diff.indexes_to_drop.count(field_id) > 0;
+
+        bool schema_identity_changed = !TextIndexSchemaIdentityEqual(
+            schema_->operator[](field_id),
+            new_info.schema_->operator[](field_id));
+
+        bool rebuild = schema_identity_changed;
+        switch (meta.source) {
+            case RawTextIndexSource::FieldData:
+                rebuild = rebuild || field_data_changed;
+                break;
+            case RawTextIndexSource::ScalarIndexRawData:
+                // A field-data mutation may also change source priority from
+                // scalar-index raw data to a newly resident field column.
+                rebuild = rebuild || scalar_index_changed || field_data_changed;
+                break;
+            case RawTextIndexSource::Unknown:
+                rebuild = rebuild || field_data_changed || scalar_index_changed;
+                break;
+        }
+
+        if (rebuild) {
+            diff.text_indexes_to_rebuild[field_id] = meta.source;
+        }
     }
 }
 
@@ -1013,8 +1438,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        AssertInfo(new_info.HasManifestPath(),
-                   "manifest could only be updated with other manifest");
+        if (!new_info.HasManifestPath()) {
+            ThrowInfo(kNeedFullSegmentReplacement,
+                      "online reopen cannot change segment {} from manifest "
+                      "to binlog storage; use full segment replacement instead",
+                      GetSegmentID());
+        }
         if (GetManifestPath() != new_info.GetManifestPath()) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
@@ -1027,9 +1456,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             ComputeDiffColumnGroups(diff, new_info);
         }
     } else {
-        AssertInfo(
-            !new_info.HasManifestPath(),
-            "field binlogs could only be updated with non-manfest load info");
+        if (new_info.HasManifestPath()) {
+            ThrowInfo(kNeedFullSegmentReplacement,
+                      "online reopen cannot change segment {} from binlog to "
+                      "manifest storage; use full segment replacement instead",
+                      GetSegmentID());
+        }
         ComputeDiffBinlogs(diff, new_info);
     }
 
@@ -1037,6 +1469,8 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     if (!schema_->is_external_collection()) {
         ComputeDiffDefaultFields(diff, new_info);
     }
+
+    PlanRawBuiltTextIndexRebuilds(diff, new_info);
 
     return diff;
 }

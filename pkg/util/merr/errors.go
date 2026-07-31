@@ -132,6 +132,10 @@ var (
 	// the query coordinator will mark the node as resource exhausted and apply a
 	// penalty period during which the node won't receive new loading tasks.
 	ErrSegmentRequestResourceFailed = newMilvusError("segment request resource failed", 605, false)
+	// ErrNeedFullSegmentReplacement is an internal control contract: the
+	// requested segment state is valid, but cannot be reached by an in-place
+	// reopen. Callers must build and atomically replace the whole segment.
+	ErrNeedFullSegmentReplacement = newMilvusError("full segment replacement required", 606, false)
 
 	// Index related
 	ErrIndexNotFound     = newMilvusError("index not found", 700, false)

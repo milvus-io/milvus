@@ -182,6 +182,74 @@ func cloneMsgPosition(position *msgpb.MsgPosition) *msgpb.MsgPosition {
 	return proto.Clone(position).(*msgpb.MsgPosition)
 }
 
+// projectSegmentLoadInfoToSchema removes metadata for fields that are no
+// longer present in the collection schema. QueryNode consumes SegmentLoadInfo
+// before segcore gets a chance to apply its own projection, so keeping the Go
+// copy canonical prevents resource accounting and runtime metadata caches from
+// observing stale manifest entries for dropped fields.
+func projectSegmentLoadInfoToSchema(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (*querypb.SegmentLoadInfo, error) {
+	if loadInfo == nil {
+		return nil, merr.WrapErrServiceInternalMsg("cannot project nil segment load info")
+	}
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create schema helper for segment load info projection")
+	}
+	hasField := func(fieldID int64) bool {
+		_, err := schemaHelper.GetFieldFromID(fieldID)
+		return err == nil
+	}
+
+	projected := proto.Clone(loadInfo).(*querypb.SegmentLoadInfo)
+	projectFieldBinlogs := func(logs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+		retained := make([]*datapb.FieldBinlog, 0, len(logs))
+		for _, fieldBinlog := range logs {
+			if len(fieldBinlog.GetChildFields()) == 0 {
+				if hasField(fieldBinlog.GetFieldID()) {
+					retained = append(retained, fieldBinlog)
+				}
+				continue
+			}
+
+			children := fieldBinlog.GetChildFields()[:0]
+			for _, childFieldID := range fieldBinlog.GetChildFields() {
+				if hasField(childFieldID) {
+					children = append(children, childFieldID)
+				}
+			}
+			fieldBinlog.ChildFields = children
+			if len(children) > 0 {
+				retained = append(retained, fieldBinlog)
+			}
+		}
+		return retained
+	}
+
+	indexInfos := make([]*querypb.FieldIndexInfo, 0, len(projected.GetIndexInfos()))
+	for _, indexInfo := range projected.GetIndexInfos() {
+		if hasField(indexInfo.GetFieldID()) {
+			indexInfos = append(indexInfos, indexInfo)
+		}
+	}
+	projected.IndexInfos = indexInfos
+	projected.BinlogPaths = projectFieldBinlogs(projected.GetBinlogPaths())
+	projected.Statslogs = projectFieldBinlogs(projected.GetStatslogs())
+	projected.Bm25Logs = projectFieldBinlogs(projected.GetBm25Logs())
+	for fieldID := range projected.GetTextStatsLogs() {
+		if !hasField(fieldID) {
+			delete(projected.TextStatsLogs, fieldID)
+		}
+	}
+	for fieldID := range projected.GetJsonKeyStatsLogs() {
+		if !hasField(fieldID) {
+			delete(projected.JsonKeyStatsLogs, fieldID)
+		}
+	}
+
+	return projected, nil
+}
+
 // compactSegmentLoadInfoForRuntime retains runtime identity/version metadata,
 // positions, deltalogs, and manifest/resource estimate fields; callers must
 // consume binlog, index, and stats metadata before compaction.
@@ -1288,28 +1356,38 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	}
 	defer s.ptrLock.Unpin()
 
+	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	projectedLoadInfo, err := projectSegmentLoadInfoToSchema(newLoadInfo, schema)
+	if err != nil {
+		return merr.Wrapf(err, "failed to project reopen metadata for segment %d", s.ID())
+	}
+
 	// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
 	// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
 	// the full-load path injects; otherwise segcore asserts on load. See #51249.
-	if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
+	if err := prepareIndexLoadParams(projectedLoadInfo.GetIndexInfos()); err != nil {
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
-	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo:      newLoadInfo,
+	err = s.csegment.Reopen(ctx, &segcore.ReopenRequest{
+		LoadInfo:      projectedLoadInfo,
 		Schema:        schema,
 		SchemaVersion: schemaVersion,
 	})
 	if err != nil {
+		if errors.Is(err, merr.ErrNeedFullSegmentReplacement) {
+			return merr.Wrapf(err,
+				"segment %d cannot be reopened in place",
+				s.ID())
+		}
 		return err
 	}
-	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
+	s.syncFieldIndexes(projectedLoadInfo.GetIndexInfos())
 	if s.relatedDataSize != nil {
-		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
+		s.relatedDataSize.Store(calculateSegmentLogSize(projectedLoadInfo))
 	}
-	s.loadInfo.Store(newLoadInfo)
-	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
+	s.loadInfo.Store(projectedLoadInfo)
+	s.syncFieldJSONStatsFromLoadInfo(ctx, projectedLoadInfo)
 	s.compactLoadInfoForRuntime()
 	return nil
 }

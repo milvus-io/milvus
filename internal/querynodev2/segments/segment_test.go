@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -236,6 +237,68 @@ func TestCompactSegmentLoadInfoForRuntime(t *testing.T) {
 
 	loadInfo.StartPosition.ChannelName = "mutated"
 	assert.Equal(t, "ch", compact.GetStartPosition().GetChannelName())
+}
+
+func TestProjectSegmentLoadInfoToSchema(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "projected",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "kept_int", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "kept_text", DataType: schemapb.DataType_Text},
+		},
+	}
+	fieldBinlog := func(fieldID int64, children ...int64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{
+			FieldID:     fieldID,
+			ChildFields: children,
+			Binlogs:     []*datapb.Binlog{{LogPath: fmt.Sprintf("field-%d", fieldID)}},
+		}
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID: 1,
+		BinlogPaths: []*datapb.FieldBinlog{
+			fieldBinlog(101),
+			fieldBinlog(103),
+			fieldBinlog(1000, 101, 103),
+			fieldBinlog(1001, 103),
+		},
+		Statslogs:  []*datapb.FieldBinlog{fieldBinlog(101), fieldBinlog(103)},
+		Bm25Logs:   []*datapb.FieldBinlog{fieldBinlog(102), fieldBinlog(103)},
+		Deltalogs:  []*datapb.FieldBinlog{fieldBinlog(103)},
+		IndexInfos: []*querypb.FieldIndexInfo{{FieldID: 101}, {FieldID: 103}},
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			102: {FieldID: 102},
+			103: {FieldID: 103},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101},
+			103: {FieldID: 103},
+		},
+	}
+
+	projected, err := projectSegmentLoadInfoToSchema(loadInfo, schema)
+	require.NoError(t, err)
+
+	require.Len(t, projected.GetBinlogPaths(), 2)
+	assert.EqualValues(t, 101, projected.GetBinlogPaths()[0].GetFieldID())
+	assert.Equal(t, []int64{101}, projected.GetBinlogPaths()[1].GetChildFields())
+	require.Len(t, projected.GetStatslogs(), 1)
+	assert.EqualValues(t, 101, projected.GetStatslogs()[0].GetFieldID())
+	require.Len(t, projected.GetBm25Logs(), 1)
+	assert.EqualValues(t, 102, projected.GetBm25Logs()[0].GetFieldID())
+	require.Len(t, projected.GetIndexInfos(), 1)
+	assert.EqualValues(t, 101, projected.GetIndexInfos()[0].GetFieldID())
+	assert.Contains(t, projected.GetTextStatsLogs(), int64(102))
+	assert.NotContains(t, projected.GetTextStatsLogs(), int64(103))
+	assert.Contains(t, projected.GetJsonKeyStatsLogs(), int64(101))
+	assert.NotContains(t, projected.GetJsonKeyStatsLogs(), int64(103))
+	assert.Equal(t, loadInfo.GetDeltalogs(), projected.GetDeltalogs())
+
+	// Projection is copy-on-write at the Go boundary; request metadata remains
+	// available to the caller for diagnostics and retry.
+	require.Len(t, loadInfo.GetBinlogPaths(), 4)
+	assert.Equal(t, []int64{101, 103}, loadInfo.GetBinlogPaths()[2].GetChildFields())
+	assert.Contains(t, loadInfo.GetTextStatsLogs(), int64(103))
 }
 
 func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
@@ -893,6 +956,112 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	err := segment.Reopen(context.Background(), newLoadInfo)
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
+}
+
+func TestLocalSegmentReopenProjectsLoadInfoToSchema(t *testing.T) {
+	paramtable.Init()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "collection_v2",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:  101,
+			Name:     "kept_field",
+			DataType: schemapb.DataType_Int64,
+		}},
+		Version: 2,
+	}
+	collection := &Collection{}
+	collection.setSchema(schema, 2, 100, 102)
+
+	newLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID: 10,
+		SegmentID:    20,
+		PartitionID:  30,
+		Level:        datapb.SegmentLevel_L1,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{FieldID: 101},
+			{FieldID: 103},
+		},
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			103: {FieldID: 103},
+		},
+	}
+
+	var captured *querypb.SegmentLoadInfo
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
+			captured = request.LoadInfo
+			return request.Schema == schema && request.SchemaVersion == 102
+		})).
+		Return(nil)
+
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			segmentType:        SegmentTypeSealed,
+			loadInfo:           atomic.NewPointer(&querypb.SegmentLoadInfo{Level: datapb.SegmentLevel_L1}),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo))
+	require.NotNil(t, captured)
+	require.Len(t, captured.GetBinlogPaths(), 1)
+	assert.EqualValues(t, 101, captured.GetBinlogPaths()[0].GetFieldID())
+	assert.Empty(t, captured.GetTextStatsLogs())
+
+	// The caller's request remains unchanged for diagnostics or retry.
+	require.Len(t, newLoadInfo.GetBinlogPaths(), 2)
+	assert.Contains(t, newLoadInfo.GetTextStatsLogs(), int64(103))
+}
+
+func TestLocalSegmentReopenPropagatesFullReplacementSignal(t *testing.T) {
+	paramtable.Init()
+
+	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	schema.Version = 1
+	collection := &Collection{}
+	collection.setSchema(schema, 1, 100, 101)
+
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.AnythingOfType("*segcore.ReopenRequest")).
+		Return(merr.ErrNeedFullSegmentReplacement)
+
+	oldLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  10,
+		SegmentID:     20,
+		PartitionID:   30,
+		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
+		DataVersion:   1,
+	}
+	newLoadInfo := proto.Clone(oldLoadInfo).(*querypb.SegmentLoadInfo)
+	newLoadInfo.DataVersion = 2
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(oldLoadInfo),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	err := segment.Reopen(context.Background(), newLoadInfo)
+	require.ErrorIs(t, err, merr.ErrNeedFullSegmentReplacement)
+	require.Contains(t, err.Error(), "cannot be reopened in place")
+	require.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
 }
 
 // TestLocalSegmentReopenInjectsDiskIndexLoadParams reproduces issue #51249:
