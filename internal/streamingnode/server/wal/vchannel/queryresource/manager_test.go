@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -19,6 +20,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+func TestManagerSharesDefaultBuildersAndLazilyAllocatesRefs(t *testing.T) {
+	first := NewManager(Config{})
+	second := NewManager(Config{})
+
+	require.Len(t, first.builders, 1)
+	require.Len(t, second.builders, 1)
+	assert.Same(t, &first.builders[0], &second.builders[0])
+	assert.Nil(t, first.refs)
+	assert.Nil(t, second.refs)
+}
 
 func TestManagerBuildNotifiesAllCurrentRefsWithoutWaiterGoroutines(t *testing.T) {
 	scheduler := nodescheduler.New(1)

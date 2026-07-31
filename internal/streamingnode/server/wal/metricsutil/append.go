@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	maxLogged    = 3
-	logThreshold = 10 * time.Millisecond
+	maxLogged                    = 3
+	logThreshold                 = 10 * time.Millisecond
+	inlineInterceptorGroups      = 16
+	inlineInterceptorOccurrences = 2
 )
 
 type InterceptorMetrics struct {
@@ -38,7 +40,16 @@ type AppendMetrics struct {
 	err                error
 	appendDuration     time.Duration
 	implAppendDuration time.Duration
-	interceptors       map[string][]*InterceptorMetrics
+	interceptorGroups  [inlineInterceptorGroups]interceptorMetricsGroup
+	interceptorCount   int
+	extraInterceptors  map[string][]*InterceptorMetrics
+}
+
+type interceptorMetricsGroup struct {
+	name    string
+	metrics [inlineInterceptorOccurrences]InterceptorMetrics
+	count   int
+	extra   []*InterceptorMetrics
 }
 
 type AppendMetricsGuard struct {
@@ -48,22 +59,48 @@ type AppendMetricsGuard struct {
 }
 
 // StartInterceptorCollector start the interceptor to collect the duration.
-func (m *AppendMetrics) StartInterceptorCollector(name string) *InterceptorCollectGuard {
-	if _, ok := m.interceptors[name]; !ok {
-		m.interceptors[name] = make([]*InterceptorMetrics, 0, 2)
+func (m *AppendMetrics) StartInterceptorCollector(name string) InterceptorCollectGuard {
+	for i := 0; i < m.interceptorCount; i++ {
+		if m.interceptorGroups[i].name == name {
+			return newInterceptorCollectGuard(m.interceptorGroups[i].next())
+		}
 	}
-	im := &InterceptorMetrics{}
-	m.interceptors[name] = append(m.interceptors[name], im)
-	return &InterceptorCollectGuard{
+	if m.interceptorCount < len(m.interceptorGroups) {
+		group := &m.interceptorGroups[m.interceptorCount]
+		m.interceptorCount++
+		group.name = name
+		return newInterceptorCollectGuard(group.next())
+	}
+	if m.extraInterceptors == nil {
+		m.extraInterceptors = make(map[string][]*InterceptorMetrics)
+	}
+	metric := &InterceptorMetrics{}
+	m.extraInterceptors[name] = append(m.extraInterceptors[name], metric)
+	return newInterceptorCollectGuard(metric)
+}
+
+func newInterceptorCollectGuard(metric *InterceptorMetrics) InterceptorCollectGuard {
+	return InterceptorCollectGuard{
 		start:        time.Now(),
 		afterStarted: false,
-		interceptor:  im,
+		interceptor:  metric,
 	}
 }
 
+func (g *interceptorMetricsGroup) next() *InterceptorMetrics {
+	if g.count < len(g.metrics) {
+		metric := &g.metrics[g.count]
+		g.count++
+		return metric
+	}
+	metric := &InterceptorMetrics{}
+	g.extra = append(g.extra, metric)
+	return metric
+}
+
 // StartAppendGuard start the append operation.
-func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
-	return &AppendMetricsGuard{
+func (m *AppendMetrics) StartAppendGuard() AppendMetricsGuard {
+	return AppendMetricsGuard{
 		inner:       m,
 		startAppend: time.Now(),
 	}
@@ -88,21 +125,16 @@ func (m *AppendMetrics) IntoLogFields() []mlog.Field {
 		}
 	}
 	loggedInterceptorCount := 0
-L:
-	for name, ims := range m.interceptors {
-		for i, im := range ims {
-			if !im.ShouldBeLogged() {
-				continue
-			}
-			if loggedInterceptorCount <= maxLogged {
-				fields = append(fields, mlog.Stringer(fmt.Sprintf("%s_%d", name, i), im))
-				loggedInterceptorCount++
-			}
-			if loggedInterceptorCount >= maxLogged {
-				break L
-			}
+	m.rangeInterceptorMetrics(func(name string, occurrence int, im *InterceptorMetrics) bool {
+		if !im.ShouldBeLogged() {
+			return true
 		}
-	}
+		if loggedInterceptorCount <= maxLogged {
+			fields = append(fields, mlog.Stringer(fmt.Sprintf("%s_%d", name, occurrence), im))
+			loggedInterceptorCount++
+		}
+		return loggedInterceptorCount < maxLogged
+	})
 	return fields
 }
 
@@ -123,8 +155,40 @@ func (m *AppendMetricsGuard) FinishAppend() {
 
 // RangeOverInterceptors range over the interceptors.
 func (m *AppendMetrics) RangeOverInterceptors(f func(name string, ims []*InterceptorMetrics)) {
-	for name, ims := range m.interceptors {
-		f(name, ims)
+	for i := 0; i < m.interceptorCount; i++ {
+		group := &m.interceptorGroups[i]
+		metrics := make([]*InterceptorMetrics, 0, group.count+len(group.extra))
+		for j := 0; j < group.count; j++ {
+			metrics = append(metrics, &group.metrics[j])
+		}
+		metrics = append(metrics, group.extra...)
+		f(group.name, metrics)
+	}
+	for name, metrics := range m.extraInterceptors {
+		f(name, metrics)
+	}
+}
+
+func (m *AppendMetrics) rangeInterceptorMetrics(f func(name string, occurrence int, metric *InterceptorMetrics) bool) {
+	for i := 0; i < m.interceptorCount; i++ {
+		group := &m.interceptorGroups[i]
+		for j := 0; j < group.count; j++ {
+			if !f(group.name, j, &group.metrics[j]) {
+				return
+			}
+		}
+		for j, metric := range group.extra {
+			if !f(group.name, group.count+j, metric) {
+				return
+			}
+		}
+	}
+	for name, metrics := range m.extraInterceptors {
+		for occurrence, metric := range metrics {
+			if !f(name, occurrence, metric) {
+				return
+			}
+		}
 	}
 }
 

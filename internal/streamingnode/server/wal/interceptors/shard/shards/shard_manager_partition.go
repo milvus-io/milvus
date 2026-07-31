@@ -20,7 +20,7 @@ func (m *shardManagerImpl) checkIfPartitionCanBeCreated(uniquePartitionKey Parti
 		return ErrCollectionNotFound
 	}
 
-	if _, ok := m.collections[uniquePartitionKey.CollectionID].PartitionIDs[uniquePartitionKey.PartitionID]; ok {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID].Partitions[uniquePartitionKey.PartitionID]; ok {
 		return ErrPartitionExists
 	}
 	return nil
@@ -39,7 +39,7 @@ func (m *shardManagerImpl) checkIfPartitionExists(uniquePartitionKey PartitionUn
 	if _, ok := m.collections[uniquePartitionKey.CollectionID]; !ok {
 		return ErrCollectionNotFound
 	}
-	if _, ok := m.collections[uniquePartitionKey.CollectionID].PartitionIDs[uniquePartitionKey.PartitionID]; !ok {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID].Partitions[uniquePartitionKey.PartitionID]; !ok {
 		return ErrPartitionNotFound
 	}
 	return nil
@@ -62,12 +62,12 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		return
 	}
 
-	m.collections[collectionID].PartitionIDs[partitionID] = struct{}{}
-	if _, ok := m.partitionManagers[uniquePartitionKey]; ok {
+	collection := m.collections[collectionID]
+	if collection.Partitions[partitionID] != nil {
 		logger.Warn(m.ctx, "partition manager already exists")
 		return
 	}
-	m.partitionManagers[uniquePartitionKey] = newPartitionSegmentManager(
+	collection.Partitions[partitionID] = newPartitionSegmentManager(
 		m.ctx,
 		m.Logger(),
 		m.wal,
@@ -76,7 +76,7 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		m.collections[collectionID].VChannel,
 		collectionID,
 		partitionID,
-		make(map[int64]*segmentAllocManager),
+		nil,
 		m.txnManager,
 		tiemtick,
 		m.metrics,
@@ -100,15 +100,15 @@ func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessa
 		logger.Warn(m.ctx, "partition can not be dropped", mlog.Err(err))
 		return
 	}
-	delete(m.collections[collectionID].PartitionIDs, partitionID)
+	collection := m.collections[collectionID]
+	pm := collection.Partitions[partitionID]
+	delete(collection.Partitions, partitionID)
 
-	pm, ok := m.partitionManagers[uniquePartitionKey]
-	if !ok {
+	if pm == nil {
 		logger.Warn(m.ctx, "partition not exists", mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(partitionID))
 		return
 	}
 
-	delete(m.partitionManagers, uniquePartitionKey)
 	segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
 	m.Logger().Info(m.ctx, "partition removed", mlog.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()

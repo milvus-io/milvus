@@ -139,6 +139,7 @@ type recoveryStorageImpl struct {
 	currentClusterID       string
 	channel                types.PChannelInfo
 	checkpoint             *WALCheckpoint
+	persistedCheckpoint    *WALCheckpoint
 	checkpointManager      *walcheckpoint.Manager
 	metaObservedCheckpoint utility.WALConsumeCheckpoint
 	vchannelManager        *vchannel.PChannelRecoveryManager
@@ -165,6 +166,9 @@ type recoveryStorageImpl struct {
 func (r *recoveryStorageImpl) installCheckpointManager(checkpoint *WALCheckpoint) {
 	r.checkpointManager = walcheckpoint.NewManager(checkpoint)
 	r.checkpoint = r.checkpointManager.Checkpoint()
+	if r.persistedCheckpoint == nil && checkpoint != nil {
+		r.persistedCheckpoint = checkpoint.Clone()
+	}
 	r.metaObservedCheckpoint = utility.WALConsumeCheckpoint{
 		MessageID: r.checkpoint.MessageID,
 		TimeTick:  r.checkpoint.TimeTick,
@@ -296,8 +300,24 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	}
 	r.mu.Unlock()
 
+	r.mu.Lock()
+	var persistedCheckpoint *WALCheckpoint
+	if r.persistedCheckpoint != nil {
+		persistedCheckpoint = r.persistedCheckpoint.Clone()
+	}
+	r.mu.Unlock()
+	cleanup := moduleapi.CleanupContext{}
+	if persistedCheckpoint != nil {
+		cleanup.MetaPhysicalTimeTick = persistedCheckpoint.TimeTick
+		if persistedCheckpoint.DataCheckpoint != nil {
+			cleanup.DataPhysicalTimeTick = persistedCheckpoint.DataCheckpoint.TimeTick
+		}
+	}
 	moduleSnapshots := make([]moduleapi.DirtySnapshot, 0)
 	for _, module := range r.modules {
+		if cleanupModule, ok := module.(moduleapi.CleanupModule); ok {
+			moduleSnapshots = append(moduleSnapshots, cleanupModule.ConsumeCleanupSnapshots(cleanup)...)
+		}
 		moduleSnapshots = append(moduleSnapshots, module.ConsumeDirtySnapshots()...)
 	}
 

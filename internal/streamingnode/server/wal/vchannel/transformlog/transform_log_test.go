@@ -79,6 +79,35 @@ func TestEmptyBarrierAdvancesInMemoryFrontierWithoutDirtySnapshot(t *testing.T) 
 	assert.Nil(t, transformLog.ConsumeDirtyAndGetSnapshot())
 }
 
+func TestSyncUpWithoutStreamNotifierDoesNotAllocate(t *testing.T) {
+	transformLog := New(Config{VChannel: "v1"})
+	timeTick := uint64(1)
+	allocs := testing.AllocsPerRun(100, func() {
+		if !transformLog.syncUp(timeTick).Appended {
+			panic("sync up did not advance")
+		}
+		timeTick++
+	})
+	assert.Zero(t, allocs)
+}
+
+func TestStreamNotifierReceivesVChannelWithoutPerLogCallback(t *testing.T) {
+	notifier := &recordingTransformLogNotifier{}
+	transformLog := New(Config{VChannel: "v1"})
+	transformLog.setStreamNotifier(notifier)
+
+	require.True(t, transformLog.syncUp(1).Appended)
+	assert.Equal(t, []string{"v1"}, notifier.vchannels)
+}
+
+type recordingTransformLogNotifier struct {
+	vchannels []string
+}
+
+func (n *recordingTransformLogNotifier) notify(vchannel string) {
+	n.vchannels = append(n.vchannels, vchannel)
+}
+
 func TestReadStopsAtEndTimeTick(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
 	manager := NewStreamManager("p1")

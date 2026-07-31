@@ -70,19 +70,19 @@ func TestPChannelRecoveryManagerModuleIndexSupportsConcurrentRange(t *testing.T)
 	assert.ElementsMatch(t, []string{"v1", "v2"}, mapKeys(observed))
 }
 
-func TestPChannelRecoveryManagerSwitchAggregatesVChannelMetaSnapshot(t *testing.T) {
+func TestPChannelRecoveryManagerSwitchAggregatesWritePathRecoverySnapshot(t *testing.T) {
 	manager := newTestManager(t, "p1", "v1", "v2")
 
 	snapshots := moduleapi.FlattenModuleSnapshot(manager.SwitchIntoMetaAndData())
 
-	vchannelSnapshots := make([]*moduleapi.VChannelModuleSnapshot, 0)
+	writeSnapshots := make([]*moduleapi.WritePathRecoveryModuleSnapshot, 0)
 	for _, snapshot := range snapshots {
-		if typed, ok := snapshot.(*moduleapi.VChannelModuleSnapshot); ok {
-			vchannelSnapshots = append(vchannelSnapshots, typed)
+		if typed, ok := snapshot.(*moduleapi.WritePathRecoveryModuleSnapshot); ok {
+			writeSnapshots = append(writeSnapshots, typed)
 		}
 	}
-	require.Len(t, vchannelSnapshots, 1)
-	assert.ElementsMatch(t, []string{"v1", "v2"}, mapKeys(vchannelSnapshots[0].VChannels))
+	require.Len(t, writeSnapshots, 1)
+	assert.ElementsMatch(t, []string{"v1", "v2"}, mapKeys(writeSnapshots[0].VChannels))
 }
 
 func TestGroupSegmentsByVChannel(t *testing.T) {
@@ -140,6 +140,7 @@ func TestPChannelRecoveryManagerReleasesInitialState(t *testing.T) {
 
 	module := manager.Module("v1")
 	require.NotNil(t, module)
+	require.Same(t, vchannelMeta, module.vchannelView.meta)
 	require.True(t, proto.Equal(vchannelMeta, module.vchannelView.AssignmentMeta()))
 	require.True(t, proto.Equal(versionSummary, module.segmentDataVersionSummary))
 	require.True(t, proto.Equal(transformLogMeta, module.transformLog.SnapshotMeta()))
@@ -148,6 +149,43 @@ func TestPChannelRecoveryManagerReleasesInitialState(t *testing.T) {
 	assert.Equal(t, int64(101), segmentID)
 	assert.Equal(t, "v1", vchannel)
 }
+
+func TestPChannelRecoveryManagerSeedsPersistedTombstoneCleanup(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	t.Cleanup(scheduler.Close)
+	manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+		PChannel:      "p1",
+		VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": newTestVChannelMeta("v1")},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			101: {
+				SegmentId:              101,
+				CollectionId:           100,
+				PartitionId:            10,
+				Vchannel:               "v1",
+				State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+				CheckpointTimeTick:     100,
+				DataCheckpointTimeTick: 100,
+				TombstoneTimeTick:      100,
+				SealedAtDataVersion:    &viewpb.DataVersion{StreamingVersion: 2},
+				Stat:                   &streamingpb.SegmentAssignmentStat{},
+			},
+		},
+		TransformLogMetas: map[string]*streamingpb.VChannelTransformLogMeta{},
+		NodeScheduler:     scheduler,
+	})
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+
+	assert.True(t, manager.HasPendingCleanup())
+	snapshots := manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 101,
+		DataPhysicalTimeTick: 101,
+	})
+	require.Len(t, snapshots, 1)
+	assert.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+	assert.Equal(t, int64(101), snapshots[0].Key().SegmentID)
+}
+
 func TestPChannelRecoveryManagerConsumesDirtySnapshotsFromUpdatedModule(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestManager(t, "p1", "v1")

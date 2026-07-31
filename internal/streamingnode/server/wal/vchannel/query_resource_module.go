@@ -3,6 +3,7 @@ package vchannel
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
@@ -24,6 +25,13 @@ func (m *VChannelRecoveryModule) ReleaseQueryResource(req snview.ReleaseResource
 		return
 	}
 	m.queryResources.Release(req)
+	m.mu.Lock()
+	changed := m.tryFinalizeSegmentsLocked()
+	m.mu.Unlock()
+	if changed && m.runtime.Notifier != nil {
+		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
+		m.runtime.Notifier.NotifyBarrierUpdated()
+	}
 }
 
 func (m *VChannelRecoveryModule) QueryRuntime(key qviews.QueryViewKey) (*queryresource.QueryRuntime, bool) {

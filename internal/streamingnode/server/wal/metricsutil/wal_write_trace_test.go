@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,4 +90,46 @@ func TestAppendMetricsDoneUsesProvidedTraceContext(t *testing.T) {
 	require.NotNil(t, entry, string(content))
 	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", entry["traceID"])
 	assert.Equal(t, "0102030405060708", entry["spanID"])
+}
+
+func TestAppendMetricsCollectorUsesCompactInlineStorage(t *testing.T) {
+	paramtable.Init()
+	writeMetrics := NewWriteMetrics(types.PChannelInfo{Name: "pchannel-alloc", Term: 1}, message.WALNameTest)
+	defer writeMetrics.Close()
+	msg := message.NewTimeTickMessageBuilderV1().
+		WithHeader(&message.TimeTickMessageHeader{}).
+		WithBody(&msgpb.TimeTickMsg{}).
+		WithAllVChannel().
+		MustBuildMutable()
+
+	allocs := testing.AllocsPerRun(100, func() {
+		appendMetrics := writeMetrics.StartAppend(msg)
+		collector := appendMetrics.StartInterceptorCollector("timetick")
+		collector.BeforeDone()
+		collector.AfterStart()
+		collector.AfterDone()
+	})
+	assert.LessOrEqual(t, allocs, float64(1))
+}
+
+func TestAppendMetricsLogFieldsKeepPerInterceptorOccurrenceIndexes(t *testing.T) {
+	msg := message.NewTimeTickMessageBuilderV1().
+		WithHeader(&message.TimeTickMessageHeader{}).
+		WithBody(&msgpb.TimeTickMsg{}).
+		WithAllVChannel().
+		MustBuildMutable()
+	appendMetrics := &AppendMetrics{msg: msg, err: assert.AnError}
+	for _, name := range []string{"lock", "lock", "txn"} {
+		collector := appendMetrics.StartInterceptorCollector(name)
+		collector.interceptor.Before = logThreshold + time.Millisecond
+	}
+
+	fields := appendMetrics.IntoLogFields()
+	keys := make([]string, 0, len(fields))
+	for _, field := range fields {
+		keys = append(keys, field.Key)
+	}
+	assert.Contains(t, keys, "lock_0")
+	assert.Contains(t, keys, "lock_1")
+	assert.Contains(t, keys, "txn_0")
 }
