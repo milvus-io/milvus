@@ -31,7 +31,7 @@ import (
 //
 //	Plain:           [ReduceByPKTS(topK)] → output
 //	ORDER BY:        [DeduplicatePK] → [OrderByLimit(topK)] → output
-//	GROUP BY:        [DeduplicateByGroups(topK)] → output
+//	GROUP BY:        [DeduplicateByGroups(unlimited)] → output
 //	GROUP BY+ORDER:  [DeduplicateByGroups(unlimited)] → [OrderByLimit(topK)] → output
 //
 // topK should be offset+limit (already set by proxy in req.Limit).
@@ -51,7 +51,7 @@ func BuildQueryReducePipeline(
 	if hasGroupBy && hasOrderBy {
 		return buildGroupByOrderByReducePipeline(name, schema, topK, orderByFields, groupByFieldIDs, aggregates)
 	} else if hasGroupBy {
-		return buildGroupByReducePipeline(name, schema, topK, groupByFieldIDs, aggregates), nil
+		return buildGroupByReducePipeline(name, schema, groupByFieldIDs, aggregates), nil
 	} else if hasOrderBy {
 		return buildOrderByReducePipeline(name, schema, topK, orderByFields, maxOutputSize), nil
 	}
@@ -73,10 +73,12 @@ func buildOrderByReducePipeline(name string, schema *schemapb.CollectionSchema, 
 	return b.Build()
 }
 
-// buildGroupByReducePipeline: [DeduplicateByGroups(topK)] → output
-func buildGroupByReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, groupByFieldIDs []int64, aggregates []*planpb.Aggregate) *Pipeline {
+// buildGroupByReducePipeline: [DeduplicateByGroups(unlimited)] → output.
+// QueryNode and Delegator must retain every partial group so Proxy can merge
+// all contributions before it applies the user-visible limit and offset.
+func buildGroupByReducePipeline(name string, schema *schemapb.CollectionSchema, groupByFieldIDs []int64, aggregates []*planpb.Aggregate) *Pipeline {
 	b := NewPipelineBuilder(name)
-	b.Add(OpReduceByGroups, pin(), pout(), NewDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, topK))
+	b.Add(OpReduceByGroups, pin(), pout(), NewDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, -1))
 	return b.Build()
 }
 

@@ -1377,9 +1377,18 @@ func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Contex
 	return resp, err
 }
 
-// copy from internal/proxy/task_query.go
-func matchCountRule(outputs []string) bool {
-	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
+// outputsContainCountStar reports whether any output field is the count(*)
+// aggregate, mirroring the Proxy's count(*) detection: a global (no GROUP BY)
+// query carrying count(*) plus a limit is rejected as meaningless pagination,
+// so REST must not attach its synthetic default limit to such a request —
+// including mixed aggregates like ["count(*)", "sum(x)"].
+func outputsContainCountStar(outputs []string) bool {
+	for _, o := range outputs {
+		if strings.EqualFold(strings.TrimSpace(o), "count(*)") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1408,14 +1417,26 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	c.Set(ContextRequest, req)
+	if len(httpReq.GroupByFields) > 0 && len(httpReq.OrderByFields) > 0 {
+		err := merr.WrapErrParameterInvalidMsg("orderByFields and groupByFields cannot be used simultaneously")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	}
-	if httpReq.Limit > 0 && !matchCountRule(httpReq.OutputFields) {
+	// REST applies a default limit, but Proxy rejects pagination for a global
+	// query containing count(*). A grouped count(*) uses limit/offset to
+	// paginate groups, so its limit must still be forwarded.
+	isGlobalCount := len(httpReq.GroupByFields) == 0 && outputsContainCountStar(httpReq.OutputFields)
+	if httpReq.Limit > 0 && !isGlobalCount {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
 	if len(httpReq.OrderByFields) > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
+	}
+	if len(httpReq.GroupByFields) > 0 {
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.GroupByFieldsKey, Value: strings.Join(httpReq.GroupByFields, ",")})
 	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
@@ -1904,12 +1925,30 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
+		if len(httpReq.OrderByFields) > 0 {
+			err := merr.WrapErrParameterInvalidMsg("orderByFields and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if searchParamsContainAny(httpReq.SearchParams, proxy.OrderByFieldsKey) {
+			err := merr.WrapErrParameterInvalidMsg("searchParams.order_by_fields and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
 		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert SearchAggregation failed", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
+	}
+
+	// The legacy searchParams.order_by_fields passthrough would silently shadow the
+	// dedicated field (first key wins on the proxy side), so reject the ambiguity.
+	if len(httpReq.OrderByFields) > 0 && searchParamsContainAny(httpReq.SearchParams, proxy.OrderByFieldsKey) {
+		err := merr.WrapErrParameterInvalidMsg("ambiguous order by: use either orderByFields or searchParams.order_by_fields, not both")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
 	}
 
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
@@ -1929,6 +1968,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
+	}
+	if len(httpReq.OrderByFields) > 0 {
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {

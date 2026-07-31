@@ -4701,6 +4701,19 @@ func TestValidateStructArrayField_MaxCapacity(t *testing.T) {
 }
 
 func Test_reconstructStructFieldData(t *testing.T) {
+	t.Run("empty fields preserve output fields", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 102,
+				Name:    "test_struct",
+			}},
+		}
+
+		fieldsData, outputFields := reconstructStructFieldData(nil, []string{"sum(price)"}, schema)
+		assert.Empty(t, fieldsData)
+		assert.Equal(t, []string{"sum(price)"}, outputFields)
+	})
+
 	t.Run("count(*) query - should return early", func(t *testing.T) {
 		fieldsData := []*schemapb.FieldData{
 			{

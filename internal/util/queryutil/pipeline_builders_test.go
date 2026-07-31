@@ -191,8 +191,8 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 
 	t.Run("group by", func(t *testing.T) {
 		aggs := []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}}
-		// topK=2 means groupLimit=2: only 2 groups are kept, but existing groups
-		// must still accumulate correctly across all results.
+		// The user limit must not truncate local partial groups before the
+		// cross-shard merge at Proxy.
 		pipeline, err := BuildQueryReducePipeline(
 			"groupby", schema, 2, reduce.IReduceNoOrder,
 			nil, []int64{200}, aggs, 0,
@@ -215,16 +215,15 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		out := msg[PipelineOutput].(*internalpb.RetrieveResults)
 		colors := out.GetFieldsData()[0].GetScalars().GetStringData().GetData()
 		counts := out.GetFieldsData()[1].GetScalars().GetLongData().GetData()
-		// groupLimit=2: blue and red are kept (first 2 groups from res1), green is new and dropped.
-		// blue must accumulate across results: 1+3=4. red stays 2.
-		require.Len(t, colors, 2)
-		require.Len(t, counts, 2)
+		require.Len(t, colors, 3)
+		require.Len(t, counts, 3)
 		actual := map[string]int64{}
 		for i := range colors {
 			actual[colors[i]] = counts[i]
 		}
 		assert.Equal(t, int64(4), actual["blue"])
 		assert.Equal(t, int64(2), actual["red"])
+		assert.Equal(t, int64(4), actual["green"])
 	})
 
 	t.Run("group by order by", func(t *testing.T) {

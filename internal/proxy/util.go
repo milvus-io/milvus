@@ -3250,7 +3250,7 @@ func reconstructStructFieldData(
 	outputFields []string,
 	schema *schemapb.CollectionSchema,
 ) ([]*schemapb.FieldData, []string) {
-	if len(outputFields) == 1 && outputFields[0] == "count(*)" {
+	if len(fieldsData) == 0 || (len(outputFields) == 1 && outputFields[0] == "count(*)") {
 		return fieldsData, outputFields
 	}
 
