@@ -558,16 +558,16 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
             if (lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
+                return skip_index.EvaluateBinaryRange<T>(
                     op_ctx, field_id, chunk_id, val1, val2, true, true);
             } else if (lower_inclusive && !upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
+                return skip_index.EvaluateBinaryRange<T>(
                     op_ctx, field_id, chunk_id, val1, val2, true, false);
             } else if (!lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
+                return skip_index.EvaluateBinaryRange<T>(
                     op_ctx, field_id, chunk_id, val1, val2, false, true);
             } else {
-                return skip_index.CanSkipBinaryRange<T>(
+                return skip_index.EvaluateBinaryRange<T>(
                     op_ctx, field_id, chunk_id, val1, val2, false, false);
             }
         };
@@ -1239,22 +1239,25 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
     auto prefetch = [&](const auto& lower_val, const auto& upper_val) {
         using ValueType = std::decay_t<decltype(lower_val)>;
         std::vector<int64_t> chunks_may_hit;
+        int64_t chunks_judged = 0;
+        int64_t chunks_pruned = 0;
         for (size_t i = 0; i < num_data_chunk_; ++i) {
-            auto skip = skip_index->CanSkipBinaryRange<ValueType>(
+            auto decision = skip_index->EvaluateBinaryRange<ValueType>(
                 field_id_,
                 i,
                 lower_val,
                 upper_val,
                 expr_->lower_inclusive_,
                 expr_->upper_inclusive_);
-            if (!skip) {
+            chunks_judged += decision.available ? 1 : 0;
+            if (!decision.can_skip) {
                 chunks_may_hit.push_back(i);
+            } else {
+                ++chunks_pruned;
             }
         }
 
-        RecordSkipIndexEffect(*skip_index,
-                              num_data_chunk_,
-                              num_data_chunk_ - chunks_may_hit.size());
+        RecordSkipIndexEffect(*skip_index, chunks_judged, chunks_pruned);
         segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
     };
 

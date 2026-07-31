@@ -39,7 +39,7 @@ func (sd *shardDelegator) executeFilterStage(
 	req *querypb.SearchRequest,
 	sealed []SnapshotItem,
 	sealedRowCount map[int64]int64,
-) ([]int64, error) {
+) ([]int64, []*internalpb.SearchResults, error) {
 	originalFilterOnly := req.FilterOnly
 	originalEnableExprCache := req.EnableExprCache
 	req.FilterOnly = true
@@ -57,9 +57,10 @@ func (sd *shardDelegator) executeFilterStage(
 	if err != nil {
 		log := sd.getLogger(ctx)
 		log.Warn(ctx, "Two-stage search: filter stage failed", mlog.Err(err))
-		return nil, err
+		return nil, nil, err
 	}
 
+	storageResults := make([]*internalpb.SearchResults, 0, len(filterResults))
 	// NOTE: validCounts ordering is non-deterministic because filterResults
 	// come from concurrent worker goroutines. This is safe for the current
 	// consumer (CalculateEffectiveSegmentNum) which only cares about the
@@ -68,14 +69,26 @@ func (sd *shardDelegator) executeFilterStage(
 	// count with its SegmentID before returning.
 	validCounts := make([]int64, 0, len(sealedRowCount))
 	for _, result := range filterResults {
+		// Preserve Stage 1 storage IO as a payload-less contribution. The final
+		// reducer deliberately includes payload-less results in storage-cost
+		// aggregation while excluding them from result-data reduction. Keep an
+		// empty CostAggregation so these sidecars do not duplicate Stage 1's
+		// service-time or related-data accounting.
+		storageResults = append(storageResults, &internalpb.SearchResults{
+			Status:             merr.Success(),
+			CostAggregation:    &internalpb.CostAggregation{},
+			ScannedRemoteBytes: result.GetScannedRemoteBytes(),
+			ScannedTotalBytes:  result.GetScannedTotalBytes(),
+			StorageCostValid:   result.GetStorageCostValid(),
+		})
 		for _, vc := range result.GetFilterValidCounts() {
 			if vc < 0 {
-				return nil, merr.WrapErrServiceInternalMsg("filter stage returned negative valid_count %d, segment may not support filter-only search", vc)
+				return nil, nil, merr.WrapErrServiceInternalMsg("filter stage returned negative valid_count %d, segment may not support filter-only search", vc)
 			}
 			validCounts = append(validCounts, vc)
 		}
 	}
-	return validCounts, nil
+	return validCounts, storageResults, nil
 }
 
 // twoStageSearch implements the two-stage search flow:
@@ -85,8 +98,8 @@ func (sd *shardDelegator) executeFilterStage(
 // (Stage 1 writes, Stage 2 reads). Cross-query reuse comes for free when the
 // same predicate runs on the same sealed segment.
 // twoStageSearch returns (results, fallback, error). When fallback is true,
-// the caller should continue with the normal single-stage search path;
-// results will be nil in that case.
+// results contains payload-less Stage 1 storage-cost contributions that the
+// caller must append to the normal single-stage search results.
 func (sd *shardDelegator) twoStageSearch(
 	ctx context.Context,
 	req *querypb.SearchRequest,
@@ -101,7 +114,7 @@ func (sd *shardDelegator) twoStageSearch(
 	collectionID := fmt.Sprint(sd.collectionID)
 
 	stage1Start := time.Now()
-	validCounts, err := sd.executeFilterStage(ctx, req, sealed, sealedRowCount)
+	validCounts, stage1StorageResults, err := sd.executeFilterStage(ctx, req, sealed, sealedRowCount)
 	stage1Dur := float64(time.Since(stage1Start).Milliseconds())
 	metrics.QueryNodeTwoStageFilterLatency.WithLabelValues(nodeID, collectionID).Observe(stage1Dur)
 	if err != nil {
@@ -120,7 +133,7 @@ func (sd *shardDelegator) twoStageSearch(
 			mlog.Int("got", len(validCounts)),
 		)
 		metrics.QueryNodeTwoStageSearchFallbackCount.WithLabelValues(nodeID, collectionID, "incomplete_filter_counts").Inc()
-		return nil, true, nil
+		return stage1StorageResults, true, nil
 	}
 
 	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, validCounts, req.GetReq().GetTopk())
@@ -154,5 +167,5 @@ func (sd *shardDelegator) twoStageSearch(
 	}
 
 	log.Debug(ctx, "Two-stage search completed", mlog.Int("results", len(results)))
-	return results, false, nil
+	return append(results, stage1StorageResults...), false, nil
 }

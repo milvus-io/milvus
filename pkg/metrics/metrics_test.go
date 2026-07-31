@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/sync/errgroup"
 )
@@ -51,6 +52,34 @@ func TestGetRegisterer(t *testing.T) {
 	register = GetRegisterer()
 	assert.NotNil(t, register)
 	assert.Equal(t, r, register)
+}
+
+func TestCleanupProxyCollectionMetricLabelHistory(t *testing.T) {
+	const (
+		nodeID       = int64(101)
+		collectionID = int64(202)
+	)
+	oldLabels := []string{"101", HybridSearchLabel, "old_db", "old_collection"}
+	newLabels := []string{"101", HybridSearchLabel, "new_db", "new_collection"}
+
+	TrackProxyCollectionMetricLabels(collectionID, "old_db", "old_collection")
+	TrackProxyCollectionMetricLabels(collectionID, "new_db", "new_collection")
+	ProxyScannedRemoteMB.WithLabelValues(oldLabels...).Add(1)
+	ProxyScannedTotalMB.WithLabelValues(oldLabels...).Add(2)
+	ProxyScannedRemoteMB.WithLabelValues(newLabels...).Add(3)
+	ProxyScannedTotalMB.WithLabelValues(newLabels...).Add(4)
+
+	CleanupProxyCollectionMetricsByID(nodeID, collectionID, "new_db", "new_collection")
+
+	assert.Zero(t, testutil.ToFloat64(ProxyScannedRemoteMB.WithLabelValues(oldLabels...)))
+	assert.Zero(t, testutil.ToFloat64(ProxyScannedTotalMB.WithLabelValues(oldLabels...)))
+	assert.Zero(t, testutil.ToFloat64(ProxyScannedRemoteMB.WithLabelValues(newLabels...)))
+	assert.Zero(t, testutil.ToFloat64(ProxyScannedTotalMB.WithLabelValues(newLabels...)))
+
+	proxyCollectionMetricLabelHistory.Lock()
+	_, ok := proxyCollectionMetricLabelHistory.labels[collectionID]
+	proxyCollectionMetricLabelHistory.Unlock()
+	assert.False(t, ok)
 }
 
 func TestRegisterRuntimeInfo(t *testing.T) {

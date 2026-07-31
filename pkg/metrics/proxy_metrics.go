@@ -18,11 +18,60 @@ package metrics
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type proxyCollectionMetricLabels struct {
+	dbName         string
+	collectionName string
+}
+
+var proxyCollectionMetricLabelHistory = struct {
+	sync.Mutex
+	labels map[int64]map[proxyCollectionMetricLabels]struct{}
+}{
+	labels: make(map[int64]map[proxyCollectionMetricLabels]struct{}),
+}
+
+// TrackProxyCollectionMetricLabels retains every canonical label set used by a
+// collection ID. Rename/move keeps the immutable collection ID, so the final
+// drop can remove series written under both the old and new names.
+func TrackProxyCollectionMetricLabels(collectionID int64, dbName, collectionName string) {
+	if collectionID == 0 || collectionName == "" {
+		return
+	}
+	labels := proxyCollectionMetricLabels{dbName: dbName, collectionName: collectionName}
+	proxyCollectionMetricLabelHistory.Lock()
+	defer proxyCollectionMetricLabelHistory.Unlock()
+	if proxyCollectionMetricLabelHistory.labels[collectionID] == nil {
+		proxyCollectionMetricLabelHistory.labels[collectionID] = make(map[proxyCollectionMetricLabels]struct{})
+	}
+	proxyCollectionMetricLabelHistory.labels[collectionID][labels] = struct{}{}
+}
+
+// CleanupProxyCollectionMetricsByID removes all historical label sets recorded
+// for a collection, plus the current label supplied by the drop notification.
+func CleanupProxyCollectionMetricsByID(nodeID, collectionID int64, dbName, collectionName string) {
+	labels := make(map[proxyCollectionMetricLabels]struct{})
+	if collectionName != "" {
+		labels[proxyCollectionMetricLabels{dbName: dbName, collectionName: collectionName}] = struct{}{}
+	}
+
+	proxyCollectionMetricLabelHistory.Lock()
+	for label := range proxyCollectionMetricLabelHistory.labels[collectionID] {
+		labels[label] = struct{}{}
+	}
+	delete(proxyCollectionMetricLabelHistory.labels, collectionID)
+	proxyCollectionMetricLabelHistory.Unlock()
+
+	for label := range labels {
+		CleanupProxyCollectionMetrics(nodeID, label.dbName, label.collectionName)
+	}
+}
 
 var (
 	ProxyReceivedNQ = prometheus.NewCounterVec(
@@ -569,6 +618,19 @@ func RegisterProxy(registry *prometheus.Registry) {
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
+	proxyCollectionMetricLabelHistory.Lock()
+	for collectionID, labels := range proxyCollectionMetricLabelHistory.labels {
+		for label := range labels {
+			if label.dbName == dbName {
+				delete(labels, label)
+			}
+		}
+		if len(labels) == 0 {
+			delete(proxyCollectionMetricLabelHistory.labels, collectionID)
+		}
+	}
+	proxyCollectionMetricLabelHistory.Unlock()
+
 	ProxySearchVectors.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -594,6 +656,14 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		databaseLabelName: dbName,
 	})
 	ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyScannedRemoteMB.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyScannedTotalMB.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})
@@ -741,6 +811,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	})
 	ProxyScannedRemoteMB.Delete(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  HybridSearchLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName:  QueryLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
@@ -760,6 +836,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	ProxyScannedTotalMB.Delete(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName:  SearchLabel,
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyScannedTotalMB.Delete(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName:  HybridSearchLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})

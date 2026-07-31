@@ -5086,8 +5086,14 @@ user-task-polling:
 		Key:          "queryNode.queryStreamBatchSize",
 		Version:      "2.4.1",
 		DefaultValue: "4194304",
-		Doc:          "return min batch size of stream query",
+		Doc:          "return min batch size of stream query; must be positive",
 		Export:       true,
+		Formatter: func(value string) string {
+			if getAsInt(value) <= 0 {
+				return "4194304"
+			}
+			return value
+		},
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
 
@@ -5095,8 +5101,14 @@ user-task-polling:
 		Key:          "queryNode.queryStreamMaxBatchSize",
 		Version:      "2.4.10",
 		DefaultValue: "134217728",
-		Doc:          "return max batch size of stream query",
+		Doc:          "return max batch size of stream query; must be positive",
 		Export:       true,
+		Formatter: func(value string) string {
+			if getAsInt(value) <= 0 {
+				return "134217728"
+			}
+			return value
+		},
 	}
 	p.QueryStreamMaxBatchSize.Init(base.mgr)
 

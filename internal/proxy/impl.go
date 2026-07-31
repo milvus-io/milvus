@@ -212,13 +212,20 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
+	if msgType == commonpb.MsgType_AlterCollection || msgType == commonpb.MsgType_RenameCollection {
+		// AlterCollection invalidations carry the pre-DDL canonical labels. Most
+		// alterations keep them unchanged, while rename/move changes them without
+		// a distinct legacy invalidation type. Retaining every such label under
+		// the immutable collection ID lets a later drop remove pre-rename series.
+		metrics.TrackProxyCollectionMetricLabels(collectionID, dbName, collectionName)
+	}
 
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
-		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
+		metrics.CleanupProxyCollectionMetricsByID(paramtable.GetNodeID(), collectionID, dbName, collectionName)
 		for _, alias := range aliasName {
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, alias)
 		}
@@ -2641,6 +2648,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	}
 	if storageCost.Valid {
 		storageMetricCollectionName := metricCollectionName(dr.schema, collectionName)
+		metrics.TrackProxyCollectionMetricLabels(dr.collectionID, dbName, storageMetricCollectionName)
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, storageMetricCollectionName).Add(float64(dr.scannedRemoteBytes.Load()) / 1024 / 1024)
 		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, storageMetricCollectionName).Add(float64(dr.scannedTotalBytes.Load()) / 1024 / 1024)
 	}
@@ -2780,6 +2788,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	SetStorageCost(it.result.GetStatus(), it.storageCost)
 	if it.storageCost.Valid {
 		storageMetricCollectionName := metricCollectionName(it.schema, collectionName)
+		metrics.TrackProxyCollectionMetricLabels(it.collectionID, dbName, storageMetricCollectionName)
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, storageMetricCollectionName).Add(float64(it.storageCost.ScannedRemoteBytes) / 1024 / 1024)
 		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, storageMetricCollectionName).Add(float64(it.storageCost.ScannedTotalBytes) / 1024 / 1024)
 	}
@@ -3047,6 +3056,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	if qt.storageCost.Valid {
 		storageMetricCollectionName := metricCollectionName(qt.schema, collectionName)
+		metrics.TrackProxyCollectionMetricLabels(qt.GetCollectionID(), dbName, storageMetricCollectionName)
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
 			metrics.SearchLabel,
@@ -3279,6 +3289,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	if qt.storageCost.Valid {
 		storageMetricCollectionName := metricCollectionName(qt.schema, collectionName)
+		metrics.TrackProxyCollectionMetricLabels(qt.GetCollectionID(), dbName, storageMetricCollectionName)
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
 			metrics.HybridSearchLabel,
@@ -3791,6 +3802,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	storageMetricCollectionName := metricCollectionName(qt.schema, request.CollectionName)
 	if qt.storageCost.Valid {
+		metrics.TrackProxyCollectionMetricLabels(qt.GetCollectionID(), request.DbName, storageMetricCollectionName)
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			metrics.QueryLabel,

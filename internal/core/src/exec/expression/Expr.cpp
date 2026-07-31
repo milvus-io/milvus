@@ -54,15 +54,15 @@ namespace exec {
 
 SegmentExpr::~SegmentExpr() {
     if (!offset_chunk_skip_decisions_.empty()) {
+        int64_t chunks_judged = 0;
         int64_t chunks_pruned = 0;
-        for (const auto& decision : offset_chunk_skip_decisions_) {
-            chunks_pruned += decision.second ? 1 : 0;
+        for (const auto& entry : offset_chunk_skip_decisions_) {
+            const auto& decision = entry.second;
+            chunks_judged += decision.available ? 1 : 0;
+            chunks_pruned += decision.can_skip ? 1 : 0;
         }
         auto skip_index = segment_->GetSkipIndex();
-        RecordSkipIndexEffect(
-            *skip_index,
-            static_cast<int64_t>(offset_chunk_skip_decisions_.size()),
-            chunks_pruned);
+        RecordSkipIndexEffect(*skip_index, chunks_judged, chunks_pruned);
     }
 
     // record accumulated json filter latencies as segment-level metrics.

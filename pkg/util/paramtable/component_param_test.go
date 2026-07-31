@@ -592,6 +592,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
 		assert.Equal(t, true, Params.EnableSegmentFilter.GetAsBool())
 
+		params.Save(Params.QueryStreamBatchSize.Key, "0")
+		assert.Equal(t, 4*1024*1024, Params.QueryStreamBatchSize.GetAsInt())
+		params.Save(Params.QueryStreamMaxBatchSize.Key, "-1")
+		assert.Equal(t, 128*1024*1024, Params.QueryStreamMaxBatchSize.GetAsInt())
+		params.Reset(Params.QueryStreamBatchSize.Key)
+		params.Reset(Params.QueryStreamMaxBatchSize.Key)
+
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))

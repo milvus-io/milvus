@@ -50,6 +50,9 @@ namespace exec {
 
 enum class FilterType { sequential = 0, random = 1 };
 
+using SkipIndexFunction =
+    std::function<SkipIndexDecision(const milvus::SkipIndex&, FieldId, int)>;
+
 // Execution path for expression evaluation.
 // Determines how the expression result bitmap is produced.
 enum class ExprExecPath {
@@ -739,13 +742,12 @@ class SegmentExpr : public Expr {
     // does not move, but the callback may maintain a batch-local bitmap cursor.
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
-    ProcessDataByOffsets(
-        BatchEvaluator evaluate_batch,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataByOffsets(BatchEvaluator evaluate_batch,
+                         SkipIndexFunction skip_func,
+                         OffsetVector* input,
+                         TargetBitmapView res,
+                         TargetBitmapView valid_res,
+                         const ValTypes&... values) {
         int64_t processed_size = 0;
 
         // index reverse lookup (only for ScalarIndex path)
@@ -764,10 +766,10 @@ class SegmentExpr : public Expr {
         // candidate density or batch shape.
         auto should_skip_offset_chunk = [&](int64_t chunk_id) {
             if (!skip_func) {
-                return false;
+                return SkipIndexDecision{};
             }
             auto [it, inserted] =
-                offset_chunk_skip_decisions_.try_emplace(chunk_id, false);
+                offset_chunk_skip_decisions_.try_emplace(chunk_id);
             if (inserted) {
                 it->second = skip_func(*skip_index, field_id_, chunk_id);
             }
@@ -1072,13 +1074,12 @@ class SegmentExpr : public Expr {
               typename BatchEvaluator,
               typename... ValTypes>
     int64_t
-    ProcessElementLevelByOffsets(
-        BatchEvaluator evaluate_batch,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        OffsetVector* element_ids,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessElementLevelByOffsets(BatchEvaluator evaluate_batch,
+                                 SkipIndexFunction skip_func,
+                                 OffsetVector* element_ids,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const ValTypes&... values) {
         auto skip_index = segment_->GetSkipIndex();
         if (segment_->type() == SegmentType::Sealed) {
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
@@ -1312,12 +1313,11 @@ class SegmentExpr : public Expr {
               typename BatchEvaluator,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksForElementLevel(
-        BatchEvaluator evaluate_batch,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataChunksForElementLevel(BatchEvaluator evaluate_batch,
+                                     SkipIndexFunction skip_func,
+                                     TargetBitmapView res,
+                                     TargetBitmapView valid_res,
+                                     const ValTypes&... values) {
         static_assert(!std::is_same_v<ElementType, Json>,
                       "Json element type is not supported for "
                       "element-level filtering");
@@ -1572,12 +1572,11 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksForSingleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataChunksForSingleChunk(FUNC func,
+                                    SkipIndexFunction skip_func,
+                                    TargetBitmapView res,
+                                    TargetBitmapView valid_res,
+                                    const ValTypes&... values) {
         int64_t processed_size = 0;
 
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
@@ -1692,12 +1691,11 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksForMultipleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataChunksForMultipleChunk(FUNC func,
+                                      SkipIndexFunction skip_func,
+                                      TargetBitmapView res,
+                                      TargetBitmapView valid_res,
+                                      const ValTypes&... values) {
         int64_t processed_size = 0;
 
         // Prefetch chunks to reduce cache miss latency, minus the ones the skip
@@ -1721,8 +1719,9 @@ class SegmentExpr : public Expr {
                     // JSON contains, timestamptz arithmetic, ...) would
                     // otherwise flood the ratio with prune_ratio == 0 samples
                     // and hide how the skip index really performs.
-                    ++judged;
-                    if (skip_func(*skip_index, field_id_, i)) {
+                    auto decision = skip_func(*skip_index, field_id_, i);
+                    judged += decision.available ? 1 : 0;
+                    if (decision.can_skip) {
                         ++pruned;
                         continue;
                     }
@@ -1905,12 +1904,11 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunks(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataChunks(FUNC func,
+                      SkipIndexFunction skip_func,
+                      TargetBitmapView res,
+                      TargetBitmapView valid_res,
+                      const ValTypes&... values) {
         if (segment_->is_chunked()) {
             return ProcessDataChunksForMultipleChunk<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, values...);
@@ -2839,7 +2837,7 @@ class SegmentExpr : public Expr {
     bool prefetched_{false};
     // Offset/iterative paths can revisit chunks across Eval batches. Keep one
     // decision per chunk and publish the aggregate once in ~SegmentExpr().
-    std::unordered_map<int64_t, bool> offset_chunk_skip_decisions_;
+    std::unordered_map<int64_t, SkipIndexDecision> offset_chunk_skip_decisions_;
     // Scalar index is pinned lazily by EnsurePinnedIndex(). Pre-pin
     // existence checks (HasCompatibleScalarIndex) query segment metadata
     // directly, so expressions on short-circuit paths (TextIndex, PkIndex,

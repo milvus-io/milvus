@@ -1943,7 +1943,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     auto skip_index_func =
         [op_ctx = op_ctx_, expr_type, val](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipUnaryRange<T>(
+            return skip_index.EvaluateUnaryRange<T>(
                 op_ctx, field_id, chunk_id, expr_type, val);
         };
 
@@ -2377,15 +2377,20 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
     U val = GetValueFromProto<U>(expr_->val_);
 
     std::vector<int64_t> chunks_may_hit;
+    int64_t chunks_judged = 0;
+    int64_t chunks_pruned = 0;
     for (size_t i = 0; i < num_data_chunk_; i++) {
-        if (skip_index->CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
+        auto decision =
+            skip_index->EvaluateUnaryRange<U>(field_id_, i, op_type, val);
+        chunks_judged += decision.available ? 1 : 0;
+        if (decision.can_skip) {
+            ++chunks_pruned;
             continue;
         }
         chunks_may_hit.push_back(i);
     }
 
-    RecordSkipIndexEffect(
-        *skip_index, num_data_chunk_, num_data_chunk_ - chunks_may_hit.size());
+    RecordSkipIndexEffect(*skip_index, chunks_judged, chunks_pruned);
     segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 

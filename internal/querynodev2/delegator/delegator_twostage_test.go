@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -365,11 +366,12 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		}
 		sealedRowCount := map[int64]int64{1000: 10000}
 
-		validCounts, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, storageResults, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.NoError(err)
 		s.NotNil(validCounts)
 		s.Len(validCounts, 1)
 		s.Equal(int64(100), validCounts[0])
+		s.Len(storageResults, 1)
 	})
 
 	s.Run("filter_stage_error", func() {
@@ -413,9 +415,10 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		}
 		sealedRowCount := map[int64]int64{1001: 10000}
 
-		validCounts, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, storageResults, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.Error(err)
 		s.Nil(validCounts)
+		s.Nil(storageResults)
 	})
 }
 
@@ -483,20 +486,30 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 
 		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
+			RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 				n := callCount.Add(1)
 				if n == 1 {
 					// First call should be filter stage with FilterOnly=true
 					s.True(req.GetFilterOnly(), "First call should have FilterOnly=true")
 					s.True(req.GetEnableExprCache(), "First call should have EnableExprCache=true")
-				} else {
-					// Second call should be normal search with FilterOnly=false but EnableExprCache=true
-					s.False(req.GetFilterOnly(), "Second call should have FilterOnly=false")
-					s.True(req.GetEnableExprCache(), "Second call should have EnableExprCache=true")
+					return &internalpb.SearchResults{
+						FilterValidCounts:  []int64{100},
+						ScannedRemoteBytes: 10,
+						ScannedTotalBytes:  20,
+						StorageCostValid:   true,
+						CostAggregation:    &internalpb.CostAggregation{},
+					}, nil
 				}
-			}).Return(&internalpb.SearchResults{
-			FilterValidCounts: []int64{100},
-		}, nil)
+				// Second call should be normal search with FilterOnly=false but EnableExprCache=true
+				s.False(req.GetFilterOnly(), "Second call should have FilterOnly=false")
+				s.True(req.GetEnableExprCache(), "Second call should have EnableExprCache=true")
+				return &internalpb.SearchResults{
+					ScannedRemoteBytes: 30,
+					ScannedTotalBytes:  40,
+					StorageCostValid:   true,
+					CostAggregation:    &internalpb.CostAggregation{},
+				}, nil
+			})
 
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
@@ -533,6 +546,12 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.NotNil(results)
 		// Should have called SearchSegments twice: once for filter stage, once for vector search
 		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
+		reduced, err := segments.ReduceSearchOnQueryNode(ctx, results,
+			reduce.NewReduceSearchResultInfo(1, 100).WithMetricType(metric.IP))
+		s.NoError(err)
+		s.Equal(int64(40), reduced.GetScannedRemoteBytes())
+		s.Equal(int64(60), reduced.GetScannedTotalBytes())
+		s.True(reduced.GetStorageCostValid())
 	})
 
 	s.Run("incomplete_filter_counts_fallback_restores_enable_expr_cache", func() {
@@ -549,7 +568,10 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 				s.True(req.GetFilterOnly(), "FilterOnly should be true in filter stage")
 				s.True(req.GetEnableExprCache(), "EnableExprCache should be true in filter stage")
 			}).Return(&internalpb.SearchResults{
-			FilterValidCounts: []int64{100},
+			FilterValidCounts:  []int64{100},
+			ScannedRemoteBytes: 5,
+			ScannedTotalBytes:  8,
+			StorageCostValid:   true,
 		}, nil).Once()
 
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
@@ -588,9 +610,81 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.True(fallback)
-		s.Nil(results)
+		s.Len(results, 1)
+		s.Equal(int64(5), results[0].GetScannedRemoteBytes())
+		s.Equal(int64(8), results[0].GetScannedTotalBytes())
+		s.True(results[0].GetStorageCostValid())
 		s.False(req.GetFilterOnly(), "FilterOnly should be restored after fallback")
 		s.False(req.GetEnableExprCache(), "EnableExprCache should be restored after fallback")
+	})
+
+	s.Run("fallback_stage1_storage_participates_in_final_reduce", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key)
+			paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key)
+			paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key)
+		}()
+
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "1")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "1")
+
+		worker1 := &cluster.MockWorker{}
+		var callCount atomic.Int32
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+				if callCount.Add(1) == 1 {
+					s.True(req.GetFilterOnly())
+					// Only one count for two segments forces the normal-search fallback.
+					return &internalpb.SearchResults{
+						FilterValidCounts:  []int64{100},
+						ScannedRemoteBytes: 5,
+						ScannedTotalBytes:  7,
+						StorageCostValid:   true,
+						CostAggregation:    &internalpb.CostAggregation{},
+					}, nil
+				}
+				s.False(req.GetFilterOnly())
+				return &internalpb.SearchResults{
+					ScannedRemoteBytes: 11,
+					ScannedTotalBytes:  13,
+					StorageCostValid:   true,
+					CostAggregation:    &internalpb.CostAggregation{},
+				}, nil
+			})
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).
+			Return(worker1, nil)
+
+		ctx := context.Background()
+		req := &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Nq:         1,
+				Topk:       100,
+				FieldId:    101,
+				MetricType: metric.IP,
+				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+			},
+			DmlChannels: []string{s.vchannelName},
+		}
+		sealed := []SnapshotItem{{
+			NodeID: 1,
+			Segments: []SegmentEntry{
+				{SegmentID: 3200, NodeID: 1},
+				{SegmentID: 3201, NodeID: 1},
+			},
+		}}
+		sealedRowCount := map[int64]int64{3200: 10000, 3201: 10000}
+
+		results, err := s.delegator.search(ctx, req, sealed, nil, sealedRowCount)
+		s.NoError(err)
+		s.Equal(int32(2), callCount.Load())
+		reduced, err := segments.ReduceSearchOnQueryNode(ctx, results,
+			reduce.NewReduceSearchResultInfo(1, 100).WithMetricType(metric.IP))
+		s.NoError(err)
+		s.Equal(int64(16), reduced.GetScannedRemoteBytes())
+		s.Equal(int64(20), reduced.GetScannedTotalBytes())
+		s.True(reduced.GetStorageCostValid())
 	})
 
 	s.Run("optimizer_path_exercised", func() {
@@ -1188,10 +1282,11 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStageWithMultipleNodes() {
 			8002: 10000,
 		}
 
-		validCounts, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, storageResults, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.NoError(err)
 		s.NotNil(validCounts)
 		s.Len(validCounts, 3)
+		s.Len(storageResults, 3)
 
 		// Verify total valid counts
 		totalValidCount := int64(0)

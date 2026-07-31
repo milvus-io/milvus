@@ -24,13 +24,28 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type ResultCacheServerSuite struct {
 	suite.Suite
+}
+
+type recordingQueryStreamServer struct {
+	results []*internalpb.RetrieveResults
+}
+
+func (s *recordingQueryStreamServer) Send(result *internalpb.RetrieveResults) error {
+	s.results = append(s.results, result)
+	return nil
+}
+
+func (s *recordingQueryStreamServer) Context() context.Context {
+	return context.Background()
 }
 
 func (s *ResultCacheServerSuite) TestSend() {
@@ -89,6 +104,42 @@ func generateStrIDs(num int) *schemapb.IDs {
 }
 
 func (s *ResultCacheServerSuite) TestSplit() {
+	s.Run("metadata-only result remains intact when max is below batch", func() {
+		sink := &recordingQueryStreamServer{}
+		cacheSrv := NewResultCacheServer(sink, 4*1024*1024, 1)
+		s.Equal(1, cacheSrv.cache.cap)
+		s.Equal(1, cacheSrv.maxMsgSize)
+		result := &internalpb.RetrieveResults{
+			Status:                    merr.Success(),
+			Ids:                       &schemapb.IDs{},
+			AllRetrieveCount:          7,
+			ScannedRemoteBytes:        11,
+			ScannedTotalBytes:         13,
+			StorageCostValid:          true,
+			SealedSegmentIDsRetrieved: []int64{17},
+			CostAggregation: &internalpb.CostAggregation{
+				TotalRelatedDataSize: 19,
+			},
+		}
+
+		s.NoError(cacheSrv.Send(result))
+		s.Len(sink.results, 1)
+		s.True(proto.Equal(result, sink.results[0]))
+		s.NoError(cacheSrv.Flush())
+		s.Len(sink.results, 1)
+	})
+
+	s.Run("tiny max size still advances int64 splitting", func() {
+		sink := &recordingQueryStreamServer{}
+		cacheSrv := NewResultCacheServer(sink, 1, 1)
+
+		s.NoError(cacheSrv.Send(&internalpb.RetrieveResults{Ids: generateIntIDs(2)}))
+		s.NoError(cacheSrv.Flush())
+		s.Len(sink.results, 2)
+		s.Equal([]int64{0}, sink.results[0].GetIds().GetIntId().GetData())
+		s.Equal([]int64{1}, sink.results[1].GetIds().GetIntId().GetData())
+	})
+
 	s.Run("split int64 message", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -157,6 +208,32 @@ func (s *ResultCacheServerSuite) TestSplit() {
 			s.LessOrEqual(size, 1024)
 		}
 		s.Equal(rev, 2048)
+	})
+}
+
+func (s *ResultCacheServerSuite) TestInvalidBatchSizes() {
+	s.Run("non-positive values disable splitting", func() {
+		cacheSrv := NewResultCacheServer(&recordingQueryStreamServer{}, 0, 0)
+		s.Equal(math.MaxInt, cacheSrv.cache.cap)
+		s.Equal(math.MaxInt, cacheSrv.maxMsgSize)
+	})
+
+	s.Run("non-positive batch uses max", func() {
+		cacheSrv := NewResultCacheServer(&recordingQueryStreamServer{}, 0, 1024)
+		s.Equal(1024, cacheSrv.cache.cap)
+		s.Equal(1024, cacheSrv.maxMsgSize)
+	})
+
+	s.Run("non-positive max is unbounded", func() {
+		cacheSrv := NewResultCacheServer(&recordingQueryStreamServer{}, 1024, 0)
+		s.Equal(1024, cacheSrv.cache.cap)
+		s.Equal(math.MaxInt, cacheSrv.maxMsgSize)
+	})
+
+	s.Run("batch larger than max is lowered", func() {
+		cacheSrv := NewResultCacheServer(&recordingQueryStreamServer{}, 2048, 1024)
+		s.Equal(1024, cacheSrv.cache.cap)
+		s.Equal(1024, cacheSrv.maxMsgSize)
 	})
 }
 

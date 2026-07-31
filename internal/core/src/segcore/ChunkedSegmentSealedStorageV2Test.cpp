@@ -1494,14 +1494,17 @@ SkipMeasurePayloadAt(int64_t i) {
 // val(INT64 monotonic 0..N-1) + payload(bloated VARCHAR -> many row groups)
 // + ts share one column group; pk sits alone. Writes two parquet files under
 // `root`; returns the row count. `writer_mem` tunes row groups per file.
-// `nullable_col` is the arrow column index that should be written with NULLs
-// (-1 = none, which reproduces the original four-column layout byte for byte).
+// `nullable_col` is the arrow column index that should be written with NULLs.
+// `all_null_first_batch_col` makes that column entirely NULL in the first
+// batch, producing at least one footer row group with no usable min/max.
+// -1 disables either option and reproduces the original layout byte for byte.
 int64_t
 WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
                           FieldId pk_fid,
                           const std::string& root,
                           int64_t writer_mem,
-                          int nullable_col = -1) {
+                          int nullable_col = -1,
+                          int all_null_first_batch_col = -1) {
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     (void)fs->DeleteDir(root);
     EXPECT_TRUE(fs->CreateDir(root + "/0").ok());
@@ -1539,7 +1542,15 @@ WriteSkipMeasureV2Parquet(const std::shared_ptr<Schema>& schema,
         const int64_t start = batch * rows_per_batch;
         std::vector<std::shared_ptr<arrow::Array>> arrays;
         for (int i = 0; i < arrow_schema->fields().size(); ++i) {
-            if (i == nullable_col) {
+            if (i == all_null_first_batch_col && batch == 0) {
+                arrow::Int64Builder builder;
+                for (int64_t r = 0; r < rows_per_batch; ++r) {
+                    EXPECT_TRUE(builder.AppendNull().ok());
+                }
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else if (i == nullable_col) {
                 // Nullable twin of `val`: identical monotonic values, so the
                 // same thresholds prune the same cells, but every
                 // kNullEvery-th row is NULL.
@@ -2161,6 +2172,94 @@ TEST(SkipIndexPr51441, ArithmeticPredicatesNeverUseSkipIndex) {
     expect_unchanged(before_offsets, after_offsets);
     EXPECT_EQ(offset_result.count, 0);
     EXPECT_GT(offset_result.total_bytes, 0);
+
+    SetDefaultEnableParquetStatsSkipIndex(false);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// An installed field-level stats source does not mean every chunk has a usable
+// metric. All-null row groups deliberately yield NoneFieldChunkMetrics: they
+// must remain readable, but they were never judged by min/max and therefore
+// must not dilute the effectiveness denominator. Exercise all three reporting
+// sites: default in-scan prefetch, driver prefetch, and offset input.
+TEST(SkipIndexPr51441, NoneChunkMetricsAreNotJudged) {
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, nullable_fid;
+    auto schema =
+        MakeSkipMeasureSchema(val_fid, pk_fid, nullptr, &nullable_fid);
+    const std::string root = "skip_pr51441_none_metrics_v2";
+    const int64_t N = WriteSkipMeasureV2Parquet(schema,
+                                                pk_fid,
+                                                root,
+                                                16 * 1024 * 1024,
+                                                /*nullable_col=*/3,
+                                                /*all_null_first_batch_col=*/3);
+
+    SetDefaultEnableParquetStatsSkipIndex(true);
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    const int64_t chunks = segment->num_chunk_data(nullable_fid);
+    ASSERT_GT(chunks, 1);
+
+    auto skip_index = segment->GetSkipIndex();
+    int64_t available_chunks = 0;
+    for (int64_t chunk = 0; chunk < chunks; ++chunk) {
+        auto decision = skip_index->EvaluateUnaryRange<int64_t>(
+            nullable_fid, chunk, OpType::GreaterThan, N);
+        available_chunks += decision.available ? 1 : 0;
+        if (decision.available) {
+            EXPECT_TRUE(decision.can_skip)
+                << "every chunk with min/max is below the impossible "
+                   "threshold";
+        } else {
+            EXPECT_FALSE(decision.can_skip)
+                << "a chunk without min/max must remain readable";
+        }
+    }
+    ASSERT_GT(available_chunks, 0);
+    ASSERT_LT(available_chunks, chunks)
+        << "the mixed parquet file must contain both usable and NONE chunk "
+           "metrics";
+
+    auto plan =
+        UnaryRangePlan(nullable_fid, proto::plan::OpType::GreaterThan, N);
+    auto& scanned = milvus::monitor::internal_core_skipindex_chunks_scanned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+    auto& pruned = milvus::monitor::internal_core_skipindex_chunks_pruned(
+        kSkipMeasureDb, kSkipMeasureCollection);
+
+    auto run_sequential = [&](bool driver_prefetch) {
+        DriverPrefetchGuard guard(driver_prefetch);
+        const double scanned_before = scanned.Value();
+        const double pruned_before = pruned.Value();
+        auto result = RunWithStorageUsage(plan, segment.get(), N);
+        EXPECT_EQ(result.count, 0);
+        EXPECT_DOUBLE_EQ(scanned.Value() - scanned_before,
+                         static_cast<double>(available_chunks));
+        EXPECT_DOUBLE_EQ(pruned.Value() - pruned_before,
+                         static_cast<double>(available_chunks));
+    };
+    run_sequential(false);
+    run_sequential(true);
+
+    milvus::exec::OffsetVector offsets;
+    offsets.reserve(chunks);
+    for (int64_t chunk = 0; chunk < chunks; ++chunk) {
+        offsets.push_back(static_cast<int32_t>(
+            segment->num_rows_until_chunk(nullable_fid, chunk)));
+    }
+    {
+        DriverPrefetchGuard guard(false);
+        const double scanned_before = scanned.Value();
+        const double pruned_before = pruned.Value();
+        auto result = RunByOffsetsWithStorageUsage(
+            plan, segment.get(), N, offsets, /*repeats=*/2);
+        EXPECT_EQ(result.count, 0);
+        EXPECT_DOUBLE_EQ(scanned.Value() - scanned_before,
+                         static_cast<double>(available_chunks));
+        EXPECT_DOUBLE_EQ(pruned.Value() - pruned_before,
+                         static_cast<double>(available_chunks));
+    }
 
     SetDefaultEnableParquetStatsSkipIndex(false);
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();

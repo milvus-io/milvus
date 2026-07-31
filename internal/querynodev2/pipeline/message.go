@@ -21,11 +21,38 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type collectionIdentityUpdate struct {
+	dbName               string
+	collectionName       string
+	updateDBName         bool
+	updateCollectionName bool
+}
+
+func (update collectionIdentityUpdate) empty() bool {
+	return !update.updateDBName && !update.updateCollectionName
+}
+
+func (update collectionIdentityUpdate) apply(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	if schema == nil || update.empty() {
+		return schema
+	}
+	updated := typeutil.Clone(schema)
+	if update.updateDBName {
+		updated.DbName = update.dbName
+	}
+	if update.updateCollectionName {
+		updated.Name = update.collectionName
+	}
+	return updated
+}
 
 type insertNodeMsg struct {
 	insertMsgs      []*InsertMsg
@@ -33,6 +60,7 @@ type insertNodeMsg struct {
 	timeRange       TimeRange
 	schema          *schemapb.CollectionSchema
 	schemaBarrierTs uint64
+	identityUpdate  collectionIdentityUpdate
 }
 
 type deleteNodeMsg struct {
@@ -40,6 +68,7 @@ type deleteNodeMsg struct {
 	timeRange       TimeRange
 	schema          *schemapb.CollectionSchema
 	schemaBarrierTs uint64
+	identityUpdate  collectionIdentityUpdate
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -63,10 +92,22 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 	case commonpb.MsgType_AlterCollection:
 		putCollectionMsg := taskMsg.(*adaptor.AlterCollectionMessageBody)
 		header := putCollectionMsg.AlterCollectionMessage.Header()
+		body := putCollectionMsg.AlterCollectionMessage.MustBody()
 		if messageutil.IsSchemaChange(header) {
-			body := putCollectionMsg.AlterCollectionMessage.MustBody()
 			msg.schema = body.GetUpdates().GetSchema()
 			msg.schemaBarrierTs = taskMsg.BeginTs()
+		}
+		for _, path := range header.GetUpdateMask().GetPaths() {
+			switch path {
+			case message.FieldMaskDB:
+				msg.identityUpdate.dbName = body.GetUpdates().GetDbName()
+				msg.identityUpdate.updateDBName = true
+				msg.schemaBarrierTs = taskMsg.BeginTs()
+			case message.FieldMaskCollectionName:
+				msg.identityUpdate.collectionName = body.GetUpdates().GetCollectionName()
+				msg.identityUpdate.updateCollectionName = true
+				msg.schemaBarrierTs = taskMsg.BeginTs()
+			}
 		}
 	case commonpb.MsgType_ManualFlush:
 		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.

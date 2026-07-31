@@ -293,14 +293,16 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 			mlog.Info(context.TODO(), "release collection due to ref count to 0",
 				mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
-			schema := collection.Schema()
-			if schema != nil && !m.hasCollectionWithMetricLabels(schema.GetDbName(), schema.GetName()) {
+			for _, labels := range collection.metricLabelHistory() {
+				if m.hasCollectionWithMetricLabels(labels) {
+					continue
+				}
 				// This is the final collection reference and all query/stream
 				// paths hold their own refs until C++ execution (including metric
 				// reporting) completes. Clean synchronously before releasing the
 				// native collection; an async cleanup could delete a freshly
 				// re-created series for the same labels.
-				m.cleanupCoreCollectionMetrics(schema.GetDbName(), schema.GetName())
+				m.cleanupCoreCollectionMetrics(labels.dbName, labels.collectionName)
 			}
 			DeleteCollection(collection)
 			// Run metrics cleanup in background; DeletePartialMatch is CPU-heavy and should not block Unref.
@@ -315,14 +317,14 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 	return true
 }
 
-// hasCollectionWithMetricLabels reports whether another loaded collection
-// still owns the same Prometheus label set. This can happen briefly when a
-// collection is dropped and re-created with a new ID but the same name.
+// hasCollectionWithMetricLabels reports whether another loaded collection has
+// ever owned the same Prometheus label set. Keeping historical ownership avoids
+// deleting a series that another live collection can still write through an
+// in-flight request from its previous schema epoch.
 // m.mut must be held by the caller.
-func (m *collectionManager) hasCollectionWithMetricLabels(dbName, collectionName string) bool {
+func (m *collectionManager) hasCollectionWithMetricLabels(labels collectionMetricLabels) bool {
 	for _, collection := range m.collections {
-		schema := collection.Schema()
-		if schema != nil && schema.GetDbName() == dbName && schema.GetName() == collectionName {
+		if collection.hasMetricLabels(labels) {
 			return true
 		}
 	}
@@ -357,14 +359,20 @@ type Collection struct {
 	// if resource group is not updated, the reference count of collection manager works failed.
 	metricType atomic.String // deprecated
 	schema     atomic.Pointer[collectionSchemaSnapshot]
-	isGpuIndex bool
-	loadFields typeutil.Set[int64]
+
+	metricLabelsMu sync.RWMutex
+	metricLabels   map[collectionMetricLabels]struct{}
+	isGpuIndex     bool
+	loadFields     typeutil.Set[int64]
 
 	refCount *atomic.Uint32
 }
 
 // GetDBName returns the database name of collection.
 func (c *Collection) GetDBName() string {
+	if schema := c.Schema(); schema != nil && schema.GetDbName() != "" {
+		return schema.GetDbName()
+	}
 	return c.dbName
 }
 
@@ -517,6 +525,38 @@ func (c *Collection) setSchema(schema *schemapb.CollectionSchema, logicalSchemaV
 		schemaBarrierTs:      schemaBarrierTs,
 		segcoreSchemaVersion: segcoreSchemaVersion,
 	})
+	if schema != nil {
+		labels := collectionMetricLabels{dbName: schema.GetDbName(), collectionName: schema.GetName()}
+		c.metricLabelsMu.Lock()
+		if c.metricLabels == nil {
+			c.metricLabels = make(map[collectionMetricLabels]struct{})
+		}
+		c.metricLabels[labels] = struct{}{}
+		c.metricLabelsMu.Unlock()
+	}
+}
+
+type collectionMetricLabels struct {
+	dbName         string
+	collectionName string
+}
+
+func (c *Collection) metricLabelHistory() []collectionMetricLabels {
+	c.metricLabelsMu.RLock()
+	defer c.metricLabelsMu.RUnlock()
+
+	labels := make([]collectionMetricLabels, 0, len(c.metricLabels))
+	for label := range c.metricLabels {
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func (c *Collection) hasMetricLabels(labels collectionMetricLabels) bool {
+	c.metricLabelsMu.RLock()
+	defer c.metricLabelsMu.RUnlock()
+	_, ok := c.metricLabels[labels]
+	return ok
 }
 
 func (c *Collection) SchemaSnapshot() (*schemapb.CollectionSchema, uint64, uint64) {

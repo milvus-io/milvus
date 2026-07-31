@@ -43,8 +43,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -2818,6 +2820,41 @@ func TestNewRowCountBasedEvaluator_ZeroRatioBoundary(t *testing.T) {
 		assert.False(t, shouldReturn, "Query should never return partial results, even with ratio=0.0")
 		assert.Equal(t, 0.0, accessedRatio)
 	})
+}
+
+func TestExecuteSubTasks_AllSearchWorkersFailedReturnsInvalidStorageSentinel(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.PartialResultRequiredDataRatio.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.QueryNodeCfg.PartialResultRequiredDataRatio.Key))
+	})
+
+	ctx := context.Background()
+	tasks := []subTask[*querypb.SearchRequest]{
+		{
+			req: &querypb.SearchRequest{
+				SegmentIDs: []int64{1},
+			},
+			targetID: 1,
+			worker:   &cluster.MockWorker{},
+		},
+	}
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(map[int64]int64{1: 100}),
+		func(context.Context, *querypb.SearchRequest, cluster.Worker) (*internalpb.SearchResults, error) {
+			return &internalpb.SearchResults{Status: merr.Success()}, errors.New("worker failed")
+		}, "Search", mlog.With())
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Nil(t, results[0].GetSlicedBlob())
+	assert.Nil(t, results[0].GetResultData())
+	assert.False(t, results[0].GetStorageCostValid())
+
+	reduced, err := segments.ReduceSearchOnQueryNode(ctx, results,
+		reduce.NewReduceSearchResultInfo(1, 1).WithMetricType(metric.IP))
+	require.NoError(t, err)
+	assert.Zero(t, reduced.GetScannedRemoteBytes())
+	assert.Zero(t, reduced.GetScannedTotalBytes())
+	assert.False(t, reduced.GetStorageCostValid())
 }
 
 func TestNewRowCountBasedEvaluator_ExactRatioBoundary(t *testing.T) {

@@ -440,6 +440,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		mlog.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
+	var stage1StorageResults []*internalpb.SearchResults
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
 		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
@@ -448,6 +449,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		if !fallback {
 			return results, nil
 		}
+		stage1StorageResults = results
 		// fallback: continue with normal single-stage search below
 		mlog.Debug(ctx, "Two-stage search requested fallback, continuing with normal search")
 	}
@@ -458,7 +460,11 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		mlog.Warn(ctx, "failed to optimize search params", mlog.Err(err))
 		return nil, err
 	}
-	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+	results, err := sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+	if err != nil {
+		return nil, err
+	}
+	return append(results, stage1StorageResults...), nil
 }
 
 // getVectorFieldDim returns the dimension of the vector field with the given field ID.
@@ -1076,6 +1082,21 @@ func executeSubTasks[T any, R interface {
 				mlog.Int64s("failureSegmentList", failureSegmentList),
 			)
 			if taskType == "Search" {
+				if len(results) == 0 {
+					// A zero required ratio intentionally allows an empty partial
+					// search response even when every worker failed. Preserve that
+					// behavior, but carry an explicit invalid contribution so an
+					// empty reduction cannot manufacture a measured zero from the
+					// Valid=true identity.
+					invalidResult, ok := any(&internalpb.SearchResults{
+						Status:          merr.Success(),
+						CostAggregation: &internalpb.CostAggregation{},
+					}).(R)
+					if !ok {
+						return nil, merr.WrapErrServiceInternalMsg("Search partial-result type is not *internalpb.SearchResults")
+					}
+					results = append(results, invalidResult)
+				}
 				for _, result := range results {
 					if searchResult, ok := any(result).(*internalpb.SearchResults); ok {
 						searchResult.StorageCostValid = false

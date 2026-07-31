@@ -1226,9 +1226,9 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             auto* elements =
                 std::any_cast<std::vector<SkipT>>(&cached_elements);
             if (elements == nullptr) {
-                return false;
+                return SkipIndexDecision{};
             }
-            return skip_index.CanSkipInQuery<SkipT>(
+            return skip_index.EvaluateInQuery<SkipT>(
                 op_ctx, field_id, chunk_id, *elements);
         };
 
@@ -1373,15 +1373,19 @@ PhyTermFilterExpr::PrefetchRawData() {
     }
 
     std::vector<int64_t> chunks_may_hit;
+    int64_t chunks_judged = 0;
+    int64_t chunks_pruned = 0;
     for (size_t i = 0; i < num_data_chunk_; ++i) {
-        auto skip = skip_index->CanSkipInQuery(field_id_, i, elements);
-        if (!skip) {
+        auto decision = skip_index->EvaluateInQuery(field_id_, i, elements);
+        chunks_judged += decision.available ? 1 : 0;
+        if (!decision.can_skip) {
             chunks_may_hit.push_back(i);
+        } else {
+            ++chunks_pruned;
         }
     }
 
-    RecordSkipIndexEffect(
-        *skip_index, num_data_chunk_, num_data_chunk_ - chunks_may_hit.size());
+    RecordSkipIndexEffect(*skip_index, chunks_judged, chunks_pruned);
     segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 

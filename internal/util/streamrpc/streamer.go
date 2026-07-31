@@ -3,6 +3,7 @@ package streamrpc
 import (
 	"context"
 	"io"
+	"math"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -125,6 +126,19 @@ type ResultCacheServer struct {
 }
 
 func NewResultCacheServer(srv QueryStreamServer, cap int, maxMsgSize int) *ResultCacheServer {
+	// Treat a non-positive max as unbounded. If the minimum batch size is
+	// invalid, use the maximum as the flush threshold. A configured maximum
+	// smaller than the minimum cannot satisfy both constraints, so keep the
+	// hard maximum and lower the flush threshold to match it.
+	if maxMsgSize <= 0 {
+		maxMsgSize = math.MaxInt
+	}
+	if cap <= 0 {
+		cap = maxMsgSize
+	}
+	if maxMsgSize < cap {
+		cap = maxMsgSize
+	}
 	return &ResultCacheServer{
 		srv:        srv,
 		cache:      &RetrieveResultCache{cap: cap},
@@ -137,8 +151,10 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 	switch result.GetIds().GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		pks := result.GetIds().GetIntId().Data
-		batch := s.maxMsgSize / 8
-		print(batch)
+		// Keep forward progress even when maxMsgSize is smaller than one int64.
+		// The protobuf envelope means such a limit cannot be met exactly, but a
+		// single-PK frame is the smallest useful split.
+		batch := max(1, s.maxMsgSize/8)
 		for start := 0; start < len(pks); start += batch {
 			newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks[start:min(start+batch, len(pks))]}}})
 		}
@@ -148,16 +164,23 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 		start := 0
 		size := 0
 		for i, pk := range pks {
-			if size+len(pk) > s.maxMsgSize {
+			// Do not emit an empty chunk when one PK alone exceeds maxMsgSize.
+			if i > start && size+len(pk) > s.maxMsgSize {
 				newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: pks[start:i]}}})
 				start = i
 				size = 0
 			}
 			size += len(pk)
 		}
-		if size > 0 {
+		if start < len(pks) {
 			newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: pks[start:]}}})
 		}
+	}
+	// A zero-hit QueryStream result intentionally carries metadata without an
+	// ID oneof. There is nothing to split in that case, so send the original
+	// frame intact instead of manufacturing an empty result slice.
+	if len(newpks) == 0 {
+		return []*internalpb.RetrieveResults{result}
 	}
 
 	results := make([]*internalpb.RetrieveResults, len(newpks))

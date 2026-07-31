@@ -170,6 +170,42 @@ func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotPanic() {
 	})
 }
 
+func (suite *DeleteNodeSuite) TestUpdateCollectionIdentity() {
+	baseSchema := &schemapb.CollectionSchema{
+		Name:    "old_collection",
+		DbName:  "old_db",
+		Version: 7,
+	}
+	collection := segments.NewTestCollection(suite.collectionID, 0, baseSchema)
+	collectionManager := segments.NewMockCollectionManager(suite.T())
+	collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
+	manager := &segments.Manager{
+		Collection: collectionManager,
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	delegator.EXPECT().UpdateSchema(mock.Anything, mock.MatchedBy(func(schema *schemapb.CollectionSchema) bool {
+		return schema.GetName() == "new_collection" &&
+			schema.GetDbName() == "new_db" &&
+			schema.GetVersion() == 7 &&
+			baseSchema.GetName() == "old_collection" &&
+			baseSchema.GetDbName() == "old_db"
+	}), uint64(100)).Return(nil).Once()
+	delegator.EXPECT().UpdateTSafe(uint64(100)).Return().Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	suite.Nil(node.Operate(&deleteNodeMsg{
+		schemaBarrierTs: 100,
+		identityUpdate: collectionIdentityUpdate{
+			dbName:               "new_db",
+			collectionName:       "new_collection",
+			updateDBName:         true,
+			updateCollectionName: true,
+		},
+		timeRange: TimeRange{timestampMax: 100},
+	}))
+}
+
 func TestDeleteNode(t *testing.T) {
 	suite.Run(t, new(DeleteNodeSuite))
 }

@@ -2569,7 +2569,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     // generally equivalent to the expression the execution kernel evaluates.
     // Passing an empty callback also keeps arithmetic out of the skip-index
     // judged/prune-ratio metrics.
-    std::function<bool(const SkipIndex&, FieldId, int)> skip_index_func;
+    SkipIndexFunction skip_index_func;
 
     int64_t processed_size;
     if (has_offset_input_) {

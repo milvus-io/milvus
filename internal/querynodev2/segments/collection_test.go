@@ -966,6 +966,29 @@ func (s *CollectionManagerSuite) TestCollectionMetricLabelOwner() {
 	s.Nil(cm.Get(10002))
 }
 
+func (s *CollectionManagerSuite) TestCollectionMetricLabelHistoryCleanup() {
+	cm := NewCollectionManager()
+	cleaned := make([]string, 0, 2)
+	cm.cleanupCoreCollectionMetrics = func(dbName, collectionName string) {
+		cleaned = append(cleaned, dbName+"/"+collectionName)
+	}
+
+	oldSchema := mock_segcore.GenTestCollectionSchema("old_name", schemapb.DataType_Int64, false)
+	oldSchema.DbName = "old_db"
+	collection := NewCollectionWithoutSegcoreForTest(10003, oldSchema)
+	collection.Ref(1)
+	cm.collections[10003] = collection
+
+	newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	newSchema.Name = "new_name"
+	newSchema.DbName = "new_db"
+	collection.setSchema(newSchema, 0, 10, 10)
+	s.Equal("new_db", collection.GetDBName())
+
+	s.True(cm.Unref(10003, 1))
+	s.ElementsMatch([]string{"old_db/old_name", "new_db/new_name"}, cleaned)
+}
+
 func (s *CollectionManagerSuite) TestList() {
 	ids := s.cm.List()
 	s.Contains(ids, int64(1))

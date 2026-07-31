@@ -28,6 +28,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -86,6 +88,43 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	status, err := node.InvalidateCollectionMetaCache(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func TestProxy_InvalidateCollectionMetaCache_RenameMetricHistory(t *testing.T) {
+	paramtable.Init()
+	cache := globalMetaCache
+	globalMetaCache = nil
+	defer func() { globalMetaCache = cache }()
+
+	const collectionID = int64(1001)
+	nodeID := paramtable.GetStringNodeID()
+	oldLabels := []string{nodeID, metrics.HybridSearchLabel, "old_db", "old_collection"}
+	metrics.ProxyScannedRemoteMB.WithLabelValues(oldLabels...).Add(1)
+
+	chMgr := NewMockChannelsMgr(t)
+	chMgr.EXPECT().removeDMLStream(collectionID).Return().Once()
+	node := &Proxy{chMgr: chMgr}
+	require.NoError(t, node.initRateCollector())
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	status, err := node.InvalidateCollectionMetaCache(context.Background(), &proxypb.InvalidateCollMetaCacheRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+		DbName:         "old_db",
+		CollectionName: "old_collection",
+		CollectionID:   collectionID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.InvalidateCollectionMetaCache(context.Background(), &proxypb.InvalidateCollMetaCacheRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+		DbName:         "new_db",
+		CollectionName: "new_collection",
+		CollectionID:   collectionID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	assert.Zero(t, testutil.ToFloat64(metrics.ProxyScannedRemoteMB.WithLabelValues(oldLabels...)))
 }
 
 // TestProxy_InvalidateCollectionMetaCache_AliasScanGating locks in the
