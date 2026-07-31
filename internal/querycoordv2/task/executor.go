@@ -238,7 +238,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 
-	loadInfo, indexInfos, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID, channel, task.LoadPriority())
+	loadInfo, indexInfos, indexInfoVersion, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID, channel, task.LoadPriority(), meta.NextTargetFirst)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		loadMeta,
 		loadInfo,
 		indexInfos,
-		ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst),
+		indexInfoVersion,
 	)
 
 	// get segment's replica first, then get shard leader by replica
@@ -419,7 +419,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		mlog.Warn(context.TODO(), "failed to get partitions of collection", mlog.Err(err))
 		return err
 	}
-	indexInfo, err := ex.broker.ListIndexes(ctx, task.CollectionID())
+	indexInfo, indexInfoVersion, err := ex.getIndexInfoSnapshot(ctx, task.CollectionID(), meta.NextTargetFirst)
 	if err != nil {
 		mlog.Warn(context.TODO(), "fail to get index meta of collection", mlog.Err(err))
 		return err
@@ -451,8 +451,6 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		return merr.Wrapf(err, "failed to get partitions for collection=%d", task.CollectionID())
 	}
 
-	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
-
 	req := packSubChannelRequest(
 		task,
 		action,
@@ -462,7 +460,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		dmChannel,
 		indexInfo,
 		partitions,
-		version,
+		indexInfoVersion,
 	)
 	err = fillSubChannelRequest(ctx, req, ex.broker, ex.shouldIncludeFlushedSegmentInfo(action.Node()))
 	if err != nil {
@@ -615,11 +613,10 @@ func (ex *Executor) setDistribution(task *LeaderTask, step int) error {
 		return err
 	}
 
-	loadInfo, indexInfo, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID(), channel, commonpb.LoadPriority_LOW)
+	loadInfo, indexInfo, indexInfoVersion, err := ex.getLoadInfo(ctx, task.CollectionID(), action.SegmentID(), channel, commonpb.LoadPriority_LOW, meta.NextTargetFirst)
 	if err != nil {
 		return err
 	}
-	indexInfoVersion := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -746,11 +743,26 @@ func (ex *Executor) getCollectionInfo(ctx context.Context, collectionID int64) (
 	}
 }
 
-func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel, priority commonpb.LoadPriority) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+func (ex *Executor) getIndexInfoSnapshot(ctx context.Context, collectionID int64, scope meta.TargetScope) ([]*indexpb.IndexInfo, int64, error) {
+	if indexInfos, version, ok := meta.GetCollectionIndexInfoSnapshot(ex.targetMgr, ctx, collectionID, scope); ok {
+		return indexInfos, version, nil
+	}
+
+	// Compatibility for recovered pre-upgrade targets and test adapters that do
+	// not expose the optional snapshot provider. Production targets created by
+	// this version always take the atomic path above.
+	indexInfos, err := ex.broker.ListIndexes(ctx, collectionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return indexInfos, ex.targetMgr.GetCollectionTargetVersion(ctx, collectionID, scope), nil
+}
+
+func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel, priority commonpb.LoadPriority, scope meta.TargetScope) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, int64, error) {
 	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)
 	if err != nil || len(segmentInfos) == 0 {
 		mlog.Warn(context.TODO(), "failed to get segment info from DataCoord", mlog.Err(err))
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	segment := segmentInfos[0]
 
@@ -758,17 +770,17 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 	if err != nil {
 		if !errors.Is(err, merr.ErrIndexNotFound) {
 			mlog.Warn(context.TODO(), "failed to get index of segment", mlog.Err(err))
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		indexes = nil
 	}
 
-	// Get collection index info
-	indexInfos, err := ex.broker.ListIndexes(ctx, collectionID)
+	indexInfos, indexInfoVersion, err := ex.getIndexInfoSnapshot(ctx, collectionID, scope)
 	if err != nil {
 		mlog.Warn(context.TODO(), "fail to get index meta of collection", mlog.Err(err))
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
+
 	// update the field index params
 	for _, segmentIndex := range indexes[segment.GetID()] {
 		index, found := lo.Find(indexInfos, func(indexInfo *indexpb.IndexInfo) bool {
@@ -776,6 +788,7 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 		})
 		if !found {
 			mlog.Warn(context.TODO(), "no collection index info for the given segment index", mlog.String("indexName", segmentIndex.GetIndexName()))
+			continue
 		}
 
 		params := funcutil.KeyValuePair2Map(segmentIndex.GetIndexParams())
@@ -791,5 +804,5 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 
 	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes[segment.GetID()])
 	loadInfo.Priority = priority
-	return loadInfo, indexInfos, nil
+	return loadInfo, indexInfos, indexInfoVersion, nil
 }

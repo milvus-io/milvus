@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -67,6 +68,14 @@ type TargetManagerSuite struct {
 	mgr *TargetManager
 
 	ctx context.Context
+}
+
+type targetIndexBrokerMock struct {
+	*MockBroker
+}
+
+func (broker *targetIndexBrokerMock) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+	return broker.ListIndexes(ctx, collectionID)
 }
 
 func (suite *TargetManagerSuite) SetupSuite() {
@@ -247,6 +256,41 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.NoError(err)
+}
+
+func (suite *TargetManagerSuite) TestIndexSnapshotBoundToTargetVersion() {
+	collectionID := suite.collections[0]
+	broker := NewMockBroker(suite.T())
+	mgr := NewTargetManager(&targetIndexBrokerMock{MockBroker: broker}, suite.meta)
+	channels := []*datapb.VchannelInfo{{
+		CollectionID: collectionID,
+		ChannelName:  suite.channels[collectionID][0],
+	}}
+	segments := []*datapb.SegmentInfo{{
+		ID:            suite.segments[collectionID][suite.partitions[collectionID][0]][0],
+		CollectionID:  collectionID,
+		PartitionID:   suite.partitions[collectionID][0],
+		InsertChannel: suite.channels[collectionID][0],
+	}}
+	index0 := []*indexpb.IndexInfo{{IndexID: 10, IndexName: "index-0"}}
+	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil).Once()
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return(index0, nil).Once()
+	suite.Require().NoError(mgr.UpdateCollectionNextTarget(suite.ctx, collectionID))
+
+	snapshot0, version0, present := mgr.GetCollectionIndexInfoSnapshot(suite.ctx, collectionID, NextTarget)
+	suite.True(present)
+	suite.Equal(index0, snapshot0)
+	suite.Positive(version0)
+
+	index1 := []*indexpb.IndexInfo{{IndexID: 11, IndexName: "index-1"}}
+	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil).Once()
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return(index1, nil).Once()
+	suite.Require().NoError(mgr.UpdateCollectionNextTarget(suite.ctx, collectionID))
+
+	snapshot1, version1, present := mgr.GetCollectionIndexInfoSnapshot(suite.ctx, collectionID, NextTarget)
+	suite.True(present)
+	suite.Equal(index1, snapshot1)
+	suite.Greater(version1, version0)
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {

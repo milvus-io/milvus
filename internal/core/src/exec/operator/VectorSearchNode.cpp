@@ -101,12 +101,6 @@ PhyVectorSearchNode::GetOutput() {
     }
 
     WaitPrefetch();
-    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
-    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
-
-    std::chrono::high_resolution_clock::time_point vector_start =
-        std::chrono::high_resolution_clock::now();
-
     auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
@@ -118,6 +112,16 @@ PhyVectorSearchNode::GetOutput() {
         query_context_->set_array_offsets(array_offsets);
         search_info_.array_offsets_ = array_offsets;
     }
+
+    // Resolve the segment-owned metric after the placeholder has established
+    // the VECTOR_ARRAY search mode, but before any zero-candidate fast path can
+    // bypass vector_search().
+    segment_->PrepareSearchInfo(search_info_);
+    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
+    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
+
+    std::chrono::high_resolution_clock::time_point vector_start =
+        std::chrono::high_resolution_clock::now();
 
     // Prepare BitsetView for search.
     // Fast path: all_rows_visible + non-element-level → empty BitsetView

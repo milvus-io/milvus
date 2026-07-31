@@ -541,6 +541,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResolveMetricType(FieldId field_id) const;
 
     void
+    PrepareSearchInfo(SearchInfo& search_info) const override;
+
+    void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
                   const size_t* query_offsets,

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -74,6 +75,22 @@ type TargetManagerInterface interface {
 	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
 	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
 	GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64
+}
+
+type collectionIndexInfoProvider interface {
+	GetCollectionIndexInfoSnapshot(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool)
+}
+
+type targetIndexBroker interface {
+	ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error)
+}
+
+func GetCollectionIndexInfoSnapshot(targetMgr TargetManagerInterface, ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
+	provider, ok := targetMgr.(collectionIndexInfoProvider)
+	if !ok {
+		return nil, 0, false
+	}
+	return provider.GetCollectionIndexInfoSnapshot(ctx, collectionID, scope)
 }
 
 type TargetManager struct {
@@ -190,7 +207,18 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return nil
 	}
 
-	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
+	var indexInfos []*indexpb.IndexInfo
+	indexInfoPresent := false
+	if broker, ok := mgr.broker.(targetIndexBroker); ok {
+		indexInfos, err = broker.ListIndexesForTarget(ctx, collectionID)
+		if err != nil {
+			mlog.Warn(ctx, "failed to get index snapshot for next target", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			return err
+		}
+		indexInfoPresent = true
+	}
+
+	allocatedTarget := newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, indexInfoPresent)
 
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
@@ -327,7 +355,8 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 		return !partitionSet.Contain(partitionID)
 	})
 
-	return NewCollectionTarget(segments, channels, partitions)
+	indexInfos, indexInfoPresent := oldTarget.GetIndexInfoSnapshot()
+	return newCollectionTarget(segments, channels, partitions, indexInfos, indexInfoPresent)
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -520,6 +549,17 @@ func (mgr *TargetManager) GetCollectionTargetVersion(ctx context.Context, collec
 	}
 
 	return 0
+}
+
+func (mgr *TargetManager) GetCollectionIndexInfoSnapshot(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, target := range targets {
+		indexInfos, present := target.GetIndexInfoSnapshot()
+		if present {
+			return indexInfos, target.GetTargetVersion(), true
+		}
+	}
+	return nil, 0, false
 }
 
 func (mgr *TargetManager) IsCurrentTargetExist(ctx context.Context, collectionID int64, partitionID int64) bool {

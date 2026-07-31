@@ -954,6 +954,12 @@ message CollectionTarget {
   int64 collectionID = 1;
   repeated ChannelTarget Channel_targets = 2;
   int64 version = 3;
+  // Collection index configuration captured when this immutable target was
+  // created. The target version orders this exact snapshot.
+  repeated index.IndexInfo index_info_list = 4;
+  // Distinguishes an authoritative empty snapshot from targets persisted by
+  // older QueryCoords that did not carry index_info_list.
+  bool index_info_present = 5;
 }
 message NodeInfo {
   int64 ID = 2;

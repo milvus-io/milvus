@@ -391,3 +391,11 @@ func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID U
 
 	return resp.GetIndexInfos(), nil
 }
+
+// ListIndexesForTarget is a concrete extension consumed by TargetManager so a
+// collection's index configuration is captured into the same immutable target
+// that supplies its ordering version. Keeping it off Broker avoids widening the
+// long-standing interface and generated test adapters.
+func (broker *CoordinatorBroker) ListIndexesForTarget(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
+	return broker.ListIndexes(ctx, collectionID)
+}

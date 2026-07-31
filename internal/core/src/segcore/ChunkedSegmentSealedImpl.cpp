@@ -3665,6 +3665,30 @@ ChunkedSegmentSealedImpl::ResolveMetricType(
 }
 
 void
+ChunkedSegmentSealedImpl::PrepareSearchInfo(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    SearchInfo& search_info) const {
+    auto field_id = search_info.field_id_;
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    AssertInfo(field_meta.is_vector(),
+               "The meta type of vector field is not vector type");
+    auto segment_metric =
+        ResolveMetricType(snapshot->runtime, snapshot->index_meta, field_id);
+    search_info.metric_type_ = ResolveSearchMetricType(
+        search_info.metric_type_, segment_metric, field_meta.get_name().get());
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        ValidateVectorArraySearchMode(
+            search_info.metric_type_, search_info.element_level(), field_id);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::PrepareSearchInfo(SearchInfo& search_info) const {
+    std::shared_lock vector_state_lck(mutex_);
+    PrepareSearchInfo(CapturePublishedState(), search_info);
+}
+
+void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
                                         const size_t* query_offsets,
@@ -3676,20 +3700,10 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
     auto field_id = search_info.field_id_;
-    auto& field_meta = snapshot->schema->operator[](field_id);
-    AssertInfo(field_meta.is_vector(),
-               "The meta type of vector field is not vector type");
     // search_info is a segment-local copy. Resolve the segment's authoritative
     // metric first, then either fill an omitted request metric or reject an
     // explicit mismatch before any vector search runs.
-    auto segment_metric =
-        ResolveMetricType(snapshot->runtime, snapshot->index_meta, field_id);
-    search_info.metric_type_ = ResolveSearchMetricType(
-        search_info.metric_type_, segment_metric, field_meta.get_name().get());
-    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        ValidateVectorArraySearchMode(
-            search_info.metric_type_, search_info.element_level(), field_id);
-    }
+    PrepareSearchInfo(snapshot, search_info);
     output.metric_type_ = search_info.metric_type_;
     AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto runtime = snapshot->runtime;

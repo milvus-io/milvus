@@ -940,7 +940,8 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
 
     auto run_case = [&](const MetricType& segment_metric,
                         bool embedding_list_placeholder,
-                        bool expect_success) {
+                        bool expect_success,
+                        bool zero_hit) {
         auto schema = std::make_shared<Schema>();
         auto primary_key = schema->AddDebugField("pk", DataType::INT64);
         auto array_vec = schema->AddDebugVectorArrayField(
@@ -967,8 +968,11 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
             schema, index_meta, SegcoreConfig::default_config(), dataset);
 
         ScopedSchemaHandle handle(*schema);
-        auto plan_blob =
-            handle.ParseSearch("", "structA[array_vec]", topk, "", R"({})");
+        auto plan_blob = handle.ParseSearch(zero_hit ? "pk < 0" : "",
+                                            "structA[array_vec]",
+                                            topk,
+                                            "",
+                                            R"({})");
         auto plan =
             CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
 
@@ -985,7 +989,7 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
         }
         auto placeholder =
             ParsePlaceholderGroup(plan.get(), raw_group.SerializeAsString());
-        EXPECT_EQ(placeholder->at(0).element_level_,
+        ASSERT_EQ(placeholder->at(0).element_level_,
                   !embedding_list_placeholder);
 
         auto verify_segment = [&](SegmentInterface* segment) {
@@ -1016,11 +1020,16 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
     };
 
     // Both valid omitted-metric modes execute on sealed and growing segments.
-    run_case(knowhere::metric::MAX_SIM, true, true);
-    run_case(knowhere::metric::COSINE, false, true);
+    run_case(knowhere::metric::MAX_SIM, true, true, false);
+    run_case(knowhere::metric::COSINE, false, true, false);
 
     // The segment-resolved metric remains authoritative and rejects both
     // placeholder/metric mode mismatch directions before vector search.
-    run_case(knowhere::metric::COSINE, true, false);
-    run_case(knowhere::metric::MAX_SIM, false, false);
+    run_case(knowhere::metric::COSINE, true, false, false);
+    run_case(knowhere::metric::MAX_SIM, false, false, false);
+
+    // The same invalid request must fail even when the scalar filter removes
+    // every candidate before vector_search() would otherwise run.
+    run_case(knowhere::metric::COSINE, true, false, true);
+    run_case(knowhere::metric::MAX_SIM, false, false, true);
 }

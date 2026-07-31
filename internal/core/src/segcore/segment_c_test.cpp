@@ -1333,12 +1333,17 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
     auto placeholder_blob = raw_group.SerializeAsString();
     ScopedSchemaHandle schema_handle(*schema);
 
-    auto run_search = [&](CSegmentInterface target_segment,
-                          const std::string& requested_metric,
-                          bool clear_plan_metric,
-                          CSearchResult* result) {
+    auto run_search_with_predicate = [&](CSegmentInterface target_segment,
+                                         const std::string& predicate,
+                                         const std::string& requested_metric,
+                                         bool clear_plan_metric,
+                                         CSearchResult* result) {
         auto plan_blob = schema_handle.ParseSearch(
-            "", "fakevec", topk, requested_metric, R"({"nprobe": 10})");
+            predicate,
+            "fakevec",
+            topk,
+            requested_metric,
+            R"({"nprobe": 10})");
         CSearchPlan plan = nullptr;
         auto status = CreateSearchPlanByExpr(
             collection, plan_blob.data(), plan_blob.size(), &plan);
@@ -1366,6 +1371,16 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
         }
         DeletePlaceholderGroup(placeholder_group);
         return std::pair<CStatus, CSearchPlan>{status, plan};
+    };
+    auto run_search = [&](CSegmentInterface target_segment,
+                          const std::string& requested_metric,
+                          bool clear_plan_metric,
+                          CSearchResult* result) {
+        return run_search_with_predicate(target_segment,
+                                         "",
+                                         requested_metric,
+                                         clear_plan_metric,
+                                         result);
     };
 
     // Legacy/test-created raw segments may not carry index configuration. An
@@ -1438,6 +1453,20 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
               std::string::npos);
     free(const_cast<char*>(mismatch_status.error_msg));
     DeleteSearchPlan(mismatch_plan);
+
+    // The filter eliminates every candidate inside VectorSearchNode. Request
+    // validation must still run before that node returns an empty result.
+    CSearchResult zero_hit_mismatch_result = nullptr;
+    auto [zero_hit_mismatch_status, zero_hit_mismatch_plan] =
+        run_search_with_predicate(segment.get(),
+                                  "counter < 0",
+                                  knowhere::metric::L2,
+                                  false,
+                                  &zero_hit_mismatch_result);
+    EXPECT_EQ(zero_hit_mismatch_status.error_code, MetricTypeNotMatch);
+    EXPECT_EQ(zero_hit_mismatch_result, nullptr);
+    free(const_cast<char*>(zero_hit_mismatch_status.error_msg));
+    DeleteSearchPlan(zero_hit_mismatch_plan);
 
     // Growing segments receive the same per-segment configuration at
     // construction time. Exercise the real growing search path as well, since

@@ -1595,17 +1595,7 @@ SegmentGrowingImpl::ResolveMetricType(FieldId field_id) const {
 }
 
 void
-SegmentGrowingImpl::vector_search(SearchInfo& search_info,
-                                  const void* query_data,
-                                  const size_t* query_offsets,
-                                  int64_t query_count,
-                                  Timestamp timestamp,
-                                  const BitsetView& bitset,
-                                  milvus::OpContext* op_context,
-                                  SearchResult& output) const {
-    // Same contract as the sealed path: use the growing segment's immutable
-    // construction-time index configuration to fill an omitted request metric or
-    // reject an explicit mismatch before brute-force/interim-index search runs.
+SegmentGrowingImpl::PrepareSearchInfo(SearchInfo& search_info) const {
     auto schema = get_schema_snapshot();
     auto& field_meta = schema->operator[](search_info.field_id_);
     search_info.metric_type_ =
@@ -1617,6 +1607,21 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                       search_info.element_level(),
                                       search_info.field_id_);
     }
+}
+
+void
+SegmentGrowingImpl::vector_search(SearchInfo& search_info,
+                                  const void* query_data,
+                                  const size_t* query_offsets,
+                                  int64_t query_count,
+                                  Timestamp timestamp,
+                                  const BitsetView& bitset,
+                                  milvus::OpContext* op_context,
+                                  SearchResult& output) const {
+    // Same contract as the sealed path: use the growing segment's immutable
+    // construction-time index configuration to fill an omitted request metric or
+    // reject an explicit mismatch before brute-force/interim-index search runs.
+    PrepareSearchInfo(search_info);
     output.metric_type_ = search_info.metric_type_;
     query::SearchOnGrowing(*this,
                            search_info,

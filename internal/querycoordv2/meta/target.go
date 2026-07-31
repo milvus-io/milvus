@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -39,6 +40,8 @@ type CollectionTarget struct {
 	dmChannels         map[string]*DmChannel
 	partitions         typeutil.Set[int64] // stores target partitions info
 	version            int64
+	indexInfos         []*indexpb.IndexInfo
+	indexInfoPresent   bool
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
@@ -48,6 +51,14 @@ type CollectionTarget struct {
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
+	return newCollectionTarget(segments, dmChannels, partitionIDs, nil, false)
+}
+
+func NewCollectionTargetWithIndexInfo(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo) *CollectionTarget {
+	return newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, true)
+}
+
+func newCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo, indexInfoPresent bool) *CollectionTarget {
 	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
 	totalRowCount := int64(0)
@@ -71,6 +82,8 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
 		version:            time.Now().UnixNano(),
+		indexInfos:         indexInfos,
+		indexInfoPresent:   indexInfoPresent,
 		totalRowCount:      totalRowCount,
 	}
 }
@@ -135,6 +148,8 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitions...),
 		version:            target.GetVersion(),
+		indexInfos:         target.GetIndexInfoList(),
+		indexInfoPresent:   target.GetIndexInfoPresent(),
 		lackSegmentInfo:    lackSegmentInfo,
 		totalRowCount:      totalRowCount,
 	}
@@ -188,9 +203,11 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 	}
 
 	return &querypb.CollectionTarget{
-		CollectionID:   collectionID,
-		ChannelTargets: lo.Values(channelTargets),
-		Version:        p.version,
+		CollectionID:     collectionID,
+		ChannelTargets:   lo.Values(channelTargets),
+		Version:          p.version,
+		IndexInfoList:    p.indexInfos,
+		IndexInfoPresent: p.indexInfoPresent,
 	}
 }
 
@@ -208,6 +225,10 @@ func (p *CollectionTarget) GetPartitionSegments(partitionID int64) []*datapb.Seg
 
 func (p *CollectionTarget) GetTargetVersion() int64 {
 	return p.version
+}
+
+func (p *CollectionTarget) GetIndexInfoSnapshot() ([]*indexpb.IndexInfo, bool) {
+	return p.indexInfos, p.indexInfoPresent
 }
 
 func (p *CollectionTarget) GetAllDmChannels() map[string]*DmChannel {

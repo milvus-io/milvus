@@ -1321,6 +1321,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldId field_id) const;
 
     void
+    PrepareSearchInfo(SearchInfo& search_info) const override;
+
+    void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
                   const size_t* query_offsets,
@@ -1434,6 +1437,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<PublishedSegmentState>
     ClonePublishedState(
         const std::shared_ptr<const PublishedSegmentState>& current) const;
+
+    void
+    PrepareSearchInfo(
+        const std::shared_ptr<const PublishedSegmentState>& snapshot,
+        SearchInfo& search_info) const;
 
     std::shared_ptr<RuntimeResourceState>
     CloneMutableRuntimeResourceState() const;

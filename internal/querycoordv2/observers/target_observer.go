@@ -543,10 +543,23 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		return false
 	}
 
-	indexInfo, err := ob.broker.ListIndexes(ctx, collectionID)
-	if err != nil {
-		mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
-		return false
+	indexInfo, indexInfoVersion, snapshotPresent := meta.GetCollectionIndexInfoSnapshot(ob.targetMgr, ctx, collectionID, meta.NextTarget)
+	if snapshotPresent {
+		if indexInfoVersion != newVersion {
+			mlog.Warn(ctx, "next target changed while reading index snapshot",
+				mlog.Int64("expectedVersion", newVersion),
+				mlog.Int64("snapshotVersion", indexInfoVersion))
+			return false
+		}
+	} else {
+		// Compatibility for targets recovered from an older QueryCoord. New
+		// targets always carry an authoritative (possibly empty) index snapshot.
+		var err error
+		indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
+		if err != nil {
+			mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
+			return false
+		}
 	}
 
 	for _, d := range collReadyDelegatorList {
