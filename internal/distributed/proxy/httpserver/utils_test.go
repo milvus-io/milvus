@@ -4395,11 +4395,35 @@ func TestStructArrayScalarSubFieldTypes(t *testing.T) {
 			},
 		},
 		{
+			name:        "int8",
+			elementType: schemapb.DataType_Int8,
+			raw:         `[-128,127,127.0,1e2]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []int32{-128, 127, 127, 100}, sf.GetIntData().GetData())
+			},
+		},
+		{
+			name:        "int16",
+			elementType: schemapb.DataType_Int16,
+			raw:         `[-32768,32767]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []int32{-32768, 32767}, sf.GetIntData().GetData())
+			},
+		},
+		{
+			name:        "int32",
+			elementType: schemapb.DataType_Int32,
+			raw:         `[-2147483648,2147483647]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []int32{math.MinInt32, math.MaxInt32}, sf.GetIntData().GetData())
+			},
+		},
+		{
 			name:        "int64",
 			elementType: schemapb.DataType_Int64,
-			raw:         `[10,20]`,
+			raw:         `[-9223372036854775808,9223372036854775807,9007199254740993.0]`,
 			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
-				assert.Equal(t, []int64{10, 20}, sf.GetLongData().GetData())
+				assert.Equal(t, []int64{math.MinInt64, math.MaxInt64, 9007199254740993}, sf.GetLongData().GetData())
 			},
 		},
 		{
@@ -4442,6 +4466,40 @@ func TestStructArrayScalarSubFieldTypes(t *testing.T) {
 
 	_, err = buildStructSubArrayScalar(&schemapb.FieldSchema{Name: "bad_bool", ElementType: schemapb.DataType_Bool}, gjson.Parse(`[1]`).Array())
 	assert.Error(t, err)
+}
+
+func TestStructArrayNarrowIntegerSubFieldValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		raw         string
+		rangeText   string
+	}{
+		{name: "int8 above max", elementType: schemapb.DataType_Int8, raw: `[128]`, rangeText: "[-128, 127]"},
+		{name: "int8 below min", elementType: schemapb.DataType_Int8, raw: `[-129]`, rangeText: "[-128, 127]"},
+		{name: "int8 int32 wraparound", elementType: schemapb.DataType_Int8, raw: `[4294967296]`, rangeText: "[-128, 127]"},
+		{name: "int8 fraction", elementType: schemapb.DataType_Int8, raw: `[127.5]`, rangeText: "[-128, 127]"},
+		{name: "int16 above max", elementType: schemapb.DataType_Int16, raw: `[32768]`, rangeText: "[-32768, 32767]"},
+		{name: "int16 below min", elementType: schemapb.DataType_Int16, raw: `[-32769]`, rangeText: "[-32768, 32767]"},
+		{name: "int16 int32 wraparound", elementType: schemapb.DataType_Int16, raw: `[4294967296]`, rangeText: "[-32768, 32767]"},
+		{name: "int32 above max", elementType: schemapb.DataType_Int32, raw: `[2147483648]`, rangeText: "[-2147483648, 2147483647]"},
+		{name: "int32 below min", elementType: schemapb.DataType_Int32, raw: `[-2147483649]`, rangeText: "[-2147483648, 2147483647]"},
+		{name: "int64 above max", elementType: schemapb.DataType_Int64, raw: `[9223372036854775808]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
+		{name: "int64 below min", elementType: schemapb.DataType_Int64, raw: `[-9223372036854775809]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
+		{name: "int64 fraction", elementType: schemapb.DataType_Int64, raw: `[127.5]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sub := &schemapb.FieldSchema{Name: "narrow", ElementType: test.elementType}
+			_, err := buildStructSubArrayScalar(sub, gjson.Parse(test.raw).Array())
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "sub-field narrow")
+			assert.Contains(t, err.Error(), "value="+strings.TrimSuffix(strings.TrimPrefix(test.raw, "["), "]"))
+			assert.Contains(t, err.Error(), test.rangeText)
+		})
+	}
 }
 
 func TestStructArrayVectorSubFieldTypes(t *testing.T) {
@@ -5022,8 +5080,45 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 	assert.Contains(t, structRow, "sub_int")
 	assert.Contains(t, structRow, "sub_vec")
 
+	int64Schema := buildStructArrayTestSchema()
+	int64Schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
+	int64Body := []byte(`{"data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":9007199254740993.0,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+	int64Rows, _, err := checkAndSetData(int64Body, int64Schema, false)
+	require.NoError(t, err)
+	int64StructRow, ok := int64Rows[0]["my_struct"].(structArrayRow)
+	require.True(t, ok)
+	int64Scalar, ok := int64StructRow["sub_int"].(*schemapb.ScalarField)
+	require.True(t, ok)
+	assert.Equal(t, []int64{9007199254740993}, int64Scalar.GetLongData().GetData())
+
 	_, _, err = checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": [1]}]}`), schema, false)
 	assert.Error(t, err)
+
+	for _, test := range []struct {
+		name        string
+		elementType schemapb.DataType
+		value       string
+		rangeText   string
+	}{
+		{name: "int8 int32 wraparound", elementType: schemapb.DataType_Int8, value: "4294967296", rangeText: "[-128, 127]"},
+		{name: "int16 int32 wraparound", elementType: schemapb.DataType_Int16, value: "4294967296", rangeText: "[-32768, 32767]"},
+		{name: "int32 overflow", elementType: schemapb.DataType_Int32, value: "2147483648", rangeText: "[-2147483648, 2147483647]"},
+		{name: "fraction", elementType: schemapb.DataType_Int8, value: "127.5", rangeText: "[-128, 127]"},
+		{name: "int64 overflow", elementType: schemapb.DataType_Int64, value: "9223372036854775808", rangeText: "[-9223372036854775808, 9223372036854775807]"},
+		{name: "int64 fraction", elementType: schemapb.DataType_Int64, value: "127.5", rangeText: "[-9223372036854775808, 9223372036854775807]"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testSchema := buildStructArrayTestSchema()
+			testSchema.GetStructArrayFields()[0].GetFields()[0].ElementType = test.elementType
+			invalidBody := []byte(fmt.Sprintf(`{"data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":%s,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`, test.value))
+			_, _, err := checkAndSetData(invalidBody, testSchema, false)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "sub-field sub_int")
+			assert.Contains(t, err.Error(), "value="+test.value)
+			assert.Contains(t, err.Error(), test.rangeText)
+		})
+	}
 }
 
 func TestParseStructArrayRowQualifiedSchemaNames(t *testing.T) {

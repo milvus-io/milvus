@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"math/big"
 	"net/http"
 	"reflect"
 	"slices"
@@ -935,6 +936,20 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 	return row, nil
 }
 
+func parseStructSubInteger(raw string, bitSize int) (int64, bool) {
+	value, err := strconv.ParseInt(raw, 10, bitSize)
+	if err == nil {
+		return value, true
+	}
+
+	number, ok := new(big.Rat).SetString(raw)
+	if !ok || !number.IsInt() {
+		return 0, false
+	}
+	value, err = strconv.ParseInt(number.Num().String(), 10, bitSize)
+	return value, err == nil
+}
+
 func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.ScalarField, error) {
 	switch sub.GetElementType() {
 	case schemapb.DataType_Bool:
@@ -949,12 +964,27 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (
 			Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: arr}},
 		}, nil
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		bitSize := 32
+		minValue, maxValue := int64(math.MinInt32), int64(math.MaxInt32)
+		switch sub.GetElementType() {
+		case schemapb.DataType_Int8:
+			bitSize = 8
+			minValue, maxValue = math.MinInt8, math.MaxInt8
+		case schemapb.DataType_Int16:
+			bitSize = 16
+			minValue, maxValue = math.MinInt16, math.MaxInt16
+		}
 		arr := make([]int32, 0, len(vals))
 		for _, v := range vals {
 			if v.Type != gjson.Number {
 				return nil, wrapStructSubParseError(sub, v, "expect integer")
 			}
-			arr = append(arr, int32(v.Int()))
+			value, ok := parseStructSubInteger(v.Raw, bitSize)
+			if !ok {
+				return nil, wrapStructSubParseError(sub, v,
+					fmt.Sprintf("expect integer in range [%d, %d]", minValue, maxValue))
+			}
+			arr = append(arr, int32(value))
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: arr}},
@@ -965,7 +995,12 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (
 			if v.Type != gjson.Number {
 				return nil, wrapStructSubParseError(sub, v, "expect integer")
 			}
-			arr = append(arr, v.Int())
+			value, ok := parseStructSubInteger(v.Raw, 64)
+			if !ok {
+				return nil, wrapStructSubParseError(sub, v,
+					fmt.Sprintf("expect integer in range [%d, %d]", int64(math.MinInt64), int64(math.MaxInt64)))
+			}
+			arr = append(arr, value)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: arr}},
