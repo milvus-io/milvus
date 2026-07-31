@@ -106,6 +106,23 @@ func TestResizePools(t *testing.T) {
 		assert.Equal(t, hardware.GetCPUNum(), GetMutatePool().Cap())
 	})
 
+	t.Run("InsertPool", func(t *testing.T) {
+		defer pt.Save(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, "2")
+
+		pt.Save(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, "3")
+		ResizeInsertPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, hardware.GetCPUNum()*3, GetInsertPool().Cap())
+
+		// factor <= 0 clamps to CPUNum.
+		pt.Save(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, "0")
+		ResizeInsertPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, hardware.GetCPUNum(), GetInsertPool().Cap())
+	})
+
 	t.Run("DynamicPool", func(t *testing.T) {
 		defer pt.Save(pt.QueryNodeCfg.DynamicPoolSizeFactor.Key, "1")
 
