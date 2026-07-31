@@ -92,6 +92,7 @@ func newScannerAdaptor(
 	currentWAL walimpls.ROWALImpls,
 	initialWAL walimpls.ROWALImpls,
 	readOption wal.ReadOption,
+	switchOptions switchableScannerOptions,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 	recovery bool,
@@ -111,6 +112,7 @@ func newScannerAdaptor(
 		innerWAL:        currentWAL,
 		initialWAL:      initialWAL,
 		readOption:      readOption,
+		switchOptions:   switchOptions,
 		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
 		reorderBuffer:   utility.NewReOrderBuffer(),
 		pendingQueue:    utility.NewPendingQueue(),
@@ -137,6 +139,7 @@ type scannerAdaptorImpl struct {
 	innerWAL      walimpls.ROWALImpls
 	initialWAL    walimpls.ROWALImpls
 	readOption    wal.ReadOption
+	switchOptions switchableScannerOptions
 	filterFunc    func(message.ImmutableMessage) bool
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
 	pendingQueue  *utility.PendingQueue
@@ -249,8 +252,9 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		wb,
 		s.readOption.DeliverPolicy,
 		msgChan,
-		func(walName message.WALName) {
-			s.metrics.SwitchReaderInfo(walName, metrics.WALReaderRoleCurrent)
+		s.switchOptions,
+		func(walName message.WALName, role string) {
+			s.metrics.SwitchReaderInfo(walName, role)
 		},
 	)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))

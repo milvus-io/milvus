@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type testWoodpeckerClient struct {
@@ -110,6 +111,7 @@ func TestOpenMissingReadOnlyWALDoesNotCreateLog(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrMqTopicNotFound)
 	assert.Nil(t, opened)
 	assert.False(t, client.created)
 }
