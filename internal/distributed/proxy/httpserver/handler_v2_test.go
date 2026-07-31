@@ -4929,6 +4929,13 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionFieldNormal() {
 				errCode:     0,
 				errMsg:      "",
 			},
+			{
+				// indexParams omitted: the bound index resolves via AutoIndex on the server side.
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}}`),
+				errCode:     0,
+				errMsg:      "",
+			},
 		}
 		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Maybe()
 

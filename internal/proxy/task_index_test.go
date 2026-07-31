@@ -1661,7 +1661,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 }
 
 func Test_wrapUserIndexParams(t *testing.T) {
-	params := wrapUserIndexParams("L2")
+	params := indexparamcheck.WrapUserIndexParams("L2")
 	assert.Equal(t, 2, len(params))
 	assert.Equal(t, "index_type", params[0].Key)
 	assert.Equal(t, AutoIndexName, params[0].Value)
@@ -2085,9 +2085,100 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+// A config-injected metric is not a user choice: for a BM25 function output
+// field, AutoIndex requests without a user metric must resolve to metric BM25
+// (same rule as the add_function_field bound-index resolution) so they reach
+// datacoord's dedup instead of failing the BM25 metric check at the proxy.
+func Test_parseIndexParams_AutoIndexBM25FunctionOutput(t *testing.T) {
+	paramtable.Init()
+
+	sparseOutputField := &schemapb.FieldSchema{
+		DataType:         schemapb.DataType_SparseFloatVector,
+		IsFunctionOutput: true,
+	}
+	bm25Function := &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25}
+
+	t.Run("empty params resolve with BM25 metric forced", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema:    sparseOutputField,
+			functionSchema: bm25Function,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}, task.newExtraParams)
+		newIndexParams := funcutil.KeyValuePair2Map(task.newIndexParams)
+		assert.Equal(t, "BM25", newIndexParams[common.MetricTypeKey])
+		assert.Equal(t, "1.2", newIndexParams["bm25_k1"])
+	})
+
+	t.Run("AUTOINDEX without metric resolves with BM25 metric forced", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema:    sparseOutputField,
+			functionSchema: bm25Function,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}, task.newExtraParams)
+	})
+
+	t.Run("user-specified BM25 metric unchanged", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema:    sparseOutputField,
+			functionSchema: bm25Function,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+					{Key: common.MetricTypeKey, Value: "BM25"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}, task.newExtraParams)
+	})
+
+	t.Run("cloud mode forces metric in build params but keeps raw user params", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+
+		task := &createIndexTask{
+			fieldSchema:    sparseOutputField,
+			functionSchema: bm25Function,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		newIndexParams := funcutil.KeyValuePair2Map(task.newIndexParams)
+		assert.Equal(t, "BM25", newIndexParams[common.MetricTypeKey])
+		// the cloud branch keeps the caller's raw extra params.
+		assert.Empty(t, task.newExtraParams)
+	})
+}
+
 func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 	t.Run("nil config", func(t *testing.T) {
-		result := adjustAutoIndexParamsByDataType(nil, schemapb.DataType_FloatVector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(nil, schemapb.DataType_FloatVector)
 		assert.Nil(t, result)
 	})
 
@@ -2096,7 +2187,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type": "HNSW_SQ",
 			"M":          "18",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
 		assert.Equal(t, config, result)
 	})
 
@@ -2105,7 +2196,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type":  "HNSW_SQ",
 			"refine_type": "FP16",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_FloatVector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_FloatVector)
 		assert.Contains(t, result, "refine_type")
 		assert.Equal(t, "FP16", result["refine_type"])
 	})
@@ -2115,7 +2206,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type":  "HNSW_SQ",
 			"refine_type": "FP16",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
 		assert.Equal(t, config, result) // same object, no copy needed
 	})
 
@@ -2125,7 +2216,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"refine_type": "BF16",
 			"M":           "18",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
 		assert.Contains(t, result, "refine_type")
 		assert.Equal(t, "FP16", result["refine_type"])
 		assert.Contains(t, result, "index_type")
@@ -2137,7 +2228,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type":  "HNSW_SQ",
 			"refine_type": "BF16",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
 		assert.Equal(t, config, result) // same object, no copy needed
 	})
 
@@ -2147,7 +2238,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"refine_type": "FP16",
 			"M":           "18",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
 		assert.Contains(t, result, "refine_type")
 		assert.Equal(t, "BF16", result["refine_type"])
 		assert.Contains(t, result, "index_type")
@@ -2159,7 +2250,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type":  "HNSW_SQ",
 			"refine_type": "SQ8",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
 		assert.Equal(t, config, result) // not modified
 	})
 
@@ -2168,7 +2259,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type":  "HNSW_SQ",
 			"refine_type": "SQ8",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
 		assert.Equal(t, config, result) // not modified
 	})
 
@@ -2177,7 +2268,7 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 			"index_type":  "HNSW_SQ",
 			"refine_type": "FP16",
 		}
-		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		result := indexparamcheck.AdjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
 		// Original config should still have original refine_type
 		assert.Equal(t, "FP16", config["refine_type"])
 		// Result should have replaced refine_type

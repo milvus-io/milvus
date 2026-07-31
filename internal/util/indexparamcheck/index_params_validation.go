@@ -112,25 +112,174 @@ func FillFunctionOutputIndexParams(functionType schemapb.FunctionType, indexPara
 	return nil
 }
 
+// RefineTypeKey is the autoindex build-param key carrying the refine type for
+// dense float vector indexes.
+const RefineTypeKey = "refine_type"
+
+// WrapUserIndexParams builds the canonical user-index-params of an
+// AUTOINDEX-resolved index. Shared by the create_index path (proxy) and the
+// add-function-field bound-index prepare (rootcoord): datacoord's checkParams
+// dedupes a later create_index by comparing exactly these pairs, so both paths
+// must persist the same shape.
+func WrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
+	return []*commonpb.KeyValuePair{
+		{
+			Key:   common.IndexTypeKey,
+			Value: common.AutoIndexName,
+		},
+		{
+			Key:   common.MetricTypeKey,
+			Value: metricType,
+		},
+	}
+}
+
+// AdjustAutoIndexParamsByDataType adjusts autoindex params based on vector data type.
+// If data_type is bf16 and refine_type is fp16/fp32, adjust to BF16.
+// If data_type is fp16 and refine_type is bf16/fp32, adjust to FP16.
+// Other refine_type values (e.g., sq8) are not modified.
+func AdjustAutoIndexParamsByDataType(config map[string]string, dataType schemapb.DataType) map[string]string {
+	if config == nil {
+		return config
+	}
+	refineType, hasRefine := config[RefineTypeKey]
+	if !hasRefine {
+		return config
+	}
+
+	refineTypeLower := strings.ToLower(refineType)
+	var requiredRefineType string
+
+	switch dataType {
+	case schemapb.DataType_Float16Vector:
+		// fp16 data requires fp16 refine, adjust if refine_type is bf16/fp32
+		if refineTypeLower == "bf16" || refineTypeLower == "fp32" {
+			requiredRefineType = "FP16"
+		}
+	case schemapb.DataType_BFloat16Vector:
+		// bf16 data requires bf16 refine, adjust if refine_type is fp16/fp32
+		if refineTypeLower == "fp16" || refineTypeLower == "fp32" {
+			requiredRefineType = "BF16"
+		}
+	}
+
+	if requiredRefineType == "" {
+		return config
+	}
+
+	adjusted := make(map[string]string, len(config))
+	for k, v := range config {
+		adjusted[k] = v
+	}
+	adjusted[RefineTypeKey] = requiredRefineType
+	return adjusted
+}
+
+// GetDenseFloatAutoIndexParams returns the autoindex build params for dense
+// float vector fields. Large-topk params apply only when autoindex is enabled
+// (cloud instance) and the collection is in large-topk query mode.
+func GetDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair) map[string]string {
+	autoIndexCfg := &paramtable.Get().AutoIndexConfig
+	if autoIndexCfg.Enable.GetAsBool() && common.IsQueryModeLargeTopK(collectionProperties...) {
+		return autoIndexCfg.LargeTopKIndexParams.GetAsJSONMap()
+	}
+	return autoIndexCfg.IndexParams.GetAsJSONMap()
+}
+
 // PrepareFunctionOutputIndexParams expands the user-provided extra params of a
-// function output field's bound index, requires an explicit index type (no
-// AUTOINDEX resolution for bound indexes), and applies function-type-specific
-// defaults. Shared by proxy validation and rootcoord materialization so both
-// operate on identical params.
-func PrepareFunctionOutputIndexParams(functionType schemapb.FunctionType, fieldName string, extraParams []*commonpb.KeyValuePair) (map[string]string, error) {
+// function output field's bound index and produces its concrete build params.
+// An explicit index_type passes through unchanged (function-type defaults
+// applied). A missing or AUTOINDEX index_type is resolved from the AutoIndex
+// config of the field's vector type under the create_index AUTOINDEX rules:
+// besides index_type only metric_type may be supplied, and a user-specified
+// metric wins over the config one. One deliberate divergence: for a BM25
+// function the required metric is known authoritatively, so a config-injected
+// (non-user) metric is forced to BM25 instead of failing the BM25 metric check.
+// Likewise, a MinHash function requires MHJACCARD: an omitted metric selects
+// the deduplicate config, while an explicitly conflicting metric is rejected.
+// Returns resolvedByAutoIndex=true when the AutoIndex path was taken so callers
+// persist the canonical AUTOINDEX user params (WrapUserIndexParams). Shared by
+// proxy validation and rootcoord materialization so both operate on identical
+// params.
+func PrepareFunctionOutputIndexParams(functionType schemapb.FunctionType, field *schemapb.FieldSchema, collectionProperties, extraParams []*commonpb.KeyValuePair) (map[string]string, bool, error) {
 	indexParamsMap, err := ExpandIndexParams(extraParams)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	indexType := indexParamsMap[common.IndexTypeKey]
-	if indexType == "" || indexType == common.AutoIndexName {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"an explicit index_type is required for the bound index of function output field %q", fieldName)
+	// AutoIndex resolution triggers only when the index_type KEY is absent or its
+	// value is exactly AUTOINDEX — same presence-based rule as create_index. A
+	// present-but-empty value is a malformed request that stays on the explicit
+	// path and is rejected downstream by the checker-existence validation.
+	indexType, hasIndexType := indexParamsMap[common.IndexTypeKey]
+	if hasIndexType && indexType != common.AutoIndexName {
+		if err := FillFunctionOutputIndexParams(functionType, indexParamsMap); err != nil {
+			return nil, false, err
+		}
+		return indexParamsMap, false, nil
+	}
+
+	allowed := 0
+	if hasIndexType {
+		allowed++
+	}
+	userMetric, userMetricSpecified := indexParamsMap[common.MetricTypeKey]
+	if userMetricSpecified {
+		allowed++
+	}
+	if len(indexParamsMap) > allowed {
+		return nil, false, merr.WrapErrParameterInvalidMsg(
+			"only metric type can be passed when use AutoIndex for the bound index of function output field %q", field.GetName())
+	}
+	if functionType == schemapb.FunctionType_MinHash && userMetricSpecified && userMetric != metric.MHJACCARD {
+		return nil, false, merr.WrapErrParameterInvalidMsg(
+			"index metric type of MinHash function output field must be MHJACCARD, got %s", userMetric)
+	}
+
+	autoIndexCfg := &paramtable.Get().AutoIndexConfig
+	var config map[string]string
+	switch {
+	case typeutil.IsDenseFloatVectorType(field.GetDataType()):
+		config = AdjustAutoIndexParamsByDataType(GetDenseFloatAutoIndexParams(collectionProperties), field.GetDataType())
+	case typeutil.IsSparseFloatVectorType(field.GetDataType()):
+		config = autoIndexCfg.SparseIndexParams.GetAsJSONMap()
+	case typeutil.IsBinaryVectorType(field.GetDataType()):
+		// A MinHash output field with no user metric must resolve to the
+		// deduplicate config (MINHASH_LSH/MHJACCARD): the generic binary config
+		// would build an index that cannot serve MinHash searches. Same
+		// function-knows-best rule as the BM25 metric forcing below.
+		if (userMetricSpecified && funcutil.SliceContain(DeduplicateMetrics, userMetric)) ||
+			(!userMetricSpecified && functionType == schemapb.FunctionType_MinHash) {
+			// The cloud create_index path gates deduplicate autoindex behind
+			// autoIndex.params.deduplicate.enable; mirror it. The OSS
+			// create_index path ignores the gate, so OSS stays ungated here too.
+			if autoIndexCfg.Enable.GetAsBool() && !autoIndexCfg.EnableDeduplicateIndex.GetAsBool() {
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					"Deduplicate index is not enabled, cannot resolve the bound index of function output field %q via AutoIndex", field.GetName())
+			}
+			config = autoIndexCfg.DeduplicateIndexParams.GetAsJSONMap()
+		} else {
+			config = autoIndexCfg.BinaryIndexParams.GetAsJSONMap()
+		}
+	case typeutil.IsIntVectorType(field.GetDataType()):
+		config = autoIndexCfg.IntVectorIndexParams.GetAsJSONMap()
+	default:
+		return nil, false, merr.WrapErrParameterInvalidMsg(
+			"AutoIndex for the bound index of function output field %q is not supported on data type %s",
+			field.GetName(), field.GetDataType().String())
+	}
+	for k, v := range config {
+		indexParamsMap[k] = v
+	}
+	if userMetricSpecified {
+		// the user's metric type is first class citizen, same as create_index.
+		indexParamsMap[common.MetricTypeKey] = userMetric
+	} else if functionType == schemapb.FunctionType_BM25 {
+		indexParamsMap[common.MetricTypeKey] = metric.BM25
 	}
 	if err := FillFunctionOutputIndexParams(functionType, indexParamsMap); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return indexParamsMap, nil
+	return indexParamsMap, true, nil
 }
 
 // ExpandIndexParams flattens user-provided index extra params into a plain map,
