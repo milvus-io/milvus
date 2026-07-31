@@ -93,7 +93,7 @@ func (m *dataViewReferenceManager) PinDataView(ctx context.Context, collectionID
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	if state.terminal || !m.collectionExists(collectionID) {
+	if state.terminal {
 		return unavailableDataViewError(collectionID, version)
 	}
 	view, err := m.dataViews.DataView(ctx, collectionID, version.IntoProto())

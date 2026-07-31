@@ -88,6 +88,26 @@ func newTestDataViewReferenceManager(t *testing.T, catalog *testDataViewReferenc
 	return manager
 }
 
+func TestDataViewReferenceManagerPinDoesNotDependOnCollectionCache(t *testing.T) {
+	version := qviews.DataVersion{StreamingVersion: 1}
+	catalog := &testDataViewReferenceCatalog{markerPresent: make(map[int64]struct{})}
+	dataViewCalled := false
+	dataViews := &testDataViewReferenceDataViews{
+		dataViewFn: func(context.Context, int64, *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error) {
+			dataViewCalled = true
+			return &viewpb.DataViewOfCollection{CollectionId: 100, DataVersion: version.IntoProto()}, nil
+		},
+		garbageCollectFn: func(context.Context, int64, []*viewpb.DataVersion, int) error { return nil },
+		dropCollectionFn: func(context.Context, int64) (*viewpb.DataVersion, error) { return nil, nil },
+	}
+	manager := newTestDataViewReferenceManager(t, catalog, dataViews, func(int64) bool { return false })
+
+	err := manager.PinDataView(context.Background(), 100, version)
+
+	require.NoError(t, err)
+	require.True(t, dataViewCalled)
+}
+
 func TestDataViewReferenceManagerPinProtectsGC(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 3, CompactVersion: 1}
 	catalog := &testDataViewReferenceCatalog{markerPresent: make(map[int64]struct{})}
