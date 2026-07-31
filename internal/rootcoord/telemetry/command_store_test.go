@@ -377,12 +377,12 @@ func TestConfigHashConsistency(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, hash1)
 
-	// Add a config for client1 (scope: client:client1)
+	// Add a config for db1 (scope: database:db1)
 	cfgID1, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType:    "push_config",
 		Payload:        []byte(`{"a": 1}`),
 		Persistent:     true,
-		TargetClientId: "client1",
+		TargetDatabase: "db1",
 	})
 
 	_, hash2, err := store.ListConfigs(ctx)
@@ -399,7 +399,7 @@ func TestConfigHashConsistency(t *testing.T) {
 		CommandType:    "push_config",
 		Payload:        []byte(`{"b": 2}`),
 		Persistent:     true,
-		TargetClientId: "client2",
+		TargetDatabase: "db2",
 	})
 
 	_, hash4, _ := store.ListConfigs(ctx)
@@ -486,13 +486,13 @@ func TestRestartBehavior_MultipleConfigs(t *testing.T) {
 		CommandType:    "push_config",
 		Payload:        []byte(`{"setting": "value1"}`),
 		Persistent:     true,
-		TargetClientId: "client1",
+		TargetDatabase: "db1",
 	})
 	cfgID2, _ := store1.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType:    "push_config",
 		Payload:        []byte(`{"setting": "value2"}`),
 		Persistent:     true,
-		TargetClientId: "client2",
+		TargetDatabase: "db2",
 	})
 
 	_, hash1, _ := store1.ListConfigs(ctx)
@@ -666,7 +666,7 @@ func TestPayloadPreservation(t *testing.T) {
 			CommandType:    "push_config",
 			Payload:        payload,
 			Persistent:     true,
-			TargetClientId: fmt.Sprintf("client%d", i),
+			TargetDatabase: fmt.Sprintf("db%d", i),
 		})
 		require.NoError(t, err, "failed for payload %d", i)
 	}
@@ -1059,5 +1059,90 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 		for _, info := range infos {
 			assert.NotEqual(t, "expired-cmd", info.CommandID)
 		}
+	})
+}
+
+func TestResolveCommandTTL(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested int64
+		expected  int64
+	}{
+		{"unset gets the default", 0, defaultCommandTTLSeconds},
+		{"explicit value is honored", 3600, 3600},
+		{"negative means never expire", -1, -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, resolveCommandTTL(tc.requested))
+		})
+	}
+
+	// A safety net for commands that are never answered, deliberately generous: the
+	// server is not told a client's heartbeat interval, so this cannot be expressed in
+	// heartbeat cycles.
+	assert.Equal(t, int64(3600), int64(defaultCommandTTLSeconds))
+}
+
+func TestPushCommandAppliesDefaultTTL(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("one-time command with unset ttl expires", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "show_errors",
+			TargetClientId: "client-1",
+			TtlSeconds:     0,
+		})
+		require.NoError(t, err)
+
+		store.cacheMu.RLock()
+		cmd := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+
+		require.NotNil(t, cmd)
+		assert.Equal(t, int64(defaultCommandTTLSeconds), cmd.TTLSeconds,
+			"an uncollected command must not live forever")
+	})
+
+	t.Run("negative ttl still means never expire", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType: "show_errors",
+			TtlSeconds:  -1,
+		})
+		require.NoError(t, err)
+
+		store.cacheMu.RLock()
+		cmd := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+
+		require.NotNil(t, cmd)
+		assert.Equal(t, int64(-1), cmd.TTLSeconds)
+	})
+
+	t.Run("expired default-ttl command is swept", func(t *testing.T) {
+		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType: "show_errors",
+			TtlSeconds:  0,
+		})
+		require.NoError(t, err)
+
+		// Backdate past the default TTL, as if the client never answered.
+		store.cacheMu.Lock()
+		store.cache.commands[id].CreateTime = time.Now().UnixMilli() - (defaultCommandTTLSeconds+1)*1000
+		store.cacheMu.Unlock()
+
+		store.CleanupExpiredCommands(ctx)
+
+		store.cacheMu.RLock()
+		_, stillThere := store.cache.commands[id]
+		store.cacheMu.RUnlock()
+		assert.False(t, stillThere, "default TTL must actually reclaim the command")
 	})
 }

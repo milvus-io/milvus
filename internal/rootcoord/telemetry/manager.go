@@ -83,16 +83,88 @@ type StoredCommandReply struct {
 	ReceivedAt     int64  `json:"received_at"`
 }
 
-// ClientMetricsCache stores the latest metrics from a client
+// ClientMetricsCache stores the latest metrics from a client.
+//
+// One cache belongs to one client, but that is not the same as one goroutine: a client's
+// heartbeat writes it while any number of admin readers -- GetClientTelemetry from the
+// WebUI or the REST API, the reply endpoints, the inactive-client sweeper -- read it
+// concurrently. So every field is either guarded by mu or individually concurrency-safe;
+// see the two groups below.
 type ClientMetricsCache struct {
-	ClientInfo        *commonpb.ClientInfo
+	// mu guards the four fields below it. They are written together by a heartbeat and read
+	// together by a telemetry query, so one lock for the group is both sufficient and the
+	// only way to hand a reader a self-consistent view: metrics and replies that came from
+	// the same heartbeat rather than a mix of two.
+	//
+	// Readers copy under RLock and do the expensive work -- proto cloning, JSON encoding --
+	// after releasing it. That is safe because these values are never mutated in place: a
+	// heartbeat replaces LatestMetrics wholesale, and CommandReplies is only ever appended
+	// to or resliced, never written through. Holding the lock across a JSON encode of up to
+	// fifty replies would stall the heartbeat that is trying to record the next one.
+	mu             sync.RWMutex
+	ClientInfo     *commonpb.ClientInfo
+	LatestMetrics  []*commonpb.OperationMetrics
+	ConfigHash     string
+	LastCommandTS  int64
+	CommandReplies []*StoredCommandReply // Last N command replies from this client
+
+	// The rest carry their own synchronization and must not be read under mu, so that the
+	// paths that only need liveness -- the sweeper, the persistent-target check -- stay off
+	// the lock entirely.
+	//
+	// ClientID is written once when the cache is created and never again.
 	ClientID          string
 	LastHeartbeat     atomic.Int64 // Unix nanoseconds for atomic access
-	LatestMetrics     []*commonpb.OperationMetrics
-	AccessedDatabases sync.Map // map[string]struct{} for concurrent access
-	ConfigHash        string
-	LastCommandTS     int64
-	CommandReplies    []*StoredCommandReply // Last N command replies from this client
+	AccessedDatabases sync.Map     // map[string]struct{} for concurrent access
+
+	// ClientIDStable mirrors ClientInfo.Reserved[clientIDStableKey] so validatePersistentTarget
+	// can consult it from an admin goroutine without taking mu.
+	ClientIDStable atomic.Bool
+}
+
+// snapshot copies the guarded fields so a caller can clone, encode and aggregate without
+// holding mu. See the note on mu for why sharing these pointers past the unlock is safe.
+func (c *ClientMetricsCache) snapshot() (*commonpb.ClientInfo, []*commonpb.OperationMetrics, []*StoredCommandReply) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ClientInfo, c.LatestMetrics, c.CommandReplies
+}
+
+// storeHeartbeat records everything a heartbeat carries in one critical section, so a
+// concurrent reader never sees the metrics of one heartbeat beside the config hash of
+// another.
+func (c *ClientMetricsCache) storeHeartbeat(info *commonpb.ClientInfo, metrics []*commonpb.OperationMetrics, configHash string, lastCommandTS int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ClientInfo = info
+	c.LatestMetrics = metrics
+	c.ConfigHash = configHash
+	c.LastCommandTS = lastCommandTS
+}
+
+// appendReplies adds this heartbeat's replies and trims the history to the most recent
+// maxStoredReplies.
+func (c *ClientMetricsCache) appendReplies(stored []*StoredCommandReply, maxStoredReplies int) {
+	if len(stored) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.CommandReplies = append(c.CommandReplies, stored...)
+	if len(c.CommandReplies) > maxStoredReplies {
+		c.CommandReplies = c.CommandReplies[len(c.CommandReplies)-maxStoredReplies:]
+	}
+}
+
+// replies returns the stored replies. The slice is a copy, but the elements are shared;
+// callers that hand them outside the package must copy the values.
+func (c *ClientMetricsCache) replies() []*StoredCommandReply {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.CommandReplies) == 0 {
+		return nil
+	}
+	return append([]*StoredCommandReply(nil), c.CommandReplies...)
 }
 
 // TelemetryManager manages client telemetry data
@@ -374,12 +446,17 @@ func (m *TelemetryManager) HandleHeartbeat(req *milvuspb.ClientHeartbeatRequest)
 		}
 	}
 
-	// Update cache fields (these updates are safe as each client has its own cache)
-	cache.ClientInfo = req.ClientInfo
+	// One client owns one cache, but readers -- the WebUI, the REST endpoints, the
+	// inactive-client sweeper -- run concurrently with this write, so it goes through the
+	// cache's own synchronization rather than assigning the fields directly.
+	cache.storeHeartbeat(
+		req.ClientInfo,
+		m.validateAndTruncateMetrics(req.Metrics), // Validate and truncate metrics
+		req.ConfigHash,
+		req.LastCommandTimestamp,
+	)
+	cache.ClientIDStable.Store(declaresStableClientID(req.GetClientInfo()))
 	cache.LastHeartbeat.Store(time.Now().UnixNano())
-	cache.LatestMetrics = m.validateAndTruncateMetrics(req.Metrics) // Validate and truncate metrics
-	cache.ConfigHash = req.ConfigHash
-	cache.LastCommandTS = req.LastCommandTimestamp
 	if dbName := m.getDatabaseFromClientInfo(req.ClientInfo); dbName != "" {
 		cache.AccessedDatabases.Store(dbName, struct{}{})
 	}
@@ -418,13 +495,17 @@ func (m *TelemetryManager) processCommandReplies(cache *ClientMetricsCache, repl
 	const maxStoredReplies = 50 // Keep last 50 replies per client
 	deletedIDs := make([]string, 0, len(replies))
 
+	// Build the batch outside the cache lock: lookupCommandInfo reaches into the command
+	// store, and holding the client's lock across that would couple two unrelated
+	// subsystems' contention.
+	stored := make([]*StoredCommandReply, 0, len(replies))
 	for _, reply := range replies {
 		if reply == nil {
 			continue
 		}
 
 		cmdType, cmdPayload := m.lookupCommandInfo(reply.CommandId)
-		stored := &StoredCommandReply{
+		stored = append(stored, &StoredCommandReply{
 			CommandID:      reply.CommandId,
 			CommandType:    cmdType,
 			CommandPayload: string(cmdPayload), // Convert []byte to string for JSON serialization
@@ -432,9 +513,7 @@ func (m *TelemetryManager) processCommandReplies(cache *ClientMetricsCache, repl
 			ErrorMsg:       reply.ErrorMessage,
 			Payload:        string(reply.Payload), // Convert []byte to string for JSON serialization
 			ReceivedAt:     now,
-		}
-
-		cache.CommandReplies = append(cache.CommandReplies, stored)
+		})
 
 		if !reply.Success {
 			mlog.Warn(context.TODO(), "processCommandReplies: command execution failed",
@@ -449,10 +528,7 @@ func (m *TelemetryManager) processCommandReplies(cache *ClientMetricsCache, repl
 		}
 	}
 
-	// Keep only the most recent replies
-	if len(cache.CommandReplies) > maxStoredReplies {
-		cache.CommandReplies = cache.CommandReplies[len(cache.CommandReplies)-maxStoredReplies:]
-	}
+	cache.appendReplies(stored, maxStoredReplies)
 
 	return deletedIDs
 }
@@ -468,6 +544,10 @@ func (m *TelemetryManager) lookupCommandInfo(commandID string) (string, []byte) 
 	return cmdType, payload
 }
 
+// cleanupRepliedCommands retires the commands this heartbeat answered.
+//
+// Only client-scoped commands are removed here; see DeleteCommandOnReply for why a
+// broadcast command must outlive its first reply.
 func (m *TelemetryManager) cleanupRepliedCommands(commandIDs []string) {
 	if m.commandStore == nil {
 		return
@@ -476,7 +556,7 @@ func (m *TelemetryManager) cleanupRepliedCommands(commandIDs []string) {
 		if id == "" {
 			continue
 		}
-		m.commandStore.DeleteNonPersistentCommand(id)
+		m.commandStore.DeleteCommandOnReply(id)
 	}
 }
 
@@ -669,8 +749,13 @@ func (m *TelemetryManager) GetClientTelemetry(req *milvuspb.GetClientTelemetryRe
 			}
 		}
 
+		// One snapshot for the whole entry, so the reply set and the metrics reported here
+		// come from the same heartbeat, and the expensive clone/encode below happens off
+		// the cache lock.
+		info, latestMetrics, storedReplies := cache.snapshot()
+
 		ct := &milvuspb.ClientTelemetry{
-			ClientInfo:        cloneClientInfo(cache.ClientInfo),
+			ClientInfo:        cloneClientInfo(info),
 			LastHeartbeatTime: cache.LastHeartbeat.Load() / int64(time.Millisecond),
 			Status:            m.getClientStatus(cache),
 			Databases:         m.getDatabaseList(cache),
@@ -688,11 +773,11 @@ func (m *TelemetryManager) GetClientTelemetry(req *milvuspb.GetClientTelemetryRe
 		}
 
 		if req.IncludeMetrics {
-			ct.Metrics = cloneOperationMetrics(cache.LatestMetrics)
+			ct.Metrics = cloneOperationMetrics(latestMetrics)
 		}
 
 		// Add command replies to ClientInfo.Reserved if there are any
-		if len(cache.CommandReplies) > 0 {
+		if len(storedReplies) > 0 {
 			if ct.ClientInfo == nil {
 				ct.ClientInfo = &commonpb.ClientInfo{}
 			}
@@ -700,7 +785,7 @@ func (m *TelemetryManager) GetClientTelemetry(req *milvuspb.GetClientTelemetryRe
 				ct.ClientInfo.Reserved = make(map[string]string)
 			}
 			// JSON encode command replies and store in Reserved
-			if repliesJSON, err := json.Marshal(cache.CommandReplies); err == nil {
+			if repliesJSON, err := json.Marshal(storedReplies); err == nil {
 				ct.ClientInfo.Reserved["command_replies"] = string(repliesJSON)
 			}
 		}
@@ -708,7 +793,7 @@ func (m *TelemetryManager) GetClientTelemetry(req *milvuspb.GetClientTelemetryRe
 		clients = append(clients, ct)
 
 		// Aggregate metrics
-		for _, opMetrics := range cache.LatestMetrics {
+		for _, opMetrics := range latestMetrics {
 			if opMetrics.Global != nil {
 				aggregated.RequestCount += opMetrics.Global.RequestCount
 				aggregated.SuccessCount += opMetrics.Global.SuccessCount
@@ -773,7 +858,69 @@ func (m *TelemetryManager) getDatabaseList(cache *ClientMetricsCache) []string {
 	return dbs
 }
 
-// PushCommand stores a command to be sent to clients
+// validatePersistentTarget rejects a persistent config aimed at a client whose ID will not
+// survive its restart.
+//
+// A persistent config is keyed by target scope, so if the target ID changes the config
+// stops matching, silently, while remaining in etcd. That is the common case: the SDK
+// generates a per-process UUID by default. But it is not universal -- a client that sets
+// TelemetryConfig.ClientID keeps its ID across restarts, and for those a persistent
+// client-scoped config is exactly right. So this decides on the client's declared
+// identity, not on the scope.
+//
+// An unknown target is rejected rather than assumed stable: the whole failure mode being
+// prevented is a config that looks accepted and never applies.
+//
+// Reads ClientMetricsCache.ClientIDStable rather than ClientInfo so this admin path stays
+// off the cache lock entirely; the two carry the same answer.
+func (m *TelemetryManager) validatePersistentTarget(req *milvuspb.PushClientCommandRequest) error {
+	if !req.GetPersistent() || req.GetTargetClientId() == "" {
+		return nil
+	}
+
+	clientID := req.GetTargetClientId()
+	value, loaded := m.clientMetrics.Load(clientID)
+	if !loaded {
+		// Retriable, not an input error. clientMetrics is RootCoord-local memory rebuilt
+		// only from heartbeats, so after a restart or failover it is empty for up to a full
+		// heartbeat interval -- 30s by default, and the server is never told what a client
+		// actually uses. A correct request for a legitimately pinned client lands here
+		// purely because the cache is cold, and classifying that as a non-retriable
+		// ParameterInvalid makes a provisioning script give up on something that would
+		// succeed seconds later. The server cannot tell "never existed" from "has not
+		// heartbeated yet", and retrying a typo costs far less than silently defeating a
+		// correct request, so it reports the transient reading. Same trade-off as the note
+		// on ErrCollectionNotFound in pkg/util/merr/errors.go.
+		return merr.WrapErrServiceNotReadyMsg(
+			"cannot push a persistent config to client %q yet: it is not currently known to "+
+				"this coordinator, either because it has not heartbeated since the coordinator "+
+				"started or because no such client exists. Retry once it has heartbeated; a "+
+				"persistent client-scoped config also requires the client to set a stable "+
+				"TelemetryConfig.ClientID, otherwise target a database or global scope",
+			clientID)
+	}
+
+	if !value.(*ClientMetricsCache).ClientIDStable.Load() {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot push a persistent config to client %q: it uses a generated client ID, "+
+				"which changes on restart, so the config would stop applying and could never "+
+				"match again. Push it as a one-time command (persistent=false) to configure the "+
+				"running client, set a stable TelemetryConfig.ClientID on the client, or target "+
+				"a database or global scope",
+			clientID)
+	}
+
+	return nil
+}
+
+// declaresStableClientID reports whether the client said its ID is configured rather than
+// generated, via ClientInfo.Reserved. Clients that do not report either way are treated as
+// unstable, which is what every client predating that field is.
+func declaresStableClientID(info *commonpb.ClientInfo) bool {
+	return info.GetReserved()[clientIDStableKey] == "true"
+}
+
+// PushCommand stores a command to be sent to clients.
 func (m *TelemetryManager) PushCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	if m.commandStore == nil {
 		// Non-retriable: service not ready
@@ -783,6 +930,13 @@ func (m *TelemetryManager) PushCommand(ctx context.Context, req *milvuspb.PushCl
 			mlog.Err(err))
 		return nil, err
 	}
+	if err := m.validatePersistentTarget(req); err != nil {
+		mlog.Warn(ctx, "PushCommand: rejected persistent config",
+			mlog.Err(err),
+			mlog.String("target_client_id", req.GetTargetClientId()))
+		return nil, err
+	}
+
 	cmdID, err := m.commandStore.PushCommand(ctx, req)
 	if err != nil {
 		// Errors from commandStore are already wrapped with merr
@@ -861,14 +1015,14 @@ func (m *TelemetryManager) GetClientCommandReplies(clientID string) []*StoredCom
 		return nil
 	}
 
-	cache := existing.(*ClientMetricsCache)
-	if len(cache.CommandReplies) == 0 {
+	stored := existing.(*ClientMetricsCache).replies()
+	if len(stored) == 0 {
 		return nil
 	}
 
 	// Return a copy to avoid external modification
-	result := make([]*StoredCommandReply, len(cache.CommandReplies))
-	for i, reply := range cache.CommandReplies {
+	result := make([]*StoredCommandReply, len(stored))
+	for i, reply := range stored {
 		copied := *reply
 		result[i] = &copied
 	}

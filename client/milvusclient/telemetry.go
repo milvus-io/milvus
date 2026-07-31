@@ -23,11 +23,15 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -47,6 +51,14 @@ type TelemetryConfig struct {
 	SamplingRate float64
 	// ErrorMaxCount is the maximum number of errors to keep
 	ErrorMaxCount int
+	// ClientID identifies this client to the server across process restarts.
+	//
+	// When empty, a random UUID is generated per Client, which means the server sees a
+	// brand-new client on every restart: telemetry history fragments and `client:<id>`
+	// scoped commands cannot target a long-lived client. Set it to a stable value (e.g.
+	// a pod name, or hostname+role) to get continuity. It must be unique per process --
+	// reusing one value across processes collapses them into a single server-side entry.
+	ClientID string
 }
 
 // DefaultTelemetryConfig returns the default telemetry configuration
@@ -431,8 +443,14 @@ type ClientTelemetryManager struct {
 	configMu sync.RWMutex // Protects config access
 	client   *Client
 
-	// Unique client ID (UUID), generated once at startup, stable across reconnections
+	// Unique client ID, resolved once at construction. Stable for the lifetime of this
+	// Client (and therefore across gRPC reconnects). It only survives a process restart
+	// when the caller pins it via TelemetryConfig.ClientID; otherwise it is a fresh UUID.
 	clientID string
+
+	// clientIDStable records whether clientID came from TelemetryConfig.ClientID (and so
+	// survives a restart) rather than being generated for this process.
+	clientIDStable bool
 
 	// Metrics collectors per operation
 	mu         sync.RWMutex
@@ -476,6 +494,20 @@ type ClientTelemetryManager struct {
 	// Startup state - indicates if telemetry manager has started
 	ready atomic.Bool
 
+	// unsupportedStreak counts consecutive heartbeats rejected with codes.Unimplemented.
+	// It backs off the heartbeat interval instead of latching telemetry off: a client
+	// load-balances across proxies, so during a rolling upgrade a single heartbeat can
+	// land on an old one while the rest of the cluster already supports the service.
+	// Disabling permanently on one such answer would never recover. Reset by any
+	// successful heartbeat.
+	unsupportedStreak atomic.Int64
+
+	// lastHeartbeatErr records the most recent heartbeat failure. The client module has
+	// no logger, so this is the only way to surface an otherwise silent best-effort
+	// failure; read it with LastHeartbeatError().
+	lastHeartbeatErr   error
+	lastHeartbeatErrMu sync.RWMutex
+
 	// Deterministic sampling counter
 	samplingCounter uint64
 }
@@ -496,10 +528,19 @@ func NewClientTelemetryManager(client *Client, config *TelemetryConfig) *ClientT
 		config = DefaultTelemetryConfig()
 	}
 
+	// Prefer a caller-supplied stable ID so the server can correlate this client across
+	// process restarts; fall back to a per-process UUID.
+	clientID := config.ClientID
+	clientIDStable := clientID != ""
+	if clientID == "" {
+		clientID = uuid.New().String()
+	}
+
 	tm := &ClientTelemetryManager{
 		config:             config,
 		client:             client,
-		clientID:           uuid.New().String(),
+		clientID:           clientID,
+		clientIDStable:     clientIDStable,
 		collectors:         make(map[string]*OperationMetricsCollector),
 		commandHandlers:    make(map[string]CommandHandler),
 		executedCommands:   make(map[string]int64),
@@ -545,7 +586,12 @@ func (m *ClientTelemetryManager) buildClientInfo() *commonpb.ClientInfo {
 		LocalTime:  time.Now().String(),
 		Host:       hostname,
 		Reserved: map[string]string{
-			"client_id": m.clientID, // Always send stable UUID to prevent ID collisions
+			"client_id": m.clientID,
+			// Tell the server whether this ID survives a restart. It only does when the
+			// caller pinned it via TelemetryConfig.ClientID; a generated UUID does not.
+			// The server needs this to decide whether a client-scoped persistent config
+			// would keep matching.
+			"client_id_stable": strconv.FormatBool(m.clientIDStable),
 		},
 	}
 	if m.client != nil {
@@ -581,7 +627,7 @@ func (m *ClientTelemetryManager) heartbeatLoop() {
 	// Use time.After instead of ticker to dynamically adapt to interval changes
 	// This allows server-pushed config to take effect immediately
 	for {
-		interval := m.getHeartbeatInterval()
+		interval := m.nextHeartbeatDelay()
 		select {
 		case <-m.stopCh:
 			return
@@ -590,6 +636,67 @@ func (m *ClientTelemetryManager) heartbeatLoop() {
 			m.sendHeartbeat()
 		}
 	}
+}
+
+// maxUnsupportedBackoff caps the heartbeat interval while the server keeps answering
+// Unimplemented. Large enough that talking to an old cluster costs almost nothing, small
+// enough that a client notices an upgrade without being restarted.
+const maxUnsupportedBackoff = 30 * time.Minute
+
+// nextHeartbeatDelay returns how long to wait before the next heartbeat: the configured
+// interval normally, backed off while the server keeps reporting Unimplemented.
+//
+// The backoff doubles per consecutive rejection and is capped, so a client against a
+// server without the service settles at one probe per maxUnsupportedBackoff rather than
+// one per interval -- and still recovers on its own once the server gains the service.
+func (m *ClientTelemetryManager) nextHeartbeatDelay() time.Duration {
+	interval := m.getHeartbeatInterval()
+
+	streak := m.unsupportedStreak.Load()
+	if streak <= 0 {
+		return interval
+	}
+
+	backoff := interval
+	for i := int64(0); i < streak && backoff < maxUnsupportedBackoff; i++ {
+		backoff *= 2
+	}
+	if backoff > maxUnsupportedBackoff {
+		backoff = maxUnsupportedBackoff
+	}
+	if backoff < interval {
+		// A client configured to heartbeat less often than the cap must not start
+		// heartbeating *more* often because the server is rejecting it.
+		return interval
+	}
+	return backoff
+}
+
+// IsSupported reports whether the server is currently known *not* to implement
+// ClientTelemetryService. It is optimistic: it returns true before the first heartbeat has
+// been sent, because nothing is known yet, so true means "no evidence of an old server"
+// rather than "confirmed supported". Use LastHeartbeatError to tell those apart.
+//
+// It goes false while the server answers codes.Unimplemented and returns true again on the
+// first reply, so it reflects current reachability rather than a permanent verdict -- a
+// client may be load-balanced across proxies that differ mid upgrade.
+func (m *ClientTelemetryManager) IsSupported() bool {
+	return m.unsupportedStreak.Load() == 0
+}
+
+// LastHeartbeatError returns the most recent heartbeat failure, or nil if the last
+// heartbeat succeeded. Heartbeats are best-effort and never surfaced through the normal
+// API, so this is the supported way to diagnose a client that is not reporting.
+func (m *ClientTelemetryManager) LastHeartbeatError() error {
+	m.lastHeartbeatErrMu.RLock()
+	defer m.lastHeartbeatErrMu.RUnlock()
+	return m.lastHeartbeatErr
+}
+
+func (m *ClientTelemetryManager) setLastHeartbeatError(err error) {
+	m.lastHeartbeatErrMu.Lock()
+	defer m.lastHeartbeatErrMu.Unlock()
+	m.lastHeartbeatErr = err
 }
 
 // sendHeartbeat sends a heartbeat to the server
@@ -602,45 +709,14 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 		return
 	}
 
-	if m.client == nil || m.client.service == nil {
+	if m.client == nil || m.client.telemetryService == nil {
 		return
 	}
 
 	// Get metrics from the latest snapshot (P99 already calculated during snapshot creation)
 	var metrics []*commonpb.OperationMetrics
-	latestSnapshot := m.GetLatestSnapshot()
-	if latestSnapshot != nil {
-		enabledCollections, allEnabled := m.snapshotEnabledCollections()
-
-		// Convert snapshot metrics to proto format
-		for _, opMetrics := range latestSnapshot.Metrics {
-			protoCollMetrics := make(map[string]*commonpb.Metrics)
-			// Only include metrics for enabled collections
-			// Use "*" wildcard to enable all collections
-			for coll, cm := range opMetrics.CollectionMetrics {
-				if allEnabled || enabledCollections[coll] {
-					protoCollMetrics[coll] = &commonpb.Metrics{
-						RequestCount: cm.RequestCount,
-						SuccessCount: cm.SuccessCount,
-						ErrorCount:   cm.ErrorCount,
-						AvgLatencyMs: cm.AvgLatencyMs,
-						P99LatencyMs: cm.P99LatencyMs,
-					}
-				}
-			}
-
-			metrics = append(metrics, &commonpb.OperationMetrics{
-				Operation: opMetrics.Operation,
-				Global: &commonpb.Metrics{
-					RequestCount: opMetrics.Global.RequestCount,
-					SuccessCount: opMetrics.Global.SuccessCount,
-					ErrorCount:   opMetrics.Global.ErrorCount,
-					AvgLatencyMs: opMetrics.Global.AvgLatencyMs,
-					P99LatencyMs: opMetrics.Global.P99LatencyMs, // Use P99 from snapshot
-				},
-				CollectionMetrics: protoCollMetrics,
-			})
-		}
+	if latestSnapshot := m.GetLatestSnapshot(); latestSnapshot != nil {
+		metrics = m.toProtoOperationMetrics(latestSnapshot.Metrics)
 	}
 
 	// Get pending command replies (snapshot only)
@@ -662,19 +738,37 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 		LastCommandTimestamp: m.lastCommandTimestamp.Load(),
 	}
 
-	// Send heartbeat with 30s fixed interval (no retry - telemetry is best effort)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := m.client.telemetryService.ClientHeartbeat(ctx, req)
+	// Telemetry is best-effort: opt out of the client-wide retry interceptor so a failing
+	// heartbeat costs exactly one RPC instead of up to 6 with backoff. The next heartbeat
+	// is the retry.
+	resp, err := m.client.telemetryService.ClientHeartbeat(ctx, req, grpc_retry.Disable())
 	if err != nil {
-		// Log error but continue - telemetry is best-effort
+		m.setLastHeartbeatError(err)
+		// Unimplemented means *this* server does not offer the service. That may be the
+		// whole cluster, or it may be one stale proxy during a rolling upgrade, so back
+		// off rather than give up: the interval grows with the streak and snaps back on
+		// the first success.
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Unimplemented {
+			m.unsupportedStreak.Add(1)
+		}
 		return
 	}
 
-	if !merr.Ok(resp.GetStatus()) {
+	// Reaching a reply at all proves the server implements the service: an unimplemented
+	// method never returns a business status. Clear the backoff before inspecting that
+	// status, so a server that is reachable but unhealthy -- a coordinator still starting,
+	// a rate limit -- does not leave the client stuck at an inflated interval left over
+	// from some earlier Unimplemented.
+	m.unsupportedStreak.Store(0)
+
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		m.setLastHeartbeatError(err)
 		return
 	}
+	m.setLastHeartbeatError(nil)
 
 	// Clear sent replies only after successful heartbeat
 	m.clearPendingProtoReplies(len(replies))
@@ -735,51 +829,48 @@ func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 	return counter%samplingDenominator < threshold
 }
 
-// collectProtoMetrics collects all operation metrics and converts to proto format
-func (m *ClientTelemetryManager) collectProtoMetrics() []*commonpb.OperationMetrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// toProtoOperationMetrics converts collected metrics into their proto form, dropping
+// collection-level entries for collections that are not currently enabled ("*" enables
+// all). This is the single conversion path used for everything put on the wire.
+func (m *ClientTelemetryManager) toProtoOperationMetrics(opMetricsList []*OperationMetrics) []*commonpb.OperationMetrics {
+	if len(opMetricsList) == 0 {
+		return nil
+	}
 
 	enabledCollections, allEnabled := m.snapshotEnabledCollections()
 
-	var result []*commonpb.OperationMetrics
-	for opName, collector := range m.collectors {
-		globalMetrics := collector.GetMetrics()
-		if globalMetrics == nil {
-			continue
-		}
-
-		collMetrics := collector.GetCollectionMetrics()
-
+	result := make([]*commonpb.OperationMetrics, 0, len(opMetricsList))
+	for _, opMetrics := range opMetricsList {
 		protoCollMetrics := make(map[string]*commonpb.Metrics)
-		// Only include metrics for enabled collections
-		// Use "*" wildcard to enable all collections
-		for coll, cm := range collMetrics {
+		for coll, cm := range opMetrics.CollectionMetrics {
 			if allEnabled || enabledCollections[coll] {
-				protoCollMetrics[coll] = &commonpb.Metrics{
-					RequestCount: cm.RequestCount,
-					SuccessCount: cm.SuccessCount,
-					ErrorCount:   cm.ErrorCount,
-					AvgLatencyMs: cm.AvgLatencyMs,
-					P99LatencyMs: cm.P99LatencyMs,
-				}
+				protoCollMetrics[coll] = toProtoMetrics(cm)
 			}
 		}
 
 		result = append(result, &commonpb.OperationMetrics{
-			Operation: opName,
-			Global: &commonpb.Metrics{
-				RequestCount: globalMetrics.RequestCount,
-				SuccessCount: globalMetrics.SuccessCount,
-				ErrorCount:   globalMetrics.ErrorCount,
-				AvgLatencyMs: globalMetrics.AvgLatencyMs,
-				P99LatencyMs: globalMetrics.P99LatencyMs,
-			},
+			Operation:         opMetrics.Operation,
+			Global:            toProtoMetrics(opMetrics.Global),
 			CollectionMetrics: protoCollMetrics,
 		})
 	}
 
 	return result
+}
+
+// toProtoMetrics converts a single metrics bucket to proto form.
+func toProtoMetrics(metrics *Metrics) *commonpb.Metrics {
+	if metrics == nil {
+		return nil
+	}
+	return &commonpb.Metrics{
+		RequestCount: metrics.RequestCount,
+		SuccessCount: metrics.SuccessCount,
+		ErrorCount:   metrics.ErrorCount,
+		AvgLatencyMs: metrics.AvgLatencyMs,
+		P99LatencyMs: metrics.P99LatencyMs,
+		MaxLatencyMs: metrics.MaxLatencyMs,
+	}
 }
 
 // getPendingProtoRepliesSnapshot returns a snapshot of pending replies without clearing.
@@ -981,100 +1072,6 @@ func (m *ClientTelemetryManager) collectMetrics() []*OperationMetrics {
 	return result
 }
 
-// getPendingReplies gets and clears pending command replies (local types, for testing)
-func (m *ClientTelemetryManager) getPendingReplies() []*CommandReply {
-	m.pendingRepliesMu.Lock()
-	defer m.pendingRepliesMu.Unlock()
-
-	var result []*CommandReply
-	for _, r := range m.pendingReplies {
-		result = append(result, &CommandReply{
-			CommandId:    r.GetCommandId(),
-			Success:      r.GetSuccess(),
-			ErrorMessage: r.GetErrorMessage(),
-			Payload:      r.GetPayload(),
-		})
-	}
-	m.pendingReplies = nil
-	return result
-}
-
-// processCommands processes commands (local types, for testing)
-// Commands are only executed once using timestamp-based deduplication:
-// - Commands with CreateTime < lastCommandTimestamp are filtered by timestamp (already processed)
-// - Commands with CreateTime >= lastCommandTimestamp use ID-based tracking for same-millisecond deduplication
-func (m *ClientTelemetryManager) processCommands(commands []*ClientCommand) {
-	hasPersistent := false
-	lastTS := m.lastCommandTimestamp.Load()
-	maxCommandTS := lastTS
-
-	// First, process all commands
-	for _, cmd := range commands {
-		if cmd.Persistent {
-			hasPersistent = true
-		}
-		if cmd.CreateTime > maxCommandTS {
-			maxCommandTS = cmd.CreateTime
-		}
-
-		// Timestamp-based deduplication: commands older than lastTS are already processed
-		if cmd.CreateTime < lastTS {
-			// Already processed in a previous cycle - skip
-			continue
-		}
-
-		// For commands at or after lastTS, check map for same-millisecond duplicates
-		m.executedCommandsMu.RLock()
-		_, alreadyExecuted := m.executedCommands[cmd.CommandId]
-		m.executedCommandsMu.RUnlock()
-
-		if alreadyExecuted {
-			// Skip execution but still generate a success reply
-			continue
-		}
-
-		// Handle the command
-		reply := m.handleCommand(cmd)
-
-		// Track command with its timestamp for later cleanup
-		m.executedCommandsMu.Lock()
-		m.executedCommands[cmd.CommandId] = cmd.CreateTime
-		m.executedCommandsMu.Unlock()
-
-		if reply != nil {
-			m.pendingRepliesMu.Lock()
-			m.pendingReplies = append(m.pendingReplies, &commonpb.CommandReply{
-				CommandId:    reply.CommandId,
-				Success:      reply.Success,
-				ErrorMessage: reply.ErrorMessage,
-				Payload:      reply.Payload,
-			})
-			m.pendingRepliesMu.Unlock()
-		}
-	}
-
-	// Clean up old entries from executedCommands map
-	// Commands with CreateTime <= lastTS are now filtered by timestamp comparison
-	// Using <= ensures commands with same millisecond timestamp are also cleaned up
-	m.executedCommandsMu.Lock()
-	for cmdID, ts := range m.executedCommands {
-		if ts <= lastTS {
-			delete(m.executedCommands, cmdID)
-		}
-	}
-	m.executedCommandsMu.Unlock()
-
-	// Update config hash AFTER all commands are processed
-	// This ensures partial processing doesn't lead to lost configs on reconnect
-	if hasPersistent {
-		m.configHashMu.Lock()
-		m.configHash = m.calculateConfigHash(commands)
-		m.configHashMu.Unlock()
-	}
-
-	m.updateLastCommandTimestamp(maxCommandTS)
-}
-
 // handleCommand handles a single command
 func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply {
 	m.commandHandlersMu.RLock()
@@ -1090,32 +1087,6 @@ func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply
 	}
 
 	return handler(cmd)
-}
-
-// calculateConfigHash calculates a hash for persistent commands (local types)
-func (m *ClientTelemetryManager) calculateConfigHash(commands []*ClientCommand) string {
-	if len(commands) == 0 {
-		return ""
-	}
-
-	var commandStrs []string
-	for _, cmd := range commands {
-		if cmd.Persistent {
-			commandStrs = append(commandStrs, cmd.CommandId+":"+cmd.CommandType)
-		}
-	}
-
-	if len(commandStrs) == 0 {
-		return ""
-	}
-
-	sort.Strings(commandStrs)
-
-	h := sha256.New()
-	for _, str := range commandStrs {
-		h.Write([]byte(str))
-	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // RegisterCommandHandler registers a handler for a command type
