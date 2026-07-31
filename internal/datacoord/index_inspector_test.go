@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -176,6 +177,70 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 	inspector.reloadFromMeta()
+}
+
+func TestIndexInspector_RebuildsStaleManifestIndex(t *testing.T) {
+	ctx := context.Background()
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	catalog := mocks2.NewDataCoordCatalog(t)
+	versionManager := newIndexEngineVersionManager()
+
+	meta := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta:   newSegmentIndexMeta(catalog),
+	}
+	meta.indexMeta.indexes[100] = map[UniqueID]*model.Index{
+		20: {
+			CollectionID: 100,
+			FieldID:      101,
+			IndexID:      20,
+			IndexName:    indexName,
+		},
+	}
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:             10,
+		CollectionID:   100,
+		PartitionID:    1,
+		NumOfRows:      1000,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "manifest-v2",
+		IsSorted:       true,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{101},
+		}},
+	}}
+	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: 100,
+		PartitionID:  1,
+		SegmentID:    10,
+		IndexID:      20,
+		BuildID:      30,
+		IndexState:   commonpb.IndexState_Finished,
+		DataManifest: "manifest-v1",
+	})
+
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(100), int64(1), int64(10), int64(30)).Return(nil)
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.MatchedBy(func(index *model.SegmentIndex) bool {
+		return index.BuildID == 31 && index.DataManifest == "manifest-v2"
+	})).Return(nil)
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(31), nil)
+	scheduler.EXPECT().Enqueue(mock.Anything).Return()
+
+	inspector := newIndexInspector(ctx, make(chan int64, 1), meta, scheduler, alloc, handler, storageCli, versionManager)
+	require.NoError(t, inspector.createIndexesForSegment(ctx, segment))
+
+	_, staleExists := meta.indexMeta.GetIndexJob(30)
+	assert.False(t, staleExists)
+	rebuilt, ok := meta.indexMeta.GetIndexJob(31)
+	require.True(t, ok)
+	assert.Equal(t, "manifest-v2", rebuilt.DataManifest)
 }
 
 func TestIndexInspector_isExternalCollection(t *testing.T) {

@@ -19,8 +19,10 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,11 +31,13 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -58,6 +62,42 @@ type refreshExternalCollectionTask struct {
 }
 
 var _ globalTask.Task = (*refreshExternalCollectionTask)(nil)
+
+var (
+	// errExternalRefreshStaleManifest signals that a refresh column patch was
+	// built on a manifest the segment has since advanced past (a concurrent
+	// text/JSON index build or compaction committed in between). The job-level
+	// apply aborts atomically and FinishJobWithApply resets the job's tasks to
+	// Init so the worker rebuilds the patch on the current manifest, instead of
+	// silently completing with a segment still missing the refreshed columns.
+	errExternalRefreshStaleManifest = errors.New("external refresh column patch built on a stale manifest")
+	// errExternalRefreshUnverifiableAttempt is a rolling-upgrade/restart repair
+	// signal: the persisted attempt predates metadata needed to prove that a birth
+	// result belongs to its coordinator-allocated ID range. The job stays active
+	// and rebuilds the task with a freshly persisted range before adoption.
+	errExternalRefreshUnverifiableAttempt = errors.New("external refresh attempt result cannot be verified")
+	// errExternalRefreshPermanent marks a refresh failure as permanent so the
+	// retry classifier fails the task instead of re-dispatching. This is an
+	// explicit signal, decoupled from the merr Input/System classification: an
+	// INTERNAL invariant violation (a Milvus bug or corrupted metadata) is a
+	// System error per the blame test, yet retrying it is pointless because a
+	// rerun deterministically reproduces it. Attach with errors.Mark so the
+	// underlying merr class is preserved.
+	errExternalRefreshPermanent = errors.New("permanent external refresh failure")
+
+	// errExternalRefreshTransientCommit marks an infrastructure failure raised
+	// while committing an apply — a catalog/etcd write that may well succeed on
+	// the next tick. FinishJobWithApply routes it back to Init like the CAS
+	// sentinels, so an etcd blip does not discard work every worker already
+	// finished; tryTimeoutJob still bounds the loop.
+	//
+	// Deterministic apply failures deliberately do NOT carry it. A transaction
+	// over the metastore op limit, a collection mismatch or an invalid manifest
+	// reproduces identically on every retry, so marking those retryable would
+	// spin until the job timeout with no signal to act on. Attach with
+	// errors.Mark so the underlying cause and its merr class are preserved.
+	errExternalRefreshTransientCommit = errors.New("transient failure committing external refresh")
+)
 
 func newRefreshExternalCollectionTask(
 	t *datapb.ExternalCollectionRefreshTask,
@@ -140,13 +180,21 @@ func (t *refreshExternalCollectionTask) SetState(state indexpb.JobState, failRea
 }
 
 func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
-	if err := t.refreshMeta.UpdateTaskState(t.GetTaskId(), state, failReason); err != nil {
+	// Fence the write to this attempt: a superseded (re-dispatched) attempt must
+	// not overwrite the current attempt's state.
+	applied, err := t.refreshMeta.UpdateTaskState(t.GetTaskId(), t.GetVersion(), state, failReason)
+	if err != nil {
 		mlog.Warn(context.TODO(), "update refresh task state failed",
 			mlog.Int64("taskID", t.GetTaskId()),
 			mlog.String("state", state.String()),
 			mlog.String("failReason", failReason),
 			mlog.Err(err))
 		return err
+	}
+	if !applied {
+		mlog.Info(context.TODO(), "refresh task state update skipped as superseded",
+			mlog.Int64("taskID", t.GetTaskId()), mlog.Int64("version", t.GetVersion()))
+		return nil
 	}
 	t.SetState(state, failReason)
 
@@ -185,7 +233,11 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
 ) error {
-	if err := t.refreshMeta.UpdateTaskResult(t.GetTaskId(), state, failReason, keptSegments, updatedSegments); err != nil {
+	// Fence the write to this attempt: a stale/late Query response from a
+	// superseded attempt must not write its result over the current attempt.
+	applied, err := t.refreshMeta.UpdateTaskResult(
+		t.GetTaskId(), t.GetVersion(), state, failReason, keptSegments, updatedSegments)
+	if err != nil {
 		mlog.Warn(context.TODO(), "update refresh task result failed",
 			mlog.Int64("taskID", t.GetTaskId()),
 			mlog.String("state", state.String()),
@@ -193,9 +245,15 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 			mlog.Err(err))
 		return err
 	}
+	if !applied {
+		// Superseded attempt: do not drive the job on a stale result.
+		mlog.Info(context.TODO(), "refresh task result dropped as superseded, skipping job processing",
+			mlog.Int64("taskID", t.GetTaskId()), mlog.Int64("version", t.GetVersion()))
+		return nil
+	}
 	t.SetState(state, failReason)
 	t.KeptSegments = append([]int64(nil), keptSegments...)
-	t.UpdatedSegments = cloneProtoSegments(updatedSegments)
+	t.UpdatedSegments = cloneRefreshUpdatedSegments(updatedSegments)
 
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
 		if t.processFinishedJob != nil {
@@ -212,6 +270,21 @@ func applyExternalCollectionSegmentUpdate(
 	collectionID int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	baseManifests map[int64]string,
+	logFields ...mlog.Field,
+) error {
+	return applyExternalCollectionSegmentUpdateWithActions(
+		ctx, mt, collectionID, keptSegmentIDs, updatedSegments, baseManifests, nil, logFields...)
+}
+
+func applyExternalCollectionSegmentUpdateWithActions(
+	ctx context.Context,
+	mt *meta,
+	collectionID int64,
+	keptSegmentIDs []int64,
+	updatedSegments []*datapb.SegmentInfo,
+	baseManifests map[int64]string,
+	extraActions []metastore.UpdateAction,
 	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
@@ -222,11 +295,14 @@ func applyExternalCollectionSegmentUpdate(
 			mlog.Int64("collectionID", collectionID),
 			mlog.Int("keptSegments", len(keptSegmentIDs)),
 			mlog.Int("updatedSegments", len(updatedSegments)),
+			mlog.Int("baseManifests", len(baseManifests)),
 		)...)
 
 	keptSegmentMap := make(map[int64]bool)
 	for _, segID := range keptSegmentIDs {
-		segment := mt.segments.GetSegment(segID)
+		// mt.GetSegment takes segMu; SegmentsInfo itself is a bare map, so a
+		// direct read here races a concurrent commit and kills the process.
+		segment := mt.GetSegment(ctx, segID)
 		if segment == nil {
 			return merr.WrapErrServiceInternalMsg("kept segment %d not found", segID)
 		}
@@ -246,7 +322,7 @@ func applyExternalCollectionSegmentUpdate(
 		if seg == nil {
 			continue
 		}
-		if err := validateExternalRefreshUpdatedSegment(seg, collectionID); err != nil {
+		if err := validateExternalRefreshUpdatedSegment(seg); err != nil {
 			return err
 		}
 		if keptSegmentMap[seg.GetID()] {
@@ -257,6 +333,14 @@ func applyExternalCollectionSegmentUpdate(
 		}
 		upsertSegmentMap[seg.GetID()] = seg
 		validUpdatedSegments = append(validUpdatedSegments, seg)
+	}
+	for segmentID, baseManifest := range baseManifests {
+		if baseManifest == "" {
+			return merr.WrapErrServiceInternalMsg("updated segment %d has an empty base manifest fence", segmentID)
+		}
+		if upsertSegmentMap[segmentID] == nil {
+			return merr.WrapErrServiceInternalMsg("base manifest fence references missing updated segment %d", segmentID)
+		}
 	}
 
 	// Safety validation: count current active segments and segments to be dropped
@@ -280,13 +364,18 @@ func applyExternalCollectionSegmentUpdate(
 	for _, incoming := range upsertSegmentMap {
 		existing := existingSegmentMap[incoming.GetID()]
 		if existing == nil {
-			existing = mt.segments.GetSegment(incoming.GetID())
+			existing = mt.GetSegment(ctx, incoming.GetID())
 		}
 		if existing != nil {
-			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-				return err
-			}
+			// Patching an existing segment is validated inside the upsert operator,
+			// after the manifest CAS. Doing it here as well would re-introduce the
+			// ordering bug: this read is outside segMu, so a concurrent schema bump
+			// can make a stale-but-retryable result look like a hard schema rollback
+			// and fail the job before the CAS ever runs.
 			continue
+		}
+		if _, hasBase := baseManifests[incoming.GetID()]; hasBase {
+			return merr.WrapErrServiceInternalMsg("new segment %d unexpectedly carries a base manifest fence", incoming.GetID())
 		}
 		if err := validateExternalRefreshNewSegment(incoming); err != nil {
 			return err
@@ -342,64 +431,30 @@ func applyExternalCollectionSegmentUpdate(
 	}
 	insertChannel := collInfo.VChannelNames[0]
 	partitionID := collInfo.Partitions[0]
-	normalizedUpdatedSegments := make([]*datapb.SegmentInfo, 0, len(validUpdatedSegments))
-	normalizedUpsertSegmentMap := make(map[int64]*datapb.SegmentInfo, len(upsertSegmentMap))
-	for _, seg := range validUpdatedSegments {
-		normalized := normalizeExternalRefreshUpdatedSegment(seg, collectionID, partitionID, insertChannel)
-		normalizedUpdatedSegments = append(normalizedUpdatedSegments, normalized)
-		normalizedUpsertSegmentMap[normalized.GetID()] = normalized
-	}
-	upsertSegmentMap = normalizedUpsertSegmentMap
 
-	// Build update operators
+	// Build update operators. Patch content is validated in exactly one place —
+	// inside the upsert operator, after the manifest CAS — so the CAS gets to
+	// classify a concurrent conflict as retryable before any content rule can
+	// report it as a hard failure. Both rejection paths use modPack.fail, which
+	// sets updatePack.err and makes UpdateSegmentsInfo return before persisting
+	// anything, so the drop operator's pending mutations are discarded.
 	var operators []UpdateOperator
-	var patchErr error
 
-	validationOperator := func(modPack *updateSegmentPack) bool {
-		for _, incoming := range upsertSegmentMap {
-			existing := modPack.meta.segments.GetSegment(incoming.GetID())
-			if existing != nil {
-				if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-					patchErr = err
-					mlog.Warn(context.TODO(), "invalid external refresh segment patch",
-						mlog.Int64("segmentID", incoming.GetID()),
-						mlog.Err(err))
-					return false
-				}
-			}
-		}
-		return true
-	}
-	operators = append(operators, validationOperator)
-
-	// Operator 1: Drop segments not in kept list
+	// Operator 1: Drop the segments selected from the validated snapshot above.
+	// Do not re-scan the collection while applying: a concurrently-created
+	// segment was not part of this refresh response and must not be dropped, and
+	// keeping this set fixed also makes the preflight transaction count an upper
+	// bound on the eventual atomic commit.
 	dropOperator := func(modPack *updateSegmentPack) bool {
-		if patchErr != nil {
-			return false
-		}
-		currentSegments := modPack.meta.segments.GetSegments()
-		for _, seg := range currentSegments {
-			// Skip segments not in this collection
-			if seg.GetCollectionID() != collectionID {
-				continue
-			}
-
-			// Skip segments that are already dropped
-			if seg.GetState() == commonpb.SegmentState_Dropped {
-				continue
-			}
-
-			// Drop segment if not kept or upserted by this refresh response.
-			if !keptSegmentMap[seg.GetID()] && upsertSegmentMap[seg.GetID()] == nil {
-				segment := modPack.Get(seg.GetID())
-				if segment != nil {
-					updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
-					segment.DroppedAt = uint64(time.Now().UnixNano())
-					modPack.segments[seg.GetID()] = segment
-					mlog.Info(context.TODO(), "marking segment as dropped",
-						mlog.Int64("segmentID", seg.GetID()),
-						mlog.Int64("numRows", seg.GetNumOfRows()))
-				}
+		for _, segmentID := range segmentsToDrop {
+			segment := modPack.Get(segmentID)
+			if segment != nil {
+				updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
+				segment.DroppedAt = uint64(time.Now().UnixNano())
+				modPack.segments[segmentID] = segment
+				mlog.Info(context.TODO(), "marking segment as dropped",
+					mlog.Int64("segmentID", segmentID),
+					mlog.Int64("numRows", segment.GetNumOfRows()))
 			}
 		}
 		return true
@@ -407,20 +462,123 @@ func applyExternalCollectionSegmentUpdate(
 	operators = append(operators, dropOperator)
 
 	// Operator 2: Add new segments or patch existing active segments.
-	for _, seg := range normalizedUpdatedSegments {
+	for _, seg := range validUpdatedSegments {
 		incoming := seg
+		baseManifest := baseManifests[incoming.GetID()]
 		upsertOperator := func(modPack *updateSegmentPack) bool {
-			if patchErr != nil {
-				return false
-			}
 			existing := modPack.Get(incoming.GetID())
 			if existing != nil {
+				// Optimistic-concurrency CAS, evaluated here inside the segMu
+				// critical section (modPack.Get is the synchronized read) so the
+				// decision is atomic with the patch. DataCoord persisted baseManifest
+				// from the exact currentSegments snapshot dispatched to the worker. Fail
+				// closed for an EXISTING segment: adopt
+				// only when the base is present AND still equals the current
+				// manifest. Reject when
+				//   - the base is empty: a pre-CAS / rolling-upgrade worker that
+				//     cannot prove it built on the current manifest — adopting it
+				//     could blindly overwrite a concurrent commit; or
+				//   - the base no longer matches: a concurrent text/JSON index build
+				//     or compaction advanced the manifest in between — adopting would
+				//     drop that commit.
+				// Abort the whole apply atomically (modPack.fail sets updatePack.err,
+				// so UpdateSegmentsInfo returns before persisting anything) and signal
+				// errExternalRefreshStaleManifest; the refresh checker resets the job's
+				// tasks to Init and the next dispatch captures the current manifest as
+				// its new coordinator-owned base, instead of silently
+				// completing with a segment still missing the refreshed data.
+				//
+				// validateManifestSuccessor also enforces that the result is a legal
+				// successor of the current manifest (same base path, strictly forward,
+				// parseable), not just that the base matched — so a buggy / corrupt /
+				// mixed-version worker that carries the right base but a result pointing
+				// at another segment or an older version cannot silently corrupt the
+				// segment pointer.
+				//
+				// NOTE: this deliberately fails CLOSED on an empty base. An old DataNode
+				// or an old persisted task still supplies the complete SegmentInfo through
+				// field 3/16, so no result is lost; it simply lacks the additive fence and
+				// is rebuilt on a capable worker before an existing-segment write is
+				// adopted.
+				isReplay, adoptErr := validateManifestSuccessor(baseManifest, existing.GetManifestPath(), incoming.GetManifestPath())
+				if adoptErr != nil {
+					mlog.Warn(context.TODO(), "external refresh patch is not a valid successor; aborting apply to rebuild on the current manifest",
+						mlog.Int64("segmentID", incoming.GetID()),
+						mlog.String("baseManifest", baseManifest),
+						mlog.String("currentManifest", existing.GetManifestPath()),
+						mlog.String("resultManifest", incoming.GetManifestPath()),
+						mlog.Err(adoptErr))
+					return modPack.fail(errors.Wrapf(errExternalRefreshStaleManifest,
+						"segment %d: %v", incoming.GetID(), adoptErr))
+				}
+				// This is the ONLY place the patch content is validated, and its
+				// position is load-bearing in BOTH directions.
+				//
+				// It runs AFTER the CAS: a result that lost a concurrent race is stale
+				// in every dimension at once (a schema bump advances the schema version
+				// and the manifest in the same mutation), so validating content first
+				// would report a stale patch as a hard "schema version rollback" and
+				// fail the job instead of letting the CAS classify it as a retryable
+				// stale-manifest conflict. Reaching here means base==current, so a
+				// content violation really is a self-contradictory result.
+				//
+				// It also runs BEFORE the no-op short-circuit: externalRefreshPatchIsNoop
+				// only compares the fields applyExternalRefreshPatch would write, so a
+				// result that matches those yet violates an invariant it does NOT compare
+				// (row count, collection ownership, dropped state, binlog row
+				// consistency) would otherwise be reported as a successful replay.
+				//
+				// modPack.fail (not a deferred error flag) is what actually aborts:
+				// UpdateSegmentsInfo only stops on updatePack.err, so this discards the
+				// drop operator's pending mutations instead of persisting them.
 				if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-					patchErr = err
 					mlog.Warn(context.TODO(), "invalid external refresh segment patch",
 						mlog.Int64("segmentID", incoming.GetID()),
 						mlog.Err(err))
-					return false
+					return modPack.fail(err)
+				}
+				if isReplay && externalRefreshPatchIsNoop(existing, incoming) {
+					// A *complete* no-op: the result manifest, schema version, fake
+					// binlogs and storage version all already match the segment. Keep
+					// it as-is so its text/JSON stats survive (re-applying would clear
+					// them). modPack.Get cloned it only for comparison, so remove that
+					// untouched clone from the pending mutation set as well.
+					//
+					// This is the ONLY case that may skip the base check, and it is safe
+					// precisely because it writes nothing. It has to be exempt: a crash
+					// replay (AlterSegments landed, the job state did not) re-arrives with
+					// current already advanced to result, so its base is legitimately
+					// stale and demanding base==current would reject a correct replay
+					// forever.
+					delete(modPack.segments, incoming.GetID())
+					return true
+				}
+				// A same-manifest replay that is NOT a full no-op still carries
+				// metadata the segment has not absorbed yet — e.g. the worker found the
+				// column already appended on the object store and returned the unchanged
+				// manifest while still bumping the schema version and rebuilding the fake
+				// binlogs for the new column. Manifest-pointer equality does not mean the
+				// SegmentInfo metadata landed, so apply it; the pointer assignment in
+				// applyExternalRefreshPatch is a no-op because result == current.
+				//
+				// But it is still a WRITE, so it owes the same proof as any other write:
+				// validateManifestSuccessor short-circuits on result==current WITHOUT
+				// looking at the base, so without this check a result carrying an empty
+				// or stale base could still rewrite schema version and binlogs — exactly
+				// the fail-closed guarantee the CAS comment above promises for an
+				// existing segment. Re-assert it here rather than inside
+				// validateManifestSuccessor: the schema-bump compaction caller shares
+				// that helper and relies on the unconditional replay short-circuit for
+				// its own crash recovery, where a stale base is expected and correct.
+				if isReplay && (baseManifest == "" || baseManifest != existing.GetManifestPath()) {
+					mlog.Warn(context.TODO(), "same-manifest external refresh patch carries no proof it was built on the current manifest; aborting apply",
+						mlog.Int64("segmentID", incoming.GetID()),
+						mlog.String("baseManifest", baseManifest),
+						mlog.String("currentManifest", existing.GetManifestPath()),
+						mlog.String("resultManifest", incoming.GetManifestPath()))
+					return modPack.fail(errors.Wrapf(errExternalRefreshStaleManifest,
+						"segment %d: same-manifest patch has base manifest %q, want %q",
+						incoming.GetID(), baseManifest, existing.GetManifestPath()))
 				}
 
 				patched := applyExternalRefreshPatch(existing, incoming)
@@ -435,20 +593,26 @@ func applyExternalCollectionSegmentUpdate(
 				return true
 			}
 
-			segInfo := NewSegmentInfo(incoming)
+			// A genuinely new segment: DataCoord materializes the authoritative
+			// SegmentInfo from only the worker-owned result fields (manifest / binlogs /
+			// row count / versions) plus collection context it owns. Any collection,
+			// partition, channel, state or level carried in the worker's SegmentInfo is
+			// ignored.
+			materialized := materializeExternalRefreshSegment(incoming, collectionID, partitionID, insertChannel)
+			segInfo := NewSegmentInfo(materialized)
 			modPack.segments[incoming.GetID()] = segInfo
 
 			modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
-				Segment: incoming,
+				Segment: materialized,
 			}
 
 			modPack.metricMutation.addNewSeg(
-				commonpb.SegmentState_Flushed,
-				incoming.GetLevel(),
-				incoming.GetIsSorted(),
-				incoming.GetStorageVersion(),
+				materialized.GetState(),
+				materialized.GetLevel(),
+				materialized.GetIsSorted(),
+				materialized.GetStorageVersion(),
 				segmentMetricFormatLabel(segInfo),
-				incoming.GetNumOfRows(),
+				materialized.GetNumOfRows(),
 			)
 
 			mlog.Info(context.TODO(), "adding new segment",
@@ -459,15 +623,60 @@ func applyExternalCollectionSegmentUpdate(
 		operators = append(operators, upsertOperator)
 	}
 
-	// Execute all operators atomically
-	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		mlog.Warn(context.TODO(), "failed to update segments atomically", mlog.Err(err))
-		return err
-	}
-	if patchErr != nil {
-		return patchErr
+	if len(extraActions) > 0 {
+		// Every snapshot-selected drop and every result that actually mutates the
+		// segment contributes one action, followed by the supplied job action(s).
+		// Check this before index invalidation, which is itself a catalog write.
+		// The etcd/backend cap cannot be raised by DataCoord, and splitting segment
+		// changes from the Finished marker would violate atomic adoption.
+		//
+		// Full no-ops are excluded: the upsert operator drops them from the pending
+		// mutation set, so they cost nothing at commit time. Counting them here
+		// would reject a crash replay — which re-sends every already-committed
+		// segment — purely on its size, before the code that recognizes it as a
+		// replay ever runs. The count is therefore a lower bound on what will be
+		// written; the exact count is re-checked under segMu immediately before
+		// commit, and that check is the authority.
+		mutatingUpdates := 0
+		for _, incoming := range validUpdatedSegments {
+			if current := mt.GetSegment(ctx, incoming.GetID()); current != nil &&
+				externalRefreshPatchIsNoop(current, incoming) {
+				continue
+			}
+			mutatingUpdates++
+		}
+		operationCount := len(segmentsToDrop) + mutatingUpdates + len(extraActions)
+		if err := validateExternalRefreshAtomicTxnSize(operationCount); err != nil {
+			return err
+		}
 	}
 
+	// Invalidate indexes before publishing an in-place patch. Removing an index
+	// unnecessarily is safe (the inspector rebuilds it); publishing new segment
+	// data while leaving an old index visible is not. The persisted DataManifest
+	// fence also lets restart recovery find any index build that raced this pass.
+	if err := invalidateExternalRefreshIndexes(ctx, mt, validUpdatedSegments); err != nil {
+		return err
+	}
+
+	var err error
+	if len(extraActions) > 0 {
+		err = mt.UpdateSegmentsInfoWithActions(ctx, extraActions, operators...)
+	} else {
+		err = mt.UpdateSegmentsInfo(ctx, operators...)
+	}
+	if err != nil {
+		mlog.Warn(context.TODO(), "failed to update external collection segments", mlog.Err(err))
+		return err
+	}
+	// Catch an index build that started after the pre-commit invalidation but read
+	// the old segment manifest. This cleanup is best-effort after the segment/job
+	// transaction has committed; the persisted DataManifest mismatch is the
+	// durable repair signal for the index inspector if this call fails or we crash.
+	if cleanupErr := invalidateExternalRefreshIndexes(ctx, mt, validUpdatedSegments); cleanupErr != nil {
+		mlog.Warn(ctx, "failed to remove stale indexes after external refresh commit; inspector will retry",
+			mlog.Err(cleanupErr))
+	}
 	mlog.Info(context.TODO(), "external collection segments updated successfully",
 		mlog.Int("updatedSegments", len(updatedSegments)),
 		mlog.Int("keptSegments", len(keptSegmentIDs)))
@@ -475,10 +684,57 @@ func applyExternalCollectionSegmentUpdate(
 	return nil
 }
 
-func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collectionID int64) error {
-	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
-		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
-			incoming.GetID(), incoming.GetCollectionID(), collectionID)
+func invalidateExternalRefreshIndexes(
+	ctx context.Context,
+	mt *meta,
+	updatedSegments []*datapb.SegmentInfo,
+) error {
+	if mt == nil || mt.indexMeta == nil {
+		return nil
+	}
+	for _, incoming := range updatedSegments {
+		if incoming == nil {
+			continue
+		}
+		// Go through meta's locked accessor: SegmentsInfo is a bare map guarded
+		// only by segMu, and this runs before UpdateSegmentsInfo takes it, so a
+		// direct read races a concurrent stats/compaction commit and aborts the
+		// process with "concurrent map read and map write".
+		current := mt.GetSegment(ctx, incoming.GetID())
+		if current == nil {
+			continue
+		}
+		// Two conditions, because this runs on both sides of the segment commit.
+		// Pre-commit the segment still holds the old manifest, so every existing
+		// index is already stale by the fence and metadataChanges only echoes it.
+		// Post-commit the segment holds the incoming manifest, so metadataChanges
+		// is false and the fence alone catches a build that registered against the
+		// old manifest during the window. metadataChanges therefore adds coverage
+		// only for a same-manifest patch whose binlogs or schema version moved;
+		// over-invalidating there costs a rebuild, while under-invalidating would
+		// leave an index serving over republished data.
+		metadataChanges := !externalRefreshPatchIsNoop(current, incoming)
+		for _, segIndex := range mt.indexMeta.GetAllSegmentIndexes(incoming.GetID()) {
+			if !metadataChanges && !segmentIndexManifestStale(segIndex, incoming.GetManifestPath()) {
+				continue
+			}
+			if err := mt.indexMeta.RemoveSegmentIndex(ctx, segIndex.BuildID); err != nil {
+				// A catalog write, not a verdict on the result: mark it transient so
+				// an etcd blip reschedules the apply instead of failing a job whose
+				// workers all succeeded.
+				return errors.Mark(
+					merr.Wrapf(err, "remove stale index build %d for refreshed segment %d",
+						segIndex.BuildID, incoming.GetID()),
+					errExternalRefreshTransientCommit)
+			}
+		}
+	}
+	return nil
+}
+
+func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo) error {
+	if incoming.GetID() <= 0 {
+		return merr.WrapErrServiceInternalMsg("updated segment has invalid segment ID %d", incoming.GetID())
 	}
 	if incoming.GetManifestPath() == "" {
 		return merr.WrapErrServiceInternalMsg("updated segment %d has empty manifest path", incoming.GetID())
@@ -489,22 +745,93 @@ func validateExternalRefreshUpdatedSegment(incoming *datapb.SegmentInfo, collect
 	return nil
 }
 
-func normalizeExternalRefreshUpdatedSegment(
+// materializeExternalRefreshSegment builds the SegmentInfo for a NEW segment out
+// of the worker's result plus the collection context DataCoord owns. Every field
+// the worker is not entitled to choose is set here — collection, partition,
+// channel, state and level — so a malformed or malicious result cannot place a
+// segment in another collection or resurrect it in a non-flushed state.
+func materializeExternalRefreshSegment(
 	incoming *datapb.SegmentInfo,
 	collectionID int64,
 	partitionID int64,
 	insertChannel string,
 ) *datapb.SegmentInfo {
-	normalized := proto.Clone(incoming).(*datapb.SegmentInfo)
-	normalized.CollectionID = collectionID
-	normalized.State = commonpb.SegmentState_Flushed
-	if normalized.InsertChannel == "" {
-		normalized.InsertChannel = insertChannel
+	return &datapb.SegmentInfo{
+		ID:             incoming.GetID(),
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannel:  insertChannel,
+		State:          commonpb.SegmentState_Flushed,
+		Level:          datapb.SegmentLevel_L1,
+		NumOfRows:      incoming.GetNumOfRows(),
+		ManifestPath:   incoming.GetManifestPath(),
+		SchemaVersion:  incoming.GetSchemaVersion(),
+		StorageVersion: incoming.GetStorageVersion(),
+		Binlogs:        cloneProtoFieldBinlogs(incoming.GetBinlogs()),
 	}
-	if normalized.PartitionID == 0 {
-		normalized.PartitionID = partitionID
+}
+
+func cloneProtoFieldBinlogs(src []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if len(src) == 0 {
+		return nil
 	}
-	return normalized
+	cloned := make([]*datapb.FieldBinlog, 0, len(src))
+	for _, binlog := range src {
+		if binlog == nil {
+			continue
+		}
+		cloned = append(cloned, proto.Clone(binlog).(*datapb.FieldBinlog))
+	}
+	return cloned
+}
+
+func dispatchBaseManifests(segments []*datapb.SegmentInfo) map[int64]string {
+	baseManifests := make(map[int64]string)
+	for _, segment := range segments {
+		if segment == nil || segment.GetID() <= 0 || segment.GetManifestPath() == "" {
+			continue
+		}
+		baseManifests[segment.GetID()] = segment.GetManifestPath()
+	}
+	if len(baseManifests) == 0 {
+		return nil
+	}
+	return baseManifests
+}
+
+func validateRefreshBaseManifestEcho(expected, echoed map[int64]string) error {
+	for segmentID, echoedManifest := range echoed {
+		expectedManifest, ok := expected[segmentID]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg(
+				"worker echoed a base manifest for segment %d outside the dispatch snapshot", segmentID)
+		}
+		if echoedManifest == "" || echoedManifest != expectedManifest {
+			return merr.WrapErrServiceInternalMsg(
+				"worker echoed base manifest %q for segment %d, expected %q",
+				echoedManifest, segmentID, expectedManifest)
+		}
+	}
+	return nil
+}
+
+func baseManifestsForUpdatedSegments(
+	updatedSegments []*datapb.SegmentInfo,
+	dispatchBaseManifests map[int64]string,
+) map[int64]string {
+	selected := make(map[int64]string)
+	for _, segment := range updatedSegments {
+		if segment == nil {
+			continue
+		}
+		if baseManifest, ok := dispatchBaseManifests[segment.GetID()]; ok {
+			selected[segment.GetID()] = baseManifest
+		}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	return selected
 }
 
 func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {
@@ -521,10 +848,6 @@ func validateExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentI
 	}
 	if oldSeg.GetState() == commonpb.SegmentState_Dropped {
 		return merr.WrapErrServiceInternalMsg("cannot patch dropped segment %d", oldSeg.GetID())
-	}
-	if incoming.GetCollectionID() != 0 && incoming.GetCollectionID() != collectionID {
-		return merr.WrapErrServiceInternalMsg("collection mismatch for segment %d: got %d, want %d",
-			incoming.GetID(), incoming.GetCollectionID(), collectionID)
 	}
 	if incoming.GetNumOfRows() != oldSeg.GetNumOfRows() {
 		return merr.WrapErrServiceInternalMsg("row count changed for segment %d: got %d, want %d",
@@ -550,27 +873,58 @@ func validateExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentI
 	return nil
 }
 
-func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expectedRows int64) error {
-	binlogRows := segmentutil.CalcRowCountFromBinLog(segment)
+func validateExternalRefreshBinlogRowCount(result *datapb.SegmentInfo, expectedRows int64) error {
+	binlogRows := segmentutil.CalcRowCountFromBinLog(result)
 	if binlogRows == -1 {
-		return merr.WrapErrServiceInternalMsg("invalid binlog row count for segment %d", segment.GetID())
+		return merr.WrapErrServiceInternalMsg("invalid binlog row count for segment %d", result.GetID())
 	}
 	if expectedRows > 0 && binlogRows != expectedRows {
 		return merr.WrapErrServiceInternalMsg("binlog row count mismatch for segment %d: got %d, want %d",
-			segment.GetID(), binlogRows, expectedRows)
+			result.GetID(), binlogRows, expectedRows)
 	}
-	if binlogRows > 0 && binlogRows != segment.GetNumOfRows() {
+	if binlogRows > 0 && binlogRows != result.GetNumOfRows() {
 		return merr.WrapErrServiceInternalMsg("binlog row count mismatch for segment %d: got %d, segment rows %d",
-			segment.GetID(), binlogRows, segment.GetNumOfRows())
+			result.GetID(), binlogRows, result.GetNumOfRows())
 	}
 	return nil
+}
+
+// externalRefreshPatchIsNoop reports whether applying incoming would leave the
+// segment byte-for-byte identical in every field applyExternalRefreshPatch
+// touches: the manifest pointer, the schema version, the fake binlogs, and the
+// storage version. Only a full no-op may skip the patch (and so preserve the
+// segment's text/JSON stats); a same-manifest result whose schema or binlogs
+// differ must still be applied.
+func externalRefreshPatchIsNoop(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo) bool {
+	if oldSeg.GetManifestPath() != incoming.GetManifestPath() {
+		return false
+	}
+	if oldSeg.GetSchemaVersion() != incoming.GetSchemaVersion() {
+		return false
+	}
+	// applyExternalRefreshPatch only overwrites the storage version when the
+	// incoming one is non-zero, so a zero incoming version never changes it.
+	if incoming.GetStorageVersion() != 0 && oldSeg.GetStorageVersion() != incoming.GetStorageVersion() {
+		return false
+	}
+	oldBinlogs := oldSeg.GetBinlogs()
+	newBinlogs := incoming.GetBinlogs()
+	if len(oldBinlogs) != len(newBinlogs) {
+		return false
+	}
+	for i := range oldBinlogs {
+		if !proto.Equal(oldBinlogs[i], newBinlogs[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo) *SegmentInfo {
 	cloned := oldSeg.Clone()
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
-	cloned.Binlogs = incoming.GetBinlogs()
+	cloned.Binlogs = cloneProtoFieldBinlogs(incoming.GetBinlogs())
 	cloned.TextStatsLogs = nil
 	cloned.JsonKeyStats = nil
 	if incoming.GetStorageVersion() != 0 {
@@ -587,6 +941,7 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 		t.GetCollectionId(),
 		resp.GetKeptSegments(),
 		resp.GetUpdatedSegments(),
+		baseManifestsForUpdatedSegments(resp.GetUpdatedSegments(), t.GetBaseManifests()),
 		mlog.Int64("taskID", t.GetTaskId()),
 	)
 }
@@ -597,35 +952,81 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	defer cancel()
 
 	var err error
+	workerMayExist := false
 	defer func() {
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to create refresh task on worker", mlog.Err(err))
-			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
-				mlog.Warn(context.TODO(), "failed to persist Failed state after create error", mlog.Err(updateErr))
+		if err == nil {
+			return
+		}
+		if workerMayExist {
+			// Create may have reached the worker even when the RPC returned an
+			// error. Do not make the task dispatchable (or terminal) until Drop
+			// confirms the old attempt has completely exited.
+			if dropErr := t.tryDropTaskOnWorker(cluster); dropErr != nil {
+				mlog.Warn(context.TODO(), "failed to cancel refresh task after create error; keeping attempt in progress",
+					mlog.Int64("taskID", t.GetTaskId()), mlog.Err(dropErr))
+				return
 			}
+		}
+		if errors.Is(err, errExternalRefreshJobTerminal) {
+			reason := err.Error()
+			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to retire refresh task after owning job became terminal", mlog.Err(updateErr))
+			}
+			t.SetState(indexpb.JobState_JobStateFailed, reason)
+			return
+		}
+		// Classify by cause (see isRetryableRefreshFailure): a data/request error
+		// fails the job (a rerun reproduces it); anything transient is re-dispatched.
+		if isRetryableRefreshFailure(err) {
+			mlog.Warn(context.TODO(), "failed to create refresh task on worker, retrying", mlog.Err(err))
+			t.resetTask(err.Error())
+			return
+		}
+		mlog.Warn(context.TODO(), "failed to create refresh task on worker, failing job", mlog.Err(err))
+		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+			mlog.Warn(context.TODO(), "failed to persist Failed state after create error", mlog.Err(updateErr))
 		}
 	}()
 
 	mlog.Info(context.TODO(), "creating refresh task on worker")
+
+	// Defense in depth against the narrow race after manager/inspector enqueue:
+	// the owning job may become terminal while this task is waiting in the global
+	// scheduler. Retire it before mutating attempt metadata or contacting a worker.
+	if job := t.refreshMeta.GetJob(t.GetJobId()); job != nil && isTerminalJobState(job.GetState()) {
+		reason := "owning job reached " + job.GetState().String()
+		if job.GetFailReason() != "" {
+			reason += ": " + job.GetFailReason()
+		}
+		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); updateErr != nil {
+			mlog.Warn(context.TODO(), "failed to retire refresh task before worker dispatch", mlog.Err(updateErr))
+		}
+		// A superseded version fence may skip the persisted mutation; the local
+		// wrapper must still become terminal so the scheduler does not requeue it.
+		t.SetState(indexpb.JobState_JobStateFailed, reason)
+		return
+	}
 
 	if t.mt == nil {
 		err = merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker")
 		return
 	}
 
-	// Persist task version and nodeID before dispatching to worker
-	if err = t.refreshMeta.UpdateTaskVersion(t.GetTaskId(), nodeID); err != nil {
-		mlog.Warn(context.TODO(), "failed to update task version", mlog.Err(err))
-		return
+	// Clear the prior attempt before re-dispatching: if this task carries a node
+	// from a prior attempt (it was reset to Init after a stale-manifest rebuild
+	// or a transient failure), drop the stale worker-side entry first. This is
+	// load-bearing, not best-effort — the DataNode REJECTS a dispatch onto an
+	// occupied taskID (ErrTaskDuplicate), so an un-dropped entry blocks the
+	// re-dispatch entirely rather than being superseded by it. A transient drop
+	// failure returns and is retried on the next tick (ErrNodeNotFound means the
+	// node and its whole in-memory task map are gone, so proceed).
+	if prevNode := t.GetNodeId(); prevNode != 0 {
+		if dropErr := cluster.DropRefreshExternalCollectionTask(prevNode, t.GetTaskId()); dropErr != nil &&
+			!errors.Is(dropErr, merr.ErrNodeNotFound) {
+			err = dropErr
+			return
+		}
 	}
-
-	// Re-read task from meta to sync in-memory state (nodeID and version)
-	updatedTask := t.refreshMeta.GetTask(t.GetTaskId())
-	if updatedTask == nil {
-		err = merr.WrapErrServiceInternalMsg("task %d not found after version update", t.GetTaskId())
-		return
-	}
-	t.ExternalCollectionRefreshTask = updatedTask
 
 	// Get current segments for the collection
 	segments := t.mt.SelectSegments(ctx, CollectionFilter(t.GetCollectionId()))
@@ -665,11 +1066,17 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	// lock, before they are supported.
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
-		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		// Collection gone (dropped) — a permanent, non-retryable condition.
+		err = merr.WrapErrCollectionNotFound(t.GetCollectionId())
 		return
 	}
 	if len(collInfo.Partitions) != 1 {
-		err = merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+		// Internal metadata invariant violation (external collections are created
+		// single-partition): a System error per the blame test, but deterministic
+		// on rerun, so mark it permanent instead of re-dispatching forever.
+		err = errors.Mark(
+			merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions)),
+			errExternalRefreshPermanent)
 		return
 	}
 	partitionID := collInfo.Partitions[0]
@@ -690,15 +1097,43 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		FileIndexEnd:           t.GetFileIndexEnd(),
 		TargetRowsPerSegment:   paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64(),
 	}
+	targetSegmentBase := path.Join(
+		req.GetStorageConfig().GetRootPath(),
+		common.SegmentInsertLogPath,
+		metautil.JoinIDPath(t.GetCollectionId(), partitionID),
+	)
+
+	// Reserve the exact attempt before contacting the worker. Version, node,
+	// InProgress state, the coordinator-owned ID range/path, and every existing
+	// segment manifest sent to the worker land in one task record. The CAS fence
+	// therefore survives an ambiguous Create RPC, DataCoord restart, and an old
+	// DataNode that returns only updatedSegments without echoing base_manifests.
+	if err = t.refreshMeta.UpdateTaskVersion(
+		t.GetTaskId(), nodeID, idRange, targetSegmentBase, dispatchBaseManifests(currentSegments)); err != nil {
+		mlog.Warn(context.TODO(), "failed to reserve refresh task attempt", mlog.Err(err))
+		return
+	}
+
+	// Re-read task from meta to sync the in-memory wrapper with the persisted
+	// node/version/range fence used by later result adoption.
+	updatedTask := t.refreshMeta.GetTask(t.GetTaskId())
+	if updatedTask == nil {
+		err = merr.WrapErrServiceInternalMsg("task %d not found after version update", t.GetTaskId())
+		return
+	}
+	t.ExternalCollectionRefreshTask = updatedTask
 
 	// Submit task to worker via unified task system
+	workerMayExist = true
 	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to create refresh task on worker", mlog.Err(err))
 		return
 	}
 
-	// Mark task as in progress - QueryTaskOnWorker will check completion
+	// Re-check the owning job after the RPC. UpdateTaskVersion already reserved
+	// the attempt as InProgress before dispatch; this second write only closes the
+	// race where the job became terminal while the worker RPC was in flight.
 	if err = t.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
 		mlog.Warn(context.TODO(), "failed to update task state to InProgress", mlog.Err(err))
 		return
@@ -712,9 +1147,12 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	job := t.refreshMeta.GetJob(t.GetJobId())
 	if job == nil {
 		mlog.Info(context.TODO(), "job not found, task has been canceled")
-		// Best-effort cleanup: try to drop task on worker if it was assigned
-		if t.GetNodeId() != 0 {
-			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+		if err := t.tryDropTaskOnWorker(cluster); err != nil {
+			// Keep the task non-terminal so its persisted node/task identity remains
+			// the cleanup owner. A later checker/query pass can retry the Drop.
+			mlog.Warn(context.TODO(), "failed to drop refresh task on worker after job disappeared; retaining cleanup ownership",
+				mlog.Int64("taskID", t.GetTaskId()), mlog.Int64("nodeID", t.GetNodeId()), mlog.Err(err))
+			return
 		}
 		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled"); err != nil {
 			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
@@ -724,9 +1162,10 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	if job.GetState() == indexpb.JobState_JobStateFailed {
 		mlog.Info(context.TODO(), "job has been marked as failed, canceling task",
 			mlog.String("jobFailReason", job.GetFailReason()))
-		// Best-effort cleanup: try to drop task on worker if it was assigned
-		if t.GetNodeId() != 0 {
-			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+		if err := t.tryDropTaskOnWorker(cluster); err != nil {
+			mlog.Warn(context.TODO(), "failed to drop refresh task on worker after job failed; retaining cleanup ownership",
+				mlog.Int64("taskID", t.GetTaskId()), mlog.Int64("nodeID", t.GetNodeId()), mlog.Err(err))
+			return
 		}
 		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason()); err != nil {
 			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
@@ -737,11 +1176,12 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	// Query task status from worker
 	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "query refresh task result failed", mlog.Err(err))
-		// If query fails, mark task as failed
-		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after query error", mlog.Err(updateErr))
-		}
+		mlog.Warn(context.TODO(), "query refresh task result failed, retrying", mlog.Err(err))
+		// A query RPC failure is transient (node blip / restart / reassignment),
+		// not a data error, so retry the task instead of failing the whole job:
+		// drop the worker-side entry and re-dispatch on the next tick. If the node
+		// is gone the drop no-ops and the re-dispatch lands on a live node.
+		t.dropAndResetTaskOnWorker(cluster, fmt.Sprintf("query task failed: %v", err))
 		return
 	}
 
@@ -759,6 +1199,15 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 		if err := t.validateSource(); err != nil {
 			mlog.Warn(context.TODO(), "task validation failed, task has been superseded", mlog.Err(err))
 			t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error())
+			return
+		}
+		// base_manifests in the response is optional for old workers and is never
+		// the CAS source of truth. When present, verify it against the exact
+		// DataCoord-owned dispatch snapshot so a buggy worker cannot misstate what
+		// it built on without detection.
+		if err := validateRefreshBaseManifestEcho(t.GetBaseManifests(), resp.GetBaseManifests()); err != nil {
+			mlog.Warn(context.TODO(), "worker returned an invalid external refresh manifest echo", mlog.Err(err))
+			t.dropAndResetTaskOnWorker(cluster, err.Error())
 			return
 		}
 
@@ -790,12 +1239,12 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			mlog.String("state", state.String()))
 
 	case indexpb.JobState_JobStateRetry:
-		// Task needs retry - mark as failed
-		mlog.Warn(context.TODO(), "refresh task in unexpected state, marking as failed",
-			mlog.String("state", state.String()))
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("task in unexpected state: %s", state.String())); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state for retry branch", mlog.Err(err))
-		}
+		// The worker asked for a retry (transient internal failure). Honor it by
+		// dropping the worker-side task and re-dispatching, instead of failing the
+		// whole job. This mirrors the stats path's Retry/None handling.
+		mlog.Warn(context.TODO(), "refresh task reported retry by worker, re-dispatching",
+			mlog.String("state", state.String()), mlog.String("failReason", failReason))
+		t.dropAndResetTaskOnWorker(cluster, fmt.Sprintf("worker requested retry: %s", failReason))
 
 	default:
 		mlog.Warn(context.TODO(), "refresh task in unknown state",
@@ -804,12 +1253,87 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 }
 
 func (t *refreshExternalCollectionTask) DropTaskOnWorker(cluster session.Cluster) {
-	// Drop task on worker to cancel execution and clean up resources
-	err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
-	if err != nil {
+	if err := t.tryDropTaskOnWorker(cluster); err != nil {
 		mlog.Warn(context.TODO(), "failed to drop refresh task on worker", mlog.Err(err))
+	}
+}
+
+func (t *refreshExternalCollectionTask) tryDropTaskOnWorker(cluster session.Cluster) error {
+	if t.GetNodeId() == 0 {
+		return nil
+	}
+	err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		return err
+	}
+	mlog.Info(context.TODO(), "refresh task dropped successfully")
+	return nil
+}
+
+// resetTask atomically returns the task to Init so the inspector re-enqueues it
+// and the scheduler re-dispatches it via CreateTaskOnWorker. It clears the stale
+// result/progress in the same write (ResetTaskForRetry) so job-level aggregation
+// cannot adopt a stale result and progress polls do not report a done task.
+func (t *refreshExternalCollectionTask) resetTask(reason string) {
+	// Fence to this attempt: a superseded attempt must not reset a task that has
+	// already been re-dispatched under a newer version.
+	applied, err := t.refreshMeta.ResetTaskForRetry(t.GetTaskId(), t.GetVersion(), reason)
+	if err != nil {
+		mlog.Warn(context.TODO(), "failed to reset refresh task for retry",
+			mlog.Int64("taskID", t.GetTaskId()), mlog.Err(err))
 		return
 	}
+	if !applied {
+		return
+	}
+	t.SetState(indexpb.JobState_JobStateInit, reason)
+}
 
-	mlog.Info(context.TODO(), "refresh task dropped successfully")
+// dropAndResetTaskOnWorker mirrors the stats retry path: it drops the worker-side
+// task first and only resets to Init once the drop succeeds (or the node is gone),
+// so the re-dispatch actually re-runs the work instead of the DataNode replaying
+// its cached result — the worker dedups by taskID, so an un-dropped entry would be
+// returned verbatim. If the drop fails transiently, the task is left as-is and the
+// drop is retried on the next tick.
+func (t *refreshExternalCollectionTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason string) {
+	if err := t.tryDropTaskOnWorker(cluster); err != nil {
+		mlog.Warn(context.TODO(), "failed to drop refresh task for retry, will retry drop next tick",
+			mlog.Int64("taskID", t.GetTaskId()), mlog.Err(err))
+		return
+	}
+	t.resetTask(reason)
+}
+
+// isRetryableRefreshFailure reports whether a refresh task failure should be
+// retried (re-dispatched) rather than failing the whole job. Permanent means "a
+// rerun deterministically reproduces the failure": genuine request errors
+// (ErrParameterInvalid / ErrParameterMissing), a dropped collection, or an
+// internal invariant violation explicitly marked errExternalRefreshPermanent.
+// Note that permanence is deliberately decoupled from the merr Input/System
+// blame classification — a System-classed invariant violation is still
+// permanent. Everything else (RPC, allocation, etcd write, node loss,
+// not-ready) defaults to retryable so an unclassified transient error
+// self-heals; the per-job timeout is the ultimate bound.
+//
+// Beyond request/config errors and the explicit invariant marker, the permanent
+// set now includes the non-retriable data/storage classes (ErrDataIntegrity,
+// ErrStorage) so a corrupt input or a hard storage error fails fast instead of
+// being hammered to the job deadline. The permanent checks come first so an
+// explicit mark always wins over any retriable class it may wrap.
+func isRetryableRefreshFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errExternalRefreshPermanent) ||
+		errors.Is(err, merr.ErrCollectionNotFound) ||
+		errors.Is(err, merr.ErrParameterInvalid) ||
+		errors.Is(err, merr.ErrParameterMissing) ||
+		errors.Is(err, merr.ErrDataIntegrity) ||
+		errors.Is(err, merr.ErrStorage) {
+		return false
+	}
+	// Everything else — RPC, allocation, etcd write, node loss, not-ready, an
+	// object-store / Loon transient, or an untyped error — defaults to retryable
+	// so a transient blip self-heals; the per-job timeout is the ultimate bound.
+	return true
 }

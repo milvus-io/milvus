@@ -2,9 +2,11 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -13,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -282,6 +285,61 @@ func (s *MixCompactionTaskSuite) TestProcess() {
 	})
 }
 
+// A failed dispatch must release the Executing gauge under the label the enqueue
+// filed it under. compactionInspector.schedule increments Executing while NodeID
+// is still NullNodeID, and the reserve write stamps the real nodeID before the
+// RPC — so reading NodeID after that write would credit a bucket that was never
+// incremented, inflating node=-1 and driving the real node negative.
+func (s *MixCompactionTaskSuite) TestCreateTaskOnWorkerFailureReleasesEnqueuedNodeLabel() {
+	const (
+		planID = int64(1)
+		nodeID = int64(111)
+	)
+	compactionType := datapb.CompactionType_MixCompaction
+
+	meta := NewMockCompactionMeta(s.T())
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            200,
+		State:         commonpb.SegmentState_Flushed,
+		SchemaVersion: 3,
+		Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
+	}}).Once()
+	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        planID,
+		Type:          compactionType,
+		InputSegments: []int64{200},
+		Schema:        &schemapb.CollectionSchema{Version: 3},
+		State:         datapb.CompactionTaskState_pipelining,
+		NodeID:        NullNodeID,
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateCompaction(nodeID, mock.Anything, mock.Anything).
+		Return(merr.WrapErrServiceUnavailableMsg("slot limit")).Once()
+	cluster.EXPECT().DropCompaction(nodeID, planID).Return(nil).Once()
+
+	enqueued := metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		fmt.Sprintf("%d", NullNodeID), compactionType.String(), metrics.Executing)
+	dispatched := metrics.DataCoordCompactionTaskNum.WithLabelValues(
+		fmt.Sprintf("%d", nodeID), compactionType.String(), metrics.Executing)
+	beforeEnqueued := testutil.ToFloat64(enqueued)
+	beforeDispatched := testutil.ToFloat64(dispatched)
+
+	task.CreateTaskOnWorker(nodeID, cluster)
+
+	s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+	s.EqualValues(NullNodeID, task.GetTaskProto().GetNodeID())
+	s.Equal(beforeEnqueued-1, testutil.ToFloat64(enqueued),
+		"the enqueue-side Executing entry must be released")
+	s.Equal(beforeDispatched, testutil.ToFloat64(dispatched),
+		"the dispatched node never had an Executing entry to release")
+}
+
 func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	cluster := session.NewMockCluster(s.T())
 
@@ -301,4 +359,47 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	t1.QueryTaskOnWorker(cluster)
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
+}
+
+func (s *MixCompactionTaskSuite) TestQueryErrorRequiresSuccessfulCancelBeforeRetry() {
+	for _, compactionType := range []datapb.CompactionType{
+		datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_SortCompaction,
+	} {
+		s.Run(compactionType.String()+"_cancel_failed", func() {
+			cluster := session.NewMockCluster(s.T())
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID: 1,
+				Type:   compactionType,
+				State:  datapb.CompactionTaskState_executing,
+				NodeID: 111,
+			}, nil, s.mockMeta, newMockVersionManager())
+
+			cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).
+				Return(nil, merr.WrapErrServiceUnavailableMsg("query failed"))
+			cluster.EXPECT().DropCompaction(int64(111), int64(1)).
+				Return(merr.WrapErrServiceUnavailableMsg("cancel failed"))
+
+			task.QueryTaskOnWorker(cluster)
+			s.Equal(taskcommon.InProgress, task.GetTaskState())
+		})
+
+		s.Run(compactionType.String()+"_cancel_succeeded", func() {
+			cluster := session.NewMockCluster(s.T())
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID: 2,
+				Type:   compactionType,
+				State:  datapb.CompactionTaskState_executing,
+				NodeID: 112,
+			}, nil, s.mockMeta, newMockVersionManager())
+
+			cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).
+				Return(nil, merr.WrapErrServiceUnavailableMsg("query failed"))
+			cluster.EXPECT().DropCompaction(int64(112), int64(2)).Return(nil)
+			s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+
+			task.QueryTaskOnWorker(cluster)
+			s.Equal(taskcommon.Init, task.GetTaskState())
+		})
+	}
 }

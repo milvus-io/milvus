@@ -276,6 +276,7 @@ func TestCompactionExecutor(t *testing.T) {
 
 		completedTask.compactor.(*MockCompactor).EXPECT().GetChannelName().Return("ch1").Maybe()
 		executingTask.compactor.(*MockCompactor).EXPECT().GetChannelName().Return("ch2").Maybe()
+		executingTask.compactor.(*MockCompactor).EXPECT().Stop().Return()
 		failedTask.compactor.(*MockCompactor).EXPECT().GetChannelName().Return("ch3").Maybe()
 
 		ex.tasks[1] = completedTask
@@ -286,13 +287,56 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, 2, len(ex.tasks))
 
 		ex.RemoveTask(2)
-		assert.Equal(t, 2, len(ex.tasks))
-
-		ex.RemoveTask(3)
 		assert.Equal(t, 1, len(ex.tasks))
 
+		ex.RemoveTask(3)
+		assert.Empty(t, ex.tasks)
+
 		_, exists := ex.tasks[2]
-		assert.True(t, exists)
+		assert.False(t, exists)
+	})
+
+	t.Run("Test_RemoveTask_BlocksReplacementUntilStopCompletes", func(t *testing.T) {
+		ex := NewExecutor()
+		oldTask := NewMockCompactor(t)
+		stopStarted := make(chan struct{})
+		releaseStop := make(chan struct{})
+		oldTask.EXPECT().Stop().Run(func() {
+			close(stopStarted)
+			<-releaseStop
+		}).Return()
+		oldTask.EXPECT().GetChannelName().Return("old")
+		ex.tasks[2] = &taskState{
+			compactor: oldTask,
+			state:     datapb.CompactionTaskState_executing,
+		}
+
+		removeDone := make(chan struct{})
+		go func() {
+			defer close(removeDone)
+			ex.RemoveTask(2)
+		}()
+		<-stopStarted
+
+		replacement := NewMockCompactor(t)
+		replacement.EXPECT().GetPlanID().Return(int64(2)).Times(2)
+		replacement.EXPECT().GetChannelName().Return("replacement")
+		replacement.EXPECT().GetSlotUsage().Return(int64(8))
+
+		succeed, err := ex.Enqueue(replacement)
+		require.False(t, succeed)
+		require.ErrorIs(t, err, merr.ErrDuplicatedCompactionTask)
+
+		close(releaseStop)
+		select {
+		case <-removeDone:
+		case <-time.After(time.Second):
+			t.Fatal("RemoveTask did not return after Stop completed")
+		}
+
+		succeed, err = ex.Enqueue(replacement)
+		require.True(t, succeed)
+		require.NoError(t, err)
 	})
 
 	t.Run("Test_GetResults_SinglePlan", func(t *testing.T) {

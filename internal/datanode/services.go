@@ -869,14 +869,20 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		// Query task state from external collection manager
 		info := node.externalCollectionManager.Get(clusterID, taskID)
 		if info == nil {
+			// The worker has no record of this task. For a task DataCoord believes
+			// is in flight this means the entry was lost — typically a DataNode
+			// restart drops the in-memory task map. Report Retry (not Failed) so
+			// DataCoord re-dispatches it (and re-runs on a live node) instead of
+			// failing the whole refresh job on a transient loss.
+			const reason = "task not tracked by worker; re-dispatch needed"
 			resp := &datapb.RefreshExternalCollectionTaskResponse{
 				Status:     merr.Success(),
-				State:      indexpb.JobState_JobStateFailed,
-				FailReason: "task result not found",
+				State:      indexpb.JobState_JobStateRetry,
+				FailReason: reason,
 			}
 			resProperties := taskcommon.NewProperties(nil)
-			resProperties.AppendTaskState(taskcommon.Failed)
-			resProperties.AppendReason("task result not found")
+			resProperties.AppendTaskState(taskcommon.Retry)
+			resProperties.AppendReason(reason)
 			return wrapQueryTaskResult(resp, resProperties)
 		}
 		resp := &datapb.RefreshExternalCollectionTaskResponse{
@@ -885,6 +891,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			FailReason:      info.FailReason,
 			KeptSegments:    info.KeptSegments,
 			UpdatedSegments: info.UpdatedSegments,
+			BaseManifests:   info.BaseManifests,
 		}
 		resProperties := taskcommon.NewProperties(nil)
 		resProperties.AppendTaskState(info.State)
@@ -948,18 +955,22 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			JobType:   jobType,
 		})
 	case taskcommon.RefreshExternalCollection:
-		// Drop external collection task from external collection manager
+		// Drop external collection task from external collection manager. The
+		// drop is unconditional and needs no attempt version: the worker rejects
+		// a dispatch onto an occupied taskID (registerTask), so at most one
+		// attempt is ever resident, and a re-dispatch only lands after this drop
+		// has removed it.
 		clusterID, err := properties.GetClusterID()
 		if err != nil {
 			return merr.Status(err), nil
 		}
-		canceled := node.externalCollectionManager.CancelTask(clusterID, taskID)
-		info := node.externalCollectionManager.Delete(clusterID, taskID)
-		if !canceled && info != nil && info.Cancel != nil {
-			info.Cancel()
+		removed, err := node.externalCollectionManager.Delete(ctx, clusterID, taskID)
+		if err != nil {
+			return merr.Status(err), nil
 		}
 		mlog.Info(ctx, "DropTask for external collection completed",
 			mlog.Int64("taskID", taskID),
+			mlog.Bool("removed", removed != nil),
 			mlog.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:
@@ -1025,6 +1036,7 @@ func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, c
 			State:           indexpb.JobState_JobStateFinished,
 			KeptSegments:    task.GetKeptSegmentIDs(),
 			UpdatedSegments: task.GetUpdatedSegments(),
+			BaseManifests:   task.GetBaseManifests(),
 		}
 
 		return resp, nil

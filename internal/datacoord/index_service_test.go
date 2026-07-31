@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -2737,6 +2739,36 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 1, len(resp.GetSegmentInfo()))
+		assert.Len(t, resp.GetSegmentInfo()[segID].GetIndexInfos(), 1)
+	})
+
+	t.Run("skip finished index built on stale manifest", func(t *testing.T) {
+		currentManifest := packed.MarshalManifestPath("files/insert_log/1/2/1000", 2)
+		staleManifest := packed.MarshalManifestPath("files/insert_log/1/2/1000", 1)
+		segment := s.meta.segments.GetSegment(segID)
+		segment.ManifestPath = currentManifest
+		segment.StorageVersion = storage.StorageV3
+		s.meta.segments.SetSegment(segID, segment)
+		segIndex, ok := segIdx1.Get(indexID)
+		require.True(t, ok)
+		segIndex.DataManifest = staleManifest
+		segIdx1.Insert(indexID, segIndex)
+
+		resp, err := s.GetIndexInfos(ctx, req)
+		require.NoError(t, err)
+		assert.Empty(t, resp.GetSegmentInfo()[segID].GetIndexInfos())
+	})
+
+	t.Run("serve finished index built on current manifest", func(t *testing.T) {
+		segment := s.meta.segments.GetSegment(segID)
+		segIndex, ok := segIdx1.Get(indexID)
+		require.True(t, ok)
+		segIndex.DataManifest = segment.GetManifestPath()
+		segIdx1.Insert(indexID, segIndex)
+
+		resp, err := s.GetIndexInfos(ctx, req)
+		require.NoError(t, err)
+		assert.Len(t, resp.GetSegmentInfo()[segID].GetIndexInfos(), 1)
 	})
 }
 

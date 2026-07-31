@@ -19,7 +19,10 @@ package index
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -184,4 +187,83 @@ func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	s.Equal(int64(8), reloaded.CostCPUNum)
 	s.Equal(int64(0), reloaded.ExecEndMs)
 	s.Equal(int64(0), reloaded.CostTimeMs)
+}
+
+func TestTaskManagerCancelBarrier(t *testing.T) {
+	ctx := context.Background()
+	const clusterID = "cancel-barrier"
+	const taskID = int64(77)
+	key := Key{ClusterID: clusterID, TaskID: taskID}
+
+	t.Run("index", func(t *testing.T) {
+		mgr := NewTaskManager(ctx)
+		cancelCalled := make(chan struct{})
+		old := &IndexTaskInfo{
+			Cancel: func() { close(cancelCalled) },
+			State:  commonpb.IndexState_InProgress,
+		}
+		require.Nil(t, mgr.LoadOrStoreIndexTask(clusterID, taskID, old))
+
+		dropDone := make(chan error, 1)
+		go func() { dropDone <- mgr.CancelAndDeleteIndexTaskInfos(ctx, []Key{key}) }()
+		select {
+		case <-cancelCalled:
+		case <-time.After(time.Second):
+			t.Fatal("index cancel was not invoked")
+		}
+
+		fresh := &IndexTaskInfo{State: commonpb.IndexState_InProgress}
+		assert.Same(t, old, mgr.LoadOrStoreIndexTask(clusterID, taskID, fresh))
+		close(old.Done)
+		require.NoError(t, <-dropDone)
+		require.Nil(t, mgr.LoadOrStoreIndexTask(clusterID, taskID, fresh))
+	})
+
+	t.Run("analyze", func(t *testing.T) {
+		mgr := NewTaskManager(ctx)
+		cancelCalled := make(chan struct{})
+		old := &AnalyzeTaskInfo{
+			Cancel: func() { close(cancelCalled) },
+			State:  indexpb.JobState_JobStateInProgress,
+		}
+		require.Nil(t, mgr.LoadOrStoreAnalyzeTask(clusterID, taskID, old))
+
+		dropDone := make(chan error, 1)
+		go func() { dropDone <- mgr.CancelAndDeleteAnalyzeTaskInfos(ctx, []Key{key}) }()
+		select {
+		case <-cancelCalled:
+		case <-time.After(time.Second):
+			t.Fatal("analyze cancel was not invoked")
+		}
+
+		fresh := &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress}
+		assert.Same(t, old, mgr.LoadOrStoreAnalyzeTask(clusterID, taskID, fresh))
+		close(old.Done)
+		require.NoError(t, <-dropDone)
+		require.Nil(t, mgr.LoadOrStoreAnalyzeTask(clusterID, taskID, fresh))
+	})
+
+	t.Run("stats including sort", func(t *testing.T) {
+		mgr := NewTaskManager(ctx)
+		cancelCalled := make(chan struct{})
+		old := &StatsTaskInfo{
+			Cancel: func() { close(cancelCalled) },
+			State:  indexpb.JobState_JobStateInProgress,
+		}
+		require.Nil(t, mgr.LoadOrStoreStatsTask(clusterID, taskID, old))
+
+		dropDone := make(chan error, 1)
+		go func() { dropDone <- mgr.CancelAndDeleteStatsTaskInfos(ctx, []Key{key}) }()
+		select {
+		case <-cancelCalled:
+		case <-time.After(time.Second):
+			t.Fatal("stats cancel was not invoked")
+		}
+
+		fresh := &StatsTaskInfo{State: indexpb.JobState_JobStateInProgress}
+		assert.Same(t, old, mgr.LoadOrStoreStatsTask(clusterID, taskID, fresh))
+		close(old.Done)
+		require.NoError(t, <-dropDone)
+		require.Nil(t, mgr.LoadOrStoreStatsTask(clusterID, taskID, fresh))
+	})
 }

@@ -30,12 +30,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type IndexTaskInfo struct {
 	Cancel                    context.CancelFunc
+	Done                      chan struct{}
 	State                     commonpb.IndexState
 	FileKeys                  []string
 	SerializedSize            uint64
@@ -56,6 +58,7 @@ type IndexTaskInfo struct {
 func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 	return &IndexTaskInfo{
 		Cancel:                    i.Cancel,
+		Done:                      i.Done,
 		State:                     i.State,
 		FileKeys:                  common.CloneStringList(i.FileKeys),
 		SerializedSize:            i.SerializedSize,
@@ -106,12 +109,86 @@ func NewTaskManager(ctx context.Context) *TaskManager {
 func (m *TaskManager) LoadOrStoreIndexTask(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo) *IndexTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
+	ensureTaskDone(&info.Done)
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	oldInfo, ok := m.indexTasks[key]
 	if ok {
 		return oldInfo
 	}
 	m.indexTasks[key] = info
+	return nil
+}
+
+func ensureTaskDone(done *chan struct{}) {
+	if *done == nil {
+		*done = make(chan struct{})
+	}
+}
+
+func closeTaskDone(done chan struct{}) {
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	default:
+		close(done)
+	}
+}
+
+func waitTaskDone(ctx context.Context, done chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return merr.Wrap(ctx.Err(), "wait canceled task to exit")
+	}
+}
+
+func (m *TaskManager) MarkIndexTaskDone(clusterID string, buildID typeutil.UniqueID) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if info, ok := m.indexTasks[Key{ClusterID: clusterID, TaskID: buildID}]; ok {
+		closeTaskDone(info.Done)
+	}
+}
+
+// CancelAndDeleteIndexTaskInfos keeps each task entry resident until its
+// scheduler goroutine has completely exited. This is the cancellation fence:
+// while Drop waits, LoadOrStore still rejects the same taskID, and after Done is
+// closed no old goroutine can write through the key into a replacement entry.
+func (m *TaskManager) CancelAndDeleteIndexTaskInfos(ctx context.Context, keys []Key) error {
+	type pending struct {
+		key  Key
+		info *IndexTaskInfo
+	}
+	pendingTasks := make([]pending, 0, len(keys))
+	m.stateLock.Lock()
+	for _, key := range keys {
+		if info, ok := m.indexTasks[key]; ok {
+			pendingTasks = append(pendingTasks, pending{key: key, info: info})
+		}
+	}
+	m.stateLock.Unlock()
+
+	for _, task := range pendingTasks {
+		if task.info.Cancel != nil {
+			task.info.Cancel()
+		}
+		if err := waitTaskDone(ctx, task.info.Done); err != nil {
+			return err
+		}
+		m.stateLock.Lock()
+		if current, ok := m.indexTasks[task.key]; ok && current == task.info {
+			delete(m.indexTasks, task.key)
+		}
+		m.stateLock.Unlock()
+		mlog.Info(ctx, "cancel and delete index task info",
+			mlog.String("cluster_id", task.key.ClusterID), mlog.FieldBuildID(task.key.TaskID))
+	}
 	return nil
 }
 
@@ -218,6 +295,7 @@ func (m *TaskManager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*I
 	for _, key := range keys {
 		info, ok := m.indexTasks[key]
 		if ok {
+			closeTaskDone(info.Done)
 			deleted = append(deleted, info)
 			delete(m.indexTasks, key)
 			mlog.Info(ctx, "delete task infos",
@@ -242,6 +320,7 @@ func (m *TaskManager) deleteAllIndexTasks() []*IndexTaskInfo {
 
 type AnalyzeTaskInfo struct {
 	Cancel        context.CancelFunc
+	Done          chan struct{}
 	State         indexpb.JobState
 	FailReason    string
 	CentroidsFile string
@@ -250,12 +329,53 @@ type AnalyzeTaskInfo struct {
 func (m *TaskManager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.UniqueID, info *AnalyzeTaskInfo) *AnalyzeTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
+	ensureTaskDone(&info.Done)
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	oldInfo, ok := m.analyzeTasks[key]
 	if ok {
 		return oldInfo
 	}
 	m.analyzeTasks[key] = info
+	return nil
+}
+
+func (m *TaskManager) MarkAnalyzeTaskDone(clusterID string, taskID typeutil.UniqueID) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if info, ok := m.analyzeTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
+		closeTaskDone(info.Done)
+	}
+}
+
+func (m *TaskManager) CancelAndDeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) error {
+	type pending struct {
+		key  Key
+		info *AnalyzeTaskInfo
+	}
+	pendingTasks := make([]pending, 0, len(keys))
+	m.stateLock.Lock()
+	for _, key := range keys {
+		if info, ok := m.analyzeTasks[key]; ok {
+			pendingTasks = append(pendingTasks, pending{key: key, info: info})
+		}
+	}
+	m.stateLock.Unlock()
+
+	for _, task := range pendingTasks {
+		if task.info.Cancel != nil {
+			task.info.Cancel()
+		}
+		if err := waitTaskDone(ctx, task.info.Done); err != nil {
+			return err
+		}
+		m.stateLock.Lock()
+		if current, ok := m.analyzeTasks[task.key]; ok && current == task.info {
+			delete(m.analyzeTasks, task.key)
+		}
+		m.stateLock.Unlock()
+		mlog.Info(ctx, "cancel and delete analyze task info",
+			mlog.String("cluster_id", task.key.ClusterID), mlog.Int64("TaskID", task.key.TaskID))
+	}
 	return nil
 }
 
@@ -303,6 +423,7 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 	if info, ok := m.analyzeTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &AnalyzeTaskInfo{
 			Cancel:        info.Cancel,
+			Done:          info.Done,
 			State:         info.State,
 			FailReason:    info.FailReason,
 			CentroidsFile: info.CentroidsFile,
@@ -318,6 +439,7 @@ func (m *TaskManager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []
 	for _, key := range keys {
 		info, ok := m.analyzeTasks[key]
 		if ok {
+			closeTaskDone(info.Done)
 			deleted = append(deleted, info)
 			delete(m.analyzeTasks, key)
 			mlog.Info(ctx, "delete analyze task infos",
@@ -393,6 +515,7 @@ func (m *TaskManager) WaitTaskFinish() {
 
 type StatsTaskInfo struct {
 	Cancel           context.CancelFunc
+	Done             chan struct{}
 	State            indexpb.JobState
 	FailReason       string
 	CollID           typeutil.UniqueID
@@ -413,6 +536,7 @@ type StatsTaskInfo struct {
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 	return &StatsTaskInfo{
 		Cancel:           s.Cancel,
+		Done:             s.Done,
 		State:            s.State,
 		FailReason:       s.FailReason,
 		CollID:           s.CollID,
@@ -502,12 +626,53 @@ func (s *StatsTaskInfo) CloneJSONKeyStatsLogs() map[int64]*datapb.JsonKeyStats {
 func (m *TaskManager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.UniqueID, info *StatsTaskInfo) *StatsTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
+	ensureTaskDone(&info.Done)
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	oldInfo, ok := m.statsTasks[key]
 	if ok {
 		return oldInfo
 	}
 	m.statsTasks[key] = info
+	return nil
+}
+
+func (m *TaskManager) MarkStatsTaskDone(clusterID string, taskID typeutil.UniqueID) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if info, ok := m.statsTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
+		closeTaskDone(info.Done)
+	}
+}
+
+func (m *TaskManager) CancelAndDeleteStatsTaskInfos(ctx context.Context, keys []Key) error {
+	type pending struct {
+		key  Key
+		info *StatsTaskInfo
+	}
+	pendingTasks := make([]pending, 0, len(keys))
+	m.stateLock.Lock()
+	for _, key := range keys {
+		if info, ok := m.statsTasks[key]; ok {
+			pendingTasks = append(pendingTasks, pending{key: key, info: info})
+		}
+	}
+	m.stateLock.Unlock()
+
+	for _, task := range pendingTasks {
+		if task.info.Cancel != nil {
+			task.info.Cancel()
+		}
+		if err := waitTaskDone(ctx, task.info.Done); err != nil {
+			return err
+		}
+		m.stateLock.Lock()
+		if current, ok := m.statsTasks[task.key]; ok && current == task.info {
+			delete(m.statsTasks, task.key)
+		}
+		m.stateLock.Unlock()
+		mlog.Info(ctx, "cancel and delete stats task info",
+			mlog.String("cluster_id", task.key.ClusterID), mlog.Int64("TaskID", task.key.TaskID))
+	}
 	return nil
 }
 
@@ -631,6 +796,7 @@ func (m *TaskManager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*S
 	for _, key := range keys {
 		info, ok := m.statsTasks[key]
 		if ok {
+			closeTaskDone(info.Done)
 			deleted = append(deleted, info)
 			delete(m.statsTasks, key)
 			mlog.Info(ctx, "delete stats task infos",

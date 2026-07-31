@@ -53,6 +53,7 @@ type taskState struct {
 	compactor Compactor
 	state     datapb.CompactionTaskState
 	result    *datapb.CompactionPlanResult
+	stopOnce  sync.Once
 }
 
 type executor struct {
@@ -171,17 +172,29 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 
 func (e *executor) RemoveTask(planID int64) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	task, exists := e.tasks[planID]
+	if !exists {
+		e.mu.Unlock()
+		return
+	}
+	state := task.state
+	e.mu.Unlock()
 
-	if task, exists := e.tasks[planID]; exists {
-		// Only remove completed/failed tasks, not executing ones
-		if task.state != datapb.CompactionTaskState_executing {
-			mlog.Info(context.TODO(), "Compaction task removed",
-				mlog.Int64("planID", planID),
-				mlog.String("channel", task.compactor.GetChannelName()),
-				mlog.String("state", task.state.String()))
-			delete(e.tasks, planID)
-		}
+	if state == datapb.CompactionTaskState_executing {
+		// Stop cancels the compactor context and waits until executeTask has run
+		// completeTask/Complete. Do not hold e.mu while waiting: completeTask needs
+		// the same lock to publish the terminal state and release the waiter.
+		task.stopOnce.Do(task.compactor.Stop)
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if current, ok := e.tasks[planID]; ok && current == task {
+		mlog.Info(context.TODO(), "Compaction task removed",
+			mlog.Int64("planID", planID),
+			mlog.String("channel", task.compactor.GetChannelName()),
+			mlog.String("state", task.state.String()))
+		delete(e.tasks, planID)
 	}
 }
 

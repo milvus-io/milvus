@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -32,6 +33,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// errExternalRefreshJobTerminal is an in-process control-flow signal used when
+// asynchronous task creation loses a race with a terminal job transition. The
+// manager catches it before it can cross a component boundary.
+var errExternalRefreshJobTerminal = errors.New("external refresh job is already terminal")
 
 // externalCollectionRefreshMeta manages both Job and Task metadata for external collection refresh.
 // Job represents user-initiated refresh operations (API level), while Task represents
@@ -46,10 +52,21 @@ type externalCollectionRefreshMeta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 
-	// Job lock (by collectionID)
+	// jobLock guards the whole job aggregate - the job record AND its tasks -
+	// keyed by collectionID. One lock rather than a job/task pair: every
+	// interesting transition (finish-with-apply, stale-manifest rebuild,
+	// task-set creation, drop) spans both, so a two-tier scheme only bought a
+	// lock-ordering rule and a window in which a job could be observed
+	// half-transitioned. collectionID is the key because the registry
+	// operations (AddJob, GetActiveJobByCollectionID) need collection-wide
+	// exclusion to keep "at most one active job per collection"; a collection
+	// holds at most one active job, so this is job-granular in practice.
+	//
+	// The lock is NOT reentrant, so anything reachable from inside a critical
+	// section must not take it: helpers meant to run there are named
+	// `...Locked`, and the read paths over the ConcurrentMap indexes (GetJob,
+	// GetTask, GetTasksByJobID, ...) take no lock at all.
 	jobLock *lock.KeyLock[UniqueID]
-	// Task lock (by jobID)
-	taskLock *lock.KeyLock[int64]
 
 	// ============ Job Indexes ============
 	// jobID -> Job
@@ -69,7 +86,6 @@ func newExternalCollectionRefreshMeta(ctx context.Context, catalog metastore.Dat
 		ctx:            ctx,
 		catalog:        catalog,
 		jobLock:        lock.NewKeyLock[UniqueID](),
-		taskLock:       lock.NewKeyLock[int64](),
 		jobs:           typeutil.NewConcurrentMap[int64, *datapb.ExternalCollectionRefreshJob](),
 		collectionJobs: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[int64, *datapb.ExternalCollectionRefreshJob]](),
 		tasks:          typeutil.NewConcurrentMap[int64, *datapb.ExternalCollectionRefreshTask](),
@@ -94,6 +110,12 @@ func (m *externalCollectionRefreshMeta) reloadFromKV() error {
 		m.jobs.Insert(job.GetJobId(), job)
 		m.addToCollectionJobs(job)
 	}
+	committedTaskIDs := make(map[int64]int64)
+	for _, job := range jobs {
+		for _, taskID := range job.GetTaskIds() {
+			committedTaskIDs[taskID] = job.GetJobId()
+		}
+	}
 
 	// Load tasks
 	tasks, err := m.catalog.ListExternalCollectionRefreshTasks(m.ctx)
@@ -101,14 +123,46 @@ func (m *externalCollectionRefreshMeta) reloadFromKV() error {
 		mlog.Error(m.ctx, "failed to load external collection refresh tasks", mlog.Err(err))
 		return err
 	}
+	loadedTaskCount := 0
+	ignoredTaskCount := 0
 	for _, task := range tasks {
+		jobID, committed := committedTaskIDs[task.GetTaskId()]
+		if !committed {
+			// Compatibility for historical records created before TaskIds became
+			// the enforced visibility marker. A job that has already advanced out
+			// of Init necessarily ran with its task set visible, so keep those
+			// records recoverable. The partial-write case this fence addresses
+			// leaves the pre-created job in Init with an empty TaskIds list.
+			if legacyJob, ok := m.jobs.Get(task.GetJobId()); ok &&
+				len(legacyJob.GetTaskIds()) == 0 &&
+				legacyJob.GetState() != indexpb.JobState_JobStateInit {
+				jobID = task.GetJobId()
+				committed = true
+			}
+		}
+		job, jobExists := m.jobs.Get(jobID)
+		if !committed || !jobExists || task.GetJobId() != jobID ||
+			(task.GetCollectionId() != 0 && task.GetCollectionId() != job.GetCollectionId()) {
+			// Task records are written before the Job.task_ids commit marker when
+			// a large create falls back to chunked etcd writes. A failed flush may
+			// therefore leave a prefix of Task records behind. They are deliberately
+			// invisible: only IDs published by the persisted Job are committed.
+			// A later job retry allocates a fresh task set; stale records can be
+			// garbage-collected independently because no scheduler/aggregator sees them.
+			// TODO: add a best-effort catalog cleanup pass for these unreachable
+			// records so repeated failed task-set creation cannot accumulate KV garbage.
+			ignoredTaskCount++
+			continue
+		}
 		m.tasks.Insert(task.GetTaskId(), task)
 		m.addToJobTasks(task)
+		loadedTaskCount++
 	}
 
 	mlog.Info(m.ctx, "externalCollectionRefreshMeta reloadFromKV done",
 		mlog.Int("jobCount", len(jobs)),
-		mlog.Int("taskCount", len(tasks)),
+		mlog.Int("taskCount", loadedTaskCount),
+		mlog.Int("ignoredUncommittedTaskCount", ignoredTaskCount),
 		mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -140,7 +194,7 @@ func (m *externalCollectionRefreshMeta) addToJobTasks(task *datapb.ExternalColle
 	taskMap.Insert(task.GetTaskId(), task)
 }
 
-func cloneProtoSegments(segments []*datapb.SegmentInfo) []*datapb.SegmentInfo {
+func cloneRefreshUpdatedSegments(segments []*datapb.SegmentInfo) []*datapb.SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -150,6 +204,17 @@ func cloneProtoSegments(segments []*datapb.SegmentInfo) []*datapb.SegmentInfo {
 			continue
 		}
 		cloned = append(cloned, proto.Clone(segment).(*datapb.SegmentInfo))
+	}
+	return cloned
+}
+
+func cloneRefreshBaseManifests(baseManifests map[int64]string) map[int64]string {
+	if len(baseManifests) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]string, len(baseManifests))
+	for segmentID, manifest := range baseManifests {
+		cloned[segmentID] = manifest
 	}
 	return cloned
 }
@@ -319,6 +384,25 @@ func (m *externalCollectionRefreshMeta) mutateJob(
 	return true, nil
 }
 
+// isTerminalJobState reports whether a refresh job/task state is terminal.
+func isTerminalJobState(state indexpb.JobState) bool {
+	return state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed
+}
+
+// stampJobState applies a state transition to a job record. Every commit path
+// goes through it so the terminal bookkeeping (EndTime, Progress=100) is
+// defined in exactly one place.
+func stampJobState(job *datapb.ExternalCollectionRefreshJob, state indexpb.JobState, failReason string) {
+	job.State = state
+	job.FailReason = failReason
+	if isTerminalJobState(state) {
+		job.EndTime = time.Now().UnixMilli()
+		if state == indexpb.JobState_JobStateFinished {
+			job.Progress = 100
+		}
+	}
+}
+
 // UpdateJobState updates job state.
 //
 // Returns (applied, err):
@@ -337,8 +421,7 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 		// (e.g. tryTimeoutJob using a job pointer captured before aggregateJobState
 		// transitioned the job to Finished in the same processJob cycle) could
 		// silently overwrite a successful Finished as Failed("timeout").
-		if job.GetState() == indexpb.JobState_JobStateFinished ||
-			job.GetState() == indexpb.JobState_JobStateFailed {
+		if isTerminalJobState(job.GetState()) {
 			mlog.Info(m.ctx, "skip update job state, already in terminal state",
 				mlog.Int64("jobID", jobID),
 				mlog.String("currentState", job.GetState().String()),
@@ -346,14 +429,7 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 			return true, nil
 		}
 
-		job.State = state
-		job.FailReason = failReason
-		if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
-			job.EndTime = time.Now().UnixMilli()
-			if state == indexpb.JobState_JobStateFinished {
-				job.Progress = 100
-			}
-		}
+		stampJobState(job, state, failReason)
 		return false, nil
 	})
 	if applied {
@@ -364,15 +440,26 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 	return applied, err
 }
 
-// UpdateJobStateWithPreApply runs preApply and persists the requested state
-// while holding the collection-scoped job lock. It is used for Finished
-// refresh jobs so concurrent eager checker paths cannot apply segment results
-// more than once before the job reaches a terminal state.
-func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
+// FinishJobWithApply runs the whole "every task is done -> apply the segment
+// results -> commit Finished" transition as one critical section over the job
+// aggregate: the terminal-state guard, the all-tasks-finished check, preApply,
+// and - when preApply loses a manifest race - the rollback of those tasks to
+// Init. Deriving the aggregate here rather than trusting one the caller computed
+// outside the lock is what collapses the outcomes to two: a caller holding a
+// pre-rollback snapshot stops at the aggregate check instead of reaching
+// preApply and needing a separate "not ready" signal to back off.
+//
+// Returns (applied, err):
+//   - (true,  nil)  Finished committed and preApply's segment update landed.
+//   - (true,  err)  preApply failed for real; the job is persisted Failed and
+//     the caller should run its job-failed cleanup.
+//   - (false, nil)  nothing happened and nothing is owed: the job is gone or
+//     already terminal, its tasks are not all finished, or the apply raced a
+//     concurrent manifest commit and the tasks were just reset for a rebuild.
+//   - (false, err)  lookup / persistence failure; a later tick retries.
+func (m *externalCollectionRefreshMeta) FinishJobWithApply(
 	jobID int64,
-	state indexpb.JobState,
-	failReason string,
-	preApply func(*datapb.ExternalCollectionRefreshJob) error,
+	preApply func(currentJob, finishedJob *datapb.ExternalCollectionRefreshJob) error,
 ) (bool, error) {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
@@ -388,21 +475,49 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	if !ok {
 		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
 	}
-	if job.GetState() == indexpb.JobState_JobStateFinished ||
-		job.GetState() == indexpb.JobState_JobStateFailed {
-		mlog.Info(m.ctx, "skip update job state with pre-apply, already in terminal state",
+	if isTerminalJobState(job.GetState()) {
+		mlog.Info(m.ctx, "skip finish job with apply, already in terminal state",
 			mlog.Int64("jobID", jobID),
-			mlog.String("currentState", job.GetState().String()),
-			mlog.String("requestedState", state.String()))
+			mlog.String("currentState", job.GetState().String()))
 		return false, nil
 	}
 
+	// A concurrent rebuild may have reset some of these tasks to Init since the
+	// caller sampled the aggregate; applying a partial result set would drop the
+	// segments of the tasks being rebuilt.
+	if state, _ := m.AggregateJobStateFromTasks(jobID); state != indexpb.JobState_JobStateFinished {
+		mlog.Info(m.ctx, "skip finish job with apply, tasks are not all finished",
+			mlog.Int64("jobID", jobID),
+			mlog.String("aggregatedState", state.String()))
+		return false, nil
+	}
+
+	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+	stampJobState(cloneJob, indexpb.JobState_JobStateFinished, "")
+
 	if preApply != nil {
-		if err := preApply(job); err != nil {
+		// preApply owns the atomic catalog transaction that writes both segment
+		// mutations and cloneJob as the Finished visibility marker.
+		if err := preApply(job, cloneJob); err != nil {
+			if errors.Is(err, errExternalRefreshStaleManifest) ||
+				errors.Is(err, errExternalRefreshUnverifiableAttempt) ||
+				errors.Is(err, errExternalRefreshTransientCommit) {
+				// Roll the finished tasks back to Init in the SAME critical section,
+				// so the job is never observable as "all tasks finished" on a result
+				// set that was already rejected. It stays non-terminal on purpose:
+				// the inspector re-dispatches, the worker rebuilds on the current
+				// manifest, and tryTimeoutJob bounds the loop.
+				//
+				// errExternalRefreshTransientCommit joins the two CAS sentinels here
+				// because it too says "this attempt did not land", not "this result
+				// is wrong": a catalog write failed and the next tick may succeed.
+				// Every other error stays terminal — a deterministic apply failure
+				// would otherwise spin here until the job timeout with no signal.
+				m.resetFinishedTasksLocked(jobID, err)
+				return false, nil
+			}
 			cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
-			cloneJob.State = indexpb.JobState_JobStateFailed
-			cloneJob.FailReason = err.Error()
-			cloneJob.EndTime = time.Now().UnixMilli()
+			stampJobState(cloneJob, indexpb.JobState_JobStateFailed, err.Error())
 			if saveErr := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); saveErr != nil {
 				mlog.Warn(m.ctx, "update job state after pre-apply failed",
 					mlog.Int64("jobID", jobID),
@@ -418,29 +533,92 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 		}
 	}
 
-	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
-	cloneJob.State = state
-	cloneJob.FailReason = failReason
-	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
-		cloneJob.EndTime = time.Now().UnixMilli()
-		if state == indexpb.JobState_JobStateFinished {
-			cloneJob.Progress = 100
+	// Task result payloads deliberately remain intact. Clearing them before the
+	// Finished job write would make an over-limit, chunked catalog update unsafe:
+	// a prefix of task clears could persist while the terminal job marker fails.
+	// After restart those tasks would still look Finished/ResultReady but no longer
+	// carry the collection-wide apply input. The tasks are removed with the job by
+	// retention GC, so keeping the payload is the simplest correct lifetime model.
+	if preApply == nil {
+		if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
+			mlog.Warn(m.ctx, "finish job with apply failed",
+				mlog.Int64("jobID", jobID),
+				mlog.Err(err))
+			return false, err
 		}
-	}
-
-	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
-		mlog.Warn(m.ctx, "update job state with pre-apply failed",
-			mlog.Int64("jobID", jobID),
-			mlog.Err(err))
-		return false, err
 	}
 
 	m.jobs.Insert(jobID, cloneJob)
 	m.addToCollectionJobs(cloneJob)
 	mlog.Info(m.ctx, "update job state success",
 		mlog.Int64("jobID", jobID),
-		mlog.String("state", state.String()))
+		mlog.String("state", indexpb.JobState_JobStateFinished.String()))
 	return true, nil
+}
+
+// resetFinishedTasksLocked rolls every finished task of a job back to Init as a
+// single composite catalog write, so the inspector re-dispatches them and the
+// worker rebuilds on the current manifest. Caller MUST hold jobLock for the
+// job's collection.
+//
+// It resets ALL finished tasks, not just the one that lost the CAS: the apply is
+// one collection-wide update built from every task's results, so rebuilding a
+// single task would still leave its siblings' results computed against the
+// superseded manifest and the next apply would lose the same race.
+//
+// Per-task payload clearing mirrors ResetTaskForRetry - a re-dispatchable task
+// must not leave a stale result behind for job aggregation to adopt, nor report
+// Progress=100 while its rebuild is still running. No version fence is needed
+// here (unlike ResetTaskForRetry, which runs unlocked from the scheduler path):
+// every task mutator takes jobLock, so the task set cannot change underneath
+// this. Version stays put; the re-dispatch bumps it in UpdateTaskVersion.
+//
+// A failed write leaves memory untouched and the job non-terminal, so a later
+// tick re-runs the apply and retries the reset. A partial reset self-heals the
+// same way: the still-finished siblings simply wait for the reset ones to
+// rebuild before the aggregate reads Finished again.
+func (m *externalCollectionRefreshMeta) resetFinishedTasksLocked(jobID int64, cause error) {
+	const reason = "manifest advanced during apply; rebuilding on the current manifest"
+
+	// GetTasksByJobID hands back clones, so these are safe to mutate in place.
+	clones := make([]*datapb.ExternalCollectionRefreshTask, 0)
+	actions := make([]metastore.UpdateAction, 0)
+	for _, task := range m.GetTasksByJobID(jobID) {
+		if task.GetState() != indexpb.JobState_JobStateFinished {
+			continue
+		}
+		task.State = indexpb.JobState_JobStateInit
+		task.FailReason = reason
+		task.Progress = 0
+		task.ResultReady = false
+		task.KeptSegments = nil
+		task.UpdatedSegments = nil
+		task.BaseManifests = nil
+		clones = append(clones, task)
+		// ActionAdd on a refresh task is an upsert - the same encoding as
+		// SaveExternalCollectionRefreshTask.
+		actions = append(actions, metastore.AddRefreshTask(task))
+	}
+	if len(actions) == 0 {
+		return
+	}
+
+	if err := m.catalog.Update(m.ctx, actions...); err != nil {
+		mlog.Warn(m.ctx, "failed to reset refresh tasks for stale-manifest rebuild",
+			mlog.Int64("jobID", jobID),
+			mlog.Int("taskCount", len(actions)),
+			mlog.Err(err))
+		return
+	}
+
+	for _, task := range clones {
+		m.tasks.Insert(task.GetTaskId(), task)
+		m.addToJobTasks(task)
+	}
+	mlog.Warn(m.ctx, "external refresh apply raced a concurrent manifest commit; reset tasks to rebuild on the current manifest",
+		mlog.Int64("jobID", jobID),
+		mlog.Int("taskCount", len(clones)),
+		mlog.Err(cause))
 }
 
 // UpdateJobProgress updates job progress
@@ -452,30 +630,19 @@ func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress 
 	return err
 }
 
-// AddTaskIDToJob adds a taskID to job's task_ids list
-func (m *externalCollectionRefreshMeta) AddTaskIDToJob(jobID int64, taskID int64) error {
-	_, err := m.mutateJob(jobID, "add taskID to job", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
-		job.TaskIds = append(job.TaskIds, taskID)
-		return false, nil
-	})
-	return err
-}
-
 // AddTasksToJob persists a batch of newly-created tasks together with the
 // job's updated TaskIds list as a single composite catalog write, then applies
-// the in-memory bookkeeping of both. It replaces the per-task pair of writes
-// createTasksForJob used to do (AddTask followed by AddTaskIDToJob), which -
-// being 2N independent txns - could leave the job's TaskIds disagreeing with
-// the persisted task set on a partial failure.
+// the in-memory bookkeeping of both. Doing it as 2N independent txns instead
+// could leave the job's TaskIds disagreeing with the persisted task set on a
+// partial failure.
 //
 // The job - the failover anchor for its tasks - is written LAST as the commit
-// marker, mirroring DropJob's ordering: a persisted job always references only
-// tasks that are themselves persisted. Both the job lock (collectionID) and
-// the task lock (jobID) are held across the whole compute -> catalog.Update ->
-// in-memory apply sequence so a concurrent AddTask / AddTaskIDToJob cannot
-// interleave and desync the job's TaskIds from its task set. (jobLock is taken
-// before taskLock; no path takes them in the opposite order, so this cannot
-// deadlock.) In-memory state is applied only after the write succeeds.
+// marker, mirroring DropJob and FinishJobWithApply: a persisted job always
+// references only tasks that are themselves persisted. jobLock covers the job
+// record and its tasks alike, so holding it across the whole
+// compute -> catalog.Update -> in-memory apply sequence is what stops a
+// concurrent task write from desyncing TaskIds from the task set. In-memory
+// state is applied only after the write succeeds.
 func (m *externalCollectionRefreshMeta) AddTasksToJob(jobID int64, tasks []*datapb.ExternalCollectionRefreshTask) error {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
@@ -484,17 +651,19 @@ func (m *externalCollectionRefreshMeta) AddTasksToJob(jobID int64, tasks []*data
 
 	m.jobLock.Lock(job.GetCollectionId())
 	defer m.jobLock.Unlock(job.GetCollectionId())
-	m.taskLock.Lock(jobID)
-	defer m.taskLock.Unlock(jobID)
 
 	// Re-fetch after lock so the persisted job carries the freshest TaskIds.
 	job, ok = m.jobs.Get(jobID)
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("job %d not found", jobID)
 	}
+	if isTerminalJobState(job.GetState()) {
+		return errors.Wrapf(errExternalRefreshJobTerminal,
+			"job %d reached %s before task creation committed", jobID, job.GetState())
+	}
 
-	// Mirror AddTaskIDToJob: mutate a clone (append every new task ID) and
-	// persist that as the job record, so on-disk TaskIds cover all saved tasks.
+	// Append every new task ID to a job clone and persist that as the job
+	// record, so on-disk TaskIds cover all saved tasks.
 	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
 	actions := make([]metastore.UpdateAction, 0, len(tasks)+1)
 	for _, task := range tasks {
@@ -584,8 +753,8 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 
 // AddTask adds a new task to meta
 func (m *externalCollectionRefreshMeta) AddTask(task *datapb.ExternalCollectionRefreshTask) error {
-	m.taskLock.Lock(task.GetJobId())
-	defer m.taskLock.Unlock(task.GetJobId())
+	m.jobLock.Lock(task.GetCollectionId())
+	defer m.jobLock.Unlock(task.GetCollectionId())
 
 	mlog.Info(m.ctx, "add refresh task",
 		mlog.Int64("taskID", task.GetTaskId()),
@@ -617,11 +786,16 @@ func (m *externalCollectionRefreshMeta) GetTask(taskID int64) *datapb.ExternalCo
 	return proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
 }
 
-// GetTasksByJobID returns all tasks for a job
+// GetTasksByJobID returns all tasks for a job, sorted by taskID.
+//
+// Lock-free by design, like GetJob / GetTask / GetAllTasks: the indexes are
+// ConcurrentMaps and every mutator clone-then-replaces a task, so each element
+// returned is internally consistent. It must stay lock-free because
+// FinishJobWithApply calls it while already holding jobLock, which is not
+// reentrant. Callers that need the task set itself to be stable against a
+// concurrent mutation must run inside jobLock themselves — which is exactly why
+// the all-tasks-finished decision was moved in there.
 func (m *externalCollectionRefreshMeta) GetTasksByJobID(jobID int64) []*datapb.ExternalCollectionRefreshTask {
-	m.taskLock.Lock(jobID)
-	defer m.taskLock.Unlock(jobID)
-
 	taskMap, ok := m.jobTasks.Get(jobID)
 	if !ok {
 		return nil
@@ -658,7 +832,7 @@ func (m *externalCollectionRefreshMeta) GetTaskState(taskID int64) indexpb.JobSt
 }
 
 // mutateTask is the Task counterpart of mutateJob: it applies a persisted
-// in-place mutation to a refresh task under the jobID-scoped task lock.
+// in-place mutation to a refresh task under the job aggregate's lock.
 // See mutateJob for the skip/apply/abort return semantics.
 func (m *externalCollectionRefreshMeta) mutateTask(
 	taskID int64,
@@ -670,8 +844,10 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 		return false, nil, merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
-	m.taskLock.Lock(task.GetJobId())
-	defer m.taskLock.Unlock(task.GetJobId())
+	// A task's collectionID is immutable, so reading it before the lock and
+	// re-fetching the task inside is safe.
+	m.jobLock.Lock(task.GetCollectionId())
+	defer m.jobLock.Unlock(task.GetCollectionId())
 
 	// Re-fetch after lock
 	task, ok = m.tasks.Get(taskID)
@@ -701,9 +877,23 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 	return true, cloneTask, nil
 }
 
-// UpdateTaskState updates task state
-func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state indexpb.JobState, failReason string) error {
+// UpdateTaskState updates task state. expectedVersion fences the write to a
+// specific attempt (0 = unconditional job-scoped write). Returns whether the
+// write landed so callers can skip attempt-scoped side effects on a superseded
+// write.
+func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID, expectedVersion int64, state indexpb.JobState, failReason string) (bool, error) {
 	applied, _, err := m.mutateTask(taskID, "update task state", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if taskVersionMismatch(task, expectedVersion) {
+			return true, nil // skip: superseded attempt
+		}
+		if state == indexpb.JobState_JobStateInProgress {
+			job, ok := m.jobs.Get(task.GetJobId())
+			if ok && isTerminalJobState(job.GetState()) {
+				return false, errors.Wrapf(errExternalRefreshJobTerminal,
+					"job %d reached %s before task %d entered InProgress",
+					job.GetJobId(), job.GetState(), task.GetTaskId())
+			}
+		}
 		task.State = state
 		task.FailReason = failReason
 		if state == indexpb.JobState_JobStateFinished {
@@ -716,7 +906,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state inde
 			mlog.Int64("taskID", taskID),
 			mlog.String("state", state.String()))
 	}
-	return err
+	return applied, err
 }
 
 // UpdateTaskProgress updates task progress
@@ -728,19 +918,67 @@ func (m *externalCollectionRefreshMeta) UpdateTaskProgress(taskID int64, progres
 	return err
 }
 
+// taskVersionMismatch reports whether an attempt-scoped write for expectedVersion
+// must be skipped because the persisted task has been re-dispatched under a newer
+// version. expectedVersion == 0 means "unconditional" (a job-scoped write such as
+// timeout that is not tied to a specific attempt).
+func taskVersionMismatch(task *datapb.ExternalCollectionRefreshTask, expectedVersion int64) bool {
+	return expectedVersion != 0 && task.GetVersion() != expectedVersion
+}
+
+// ResetTaskForRetry atomically returns a task to Init for re-dispatch and clears
+// its transient result payload and progress in the same write. This mirrors the
+// stats retry path: a re-dispatchable task must not leave a stale result behind
+// (job-level aggregation would otherwise adopt it) nor report Progress=100 while
+// the rebuild is still running. expectedVersion fences the write to a specific
+// attempt (0 = unconditional).
+func (m *externalCollectionRefreshMeta) ResetTaskForRetry(taskID, expectedVersion int64, reason string) (bool, error) {
+	return m.mutateTaskApplied(taskID, "reset task for retry", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if taskVersionMismatch(task, expectedVersion) {
+			return true, nil // skip: superseded attempt
+		}
+		task.State = indexpb.JobState_JobStateInit
+		task.FailReason = reason
+		task.Progress = 0
+		task.ResultReady = false
+		task.KeptSegments = nil
+		task.UpdatedSegments = nil
+		task.BaseManifests = nil
+		return false, nil
+	})
+}
+
+// mutateTaskApplied is mutateTask returning only (applied, error) for callers that
+// need to know whether a version-fenced write actually landed.
+func (m *externalCollectionRefreshMeta) mutateTaskApplied(taskID int64, opName string, mutate func(*datapb.ExternalCollectionRefreshTask) (bool, error)) (bool, error) {
+	applied, _, err := m.mutateTask(taskID, opName, mutate)
+	return applied, err
+}
+
 // UpdateTaskResult persists the terminal worker response for job-level aggregation.
 func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 	taskID int64,
+	expectedVersion int64,
 	state indexpb.JobState,
 	failReason string,
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
-) error {
+) (bool, error) {
 	applied, cloned, err := m.mutateTask(taskID, "update task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if taskVersionMismatch(task, expectedVersion) {
+			// A superseded attempt's result — the task was re-dispatched under a
+			// newer version. Drop the write so a stale/late Query response cannot
+			// overwrite the current attempt's state.
+			mlog.Info(m.ctx, "drop refresh task result from a superseded attempt",
+				mlog.Int64("taskID", taskID),
+				mlog.Int64("resultVersion", expectedVersion),
+				mlog.Int64("currentVersion", task.GetVersion()))
+			return true, nil
+		}
 		task.State = state
 		task.FailReason = failReason
 		task.KeptSegments = append([]int64(nil), keptSegments...)
-		task.UpdatedSegments = cloneProtoSegments(updatedSegments)
+		task.UpdatedSegments = cloneRefreshUpdatedSegments(updatedSegments)
 		task.ResultReady = true
 		if state == indexpb.JobState_JobStateFinished {
 			task.Progress = 100
@@ -752,46 +990,42 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 			mlog.Int64("taskID", taskID),
 			mlog.String("state", state.String()),
 			mlog.Int("keptSegments", len(cloned.GetKeptSegments())),
-			mlog.Int("updatedSegments", len(cloned.GetUpdatedSegments())))
+			mlog.Int("updatedSegments", len(cloned.GetUpdatedSegments())),
+			mlog.Int("baseManifests", len(cloned.GetBaseManifests())))
 	}
-	return err
+	return applied, err
 }
 
-// ClearTaskResult clears stored task result payload after the owning job has
-// persisted Finished. The task state/progress remain intact for progress and
-// history queries until the job retention GC drops the task.
-func (m *externalCollectionRefreshMeta) ClearTaskResult(taskID int64) error {
-	applied, cloned, err := m.mutateTask(taskID, "clear task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
-		if len(task.GetKeptSegments()) == 0 && len(task.GetUpdatedSegments()) == 0 {
-			return true, nil
-		}
-		task.KeptSegments = nil
-		task.UpdatedSegments = nil
-		return false, nil
-	})
-	if applied {
-		mlog.Info(m.ctx, "clear task result success",
-			mlog.Int64("taskID", taskID),
-			mlog.String("state", cloned.GetState().String()))
+// UpdateTaskVersion atomically reserves one worker attempt: the version, node,
+// InProgress state, preallocated ID range, target path, and existing-segment
+// manifest snapshot are one persisted fence. The ID range proves new-segment
+// ownership; baseManifests is the coordinator-owned CAS expectation for patches.
+func (m *externalCollectionRefreshMeta) UpdateTaskVersion(
+	taskID, nodeID int64,
+	idRange *datapb.IDRange,
+	targetSegmentBase string,
+	baseManifests map[int64]string,
+) error {
+	if idRange == nil || idRange.GetBegin() >= idRange.GetEnd() {
+		return merr.WrapErrServiceInternalMsg("task %d has invalid preallocated ID range", taskID)
 	}
-	return err
-}
-
-func (m *externalCollectionRefreshMeta) ClearTaskResultsByJobID(jobID int64) error {
-	tasks := m.GetTasksByJobID(jobID)
-	for _, task := range tasks {
-		if err := m.ClearTaskResult(task.GetTaskId()); err != nil {
-			return err
-		}
+	if targetSegmentBase == "" {
+		return merr.WrapErrServiceInternalMsg("task %d has empty target segment base path", taskID)
 	}
-	return nil
-}
-
-// UpdateTaskVersion updates task version and nodeID
-func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) error {
 	applied, cloned, err := m.mutateTask(taskID, "update task version", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		job, ok := m.jobs.Get(task.GetJobId())
+		if ok && isTerminalJobState(job.GetState()) {
+			return false, errors.Wrapf(errExternalRefreshJobTerminal,
+				"job %d reached %s before task %d attempt was reserved",
+				job.GetJobId(), job.GetState(), task.GetTaskId())
+		}
 		task.Version++
 		task.NodeId = nodeID
+		task.State = indexpb.JobState_JobStateInProgress
+		task.FailReason = ""
+		task.PreallocatedSegmentIds = proto.Clone(idRange).(*datapb.IDRange)
+		task.TargetSegmentBase = targetSegmentBase
+		task.BaseManifests = cloneRefreshBaseManifests(baseManifests)
 		return false, nil
 	})
 	if applied {
@@ -808,6 +1042,13 @@ func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) 
 // AggregateJobStateFromTasks calculates job state and progress from its tasks
 func (m *externalCollectionRefreshMeta) AggregateJobStateFromTasks(jobID int64) (state indexpb.JobState, progress int64) {
 	tasks := m.GetTasksByJobID(jobID)
+	if job, ok := m.jobs.Get(jobID); ok && len(job.GetTaskIds()) > 0 && len(tasks) != len(job.GetTaskIds()) {
+		// A committed job must recover its complete authoritative task set.
+		// Never aggregate a subset to Finished: doing so could apply incomplete
+		// collection results. Leave it active so timeout/recovery surfaces the
+		// metadata loss instead of silently dropping data.
+		return indexpb.JobState_JobStateInit, 0
+	}
 	if len(tasks) == 0 {
 		return indexpb.JobState_JobStateNone, 0
 	}

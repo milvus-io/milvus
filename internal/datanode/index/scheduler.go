@@ -239,6 +239,7 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}
 
 	defer func() {
+		sched.markTaskDone(t)
 		t.Reset()
 		debug.FreeOSMemory()
 	}()
@@ -293,6 +294,17 @@ func (sched *TaskScheduler) processTask(t Task) {
 		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
 			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
 		}
+	}
+}
+
+func (sched *TaskScheduler) markTaskDone(t Task) {
+	switch task := t.(type) {
+	case *indexBuildTask:
+		task.manager.MarkIndexTaskDone(task.req.GetClusterID(), task.req.GetBuildID())
+	case *analyzeTask:
+		task.manager.MarkAnalyzeTaskDone(task.req.GetClusterID(), task.req.GetTaskID())
+	case *statsTask:
+		task.manager.MarkStatsTaskDone(task.req.GetClusterID(), task.req.GetTaskID())
 	}
 }
 

@@ -126,6 +126,7 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 	}
 	it.IndexVersion++
 	it.NodeID = nodeID
+	it.SetState(indexpb.JobState_JobStateInProgress, "")
 	return nil
 }
 
@@ -287,19 +288,15 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 
 	defer func() {
 		if err != nil {
-			it.tryDropTaskOnWorker(cluster)
+			// CreateIndex may have reached the worker even when the RPC failed.
+			// Only a successful drop may make this task dispatchable again.
+			it.dropAndResetTaskOnWorker(cluster, err.Error())
 		}
 	}()
 
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
-		return
-	}
-
-	// Update state to in progress
-	if err = it.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(ctx, "failed to update task state", mlog.Err(err))
 		return
 	}
 
@@ -642,7 +639,7 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	}
-	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
+	it.dropAndResetTaskOnWorker(cluster, "index is not in info response")
 	// Task not found in results will be return error
 }
 

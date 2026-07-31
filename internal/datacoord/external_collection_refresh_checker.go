@@ -20,11 +20,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // externalCollectionRefreshChecker drives the external collection job state machine.
@@ -35,25 +38,39 @@ import (
 // 3. Job statistics reporting
 //
 // JOB STATE MACHINE:
-// Init → InProgress → Finished
 //
-//	↓        ↓            ↓
+//	                 ┌──────────── timeout ────────────┐
+//	                 │                                 ▼
+//	Init ──► Init / Retry / InProgress ──────────────► Failed ──┐
+//	                 │         ▲                                │
+//	   all tasks Finished      │ stale-manifest rebuild         │
+//	                 │         │ (tasks reset to Init)          │
+//	                 ▼         │                                │
+//	         FinishJobWithApply ┘                               │
+//	                 │                                          │
+//	                 ▼                                          ▼
+//	             Finished ────────► retention elapsed ────► GC (removed)
 //
-// Failed  Failed        GC
-//
-//	↓        ↓            ↓
-//
-// GC       GC       (removed)
+// A job's state is the fold of its tasks' states (AggregateJobStateFromTasks,
+// priority Failed > InProgress > Retry > Init > Finished), so it is only
+// Finished once EVERY task is.
 //
 // STATE TRANSITIONS:
-// 1. Init → InProgress: Task dispatched to DataNode (handled by scheduler)
-// 2. InProgress → Finished: All tasks completed successfully
-// 3. InProgress → Failed: Any task failed or job timeout
-// 4. Finished/Failed → GC: Remove job and tasks after retention period
+//  1. Init → InProgress: task dispatched to DataNode (handled by the scheduler)
+//  2. all tasks Finished → FinishJobWithApply: applies the collection-wide
+//     segment update and commits Finished in one critical section. If that apply
+//     loses a manifest CAS it resets the job's tasks to Init instead, leaving the
+//     job non-terminal so the worker rebuilds on the current manifest.
+//  3. → Failed: any task failed, the apply failed for real, or the job timed out
+//  4. Finished/Failed → GC: remove job and tasks after the retention period
 type externalCollectionRefreshChecker struct {
 	ctx         context.Context
 	refreshMeta *externalCollectionRefreshMeta
 	closeChan   chan struct{}
+	// cluster is wired by the manager in production. Terminal reconciliation
+	// retains task metadata until this client confirms Drop (or the node is gone),
+	// so a failed cancel never loses its durable cleanup owner.
+	cluster session.Cluster
 	// onJobFinished is the manager-side callback that pushes the refreshed
 	// schema (ExternalSource/ExternalSpec) into RootCoord via the WAL
 	// broadcast. The manager holds a notifiedJobs dedup map so this callback
@@ -63,7 +80,7 @@ type externalCollectionRefreshChecker struct {
 	// applyJobInfo is invoked exactly before a job is persisted as Finished.
 	// It performs the collection-global segment update from all finished task
 	// results so progress polls cannot observe Finished before segments are visible.
-	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
+	applyJobInfo func(ctx context.Context, currentJob, finishedJob *datapb.ExternalCollectionRefreshJob) error
 	// onJobFailed is the manager-side callback invoked when a job first
 	// transitions into Failed state (via aggregateJobState or tryTimeoutJob).
 	// Used to reclaim per-job resources (e.g. the explore temp directory)
@@ -90,7 +107,7 @@ func newRefreshChecker(
 	refreshMeta *externalCollectionRefreshMeta,
 	closeChan chan struct{},
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob),
-	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error,
+	applyJobInfo func(ctx context.Context, currentJob, finishedJob *datapb.ExternalCollectionRefreshJob) error,
 	onJobFailed func(jobID int64),
 	onJobGC func(jobID int64),
 	onInitJobPending func(jobID int64),
@@ -190,8 +207,83 @@ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollec
 	// cycles before GC is harmless).
 	c.ensureJobFinishedNotified(latestJob)
 
+	// Converge the job's tasks onto its terminal state. Runs before checkGC so
+	// the tasks are retired while they still exist (GC drops job and tasks
+	// together).
+	c.reconcileTerminalJobTasks(latestJob)
+
 	// Check GC for terminal states (Finished/Failed)
 	c.checkGC(latestJob)
+}
+
+// reconcileTerminalJobTasks retires every task still sitting in a non-terminal
+// state under a job that has already reached Finished/Failed. It is the checker's
+// half of the invariant "a terminal job owns no dispatchable task".
+//
+// It has to be a per-tick reconcile rather than a one-shot cleanup at the moment
+// the job goes terminal, which is what tryTimeoutJob used to do inline. A one-shot
+// loop cannot hold the invariant for two independent reasons:
+//   - it runs in a different critical section than the job transition, so a task
+//     that resetFinishedTasksLocked returns to Init just after it passes is missed;
+//   - a failed catalog write leaves that task non-terminal with nobody to retry.
+//
+// Either way the task used to be stranded until the retention-gated GC (hours).
+// Converging here remains the durable repair path; the inspector's terminal-job
+// fence prevents dispatch during that repair window but does not mutate task
+// state itself.
+//
+// In practice this only ever fires for a Failed job: a job reaches Finished only
+// once AggregateJobStateFromTasks sees EVERY task Finished.
+func (c *externalCollectionRefreshChecker) reconcileTerminalJobTasks(job *datapb.ExternalCollectionRefreshJob) {
+	if !isTerminalJobState(job.GetState()) {
+		return
+	}
+
+	reason := "owning job reached " + job.GetState().String()
+	if failReason := job.GetFailReason(); failReason != "" {
+		reason += ": " + failReason
+	}
+
+	for _, t := range c.refreshMeta.GetTasksByJobID(job.GetJobId()) {
+		switch t.GetState() {
+		case indexpb.JobState_JobStateInit,
+			indexpb.JobState_JobStateRetry,
+			indexpb.JobState_JobStateInProgress:
+		default:
+			continue
+		}
+		if t.GetNodeId() != 0 && c.cluster != nil {
+			if err := c.cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId()); err != nil &&
+				!errors.Is(err, merr.ErrNodeNotFound) {
+				// Keep the task non-terminal. Its persisted (nodeID, taskID) is the
+				// cleanup owner, the next checker tick retries Drop, and GC below is
+				// fenced while any such owner remains.
+				mlog.Warn(c.ctx, "failed to cancel task under terminal job, retaining cleanup ownership",
+					mlog.FieldJobID(job.GetJobId()),
+					mlog.Int64("taskID", t.GetTaskId()),
+					mlog.Int64("nodeID", t.GetNodeId()),
+					mlog.Err(err))
+				continue
+			}
+		}
+		// Job-scoped write (a terminal job retires every attempt): unconditional
+		// (version 0). Non-fatal — the next tick retries this exact write, which
+		// is the whole point of reconciling rather than cleaning up once — but
+		// logged, because mutateTask logs only the catalog write failure (not a
+		// missing task) and neither log carries the jobID.
+		if _, err := c.refreshMeta.UpdateTaskState(t.GetTaskId(), 0, indexpb.JobState_JobStateFailed, reason); err != nil {
+			mlog.Warn(c.ctx, "failed to retire task under terminal job, will retry next tick",
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.Int64("taskID", t.GetTaskId()),
+				mlog.String("jobState", job.GetState().String()),
+				mlog.Err(err))
+			continue
+		}
+		mlog.Info(c.ctx, "retired task under terminal job",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.Int64("taskID", t.GetTaskId()),
+			mlog.String("reason", reason))
+	}
 }
 
 // processJobByID looks up a job and runs one inspection pass for it
@@ -210,8 +302,7 @@ func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 // aggregateJobState updates job state based on its tasks.
 func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.ExternalCollectionRefreshJob) {
 	// Skip if job is already in terminal state
-	if job.GetState() == indexpb.JobState_JobStateFinished ||
-		job.GetState() == indexpb.JobState_JobStateFailed {
+	if isTerminalJobState(job.GetState()) {
 		return
 	}
 
@@ -247,34 +338,27 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		}
 
 		if state == indexpb.JobState_JobStateFinished && c.applyJobInfo != nil {
-			applied, err := c.refreshMeta.UpdateJobStateWithPreApply(
+			// FinishJobWithApply owns the whole transition under one lock: the
+			// terminal-state guard, the re-derived all-tasks-finished check, the
+			// segment apply, the single-key Finished job commit, and - on a manifest
+			// race - resetting the job's tasks so the worker rebuilds on the current
+			// manifest. Task results remain until retention GC. Every retry signal now surfaces
+			// as applied=false with no error: nothing happened, nothing is owed.
+			applied, err := c.refreshMeta.FinishJobWithApply(
 				job.GetJobId(),
-				state,
-				failReason,
-				func(latestJob *datapb.ExternalCollectionRefreshJob) error {
-					return c.applyJobInfo(c.ctx, latestJob)
+				func(latestJob, finishedJob *datapb.ExternalCollectionRefreshJob) error {
+					return c.applyJobInfo(c.ctx, latestJob, finishedJob)
 				})
 			if err != nil {
 				mlog.Warn(c.ctx, "failed to apply external collection refresh result",
 					mlog.FieldJobID(job.GetJobId()),
 					mlog.Err(err))
+				// applied means the apply persisted the job as Failed, so this path
+				// owns the failure cleanup.
 				if applied && c.onJobFailed != nil {
 					c.onJobFailed(job.GetJobId())
 				}
-				return
 			}
-			if !applied {
-				// A concurrent path already drove the job into a terminal state
-				// and owns the one-time segment apply / callback side effects.
-				return
-			}
-
-			if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
-				mlog.Warn(c.ctx, "failed to clear external collection refresh task results",
-					mlog.FieldJobID(job.GetJobId()),
-					mlog.Err(err))
-			}
-
 			// processJobs calls ensureJobFinishedNotified right after this
 			// function returns, so we don't fire the callback here.
 			return
@@ -410,15 +494,10 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			return
 		}
 
-		// Also mark all active tasks as failed
-		tasks := c.refreshMeta.GetTasksByJobID(job.GetJobId())
-		for _, task := range tasks {
-			if task.GetState() == indexpb.JobState_JobStateInit ||
-				task.GetState() == indexpb.JobState_JobStateRetry ||
-				task.GetState() == indexpb.JobState_JobStateInProgress {
-				_ = c.refreshMeta.UpdateTaskState(task.GetTaskId(), indexpb.JobState_JobStateFailed, "job timeout")
-			}
-		}
+		// The job's still-active tasks are NOT retired here. Retiring them is a
+		// job-terminal invariant, not a timeout side effect, so it belongs to
+		// reconcileTerminalJobTasks, which processJob runs every tick right after
+		// this — see that function for why a one-shot loop here could not hold it.
 
 		// Reclaim per-job resources (explore temp dir) immediately on
 		// timeout instead of waiting 24h for the retention-gated GC path.
@@ -431,8 +510,7 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 // checkGC performs garbage collection for completed/failed jobs.
 func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectionRefreshJob) {
 	// Only GC terminal states
-	if job.GetState() != indexpb.JobState_JobStateFinished &&
-		job.GetState() != indexpb.JobState_JobStateFailed {
+	if !isTerminalJobState(job.GetState()) {
 		return
 	}
 
@@ -449,6 +527,18 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 	age := time.Since(endTime)
 
 	if age > retention {
+		for _, task := range c.refreshMeta.GetTasksByJobID(job.GetJobId()) {
+			if !isTerminalJobState(task.GetState()) {
+				// The etcd task record is the durable retry handle for a worker Drop
+				// that has not succeeded. Retention cannot delete that ownership and
+				// leave an untraceable worker attempt behind.
+				mlog.Warn(c.ctx, "skip external refresh job GC while task cleanup is pending",
+					mlog.FieldJobID(job.GetJobId()),
+					mlog.Int64("taskID", task.GetTaskId()),
+					mlog.String("taskState", task.GetState().String()))
+				return
+			}
+		}
 		mlog.Info(c.ctx, "external collection job has reached GC retention",
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.FieldCollectionID(job.GetCollectionId()),

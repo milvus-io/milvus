@@ -65,11 +65,13 @@ func TestSegmentIndex_MarshalUnmarshal_IndexStorePathVersion(t *testing.T) {
 		IndexVersion:          1,
 		IndexStorePathVersion: 1,
 		IndexType:             "HNSW",
+		DataManifest:          `{"base_path":"segment","ver":2}`,
 	}
 	pb := MarshalSegmentIndexModel(original)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, pb.IndexStorePathVersion)
 	restored := UnmarshalSegmentIndexModel(pb)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, restored.IndexStorePathVersion)
+	assert.Equal(t, original.DataManifest, restored.DataManifest)
 }
 
 func TestSegmentIndex_MarshalUnmarshal_LegacyDefaultZero(t *testing.T) {
@@ -86,9 +88,11 @@ func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 		CollectionID:          100,
 		BuildID:               1000,
 		IndexStorePathVersion: 1,
+		DataManifest:          "manifest-v1",
 	}
 	cloned := CloneSegmentIndex(original)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
 	cloned.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, original.IndexStorePathVersion)
+	assert.Equal(t, "manifest-v1", cloned.DataManifest)
 }

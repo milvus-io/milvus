@@ -837,7 +837,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsUs
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.ElementsMatch([]int64{1}, task.GetKeptSegmentIDs())
-	s.Equal(created, task.GetUpdatedSegments())
+	s.Require().Len(task.GetUpdatedSegments(), 1)
+	s.Equal(created[0].GetID(), task.GetUpdatedSegments()[0].GetID())
 	s.Equal([]*datapb.SegmentInfo{req.GetCurrentSegments()[0], created[0]}, result)
 	s.Require().Len(gotOrphans, 1)
 	s.Equal("/data/file2.parquet", gotOrphans[0].FilePath)
@@ -899,7 +900,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_RewritesSegmen
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.Empty(task.GetKeptSegmentIDs())
-	s.Equal(created, task.GetUpdatedSegments())
+	s.Require().Len(task.GetUpdatedSegments(), 1)
+	s.Equal(created[0].GetID(), task.GetUpdatedSegments()[0].GetID())
 	s.Equal(created, result)
 	s.Equal([]string{"101"}, checkedColumns)
 	s.Require().Len(gotOrphans, 1)
@@ -2236,14 +2238,14 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskAccessorsAndCloneHelpers() 
 	s.Equal(taskCtx, task.Ctx())
 	s.Equal(task.updatedSegments, task.GetUpdatedSegments())
 
-	segments := []*datapb.SegmentInfo{{ID: 1}, nil, {ID: 2}}
-	cloned := cloneSegments(segments)
+	results := []*datapb.SegmentInfo{{ID: 1}, nil, {ID: 2}}
+	cloned := cloneSegments(results)
 	s.Require().Len(cloned, 3)
 	s.Equal(int64(1), cloned[0].GetID())
 	s.Nil(cloned[1])
-	s.NotSame(segments[0], cloned[0])
+	s.NotSame(results[0], cloned[0])
 	cloned[0].ID = 10
-	s.Equal(int64(1), segments[0].GetID())
+	s.Equal(int64(1), results[0].GetID())
 
 	info := &TaskInfo{
 		State:           indexpb.JobState_JobStateInProgress,
@@ -2290,7 +2292,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteWithMockedSteps() {
 	mockOrganize := mockey.Mock(mockey.GetMethod(task, "organizeSegments")).
 		To(func(ctx context.Context, currentSegmentFragments packed.SegmentFragments, newFragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
 			task.updatedSegments = updated
-			return updated, nil
+			return nil, nil
 		}).Build()
 	defer mockOrganize.UnPatch()
 

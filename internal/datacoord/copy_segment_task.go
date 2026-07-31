@@ -922,6 +922,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			FinishedUTCTime:           uint64(now),
 			NumRows:                   result.GetImportedRows(),
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
+			DataManifest:              result.GetManifestPath(),
 		}
 
 		err := meta.indexMeta.AddSegmentIndex(ctx, segIndex)

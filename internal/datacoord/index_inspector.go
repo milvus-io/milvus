@@ -135,7 +135,8 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
-		if i.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
+		if i.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) ||
+			i.meta.indexMeta.HasStaleSegmentIndex(segment.CollectionID, segment.GetID(), segment.GetManifestPath()) {
 			unindexedSegments = append(unindexedSegments, segment)
 		}
 	}
@@ -157,8 +158,19 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 	var segmentBinlogFields map[int64]struct{}
 
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
-			continue
+		if segIndex, ok := indexIDToSegIndexes[index.IndexID]; ok {
+			if !segmentIndexManifestStale(segIndex, segment.GetManifestPath()) {
+				continue
+			}
+			mlog.Info(ctx, "remove segment index built on stale manifest",
+				mlog.FieldSegmentID(segment.GetID()),
+				mlog.FieldIndexID(index.IndexID),
+				mlog.Int64("buildID", segIndex.BuildID),
+				mlog.String("indexManifest", segIndex.DataManifest),
+				mlog.String("segmentManifest", segment.GetManifestPath()))
+			if err := i.meta.indexMeta.RemoveSegmentIndex(ctx, segIndex.BuildID); err != nil {
+				return err
+			}
 		}
 		if segmentBinlogFields == nil {
 			segmentBinlogFields = getSegmentBinlogFields(segment)
@@ -264,6 +276,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		WriteHandoff:          false,
 		IndexType:             indexType,
 		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
+		DataManifest:          segment.GetManifestPath(),
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

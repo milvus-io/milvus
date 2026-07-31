@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -40,9 +42,9 @@ import (
 )
 
 // nonRetriableJobError marks a refresh-job submission failure that must NOT
-// be retried by the checker tick (e.g. empty source, zero-row source, bucket
-// not found). ensureTasksForInitJob recognizes it and transitions the job
-// straight to Failed instead of leaving it in Init for endless retry.
+// be retried by the checker tick (e.g. an empty result set or an invalid
+// milvus-table snapshot/schema). ensureTasksForInitJob recognizes it and
+// transitions the job straight to Failed instead of leaving it in Init.
 type nonRetriableJobError struct {
 	reason string
 }
@@ -98,8 +100,8 @@ type ExternalCollectionRefreshManager interface {
 
 	// SubmitRefreshJobWithID creates a refresh job with a pre-allocated job ID (from WAL).
 	// This ensures idempotency - if the job already exists, it returns without error.
-	// If there's an existing active job for the same collection, it will be canceled
-	// and replaced by the new job (the old job will show "superseded by new job" as fail reason).
+	// If there's an existing active job for the same collection, the submission is
+	// rejected. The caller must cancel it completely before submitting a new job.
 	// This method is called from the WAL callback to ensure distributed consistency.
 	SubmitRefreshJobWithID(ctx context.Context, jobID int64, collectionID int64, collectionName string, externalSource, externalSpec string) (int64, error)
 
@@ -216,6 +218,7 @@ func NewExternalCollectionRefreshManager(
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, mt, scheduler, allocator, closeChan)
 	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.checker.cluster = cluster
 	m.inspector.wrapTask = m.wrapTask
 
 	return m
@@ -305,7 +308,11 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 	}
 }
 
-func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+func (m *externalCollectionRefreshManager) applyFinishedJobSegments(
+	ctx context.Context,
+	job *datapb.ExternalCollectionRefreshJob,
+	finishedJob *datapb.ExternalCollectionRefreshJob,
+) error {
 	tasks := m.refreshMeta.GetTasksByJobID(job.GetJobId())
 	if len(tasks) == 0 {
 		return merr.WrapErrServiceInternalMsg("job %d has no tasks to apply", job.GetJobId())
@@ -315,13 +322,21 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	updatedSet := make(map[int64]struct{})
 	keptSegments := make([]int64, 0)
 	updatedSegments := make([]*datapb.SegmentInfo, 0)
+	baseManifests := make(map[int64]string)
 	for _, task := range tasks {
+		// Both checks below are invariants, not races: FinishJobWithApply
+		// re-derives the all-tasks-finished aggregate under jobLock and only then
+		// calls this, and jobLock also blocks every task mutator, so the task set
+		// cannot shift underneath us. UpdateTaskResult writes State=Finished and
+		// ResultReady=true in the same mutation, so a Finished task without a
+		// persisted result can only be pre-upgrade leftover data. Fail the job
+		// with a clear reason rather than spinning until the job timeout.
 		if task.GetState() != indexpb.JobState_JobStateFinished {
-			return merr.WrapErrServiceInternalMsg("job %d has non-finished task %d in state %s",
+			return merr.WrapErrServiceInternalMsg("job %d has task %d in state %s, expected Finished",
 				job.GetJobId(), task.GetTaskId(), task.GetState().String())
 		}
 		if !task.GetResultReady() {
-			return merr.WrapErrServiceInternalMsg("job %d has finished task %d without persisted refresh result; please retry refresh",
+			return merr.WrapErrServiceInternalMsg("job %d has finished task %d without persisted refresh result",
 				job.GetJobId(), task.GetTaskId())
 		}
 		for _, segmentID := range task.GetKeptSegments() {
@@ -331,9 +346,13 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 			keptSet[segmentID] = struct{}{}
 			keptSegments = append(keptSegments, segmentID)
 		}
+		taskBaseManifests := task.GetBaseManifests()
 		for _, segment := range task.GetUpdatedSegments() {
 			if segment == nil {
 				continue
+			}
+			if err := m.validateTaskSegmentResultOwnership(ctx, task, segment); err != nil {
+				return merr.Wrapf(err, "job %d task %d has invalid refresh result ownership", job.GetJobId(), task.GetTaskId())
 			}
 			if _, ok := updatedSet[segment.GetID()]; ok {
 				return merr.WrapErrServiceInternalMsg("job %d has duplicate updated segment %d from task %d",
@@ -341,6 +360,9 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 			}
 			updatedSet[segment.GetID()] = struct{}{}
 			updatedSegments = append(updatedSegments, segment)
+			if baseManifest, ok := taskBaseManifests[segment.GetID()]; ok {
+				baseManifests[segment.GetID()] = baseManifest
+			}
 		}
 	}
 
@@ -350,14 +372,68 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	// self-heals them. Segment-level validation still rejects schema-version
 	// rollback, but drop, rename, or type changes need a schema gate or lock
 	// before they are supported.
-	return applyExternalCollectionSegmentUpdate(
+	return applyExternalCollectionSegmentUpdateWithActions(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
 		keptSegments,
 		updatedSegments,
+		baseManifests,
+		[]metastore.UpdateAction{metastore.SaveRefreshJob(finishedJob)},
 		mlog.FieldJobID(job.GetJobId()),
 	)
+}
+
+// validateTaskSegmentResultOwnership binds a birth result to the exact
+// coordinator-owned dispatch attempt that was allowed to create it. Existing
+// segments are governed by the manifest CAS in the segment apply path; new
+// segments additionally owe two proofs persisted before worker dispatch:
+//   - their ID is inside this attempt's preallocated range;
+//   - their manifest base is exactly {target_segment_base}/{segmentID}.
+//
+// A task restored from an older DataCoord has neither proof. It is rebuilt
+// instead of adopted or failed permanently, which keeps rolling-upgrade recovery
+// safe without trusting worker-selected identity/path fields.
+func (m *externalCollectionRefreshManager) validateTaskSegmentResultOwnership(
+	ctx context.Context,
+	task *datapb.ExternalCollectionRefreshTask,
+	result *datapb.SegmentInfo,
+) error {
+	if m.mt == nil || m.mt.segments == nil || result == nil {
+		return merr.WrapErrServiceInternalMsg("segment metadata is unavailable for refresh result validation")
+	}
+	// Go through meta's locked accessor: SegmentsInfo is a bare map guarded only
+	// by segMu, so reading it directly races a concurrent stats/compaction commit
+	// and aborts the process with "concurrent map read and map write".
+	if m.mt.GetSegment(ctx, result.GetID()) != nil {
+		return nil
+	}
+
+	idRange := task.GetPreallocatedSegmentIds()
+	if idRange == nil || task.GetTargetSegmentBase() == "" {
+		return errors.Wrapf(errExternalRefreshUnverifiableAttempt,
+			"task %d predates persisted ID-range/base-path fencing", task.GetTaskId())
+	}
+	if result.GetID() < idRange.GetBegin() || result.GetID() >= idRange.GetEnd() {
+		return merr.WrapErrServiceInternalMsg(
+			"new segment %d is outside task %d preallocated range [%d, %d)",
+			result.GetID(), task.GetTaskId(), idRange.GetBegin(), idRange.GetEnd())
+	}
+	manifestBase, _, err := packed.UnmarshalManifestPath(result.GetManifestPath())
+	if err != nil {
+		return merr.Wrapf(err, "new segment %d has invalid manifest", result.GetID())
+	}
+	expectedBase := path.Join(task.GetTargetSegmentBase(), fmt.Sprintf("%d", result.GetID()))
+	// Object-store keys do not normalize `..` components for us. Require the
+	// worker-produced base to be canonical AND byte-for-byte equal to the path
+	// DataCoord reserved; cleaning both sides before comparison would accept a
+	// key such as ".../150/../150" even though it is a different object prefix.
+	if manifestBase != path.Clean(manifestBase) || manifestBase != expectedBase {
+		return merr.WrapErrServiceInternalMsg(
+			"new segment %d manifest base %q does not match task-owned path %q",
+			result.GetID(), manifestBase, expectedBase)
+	}
+	return nil
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto
@@ -678,6 +754,11 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 		}
 
 		// Enqueue all created tasks for scheduling.
+		latestJob := m.refreshMeta.GetJob(jobID)
+		if latestJob == nil || isTerminalJobState(latestJob.GetState()) {
+			log.Info(m.ctx, "job became terminal before task enqueue, skipping dispatch")
+			return
+		}
 		for _, t := range tasks {
 			m.scheduler.Enqueue(t)
 		}
@@ -705,19 +786,21 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// Manifest is written to S3 so DataNodes can read file info by range.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
-		// Hard explore failures are terminal for this job: the source is
-		// unreachable, denied, malformed, absent, or its snapshot metadata
-		// is incompatible with the requested external format. Surface them
-		// as non-retriable so the user gets a clear RefreshFailed signal
-		// and can re-issue refresh after fixing the source. Pure
-		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
-		// existing transient path so a real outage still gets retried.
+		// Explore failures are terminal for this job. ErrLoonTransient is
+		// included despite its name: the loon FFI boundary maps every storage
+		// failure onto that one sentinel, so it is what an unreachable, denied,
+		// absent or malformed source reports — NoSuchBucket included. Treating
+		// it as retriable leaves the job in Init and the checker re-runs the
+		// same doomed explore until ExternalCollectionJobTimeout (1h), giving
+		// the user no signal; see #49233. A genuine S3 blip is therefore
+		// surfaced as RefreshFailed and must be re-issued, which is the
+		// deliberate trade until storage exposes a precise error category.
 		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
 			errors.Is(err, packed.ErrLoonTransient) ||
 			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
+		return nil, merr.Wrap(err, "failed to explore external files")
 	}
 	if len(allFiles) == 0 {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
@@ -793,6 +876,10 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	}
 
 	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
+		if errors.Is(err, errExternalRefreshJobTerminal) {
+			log.Info(ctx, "job became terminal while external files were being explored, discarding task set")
+			return nil, nil
+		}
 		log.Warn(ctx, "failed to add tasks to job", mlog.Err(err))
 		return nil, err
 	}
@@ -921,7 +1008,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		extfs,
 	)
 	if err != nil {
-		return nil, "", merr.WrapErrServiceInternalErr(err, "failed to explore files returning manifest path")
+		return nil, "", merr.Wrap(err, "failed to explore files returning manifest path")
 	}
 
 	// Convert to proto type
