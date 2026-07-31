@@ -435,6 +435,42 @@ TEST_F(StorageTest, RecordBatchSizeAccountsForReferencedSlice) {
     EXPECT_EQ(first_bytes + second_bytes, backing_bytes);
 }
 
+// Arrow's byte-range visitor has no overload for the view layouts, so
+// ReferencedBufferSize fails outright for a batch containing one — and the
+// external (vortex schemaless) reader produces exactly those, on the
+// pre-normalization batch the in-flight budget is charged from. Falling back
+// to the row count there would charge a multi-MB batch as a few thousand
+// bytes and disable byte backpressure; the estimate must stay in bytes.
+TEST_F(StorageTest, RecordBatchSizeHandlesArrowViewTypes) {
+    constexpr int64_t kRows = 4096;
+    const std::string value(256, 'x');
+
+    arrow::StringViewBuilder builder;
+    ASSERT_TRUE(builder.Reserve(kRows).ok());
+    for (int64_t i = 0; i < kRows; ++i) {
+        ASSERT_TRUE(builder.Append(value).ok());
+    }
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+
+    auto batch = arrow::RecordBatch::Make(
+        arrow::schema({arrow::field("value", arrow::utf8_view())}),
+        kRows,
+        {values});
+
+    // Precondition: this is the layout arrow cannot walk. If a future arrow
+    // bump adds the overload, this assertion flips and the fallback below
+    // stops being the code under test — fail loudly rather than silently.
+    EXPECT_FALSE(arrow::util::ReferencedBufferSize(*batch).ok())
+        << "arrow now supports view types; revisit the fallback";
+
+    auto estimated = EstimateRecordBatchBytes(*batch);
+    EXPECT_EQ(estimated, arrow::util::TotalBufferSize(*batch));
+    // The real payload is ~1MB; the row count would have been 4096.
+    EXPECT_GT(estimated, kRows * 10)
+        << "view-typed batch must not be charged its row count";
+}
+
 // A growing segment born while a function output field was absent from the
 // schema (add/drop-function churn) never materializes that column —
 // Reopen/FillAbsentFields skip function outputs by design. Flushing with a
