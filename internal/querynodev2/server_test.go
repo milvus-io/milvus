@@ -258,7 +258,7 @@ func (suite *QueryNodeSuite) TestHasOtherActiveQueryNode() {
 
 	// Create and register the current node's session.
 	sess := sessionutil.NewSessionWithEtcd(suite.node.ctx, metaRoot, suite.etcd)
-	sess.Init(typeutil.QueryNodeRole, "addr1", false)
+	sess.Init(typeutil.QueryNodeRole, "addr1", false, false)
 	sess.Register()
 	defer sess.Stop()
 
@@ -335,7 +335,7 @@ func (suite *QueryNodeSuite) TestStopStandaloneMigrateTimeout() {
 
 	// Set up a registered session on suite.node so GoingStop succeeds and the migrate loop runs.
 	sess := sessionutil.NewSessionWithEtcd(suite.node.ctx, metaRoot, suite.etcd)
-	sess.Init(typeutil.QueryNodeRole, "addr-standalone", false)
+	sess.Init(typeutil.QueryNodeRole, "addr-standalone", false, false)
 	sess.Register()
 	suite.node.session = sess
 	suite.node.serverID = sess.ServerID
