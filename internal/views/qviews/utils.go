@@ -100,6 +100,13 @@ type DataVersion struct {
 	CompactVersion   int64
 }
 
+// DataViewReferenceManager protects DataViews referenced by persisted QueryViews.
+type DataViewReferenceManager interface {
+	PinDataView(ctx context.Context, collectionID int64, version DataVersion) error
+	RecoverDataViewReference(ctx context.Context, collectionID int64, version DataVersion) (bool, error)
+	UnpinDataView(collectionID int64, version DataVersion)
+}
+
 // String returns the string representation of the data version.
 func (dv DataVersion) String() string {
 	return fmt.Sprintf("%d/%d", dv.StreamingVersion, dv.CompactVersion)

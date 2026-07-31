@@ -360,6 +360,9 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 	for _, callback := range afterPersist {
 		callback()
 	}
+	for _, callback := range afterPersist {
+		callback()
+	}
 	if len(viewsByNode) > 0 {
 		if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{ViewsByNode: viewsByNode}); err != nil {
 			return err
