@@ -104,6 +104,45 @@ func TestNewQViewsRuntimeUsesDefaultRowBalanceConfig(t *testing.T) {
 	assert.Positive(t, config.TargetRowsPerShardNode)
 }
 
+type fakeRuntimeDataViewReferences struct {
+	recovered []qviews.DataVersion
+}
+
+func (r *fakeRuntimeDataViewReferences) PinDataView(context.Context, int64, qviews.DataVersion) error {
+	return nil
+}
+
+func (r *fakeRuntimeDataViewReferences) RecoverDataViewReference(_ context.Context, _ int64, version qviews.DataVersion) (bool, error) {
+	r.recovered = append(r.recovered, version)
+	return true, nil
+}
+
+func (r *fakeRuntimeDataViewReferences) UnpinDataView(int64, qviews.DataVersion) {}
+
+func TestQViewsRuntimePassesReferenceManagerToRegistry(t *testing.T) {
+	ctx := context.Background()
+	catalog := metastoremocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().GetCollections(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().GetPartitions(mock.Anything, mock.Anything).
+		Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Once()
+	catalog.EXPECT().GetReplicas(mock.Anything).Return(nil, nil).Once()
+	refs := &fakeRuntimeDataViewReferences{}
+
+	_, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
+		queryCoordCatalog: catalog,
+		queryViewCatalog: &fakeQueryViewCatalog{views: []*viewpb.QueryViewOfShard{
+			testPersistedQueryView(100, qviews.ShardID{ReplicaID: 1000, VChannel: "v0"}),
+		}},
+		viewSyncClient:       &fakeRuntimeViewSyncClient{},
+		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
+		dataViewProvider:     &fakeRuntimeDataViewProvider{},
+		dataViewReferences:   refs,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 1, CompactVersion: 1}}, refs.recovered)
+}
+
 func TestQViewsRuntimeLoadManagerEnsuresShardsAndTriggersBalancer(t *testing.T) {
 	ctx := context.Background()
 	catalog := metastoremocks.NewQueryCoordCatalog(t)
