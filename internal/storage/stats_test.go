@@ -65,6 +65,21 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestPrimaryKeyStatsUpdateByMsgsAllocatesOnlyFinalMinMax(t *testing.T) {
+	paramtable.Init()
+	stats, err := NewPrimaryKeyStats(100, int64(schemapb.DataType_Int64), 1024)
+	assert.NoError(t, err)
+	data := &Int64FieldData{Data: make([]int64, 1024)}
+	for i := range data.Data {
+		data.Data[i] = int64(i)
+	}
+
+	allocs := testing.AllocsPerRun(10, func() {
+		stats.UpdateByMsgs(data)
+	})
+	assert.Less(t, allocs, float64(10))
+}
+
 func TestStatsWriter_BF(t *testing.T) {
 	value := make([]int64, 1000000)
 	for i := 0; i < 1000000; i++ {

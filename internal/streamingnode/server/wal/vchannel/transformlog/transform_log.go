@@ -73,11 +73,14 @@ type truncateResult struct {
 	Changed bool
 }
 
+type streamNotifier interface {
+	notify(vchannel string)
+}
+
 type TransformLog struct {
 	flushMu               sync.Mutex
 	materializeMu         sync.Mutex
 	mu                    sync.Mutex
-	notifyCh              chan struct{}
 	vchannel              string
 	meta                  *streamingpb.VChannelTransformLogMeta
 	persistedDataTimeTick uint64
@@ -94,7 +97,7 @@ type TransformLog struct {
 	metaAndData           bool
 	flushTasks            []*transformFlushTask
 	materializeTasks      []*transformMaterializeTask
-	streamNotifier        func()
+	streamNotifier        streamNotifier
 
 	chunks []*chunkDescriptor
 }
@@ -107,7 +110,6 @@ func New(config Config) *TransformLog {
 		persistedDataTimeTick: meta.GetCheckpointTimeTick(),
 		persistedMaterialized: meta.GetMaterializedTimeTick(),
 		syncUpTimeTick:        meta.GetCheckpointTimeTick(),
-		notifyCh:              make(chan struct{}),
 		buffer:                newBuffer(config.MaxRows),
 		store:                 config.Store,
 		materializer:          config.Materializer,
@@ -168,7 +170,6 @@ func (t *TransformLog) append(msg message.ImmutableMessage, opt appendOption) ap
 	if !t.buffer.append(msg, opt) {
 		return appendResult{DataTimeTick: t.buffer.DataTimeTick()}
 	}
-	t.notifyScannersLocked()
 	t.notifyStreamLocked()
 	return appendResult{
 		Appended:     true,
@@ -184,7 +185,6 @@ func (t *TransformLog) syncUp(timeTick uint64) appendResult {
 		return appendResult{DataTimeTick: t.buffer.DataTimeTick()}
 	}
 	t.syncUpTimeTick = timeTick
-	t.notifyScannersLocked()
 	t.notifyStreamLocked()
 	return appendResult{
 		Appended:     true,
@@ -686,18 +686,7 @@ func (t *TransformLog) validateLoadedChunkOrderLocked(chunk *chunkDescriptor) er
 	return nil
 }
 
-func (t *TransformLog) notifyChannel() <-chan struct{} {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.notifyCh
-}
-
-func (t *TransformLog) notifyScannersLocked() {
-	close(t.notifyCh)
-	t.notifyCh = make(chan struct{})
-}
-
-func (t *TransformLog) setStreamNotifier(notifier func()) {
+func (t *TransformLog) setStreamNotifier(notifier streamNotifier) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.streamNotifier = notifier
@@ -705,7 +694,7 @@ func (t *TransformLog) setStreamNotifier(notifier func()) {
 
 func (t *TransformLog) notifyStreamLocked() {
 	if t.streamNotifier != nil {
-		t.streamNotifier()
+		t.streamNotifier.notify(t.vchannel)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -19,6 +20,22 @@ type Module interface {
 	// snapshots for RecoveryStorage-owned catalog persistence. It does not
 	// return an error because it only snapshots in-memory state.
 	ConsumeDirtySnapshots() []DirtySnapshot
+}
+
+type CleanupContext struct {
+	MetaPhysicalTimeTick uint64
+	DataPhysicalTimeTick uint64
+}
+
+type CleanupModule interface {
+	ConsumeCleanupSnapshots(CleanupContext) []DirtySnapshot
+}
+
+// PendingCleanupModule exposes whether a cleanup module still has work that
+// RecoveryStorage must drain before closing.
+type PendingCleanupModule interface {
+	CleanupModule
+	HasPendingCleanup() bool
 }
 
 type ModuleName string
@@ -74,6 +91,33 @@ func (*SegmentModuleSnapshot) ModuleName() ModuleName {
 
 type TransformLogModuleSnapshot struct {
 	TransformLogs map[string]*streamingpb.VChannelTransformLogMeta
+}
+
+// WritePathRecoveryModuleSnapshot contains only the state needed to resume the WAL
+// write path. It intentionally excludes persisted binlogs and historical
+// schemas retained by QueryView recovery.
+type WritePathRecoveryModuleSnapshot struct {
+	VChannels       map[string]VChannelWritePathRecoveryState
+	GrowingSegments map[int64]SegmentWritePathRecoveryState
+}
+
+func (*WritePathRecoveryModuleSnapshot) ModuleName() ModuleName {
+	return ModuleNameVChannel
+}
+
+type VChannelWritePathRecoveryState struct {
+	VChannel     string
+	CollectionID int64
+	PartitionIDs []int64
+	Schema       *schemapb.CollectionSchema
+}
+
+type SegmentWritePathRecoveryState struct {
+	VChannel     string
+	CollectionID int64
+	PartitionID  int64
+	SegmentID    int64
+	Stat         *streamingpb.SegmentAssignmentStat
 }
 
 func (*TransformLogModuleSnapshot) ModuleName() ModuleName {

@@ -81,13 +81,14 @@ func adaptImplsToRWWAL(
 		panic("wal should be read-write")
 	}
 	// build append interceptor for a wal.
+	interceptorBuildResult := buildInterceptorsAndReleaseInitialSnapshot(builders, interceptorParam)
 	wal := &walAdaptorImpl{
 		roWALAdaptorImpl: roWAL,
 		rwWALImpls:       roWAL.roWALImpls.(walimpls.WALImpls),
 		// TODO: remove the pool, use a queue instead.
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  interceptorParam,
-		interceptorBuildResult: buildInterceptor(builders, interceptorParam),
+		interceptorBuildResult: interceptorBuildResult,
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
@@ -675,4 +676,13 @@ func buildInterceptor(builders []interceptors.InterceptorBuilder, param *interce
 			}
 		},
 	}
+}
+
+func buildInterceptorsAndReleaseInitialSnapshot(
+	builders []interceptors.InterceptorBuilder,
+	param *interceptors.InterceptorBuildParam,
+) interceptorBuildResult {
+	result := buildInterceptor(builders, param)
+	param.InitialRecoverSnapshot = nil
+	return result
 }

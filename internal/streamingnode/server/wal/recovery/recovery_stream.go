@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -60,10 +61,16 @@ L:
 	}
 	snapshot = r.switchModulesIntoMetaAndData()
 	snapshot.TxnBuffer = rs.TxnBuffer()
+	vchannelCount := len(snapshot.VChannels)
+	segmentCount := len(snapshot.SegmentAssignments)
+	if snapshot.WritePathRecovery != nil {
+		vchannelCount = len(snapshot.WritePathRecovery.VChannels)
+		segmentCount = len(snapshot.WritePathRecovery.GrowingSegments)
+	}
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
-		mlog.Int("vchannels", len(snapshot.VChannels)),
-		mlog.Int("segments", len(snapshot.SegmentAssignments)),
+		mlog.Int("vchannels", vchannelCount),
+		mlog.Int("segments", segmentCount),
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
 	}
@@ -85,12 +92,22 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 		moduleSnapshot := module.SwitchIntoMetaAndData()
 		for _, s := range moduleapi.FlattenModuleSnapshot(moduleSnapshot) {
 			switch typed := s.(type) {
+			case *moduleapi.WritePathRecoveryModuleSnapshot:
+				if snapshot.WritePathRecovery == nil {
+					snapshot.WritePathRecovery = &moduleapi.WritePathRecoveryModuleSnapshot{
+						VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
+						GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
+					}
+				}
+				maps.Copy(snapshot.WritePathRecovery.VChannels, typed.VChannels)
+				maps.Copy(snapshot.WritePathRecovery.GrowingSegments, typed.GrowingSegments)
 			case *moduleapi.VChannelModuleSnapshot:
 				if snapshot.VChannels == nil {
 					snapshot.VChannels = maps.Clone(typed.VChannels)
 				} else {
 					maps.Copy(snapshot.VChannels, typed.VChannels)
 				}
+				snapshot.mergeLegacyVChannelsIntoWritePathRecovery(typed.VChannels)
 			case *moduleapi.SegmentModuleSnapshot:
 				if snapshot.SegmentAssignments == nil {
 					snapshot.SegmentAssignments = maps.Clone(typed.Segments)
@@ -102,6 +119,7 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 				} else {
 					maps.Copy(snapshot.SegmentDataVersionSummaries, typed.DataVersionSummaries)
 				}
+				snapshot.mergeLegacySegmentsIntoWritePathRecovery(typed.Segments)
 			}
 		}
 	}
@@ -110,4 +128,52 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 		snapshot.AlterWALInfo = &alterWALInfoCopy
 	}
 	return snapshot
+}
+
+func (s *RecoverySnapshot) ensureWritePathRecovery() *moduleapi.WritePathRecoveryModuleSnapshot {
+	if s.WritePathRecovery == nil {
+		s.WritePathRecovery = &moduleapi.WritePathRecoveryModuleSnapshot{
+			VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
+			GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
+		}
+	}
+	return s.WritePathRecovery
+}
+
+func (s *RecoverySnapshot) mergeLegacyVChannelsIntoWritePathRecovery(vchannels map[string]*streamingpb.VChannelMeta) {
+	write := s.ensureWritePathRecovery()
+	for vchannel, meta := range vchannels {
+		if meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || meta.GetCollectionInfo() == nil {
+			continue
+		}
+		collection := meta.GetCollectionInfo()
+		state := moduleapi.VChannelWritePathRecoveryState{
+			VChannel:     vchannel,
+			CollectionID: collection.GetCollectionId(),
+			PartitionIDs: make([]int64, 0, len(collection.GetPartitions())),
+		}
+		for _, partition := range collection.GetPartitions() {
+			state.PartitionIDs = append(state.PartitionIDs, partition.GetPartitionId())
+		}
+		if schemas := collection.GetSchemas(); len(schemas) > 0 {
+			state.Schema = schemas[len(schemas)-1].GetSchema()
+		}
+		write.VChannels[vchannel] = state
+	}
+}
+
+func (s *RecoverySnapshot) mergeLegacySegmentsIntoWritePathRecovery(segments map[int64]*streamingpb.SegmentAssignmentMeta) {
+	write := s.ensureWritePathRecovery()
+	for segmentID, meta := range segments {
+		if meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+			continue
+		}
+		write.GrowingSegments[segmentID] = moduleapi.SegmentWritePathRecoveryState{
+			VChannel:     meta.GetVchannel(),
+			CollectionID: meta.GetCollectionId(),
+			PartitionID:  meta.GetPartitionId(),
+			SegmentID:    meta.GetSegmentId(),
+			Stat:         meta.GetStat(),
+		}
+	}
 }

@@ -7,6 +7,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
+var defaultWriteOnlyFlushPolicy flushPolicy = &dynamicWriteOnlyFlushPolicy{}
+
 type flushPolicy interface {
 	ShouldFlush(buffer writeOnlyInsertBuffer, now uint64) bool
 }
@@ -18,15 +20,21 @@ type writeOnlyFlushPolicy struct {
 }
 
 func newDefaultWriteOnlyFlushPolicy() flushPolicy {
-	return newWriteOnlyFlushPolicy(
-		0,
-		uint64(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()),
-		paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
-	)
+	return defaultWriteOnlyFlushPolicy
+}
+
+type dynamicWriteOnlyFlushPolicy struct{}
+
+func (dynamicWriteOnlyFlushPolicy) ShouldFlush(buffer writeOnlyInsertBuffer, now uint64) bool {
+	params := paramtable.Get()
+	return writeOnlyFlushPolicy{
+		maxBytes: uint64(params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64()),
+		maxAge:   params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
+	}.ShouldFlush(buffer, now)
 }
 
 func newWriteOnlyFlushPolicy(maxRows, maxBytes uint64, maxAge time.Duration) flushPolicy {
-	return writeOnlyFlushPolicy{
+	return &writeOnlyFlushPolicy{
 		maxRows:  maxRows,
 		maxBytes: maxBytes,
 		maxAge:   maxAge,

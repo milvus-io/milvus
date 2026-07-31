@@ -49,9 +49,7 @@ func (m *StreamManager) Register(vchannel string, log *TransformLog) {
 	if vchannel == "" || log == nil {
 		return
 	}
-	log.setStreamNotifier(func() {
-		m.notify(vchannel)
-	})
+	log.setStreamNotifier(m)
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	m.logs[vchannel] = log

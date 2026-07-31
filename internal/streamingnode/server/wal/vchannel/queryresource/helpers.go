@@ -5,9 +5,11 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
+var defaultQueryRuntimeBuilders = []QueryRuntimeModuleBuilder{NewGrowingRuntimeModuleBuilder(nil)}
+
 func defaultQueryRuntimeModuleBuilders(builders []QueryRuntimeModuleBuilder) []QueryRuntimeModuleBuilder {
 	if len(builders) == 0 {
-		return []QueryRuntimeModuleBuilder{NewGrowingRuntimeModuleBuilder(nil)}
+		return defaultQueryRuntimeBuilders
 	}
 	return append([]QueryRuntimeModuleBuilder(nil), builders...)
 }

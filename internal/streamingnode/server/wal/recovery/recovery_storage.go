@@ -21,6 +21,7 @@ type RecoverySnapshot struct {
 	VChannels                   map[string]*streamingpb.VChannelMeta
 	SegmentAssignments          map[int64]*streamingpb.SegmentAssignmentMeta
 	SegmentDataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
+	WritePathRecovery           *moduleapi.WritePathRecoveryModuleSnapshot
 	Checkpoint                  *WALCheckpoint
 	CheckpointDirty             bool
 	TxnBuffer                   *utility.TxnBuffer

@@ -128,6 +128,22 @@ func TestSerDe(t *testing.T) {
 	}
 }
 
+func TestAppendTypedFieldDataDoesNotAllocatePerInt64Row(t *testing.T) {
+	const rows = 1024
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer builder.Release()
+	builder.Reserve(rows * 100)
+	fieldData := &Int64FieldData{Data: make([]int64, rows)}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		handled, err := appendTypedFieldData(builder, fieldData)
+		if err != nil || !handled {
+			panic("typed field data was not appended")
+		}
+	})
+	assert.Zero(t, allocs)
+}
+
 func TestSerDeCopy(t *testing.T) {
 	tests := []struct {
 		name string

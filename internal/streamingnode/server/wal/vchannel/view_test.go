@@ -47,3 +47,13 @@ func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
 	view.MarkSnapshotPersisted(next)
 	assert.Nil(t, view.ConsumeDirtyAndGetSnapshot())
 }
+
+func TestRecoveredVChannelViewAdoptsOwnedMetaButSnapshotsClone(t *testing.T) {
+	meta := &streamingpb.VChannelMeta{Vchannel: "v1", CheckpointTimeTick: 10}
+	view := newVChannelViewFromOwnedMeta(meta)
+
+	assert.Same(t, meta, view.meta)
+	snapshot := view.AssignmentMeta()
+	assert.NotSame(t, meta, snapshot)
+	assert.Equal(t, meta, snapshot)
+}

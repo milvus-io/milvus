@@ -16,6 +16,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
+var partitionReady = func() <-chan struct{} {
+	ready := make(chan struct{})
+	close(ready)
+	return ready
+}()
+
 // newPartitionSegmentManager creates a new partition segment assign manager.
 func newPartitionSegmentManager(
 	ctx context.Context,
@@ -82,6 +88,9 @@ func (m *partitionManager) AddSegment(s *segmentAllocManager) {
 	if s.CreateSegmentTimeTick() <= m.fencedAssignTimeTick {
 		panic("critical bug: create segment time tick is less than fenced assign time tick")
 	}
+	if m.segments == nil {
+		m.segments = make(map[int64]*segmentAllocManager)
+	}
 	m.segments[s.GetSegmentID()] = s
 	m.metrics.ObserveCreateSegment()
 }
@@ -109,9 +118,7 @@ func (m *partitionManager) WaitPendingGrowingSegmentReady() <-chan struct{} {
 	if m.onAllocating != nil {
 		return m.onAllocating
 	}
-	ready := make(chan struct{})
-	close(ready)
-	return ready
+	return partitionReady
 }
 
 // FlushAndDropPartition flushes all segments in the partition.
@@ -133,7 +140,7 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
-	m.segments = make(map[int64]*segmentAllocManager)
+	m.segments = nil
 	return segmentIDs
 }
 
@@ -155,7 +162,7 @@ func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
-	m.segments = make(map[int64]*segmentAllocManager)
+	m.segments = nil
 
 	// fence the assign operation until the incoming time tick or latest assigned timetick.
 	// The new incoming assignment request will be fenced.

@@ -38,6 +38,73 @@ func TestVChannelRecoveryModuleObservesOnlyItsVChannel(t *testing.T) {
 	assert.Equal(t, uint64(0), result.Data.TimeTick())
 }
 
+func TestVChannelRecoveryModuleLazilyAllocatesDirtySegments(t *testing.T) {
+	module := newTestModule(t, "p1", "v1")
+	assert.Nil(t, module.dirtySegments)
+
+	view := &segment.SegmentView{}
+	module.markSegmentDirty(1, view)
+	require.Len(t, module.dirtySegments, 1)
+	assert.Same(t, view, module.dirtySegments[1])
+
+	assert.Len(t, module.takeDirtySegments(), 1)
+	assert.Nil(t, module.dirtySegments)
+}
+
+func TestSwitchReturnsLightweightWritePathRecoveryState(t *testing.T) {
+	module := newTestModule(t, "p1", "v1")
+	snapshot := module.SwitchIntoMetaAndData()
+	writeSnapshot, ok := snapshot.(*moduleapi.WritePathRecoveryModuleSnapshot)
+	require.True(t, ok)
+	require.Contains(t, writeSnapshot.VChannels, "v1")
+	assert.Equal(t, int64(100), writeSnapshot.VChannels["v1"].CollectionID)
+}
+
+func TestSegmentCleanupWaitsForPhysicalCheckpointsAndCatalogDelete(t *testing.T) {
+	module, err := NewModule(ModuleConfig{
+		PChannel: "p1",
+		VChannel: "v1",
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			10: {
+				SegmentId:              10,
+				Vchannel:               "v1",
+				State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+				CheckpointTimeTick:     20,
+				DataCheckpointTimeTick: 20,
+				SealedAtDataVersion:    &viewpb.DataVersion{StreamingVersion: 2},
+				Stat:                   &streamingpb.SegmentAssignmentStat{},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	module.mu.Lock()
+	require.True(t, module.tryFinalizeSegmentsLocked())
+	module.mu.Unlock()
+
+	upserts := module.ConsumeDirtySnapshots()
+	require.Len(t, upserts, 1)
+	assert.Equal(t, moduleapi.SnapshotOpUpsert, upserts[0].Op())
+	upserts[0].MarkPersisted()
+	require.True(t, module.HasCleanupCandidates())
+
+	assert.Empty(t, module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 20,
+		DataPhysicalTimeTick: 20,
+	}))
+	deletes := module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 21,
+		DataPhysicalTimeTick: 21,
+	})
+	require.Len(t, deletes, 1)
+	assert.Equal(t, moduleapi.SnapshotOpDelete, deletes[0].Op())
+	assert.Contains(t, module.segments, int64(10))
+
+	deletes[0].MarkPersisted()
+	assert.NotContains(t, module.segments, int64(10))
+	assert.False(t, module.HasCleanupCandidates())
+}
+
 func TestVChannelRecoveryModuleRecoveryBarrierFlushesOwnedTransformLog(t *testing.T) {
 	ctx := context.Background()
 	module := newTestModule(t, "p1", "v1")
@@ -207,11 +274,10 @@ func TestRecoveredDurableSegmentRetriesMissingFinalCommit(t *testing.T) {
 			if state == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
 				meta.TombstoneTimeTick = 30
 			}
-			var view *segment.SegmentView
-			view = segment.NewSegmentViewFromMetaWithOptions(
+			view := segment.NewSegmentViewFromMetaWithConfig(
 				meta,
 				&schemapb.CollectionSchema{Name: "c100"},
-				module.segmentOptions(10, func() *segment.SegmentView { return view })...,
+				module.segmentViewConfig(),
 			)
 			module.segments = map[int64]*segment.SegmentView{10: view}
 
@@ -241,13 +307,11 @@ func TestManualFlushDeduplicatesPendingSegmentFinalCommit(t *testing.T) {
 	module.runtime.Scheduler = taskScheduler
 	module.segmentLifecycle = lifecycle
 	newSegment := func(segmentID int64, createTimeTick uint64) *segment.SegmentView {
-		var view *segment.SegmentView
-		view = segment.NewSegmentViewFromMetaWithOptions(
+		return segment.NewSegmentViewFromMetaWithConfig(
 			newTestGrowingSegmentMeta(segmentID, createTimeTick),
 			&schemapb.CollectionSchema{Name: "c100"},
-			module.segmentOptions(segmentID, func() *segment.SegmentView { return view })...,
+			module.segmentViewConfig(),
 		)
-		return view
 	}
 	module.segments = map[int64]*segment.SegmentView{
 		10: newSegment(10, 10),

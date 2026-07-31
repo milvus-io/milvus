@@ -3,6 +3,7 @@ package metricsutil
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,7 +36,7 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName message.WALName) *Writ
 		// woodpecker wal is always slow, so we need to set a higher threshold by default.
 		slowLogThreshold = 3 * time.Second
 	}
-	return &WriteMetrics{
+	writeMetrics := &WriteMetrics{
 		walName:                      walName.String(),
 		pchannel:                     pchannel,
 		constLabel:                   constLabel,
@@ -46,8 +47,32 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName message.WALName) *Writ
 		walimplsDuration:             metrics.WALImplsAppendMessageDurationSeconds.MustCurryWith(constLabel),
 		walBeforeInterceptorDuration: metrics.WALAppendMessageBeforeInterceptorDurationSeconds.MustCurryWith(constLabel),
 		walAfterInterceptorDuration:  metrics.WALAppendMessageAfterInterceptorDurationSeconds.MustCurryWith(constLabel),
-		slowLogThreshold:             time.Second,
+		slowLogThreshold:             slowLogThreshold,
 	}
+	for index, status := range []string{metrics.WALStatusOK, metrics.WALStatusCancel, metrics.WALStatusError} {
+		writeMetrics.status[index] = writeStatusMetrics{
+			bytes:        writeMetrics.bytes.WithLabelValues(status),
+			walDuration:  writeMetrics.walDuration.WithLabelValues(status),
+			implDuration: writeMetrics.walimplsDuration.WithLabelValues(status),
+		}
+	}
+	return writeMetrics
+}
+
+type writeStatusMetrics struct {
+	bytes        prometheus.Observer
+	walDuration  prometheus.Observer
+	implDuration prometheus.Observer
+}
+
+type messageStatusKey struct {
+	messageType string
+	status      int
+}
+
+type interceptorObservers struct {
+	before prometheus.Observer
+	after  prometheus.Observer
 }
 
 type WriteMetrics struct {
@@ -64,13 +89,15 @@ type WriteMetrics struct {
 	walBeforeInterceptorDuration prometheus.ObserverVec
 	walAfterInterceptorDuration  prometheus.ObserverVec
 	slowLogThreshold             time.Duration
+	status                       [3]writeStatusMetrics
+	totalByMessageStatus         sync.Map
+	interceptorByName            sync.Map
 }
 
 func (m *WriteMetrics) StartAppend(msg message.MutableMessage) *AppendMetrics {
 	return &AppendMetrics{
-		wm:           m,
-		msg:          msg,
-		interceptors: make(map[string][]*InterceptorMetrics),
+		wm:  m,
+		msg: msg,
 	}
 }
 
@@ -78,23 +105,24 @@ func (m *WriteMetrics) done(ctx context.Context, appendMetrics *AppendMetrics) {
 	if !appendMetrics.msg.IsPersisted() {
 		return
 	}
-	status := parseError(appendMetrics.err)
+	statusIndex, status := errorStatus(appendMetrics.err)
+	statusMetrics := m.status[statusIndex]
 	if appendMetrics.implAppendDuration != 0 {
-		m.walimplsDuration.WithLabelValues(status).Observe(appendMetrics.implAppendDuration.Seconds())
+		statusMetrics.implDuration.Observe(appendMetrics.implAppendDuration.Seconds())
 	}
-	m.bytes.WithLabelValues(status).Observe(float64(appendMetrics.msg.EstimateSize()))
-	m.total.WithLabelValues(appendMetrics.msg.MessageType().String(), status).Inc()
-	m.walDuration.WithLabelValues(status).Observe(appendMetrics.appendDuration.Seconds())
-	for name, ims := range appendMetrics.interceptors {
-		for _, im := range ims {
-			if im.Before != 0 {
-				m.walBeforeInterceptorDuration.WithLabelValues(name).Observe(im.Before.Seconds())
-			}
-			if im.After != 0 {
-				m.walAfterInterceptorDuration.WithLabelValues(name).Observe(im.After.Seconds())
-			}
+	statusMetrics.bytes.Observe(float64(appendMetrics.msg.EstimateSize()))
+	m.totalCounter(appendMetrics.msg.MessageType().String(), statusIndex, status).Inc()
+	statusMetrics.walDuration.Observe(appendMetrics.appendDuration.Seconds())
+	appendMetrics.rangeInterceptorMetrics(func(name string, _ int, im *InterceptorMetrics) bool {
+		observers := m.interceptorObservers(name)
+		if im.Before != 0 {
+			observers.before.Observe(im.Before.Seconds())
 		}
-	}
+		if im.After != 0 {
+			observers.after.Observe(im.After.Seconds())
+		}
+		return true
+	})
 	if appendMetrics.err != nil {
 		m.Logger().Warn(ctx, "append message into wal failed", appendMetrics.IntoLogFields()...)
 		return
@@ -108,6 +136,28 @@ func (m *WriteMetrics) done(ctx context.Context, appendMetrics *AppendMetrics) {
 	if m.Logger().LevelEnabled(logLV) {
 		m.Logger().Log(ctx, logLV, "append message into wal", appendMetrics.IntoLogFields()...)
 	}
+}
+
+func (m *WriteMetrics) totalCounter(messageType string, statusIndex int, status string) prometheus.Counter {
+	key := messageStatusKey{messageType: messageType, status: statusIndex}
+	if cached, ok := m.totalByMessageStatus.Load(key); ok {
+		return cached.(prometheus.Counter)
+	}
+	counter := m.total.WithLabelValues(messageType, status)
+	actual, _ := m.totalByMessageStatus.LoadOrStore(key, counter)
+	return actual.(prometheus.Counter)
+}
+
+func (m *WriteMetrics) interceptorObservers(name string) interceptorObservers {
+	if cached, ok := m.interceptorByName.Load(name); ok {
+		return cached.(interceptorObservers)
+	}
+	observers := interceptorObservers{
+		before: m.walBeforeInterceptorDuration.WithLabelValues(name),
+		after:  m.walAfterInterceptorDuration.WithLabelValues(name),
+	}
+	actual, _ := m.interceptorByName.LoadOrStore(name, observers)
+	return actual.(interceptorObservers)
 }
 
 // ObserveRetry observes the retry of the walimpls.
@@ -133,11 +183,16 @@ func (m *WriteMetrics) Close() {
 
 // parseError parses the error to status.
 func parseError(err error) string {
+	_, status := errorStatus(err)
+	return status
+}
+
+func errorStatus(err error) (int, string) {
 	if err == nil {
-		return metrics.WALStatusOK
+		return 0, metrics.WALStatusOK
 	}
 	if status.IsCanceled(err) {
-		return metrics.WALStatusCancel
+		return 1, metrics.WALStatusCancel
 	}
-	return metrics.WALStatusError
+	return 2, metrics.WALStatusError
 }

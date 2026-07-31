@@ -6,10 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
@@ -59,6 +61,84 @@ func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
 
 	view.MarkSnapshotPersisted(next)
 	assert.Nil(t, view.ConsumeDirtyAndGetSnapshot())
+}
+
+func TestSegmentViewsShareDefaultFlushPolicy(t *testing.T) {
+	first := NewSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{}, nil)
+	second := NewSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{}, nil)
+
+	assert.Same(t, first.flushPolicy, second.flushPolicy)
+}
+
+func TestSharedDefaultFlushPolicyObservesDynamicConfig(t *testing.T) {
+	policy := newDefaultWriteOnlyFlushPolicy()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.FlushInsertBufferSize.Key, "1"))
+	defer params.Reset(params.DataNodeCfg.FlushInsertBufferSize.Key)
+
+	assert.True(t, policy.ShouldFlush(writeOnlyInsertBuffer{
+		entries:    []message.ImmutableMessage{nil},
+		binarySize: 2,
+	}, 0))
+}
+
+func TestSegmentViewNotifiesSharedOwnerWithoutPerViewCallbacks(t *testing.T) {
+	owner := &recordingSegmentViewOwner{}
+	view := NewSegmentViewFromMetaWithConfig(
+		&streamingpb.SegmentAssignmentMeta{SegmentId: 10},
+		nil,
+		ViewConfig{Owner: owner},
+	)
+
+	view.NotifyDataUpdated()
+	assert.Equal(t, int64(10), owner.segmentID)
+	assert.Same(t, view, owner.view)
+
+	event := walview.SegmentSealedEvent{SegmentID: 10}
+	view.NotifySegmentSealed(event)
+	assert.Equal(t, event, owner.sealed)
+}
+
+func TestSegmentTombstoneWaitsForOldestQueryViewDataVersion(t *testing.T) {
+	view := NewSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{
+		SegmentId:              10,
+		State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+		CheckpointTimeTick:     20,
+		DataCheckpointTimeTick: 20,
+		SealedAtDataVersion:    &viewpb.DataVersion{StreamingVersion: 2},
+	}, nil)
+
+	assert.False(t, view.TryFinalizeTombstoneAt(qviews.DataVersion{StreamingVersion: 1}, true))
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, view.AssignmentMeta().GetState())
+	assert.True(t, view.TryFinalizeTombstoneAt(qviews.DataVersion{StreamingVersion: 2}, true))
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED, view.AssignmentMeta().GetState())
+}
+
+func TestSegmentTombstoneWaitsForFinalCommitDataVersion(t *testing.T) {
+	view := NewSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{
+		SegmentId:              10,
+		State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+		CheckpointTimeTick:     20,
+		DataCheckpointTimeTick: 20,
+	}, nil)
+
+	assert.False(t, view.TryFinalizeTombstoneAt(qviews.DataVersion{}, false))
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, view.AssignmentMeta().GetState())
+}
+
+type recordingSegmentViewOwner struct {
+	segmentID int64
+	view      *SegmentView
+	sealed    walview.SegmentSealedEvent
+}
+
+func (o *recordingSegmentViewOwner) SegmentDataUpdated(segmentID int64, view *SegmentView) {
+	o.segmentID = segmentID
+	o.view = view
+}
+
+func (o *recordingSegmentViewOwner) SegmentSealed(event walview.SegmentSealedEvent) {
+	o.sealed = event
 }
 
 func TestFlushedSegmentSnapshotReturnsFilteredSealedSegment(t *testing.T) {

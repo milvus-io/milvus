@@ -47,7 +47,6 @@ func NewManager(config Config) *Manager {
 		scheduler:        config.Scheduler,
 		dispatcher:       config.Dispatcher,
 		loadInfoProvider: config.LoadInfoProvider,
-		refs:             make(map[qviews.QueryViewKey]queryViewRef),
 	}
 }
 
@@ -66,6 +65,9 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	}
 	if _, ok := m.refs[req.Key]; !ok {
 		m.assertAcquireMonotonic(req.Key.QueryViewVersion.DataVersion)
+		if m.refs == nil {
+			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
+		}
 		m.refs[req.Key] = queryViewRef{onReady: req.OnReady}
 		if m.runtime == nil && m.task == nil {
 			m.startBuildLocked(req.Meta, build)
@@ -125,6 +127,15 @@ func (m *Manager) QueryRuntime(key qviews.QueryViewKey) (*QueryRuntime, bool) {
 	return m.runtime, true
 }
 
+func (m *Manager) OldestDataVersion() (qviews.DataVersion, bool) {
+	if m == nil {
+		return qviews.DataVersion{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return minQueryViewDataVersion(m.refs)
+}
+
 func (m *Manager) Close() {
 	if m == nil {
 		return
@@ -132,7 +143,7 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closed = true
 	runtime, task := m.takeRuntimeLocked()
-	m.refs = make(map[qviews.QueryViewKey]queryViewRef)
+	m.refs = nil
 	m.mu.Unlock()
 
 	cancelTask(task)

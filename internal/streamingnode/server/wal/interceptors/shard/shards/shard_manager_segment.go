@@ -50,7 +50,7 @@ func (m *shardManagerImpl) checkIfSegmentCanBeCreated(uniquePartitionKey Partiti
 		return err
 	}
 
-	if m := m.partitionManagers[uniquePartitionKey].GetSegmentManager(segmentID); m != nil {
+	if manager := m.partitionManager(uniquePartitionKey); manager != nil && manager.GetSegmentManager(segmentID) != nil {
 		return ErrSegmentExists
 	}
 	return nil
@@ -72,7 +72,10 @@ func (m *shardManagerImpl) checkIfSegmentCanBeFlushed(uniquePartitionKey Partiti
 
 	// segment can be flushed only if the segment exists, and its state is flushed.
 	// pm must exists, because we have checked the partition exists.
-	pm := m.partitionManagers[uniquePartitionKey]
+	pm := m.partitionManager(uniquePartitionKey)
+	if pm == nil {
+		return ErrSegmentNotFound
+	}
 	sm := pm.GetSegmentManager(segmentID)
 	if sm == nil {
 		return ErrSegmentNotFound
@@ -96,8 +99,8 @@ func (m *shardManagerImpl) CreateSegment(msg message.ImmutableCreateSegmentMessa
 	}
 
 	s := newSegmentAllocManager(m.pchannel, msg)
-	pm, ok := m.partitionManagers[uniquePartitionKey]
-	if !ok {
+	pm := m.ensurePartitionManager(uniquePartitionKey)
+	if pm == nil {
 		panic("critical error: partition manager not found when a segment is created")
 	}
 	pm.AddSegment(s)
@@ -118,8 +121,8 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 		return
 	}
 
-	pm, ok := m.partitionManagers[uniquePartitionKey]
-	if !ok {
+	pm := m.partitionManager(uniquePartitionKey)
+	if pm == nil {
 		logger.Warn(m.ctx, "partition not found when FlushSegment")
 		return
 	}
@@ -133,8 +136,8 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	defer m.mu.Unlock()
 
 	uniqueKey := PartitionUniqueKey{CollectionID: req.CollectionID, PartitionID: req.PartitionID}
-	pm, ok := m.partitionManagers[uniqueKey]
-	if !ok {
+	pm := m.ensurePartitionManager(uniqueKey)
+	if pm == nil {
 		return nil, ErrPartitionNotFound
 	}
 
@@ -174,7 +177,7 @@ func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(uniquePartitionKey Parti
 	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return nil, err
 	}
-	return m.partitionManagers[uniquePartitionKey].WaitPendingGrowingSegmentReady(), nil
+	return m.ensurePartitionManager(uniquePartitionKey).WaitPendingGrowingSegmentReady(), nil
 }
 
 // FlushAndFenceSegmentAllocUntil flush all segment that contains the message which timetick is less than the incoming timetick.
@@ -216,14 +219,11 @@ func (m *shardManagerImpl) flushAndFenceSegmentAllocUntil(collectionID int64, ti
 	}
 
 	collectionInfo := m.collections[collectionID]
-	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
+	segmentIDs := make([]int64, 0, len(collectionInfo.Partitions))
 	// collect all partitions
-	for partitionID := range collectionInfo.PartitionIDs {
+	for _, pm := range collectionInfo.Partitions {
 		// Seal all segments and fence assign to the partition manager.
-		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
-		pm, ok := m.partitionManagers[uniqueKey]
-		if !ok {
-			logger.Warn(m.ctx, "partition not found when FlushAndFenceSegmentAllocUntil", mlog.FieldPartitionID(partitionID))
+		if pm == nil {
 			continue
 		}
 		newSealedSegments := pm.FlushAndFenceSegmentUntil(timetick)
@@ -242,8 +242,8 @@ func (m *shardManagerImpl) AsyncFlushSegment(signal utils.SealSegmentSignal) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	pm, ok := m.partitionManagers[signal.SegmentBelongs.PartitionUniqueKey()]
-	if !ok {
+	pm := m.partitionManager(signal.SegmentBelongs.PartitionUniqueKey())
+	if pm == nil {
 		logger.Warn(m.ctx, "partition not found when AsyncMustSeal, may be already dropped")
 		return
 	}

@@ -25,13 +25,25 @@ func NewVChannelViewFromMeta(meta *streamingpb.VChannelMeta, configs ...runtimeC
 	)
 }
 
+func newVChannelViewFromOwnedMeta(meta *streamingpb.VChannelMeta) *VChannelView {
+	return newVChannelView(meta, meta.GetCheckpointTimeTick(), false, runtimeConfig{})
+}
+
 func NewVChannelView(
 	meta *streamingpb.VChannelMeta,
 	persistedMetaTimeTick uint64,
 	dirty bool,
 	config runtimeConfig,
 ) *VChannelView {
-	meta = proto.Clone(meta).(*streamingpb.VChannelMeta)
+	return newVChannelView(proto.Clone(meta).(*streamingpb.VChannelMeta), persistedMetaTimeTick, dirty, config)
+}
+
+func newVChannelView(
+	meta *streamingpb.VChannelMeta,
+	persistedMetaTimeTick uint64,
+	dirty bool,
+	config runtimeConfig,
+) *VChannelView {
 	return &VChannelView{
 		meta:                  meta,
 		persistedMetaTimeTick: persistedMetaTimeTick,
@@ -111,6 +123,27 @@ func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	return proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+}
+
+func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathRecoveryState, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || info.meta.GetCollectionInfo() == nil {
+		return moduleapi.VChannelWritePathRecoveryState{}, false
+	}
+	collection := info.meta.GetCollectionInfo()
+	state := moduleapi.VChannelWritePathRecoveryState{
+		VChannel:     info.meta.GetVchannel(),
+		CollectionID: collection.GetCollectionId(),
+		PartitionIDs: make([]int64, 0, len(collection.GetPartitions())),
+	}
+	for _, partition := range collection.GetPartitions() {
+		state.PartitionIDs = append(state.PartitionIDs, partition.GetPartitionId())
+	}
+	if schemas := collection.GetSchemas(); len(schemas) > 0 && schemas[len(schemas)-1].GetSchema() != nil {
+		state.Schema = proto.Clone(schemas[len(schemas)-1].GetSchema()).(*schemapb.CollectionSchema)
+	}
+	return state, true
 }
 
 func (info *VChannelView) Name() string {

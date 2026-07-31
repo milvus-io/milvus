@@ -34,6 +34,10 @@ func NewSegmentViewFromMeta(meta *streamingpb.SegmentAssignmentMeta, schema *sch
 	)
 }
 
+func NewSegmentViewFromMetaWithConfig(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, config ViewConfig) *SegmentView {
+	return NewSegmentViewFromMeta(meta, schema, runtimeConfigFromViewConfig(config))
+}
+
 func NewSegmentView(
 	meta *streamingpb.SegmentAssignmentMeta,
 	persistedMetaTimeTick uint64,
@@ -63,6 +67,7 @@ func NewSegmentView(
 		finalCommitDone:       finalCommitDoneFromMeta(meta),
 		metaAndData:           config.metaAndData,
 		commitL1Limiter:       config.commitL1Limiter,
+		owner:                 config.owner,
 	}
 }
 
@@ -94,6 +99,10 @@ func NewSegmentViewFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMe
 		schema,
 		firstRuntimeConfig(configs),
 	)
+}
+
+func NewSegmentViewFromCreateSegmentMessageWithConfig(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, config ViewConfig) *SegmentView {
+	return NewSegmentViewFromCreateSegmentMessage(msg, schema, runtimeConfigFromViewConfig(config))
 }
 
 func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
@@ -165,6 +174,7 @@ type SegmentView struct {
 	schema             *schemapb.CollectionSchema // schema used to encode pending insert data.
 	metaAndData        bool                       // false during meta-only replay; true when data tasks may run.
 	commitL1Limiter    *commitL1Limiter
+	owner              ViewOwner
 }
 
 // ViewOption configures a segment-level recovery view.
@@ -405,6 +415,24 @@ func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
 	return proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
 }
 
+func (info *SegmentView) WritePathRecoveryState() (moduleapi.SegmentWritePathRecoveryState, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+		return moduleapi.SegmentWritePathRecoveryState{}, false
+	}
+	state := moduleapi.SegmentWritePathRecoveryState{
+		VChannel:     info.meta.GetVchannel(),
+		CollectionID: info.meta.GetCollectionId(),
+		PartitionID:  info.meta.GetPartitionId(),
+		SegmentID:    info.meta.GetSegmentId(),
+	}
+	if info.meta.GetStat() != nil {
+		state.Stat = proto.Clone(info.meta.GetStat()).(*streamingpb.SegmentAssignmentStat)
+	}
+	return state, true
+}
+
 func (info *SegmentView) IDAndVChannel() (int64, string) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
@@ -642,12 +670,20 @@ func (info *SegmentView) MarkSnapshotPersisted(snapshot *streamingpb.SegmentAssi
 }
 
 func (info *SegmentView) NotifyDataUpdated() {
+	if info.owner != nil {
+		info.owner.SegmentDataUpdated(info.ID(), info)
+		return
+	}
 	if info.onDataUpdated != nil {
 		info.onDataUpdated()
 	}
 }
 
 func (info *SegmentView) NotifySegmentSealed(event walview.SegmentSealedEvent) {
+	if info.owner != nil {
+		info.owner.SegmentSealed(event)
+		return
+	}
 	if info.onSegmentSealed != nil {
 		info.onSegmentSealed(event)
 	}
@@ -665,6 +701,18 @@ func (info *SegmentView) markDataCheckpointLocked(timetick uint64) {
 func (info *SegmentView) TryFinalizeTombstone() bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
+	return info.maybeMarkTombstonedLocked()
+}
+
+func (info *SegmentView) TryFinalizeTombstoneAt(oldest qviews.DataVersion, hasOldest bool) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if !info.tombstoneFinalizeReadyLocked() {
+		return false
+	}
+	if sealedAt := info.meta.GetSealedAtDataVersion(); sealedAt != nil && hasOldest && !oldest.GTE(qviews.FromProtoDataVersion(sealedAt)) {
+		return false
+	}
 	return info.maybeMarkTombstonedLocked()
 }
 
@@ -828,6 +876,8 @@ func (s *SegmentView) tombstoneFinalizeReadyLocked() bool {
 	tombstoneTimeTick := s.meta.GetCheckpointTimeTick()
 	return s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
 		tombstoneTimeTick > 0 &&
+		s.finalCommitDone &&
+		s.meta.GetSealedAtDataVersion() != nil &&
 		s.meta.GetDataCheckpointTimeTick() >= tombstoneTimeTick
 }
 

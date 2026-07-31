@@ -241,8 +241,14 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	if resMgr == nil {
 		return nil, errors.New("recovered vchannel manager is nil")
 	}
-	for vchannel := range snapshot.VChannels {
-		param.MVCCManager.ApplyRecoveryBarrier(vchannel, param.LastTimeTickMessage.TimeTick())
+	if snapshot.WritePathRecovery != nil {
+		for vchannel := range snapshot.WritePathRecovery.VChannels {
+			param.MVCCManager.ApplyRecoveryBarrier(vchannel, param.LastTimeTickMessage.TimeTick())
+		}
+	} else {
+		for vchannel := range snapshot.VChannels {
+			param.MVCCManager.ApplyRecoveryBarrier(vchannel, param.LastTimeTickMessage.TimeTick())
+		}
 	}
 	snHandler := snview.RecoverPChannelSNQueryViewHandler(opt.Channel.Name, queryViewCatalog, resMgr, persistedViews)
 
@@ -258,11 +264,12 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	param.InitialRecoverSnapshot = snapshot
 	param.TxnManager = txn.NewTxnManager(param.ChannelInfo, snapshot.TxnBuffer.GetUncommittedMessageBuilder())
 	param.ShardManager = shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
-		ChannelInfo:            param.ChannelInfo,
-		WAL:                    param.WAL,
-		Scheduler:              nodescheduler.Get(),
-		InitialRecoverSnapshot: snapshot,
-		TxnManager:             param.TxnManager,
+		ChannelInfo:        param.ChannelInfo,
+		WAL:                param.WAL,
+		Scheduler:          nodescheduler.Get(),
+		WritePathRecovery:  snapshot.WritePathRecovery,
+		CheckpointTimeTick: snapshot.Checkpoint.TimeTick,
+		TxnManager:         param.TxnManager,
 	})
 	// Load salvage checkpoints from etcd (one per source cluster that was force-promoted from).
 	var salvageCheckpoints []*utility.ReplicateCheckpoint

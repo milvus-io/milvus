@@ -2,16 +2,32 @@ package shards
 
 import (
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func newSegmentAllocManagerFromRecovery(pchannel types.PChannelInfo, state moduleapi.SegmentWritePathRecoveryState) *segmentAllocManager {
+	meta := &streamingpb.SegmentAssignmentMeta{
+		CollectionId: state.CollectionID,
+		PartitionId:  state.PartitionID,
+		SegmentId:    state.SegmentID,
+		Vchannel:     state.VChannel,
+		State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+	}
+	if state.Stat != nil {
+		meta.Stat = proto.Clone(state.Stat).(*streamingpb.SegmentAssignmentStat)
+	}
+	return newSegmentAllocManagerFromProto(pchannel, meta)
+}
 
 // newSegmentAllocManagerFromProto creates a new segment assignment meta from proto.
 // if the segment is growing, the stat should be registered to stats manager,
@@ -24,8 +40,6 @@ func newSegmentAllocManagerFromProto(pchannel types.PChannelInfo, inner *streami
 	return &segmentAllocManager{
 		pchannel: pchannel,
 		inner:    inner,
-		ackSem:   atomic.NewInt32(0),
-		txnSem:   atomic.NewInt32(0),
 	}
 }
 
@@ -44,8 +58,6 @@ func newSegmentAllocManager(pchannel types.PChannelInfo, msg message.ImmutableCr
 	return &segmentAllocManager{
 		pchannel: pchannel,
 		inner:    meta,
-		ackSem:   atomic.NewInt32(0),
-		txnSem:   atomic.NewInt32(0),
 	}
 }
 
@@ -79,8 +91,8 @@ func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreat
 type segmentAllocManager struct {
 	pchannel types.PChannelInfo
 	inner    *streamingpb.SegmentAssignmentMeta
-	ackSem   *atomic.Int32 // the ackSem is increased when segment allocRows, decreased when the segment is acked.
-	txnSem   *atomic.Int32 // the running txn count of the segment, !!! it's lost after wal recovery.
+	ackSem   atomic.Int32 // the ackSem is increased when segment allocRows, decreased when the segment is acked.
+	txnSem   atomic.Int32 // the running txn count of the segment, !!! it's lost after wal recovery.
 
 	// only can be seen after the segment is flushed.
 	flushedStats *stats.SegmentStats
@@ -190,6 +202,6 @@ func (s *segmentAllocManager) AllocRows(req *AssignSegmentRequest) (*AssignSegme
 	// persist stats if too dirty.
 	return &AssignSegmentResult{
 		SegmentID:   s.GetSegmentID(),
-		Acknowledge: s.ackSem,
+		Acknowledge: &s.ackSem,
 	}, nil
 }

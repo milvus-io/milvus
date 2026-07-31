@@ -1374,6 +1374,86 @@ func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArro
 	}
 }
 
+func appendTypedFieldData(builder array.Builder, fieldData FieldData) (bool, error) {
+	validity := func(nullable bool, valid []bool) []bool {
+		if nullable {
+			return valid
+		}
+		return nil
+	}
+	switch data := fieldData.(type) {
+	case *BoolFieldData:
+		b, ok := builder.(*array.BooleanBuilder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.BooleanBuilder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *Int8FieldData:
+		b, ok := builder.(*array.Int8Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Int8Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *Int16FieldData:
+		b, ok := builder.(*array.Int16Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Int16Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *Int32FieldData:
+		b, ok := builder.(*array.Int32Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Int32Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *Int64FieldData:
+		b, ok := builder.(*array.Int64Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *TimestamptzFieldData:
+		b, ok := builder.(*array.Int64Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *FloatFieldData:
+		b, ok := builder.(*array.Float32Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Float32Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *DoubleFieldData:
+		b, ok := builder.(*array.Float64Builder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.Float64Builder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *StringFieldData:
+		b, ok := builder.(*array.StringBuilder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.StringBuilder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *JSONFieldData:
+		b, ok := builder.(*array.BinaryBuilder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.BinaryBuilder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	case *GeometryFieldData:
+		b, ok := builder.(*array.BinaryBuilder)
+		if !ok {
+			return true, merr.WrapErrServiceInternalMsg("expected *array.BinaryBuilder, got %T", builder)
+		}
+		b.AppendValues(data.Data, validity(data.Nullable, data.ValidData))
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
 func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.CollectionSchema) error {
 	if data == nil {
 		return nil
@@ -1393,6 +1473,9 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 
 		if fieldData.RowNum() == 0 {
 			return merr.WrapErrServiceInternalMsg("row num is 0 for field %s", field.Name)
+		}
+		if handled, err := appendTypedFieldData(fBuilder, fieldData); handled {
+			return err
 		}
 
 		// Get element type for ArrayOfVector, otherwise use None

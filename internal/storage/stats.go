@@ -147,12 +147,21 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			return
 		}
 
-		b := make([]byte, 8)
+		minValue, maxValue := data[0], data[0]
+		var buffer [8]byte
 		for _, int64Value := range data {
-			pk := NewInt64PrimaryKey(int64Value)
-			stats.UpdateMinMax(pk)
-			common.Endian.PutUint64(b, uint64(int64Value))
-			stats.BF.Add(b)
+			if int64Value < minValue {
+				minValue = int64Value
+			}
+			if int64Value > maxValue {
+				maxValue = int64Value
+			}
+			common.Endian.PutUint64(buffer[:], uint64(int64Value))
+			stats.BF.Add(buffer[:])
+		}
+		stats.UpdateMinMax(NewInt64PrimaryKey(minValue))
+		if maxValue != minValue {
+			stats.UpdateMinMax(NewInt64PrimaryKey(maxValue))
 		}
 	case schemapb.DataType_VarChar:
 		data := msgs.(*StringFieldData).Data
@@ -161,10 +170,19 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			return
 		}
 
+		minValue, maxValue := data[0], data[0]
 		for _, str := range data {
-			pk := NewVarCharPrimaryKey(str)
-			stats.UpdateMinMax(pk)
+			if str < minValue {
+				minValue = str
+			}
+			if str > maxValue {
+				maxValue = str
+			}
 			stats.BF.AddString(str)
+		}
+		stats.UpdateMinMax(NewVarCharPrimaryKey(minValue))
+		if maxValue != minValue {
+			stats.UpdateMinMax(NewVarCharPrimaryKey(maxValue))
 		}
 	default:
 		// TODO::
