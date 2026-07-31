@@ -201,7 +201,9 @@ func TestCheckAndFlattenStructFieldDataAllowsMatchingRecursiveArrayElementCounts
 				Name: "test_struct",
 				Fields: []*schemapb.FieldSchema{
 					{
-						Name: "nested",
+						Name:        "nested",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
 						TypeSchema: &schemapb.TypeSchema{
 							Kind: &schemapb.TypeSchema_ArrayElement{
 								ArrayElement: &schemapb.TypeSchema{

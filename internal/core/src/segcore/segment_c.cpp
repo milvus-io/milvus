@@ -877,6 +877,7 @@ struct FieldInfo {
     std::string field_name;
     milvus::DataType data_type;
     milvus::DataType element_type;
+    bool is_nested_array;
     bool nullable;
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
@@ -1591,7 +1592,7 @@ BuildArrayForChunk(const FieldInfo& field_info,
         }
 
         case milvus::DataType::ARRAY: {
-            if (field_info.element_type == milvus::DataType::ARRAY) {
+            if (field_info.is_nested_array) {
                 auto array_vec =
                     dynamic_cast<const milvus::segcore::ConcurrentVector<
                         milvus::ArrayValue>*>(field_info.vec_base);
@@ -2136,6 +2137,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.element_type = data_type == milvus::DataType::ARRAY
                                     ? field_meta.get_array_element_type()
                                     : field_meta.get_element_type();
+            info.is_nested_array = field_meta.has_element_schema();
             info.nullable = field_meta.is_nullable();
             info.dim = dim;
             info.vec_base = vec_base;

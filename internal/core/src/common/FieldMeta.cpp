@@ -65,26 +65,6 @@ ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
 
 }  // namespace
 
-void
-FieldMeta::ValidateFieldTypeSchema(const proto::schema::TypeSchema& type_schema,
-                                   DataType data_type,
-                                   DataType element_type,
-                                   const std::string& field_name) {
-    const auto schema_types = ValidateTypeSchemaNode(type_schema, field_name);
-    AssertInfo(schema_types.data_type == data_type,
-               "type_schema root type {} does not match data_type {} for "
-               "field {}",
-               schema_types.data_type,
-               data_type,
-               field_name);
-    AssertInfo(schema_types.element_type == element_type,
-               "type_schema direct element type {} does not match "
-               "element_type {} for field {}",
-               schema_types.element_type,
-               element_type,
-               field_name);
-}
-
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params) {
     auto iter = params.find("analyzer_params");
@@ -218,9 +198,20 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto element_type = DataType(schema_proto.element_type());
     auto external_field_mapping = schema_proto.external_field();
 
+    const bool has_array_type_pair =
+        data_type == DataType::ARRAY && element_type == DataType::ARRAY;
+    AssertInfo(schema_proto.has_type_schema() == has_array_type_pair,
+               "type_schema, data_type ARRAY, and element_type ARRAY must be "
+               "specified together for nested ARRAY field {}",
+               name.get());
+
     if (schema_proto.has_type_schema()) {
-        ValidateFieldTypeSchema(
-            schema_proto.type_schema(), data_type, element_type, name.get());
+        const auto schema_types =
+            ValidateTypeSchemaNode(schema_proto.type_schema(), name.get());
+        AssertInfo(schema_types.data_type == DataType::ARRAY &&
+                       schema_types.element_type == DataType::ARRAY,
+                   "type_schema is only supported for nested ARRAY field {}",
+                   name.get());
     }
 
     auto with_type_schema = [&](FieldMeta field_meta) -> FieldMeta {

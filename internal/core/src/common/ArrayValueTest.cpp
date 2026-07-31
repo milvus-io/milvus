@@ -50,6 +50,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 #include "segcore/segment_c.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/MmapManager.h"
 #include "storage/Util.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -250,7 +251,7 @@ StorageV3NestedArraySchema(bool enable_mmap) {
 std::vector<ScalarFieldProto>
 StorageV3NestedArrayRows() {
     // Keep the first growing chunk larger than Parquet's default row-group
-    // target so the sealed reader exposes more than one cell.
+    // target so the writer emits more than one row group.
     std::string large_value(
         milvus_storage::DEFAULT_MAX_ROW_GROUP_SIZE + 64 * 1024, 'x');
     return {
@@ -305,6 +306,15 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     const auto original_chunk_rows = segcore_config.get_chunk_rows();
     DeferLambda([&]() { segcore_config.set_chunk_rows(original_chunk_rows); });
     segcore_config.set_chunk_rows(2);
+
+    const auto original_cell_target_size =
+        segcore::storagev2translator::GetCellTargetSizeBytes();
+    Defer restore_cell_target_size([&]() {
+        segcore::storagev2translator::SetCellTargetSizeBytes(
+            original_cell_target_size);
+    });
+    // The default 4 MiB target may merge the row groups back into one cell.
+    segcore::storagev2translator::SetCellTargetSizeBytes(1);
 
     auto growing = segcore::CreateGrowingSegment(
         schema, empty_index_meta, 0, segcore_config);

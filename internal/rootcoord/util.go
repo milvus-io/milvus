@@ -467,18 +467,14 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 		}
 
 		for _, field := range schema.GetFields() {
+			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+				return err
+			}
 			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 				msg := fmt.Sprintf("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
-			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
-				return err
-			}
 			switch field.GetElementType() {
-			case schemapb.DataType_Array:
-				if field.GetTypeSchema() == nil {
-					return merr.WrapErrParameterInvalidMsg("nested array field %s should be specified by type_schema", field.GetName())
-				}
 			case schemapb.DataType_ArrayOfVector:
 				return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.GetName())
 			case schemapb.DataType_ArrayOfStruct:

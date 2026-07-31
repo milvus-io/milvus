@@ -130,10 +130,10 @@ class FieldMeta {
           type_schema_(std::move(type_schema)) {
         Assert(IsArrayDataType(type_));
         if (type_schema_.has_value()) {
-            AssertInfo(type_ == DataType::ARRAY,
-                       "type_schema is only supported for ARRAY FieldMeta");
-            ValidateFieldTypeSchema(
-                *type_schema_, type_, element_type_, name_.get());
+            AssertInfo(
+                type_ == DataType::ARRAY && element_type_ == DataType::ARRAY,
+                "type_schema is only supported for nested ARRAY "
+                "FieldMeta");
         }
     }
 
@@ -383,13 +383,6 @@ class FieldMeta {
     ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto);
 
  private:
-    static void
-    ValidateFieldTypeSchema(
-        const milvus::proto::schema::TypeSchema& type_schema,
-        DataType data_type,
-        DataType element_type,
-        const std::string& field_name);
-
     struct VectorInfo {
         int64_t dim_;
         std::optional<knowhere::MetricType> metric_type_;

@@ -84,7 +84,7 @@ TEST(FieldMetaTest, ParseFromWithoutExternalField) {
     EXPECT_TRUE(field.get_external_field_mapping().empty());
 }
 
-TEST(FieldMetaTest, TypeSchemaRoundTripForScalarField) {
+TEST(FieldMetaTest, RejectTypeSchemaForScalarField) {
     milvus::proto::schema::FieldSchema proto;
     proto.set_fieldid(202);
     proto.set_name("typed_scalar");
@@ -92,12 +92,51 @@ TEST(FieldMetaTest, TypeSchemaRoundTripForScalarField) {
     proto.mutable_type_schema()->set_leaf_type(
         milvus::proto::schema::DataType::Int64);
 
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, RejectLegacyNestedArray) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("legacy_nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, NestedArrayRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    auto* child = proto.mutable_type_schema()->mutable_array_element();
+    child->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
     auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::ARRAY);
+    EXPECT_EQ(field.get_element_type(), DataType::ARRAY);
+    EXPECT_TRUE(field.has_element_schema());
+
     auto serialized = field.ToProto();
     ASSERT_TRUE(serialized.has_type_schema());
-    EXPECT_TRUE(serialized.type_schema().has_leaf_type());
-    EXPECT_EQ(serialized.type_schema().leaf_type(),
-              milvus::proto::schema::DataType::Int64);
+    EXPECT_EQ(serialized.data_type(), milvus::proto::schema::DataType::Array);
+    EXPECT_EQ(serialized.element_type(),
+              milvus::proto::schema::DataType::Array);
+    EXPECT_EQ(serialized.SerializeAsString(), proto.SerializeAsString());
+}
+
+TEST(FieldMetaTest, RejectTypeSchemaOnlyNestedArray) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("nested_array");
+    auto* child = proto.mutable_type_schema()->mutable_array_element();
+    child->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
 }
 
 TEST(FieldMetaTest, LocalFormatRoundTrip) {

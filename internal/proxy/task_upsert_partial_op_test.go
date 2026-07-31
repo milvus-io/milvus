@@ -159,7 +159,9 @@ func TestValidateFieldPartialUpdateOps_RemoveOnArrayField(t *testing.T) {
 
 func TestValidateFieldPartialUpdateOps_RejectsRecursiveArrayOps(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
-		Name: "nested",
+		Name:        "nested",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
 		TypeSchema: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
 			ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
 				ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{

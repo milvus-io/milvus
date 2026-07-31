@@ -761,6 +761,33 @@ func Test_updateMaxFieldIDProperty(t *testing.T) {
 	})
 }
 
+func TestCheckFieldSchemaNestedArrayTypeRepresentation(t *testing.T) {
+	typeSchema := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{{
+		Name:        "nested_array",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema:  typeSchema,
+	}}))
+
+	err := checkFieldSchema([]*schemapb.FieldSchema{{
+		Name:       "nested_array",
+		TypeSchema: typeSchema,
+	}})
+	require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
+}
+
 func TestValidateLocalFormat(t *testing.T) {
 	tests := []struct {
 		name      string

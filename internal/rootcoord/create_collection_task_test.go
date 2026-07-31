@@ -878,10 +878,10 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nested array field nested_array should be specified by type_schema")
+		assert.Contains(t, err.Error(), "nested array field nested_array must specify type_schema")
 	})
 
-	t.Run("struct array field - nested array of vector rejected", func(t *testing.T) {
+	t.Run("struct array field - non-nested type schema rejected", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -896,10 +896,8 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 					Name: "struct_field",
 					Fields: []*schemapb.FieldSchema{
 						{
-							Name:        "nested_array_of_vector",
-							DataType:    schemapb.DataType_Array,
-							ElementType: schemapb.DataType_ArrayOfVector,
-							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							Name:       "array_of_vector",
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 							TypeSchema: &schemapb.TypeSchema{
 								Kind: &schemapb.TypeSchema_ArrayElement{
 									ArrayElement: &schemapb.TypeSchema{
@@ -914,7 +912,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nested ArrayOfVector is not supported")
+		assert.Contains(t, err.Error(), "type_schema is only supported for nested array")
 	})
 
 	t.Run("struct array field - invalid element type", func(t *testing.T) {

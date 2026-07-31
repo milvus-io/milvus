@@ -8599,9 +8599,11 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		return &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					Name:       "nested",
-					TypeParams: rootParams,
-					TypeSchema: testArrayTypeSchema(child, rootParams...),
+					Name:        "nested",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Array,
+					TypeParams:  rootParams,
+					TypeSchema:  testArrayTypeSchema(child, rootParams...),
 				},
 			},
 		}
@@ -8621,9 +8623,11 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		return &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					Name:       "nested",
-					TypeParams: rootParams,
-					TypeSchema: testArrayTypeSchema(child, rootParams...),
+					Name:        "nested",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Array,
+					TypeParams:  rootParams,
+					TypeSchema:  testArrayTypeSchema(child, rootParams...),
 				},
 			},
 		}

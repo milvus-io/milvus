@@ -36,100 +36,82 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 		}
 	}
 
-	t.Run("unset", func(t *testing.T) {
-		require.NoError(t, ValidateFieldTypeSchema(&schemapb.FieldSchema{
+	t.Run("legacy scalar", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int64,
-		}))
+		})
+		require.NoError(t, err)
 	})
 
-	t.Run("matching leaf", func(t *testing.T) {
-		require.NoError(t, ValidateFieldTypeSchema(&schemapb.FieldSchema{
+	t.Run("legacy array", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int32,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("legacy validation is delegated", func(t *testing.T) {
+		require.NoError(t, ValidateFieldTypeSchema(&schemapb.FieldSchema{}))
+	})
+
+	t.Run("nested array", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("scalar type schema is rejected", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+			Name:       "field",
 			DataType:   schemapb.DataType_Int64,
 			TypeSchema: leaf(schemapb.DataType_Int64),
-		}))
+		})
+		require.ErrorContains(t, err, "only supported for nested array")
 	})
 
-	t.Run("matching array", func(t *testing.T) {
-		require.NoError(t, ValidateFieldTypeSchema(&schemapb.FieldSchema{
+	t.Run("single-level array type schema is rejected", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+			Name:        "field",
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Int32,
 			TypeSchema:  array(leaf(schemapb.DataType_Int32)),
-		}))
+		})
+		require.ErrorContains(t, err, "only supported for nested array")
 	})
 
-	t.Run("matching recursive array", func(t *testing.T) {
-		require.NoError(t, ValidateFieldTypeSchema(&schemapb.FieldSchema{
+	t.Run("nested array requires type schema", func(t *testing.T) {
+		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
+			Name:        "field",
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Array,
-			TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
-		}))
+		})
+		require.ErrorContains(t, err, "must specify type_schema")
 	})
 
-	t.Run("data type mismatch", func(t *testing.T) {
+	t.Run("nested array requires array compatibility fields", func(t *testing.T) {
 		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
 			Name:       "field",
-			DataType:   schemapb.DataType_Array,
-			TypeSchema: leaf(schemapb.DataType_Int64),
+			TypeSchema: array(array(leaf(schemapb.DataType_Int32))),
 		})
-		require.ErrorContains(t, err, "does not match data_type")
+		require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
 	})
 
-	t.Run("element type mismatch", func(t *testing.T) {
+	t.Run("array leaf must use array element", func(t *testing.T) {
 		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int32,
-			TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
-		})
-		require.ErrorContains(t, err, "does not match element_type")
-	})
-
-	t.Run("leaf field element type mismatch", func(t *testing.T) {
-		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Int64,
-			ElementType: schemapb.DataType_Int32,
-			TypeSchema:  leaf(schemapb.DataType_Int64),
-		})
-		require.ErrorContains(t, err, "does not match element_type")
-	})
-
-	t.Run("root array must use array element", func(t *testing.T) {
-		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int32,
-			TypeSchema:  leaf(schemapb.DataType_Array),
-		})
-		require.ErrorContains(t, err, "must use array_element")
-	})
-
-	t.Run("nested array must use array element", func(t *testing.T) {
-		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Array,
-			TypeSchema:  array(leaf(schemapb.DataType_Array)),
-		})
-		require.ErrorContains(t, err, "must use array_element")
-	})
-
-	t.Run("deeply nested array must use array element", func(t *testing.T) {
-		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Array,
-			TypeSchema:  array(array(leaf(schemapb.DataType_Array))),
+			Name:       "field",
+			TypeSchema: array(array(leaf(schemapb.DataType_Array))),
 		})
 		require.ErrorContains(t, err, "must use array_element")
 	})
 
 	t.Run("deeply nested kind is required", func(t *testing.T) {
 		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Array,
-			TypeSchema:  array(array(&schemapb.TypeSchema{})),
+			Name:       "field",
+			TypeSchema: array(array(&schemapb.TypeSchema{})),
 		})
 		require.ErrorContains(t, err, "kind should be specified")
 	})
@@ -137,7 +119,6 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 	t.Run("missing kind", func(t *testing.T) {
 		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
 			Name:       "field",
-			DataType:   schemapb.DataType_Int64,
 			TypeSchema: &schemapb.TypeSchema{},
 		})
 		require.ErrorContains(t, err, "kind should be specified")
@@ -145,9 +126,7 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 
 	t.Run("missing array element", func(t *testing.T) {
 		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
-			Name:        "field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
+			Name: "field",
 			TypeSchema: &schemapb.TypeSchema{
 				Kind: &schemapb.TypeSchema_ArrayElement{},
 			},
@@ -158,8 +137,7 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 	t.Run("invalid leaf type", func(t *testing.T) {
 		err := ValidateFieldTypeSchema(&schemapb.FieldSchema{
 			Name:       "field",
-			DataType:   schemapb.DataType(999),
-			TypeSchema: leaf(schemapb.DataType(999)),
+			TypeSchema: array(array(leaf(schemapb.DataType(999)))),
 		})
 		require.ErrorContains(t, err, "leaf_type 999 is not valid")
 	})
