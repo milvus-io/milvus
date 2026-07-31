@@ -1391,6 +1391,60 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
 }
 
+// The dividing assertion against async semantics: with async first build
+// turned off, the batch that crosses the build threshold must leave the
+// index fully synced *before* Insert returns -- no WaitSynced polling
+// needed, unlike every other test in this suite.
+TEST(GrowingIndexAsyncBuildTest, SyncFallbackBehavesLikeLegacy) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild sync_build(config, false);
+    ApplyAsyncBuildConfig(config);
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segmentImplPtr, nullptr);
+
+    // A single batch that crosses kAsyncBuildThreshold (22698): in sync mode
+    // Insert() builds and adds the interim index inline on the calling
+    // thread, so there is no background task to wait for.
+    constexpr int64_t rows = kAsyncBuildThreshold + 5000;
+    InsertAsyncBatch(segment.get(), fixture.schema, rows, /*seed=*/13);
+
+    // No WaitSynced: the assertion is made immediately after Insert returns.
+    // (The kBuilding/kSynced state machine is async-only -- see
+    // AppendSegmentIndexDense's "Legacy synchronous path" branch in
+    // FieldIndexing.cpp, which drives `built_` instead and never touches
+    // state_ -- so this test does not assert on get_growing_index_state().)
+    EXPECT_TRUE(
+        segmentImplPtr->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    EXPECT_EQ(IndexedRowCount(segmentImplPtr, fixture.vec), rows);
+
+    // try_remove_chunks runs inline on the same insert path in sync mode, so
+    // raw chunks are reclaimed immediately too (IVF_FLAT_CC keeps raw data,
+    // so the index owns it now) -- matching legacy pre-async behavior.
+    auto* field_data =
+        segmentImplPtr->get_insert_record().get_data<milvus::FloatVector>(
+            fixture.vec);
+    EXPECT_EQ(field_data->num_chunk(), 0);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int num_queries = 5;
+    constexpr int top_k = 5;
+    auto ph_group =
+        MakeAsyncPlaceholders(DataType::VECTOR_FLOAT, plan.get(), num_queries);
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+    EXPECT_EQ(sr->total_nq_, num_queries);
+    EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
+    EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
+}
+
 TEST(GrowingIndexAsyncBuildTest, BuildFailureDisablesIndexPermanently) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
