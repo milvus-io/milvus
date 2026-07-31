@@ -308,7 +308,8 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
     EvalPrepared(proto::plan::GISFunctionFilterExpr_GISOp op,
                  const PreparedGeometry& prepared,
                  const Geometry& query_geom,
-                 const Geometry& left) const;
+                 const Geometry& left,
+                 GEOSContextHandle_t operation_ctx) const;
 
     GISGroupStatePtr st_;
     int64_t current_pos_{0};

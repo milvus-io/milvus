@@ -152,8 +152,9 @@ class TextLobSpillover {
                    "TEXT value too large for LOB spillover: {} bytes (max 4GB)",
                    size);
 
+        auto current_offset = current_offset_.load(std::memory_order_relaxed);
         TextLobRef ref;
-        ref.offset = current_offset_;
+        ref.offset = current_offset;
         ref.size = static_cast<uint32_t>(size);
         ref.flags = 0;
 
@@ -162,16 +163,16 @@ class TextLobSpillover {
             ssize_t n = ::pwrite(fd_,
                                  data + total_written,
                                  size - total_written,
-                                 current_offset_ + total_written);
+                                 current_offset + total_written);
             AssertInfo(
                 n > 0,
                 "Failed to pwrite to LOB spillover file: {} at offset {}",
                 path_,
-                current_offset_ + total_written);
+                current_offset + total_written);
             total_written += n;
         }
 
-        current_offset_ += size;
+        current_offset_.store(current_offset + size, std::memory_order_relaxed);
         return ref.Encode();
     }
 
@@ -221,7 +222,7 @@ class TextLobSpillover {
      */
     uint64_t
     GetDiskUsage() const {
-        return current_offset_;
+        return current_offset_.load(std::memory_order_relaxed);
     }
 
  private:
@@ -272,7 +273,7 @@ class TextLobSpillover {
 
     int fd_;
     std::mutex write_mutex_;
-    uint64_t current_offset_;
+    std::atomic<uint64_t> current_offset_;
 };
 
 }  // namespace milvus::segcore

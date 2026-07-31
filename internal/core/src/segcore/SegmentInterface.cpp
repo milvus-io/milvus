@@ -761,7 +761,6 @@ SegmentInternalInterface::set_field_avg_size(const FieldMeta& field_meta,
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
     auto data_type = field_meta.get_data_type();
-
     std::unique_lock lck(mutex_);
     if (IsVariableDataType(data_type)) {
         AssertInfo(num_rows > 0,
@@ -923,7 +922,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()
                                     ->mutable_data();

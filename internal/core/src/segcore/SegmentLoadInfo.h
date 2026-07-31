@@ -155,6 +155,22 @@ struct LoadDiff {
         return manifest_updated;
     }
 
+    // True when the reopen replaces the data of rows that already existed
+    // before it (as opposed to only adding new fields / indexes). Any process-
+    // level result cached against {segment_id, predicate, row_count} — which
+    // carries no data generation — becomes stale in exactly these cases and
+    // must be invalidated. New-field-only changes (fields_to_fill_default,
+    // *_to_load, index (re)builds over unchanged values) do not alter an
+    // existing predicate's result and are intentionally excluded.
+    [[nodiscard]] bool
+    ReplacesExistingFieldData() const {
+        return !binlogs_to_replace.empty() ||
+               !column_groups_to_replace.empty() ||
+               !column_groups_to_lazyreplace.empty() ||
+               !field_data_to_drop.empty() || !fields_to_reload.empty() ||
+               manifest_updated || load_external_manifest;
+    }
+
     [[nodiscard]] std::string
     ToString() const {
         std::ostringstream oss;

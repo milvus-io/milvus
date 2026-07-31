@@ -49,6 +49,7 @@ EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
                       const PreparedGeometry& prepared,
                       const Geometry& query_geom,
                       const Geometry& left,
+                      GEOSContextHandle_t operation_ctx,
                       double distance) {
     switch (op) {
         case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
@@ -68,10 +69,10 @@ EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
             return prepared.contains(left);
         case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
             // No prepared version - fall back to regular geometry.
-            return left.equals(query_geom);
+            return left.equals(operation_ctx, query_geom);
         case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
             // Distance-based operation - no prepared version.
-            return left.dwithin(query_geom, distance);
+            return left.dwithin(operation_ctx, query_geom, distance);
         default:
             ThrowInfo(
                 NotImplemented, "unknown GIS op : {}", static_cast<int>(op));
