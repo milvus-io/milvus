@@ -18,6 +18,7 @@
 
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
+#include <algorithm>
 #include <exception>
 #include <utility>
 
@@ -183,7 +184,7 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
     }
 
     auto& builder = it->second;
-    auto ast = AppendDataToBuilder(value, builder);
+    auto ast = AppendJsonStatsValueToBuilder(value, builder);
     AssertInfo(ast.ok(), "failed to append data to builder");
 }
 
@@ -199,7 +200,7 @@ JsonStatsParquetWriter::AppendRow(
         }
 
         auto& builder = it->second;
-        auto status = AppendDataToBuilder(value, builder);
+        auto status = AppendJsonStatsValueToBuilder(value, builder);
         AssertInfo(status.ok(), "failed to append data to builder");
     }
 
@@ -207,7 +208,67 @@ JsonStatsParquetWriter::AppendRow(
 }
 
 arrow::Status
-JsonStatsParquetWriter::AppendDataToBuilder(
+JsonStatsParquetWriter::AppendRecordBatch(
+    const std::shared_ptr<arrow::RecordBatch>& batch) {
+    if (batch == nullptr) {
+        return arrow::Status::Invalid(
+            "cannot append a null json stats record batch");
+    }
+    if (schema_ == nullptr || builders_.empty()) {
+        return arrow::Status::Invalid(
+            "json stats parquet writer is not initialized");
+    }
+    if (builders_.size() != static_cast<size_t>(batch->num_columns())) {
+        return arrow::Status::Invalid(
+            "json stats record batch column count does not match writer "
+            "builder count");
+    }
+    if (!schema_->Equals(*batch->schema(), true)) {
+        return arrow::Status::Invalid(
+            "json stats record batch schema does not match writer schema");
+    }
+    auto validate_status = batch->Validate();
+    if (!validate_status.ok()) {
+        return validate_status;
+    }
+
+    const auto target_batch_size = std::max<size_t>(1, batch_size_);
+    if (unflushed_row_count_ >= target_batch_size) {
+        auto result = WriteCurrentBatch();
+        if (!result.ok()) {
+            return result.status();
+        }
+    }
+    int64_t offset = 0;
+    while (offset < batch->num_rows()) {
+        const auto available_rows = target_batch_size - unflushed_row_count_;
+        const auto rows_to_append = std::min<int64_t>(
+            static_cast<int64_t>(available_rows), batch->num_rows() - offset);
+
+        for (int column = 0; column < batch->num_columns(); ++column) {
+            arrow::ArraySpan array_span(*batch->column(column)->data());
+            auto status = builders_[column]->AppendArraySlice(
+                array_span, offset, rows_to_append);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+
+        offset += rows_to_append;
+        unflushed_row_count_ += rows_to_append;
+        all_row_count_ += rows_to_append;
+        if (unflushed_row_count_ >= target_batch_size) {
+            auto result = WriteCurrentBatch();
+            if (!result.ok()) {
+                return result.status();
+            }
+        }
+    }
+    return arrow::Status::OK();
+}
+
+arrow::Status
+AppendJsonStatsValueToBuilder(
     const std::string& value,
     const std::shared_ptr<arrow::ArrayBuilder>& builder) {
     auto type_id = builder->type()->id();
