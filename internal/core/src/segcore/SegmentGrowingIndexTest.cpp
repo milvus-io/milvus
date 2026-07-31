@@ -57,6 +57,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "storage/FileManager.h"
+#include "storage/ThreadPool.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -2003,7 +2004,13 @@ TEST(GrowingIndexAsyncBuildTest, SearchDuringBuildUsesBruteForce) {
     // One batch crosses the build threshold on its own, so the whole segment
     // is exactly this batch and every seg_offset is a local row index.
     constexpr int64_t per_batch = 25000;
-    constexpr int64_t probe_row = 4237;
+    // probe_row must be in [kAsyncBuildThreshold, 25000) to lie in the
+    // catch-up window: at kAfterBuild, rows < kAsyncBuildThreshold are already
+    // indexed by Phase 1, so a probe there would not discriminate brute-force
+    // from index serving. At 23500, the row is absent from the index until
+    // catch-up completes, so a hit at the kAfterBuild window proves chunk
+    // scanning via brute-force.
+    constexpr int64_t probe_row = 23500;
     auto batch = InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 5);
     auto probe_vectors = batch.get_col<float>(fixture.vec);
     ASSERT_EQ(probe_vectors.size(), per_batch * kAsyncDim);
@@ -2107,6 +2114,9 @@ TEST(GrowingIndexAsyncBuildTest, InsertDuringCatchupLosesNoRows) {
     constexpr int64_t catchup_batch = 5000;
     constexpr int64_t n_catchup = 3;
     constexpr int64_t probe_row = 1234;
+    auto* field_data =
+        segment_impl->get_insert_record().get_data<milvus::FloatVector>(
+            fixture.vec);
     std::vector<std::unique_ptr<GeneratedData>> during_build;
     for (int64_t i = 0; i < n_catchup; i++) {
         during_build.push_back(std::make_unique<GeneratedData>(
@@ -2120,6 +2130,9 @@ TEST(GrowingIndexAsyncBuildTest, InsertDuringCatchupLosesNoRows) {
                       .get_growing_index_state(),
                   VectorFieldIndexing::GrowingIndexState::kBuilding)
             << "catch-up batch " << i;
+        // Each insert calls try_remove_chunks while state==kBuilding, so this
+        // directly asserts chunks survive during kBuilding.
+        EXPECT_GT(field_data->num_chunk(), 0) << "catch-up batch " << i;
     }
 
     release_after_build.store(true);
@@ -2259,7 +2272,7 @@ TEST(GrowingIndexAsyncBuildTest, DestroyWhileQueuedReturnsImmediately) {
     // than hard-coding that, add segments until one of them fails to start
     // within the settle window. That segment's task is the queued one, and by
     // construction it is the only queued one.
-    constexpr int kMaxSegments = 8;
+    const int kMaxSegments = std::max(8, milvus::CPU_NUM + 2);
     constexpr int64_t per_batch = 25000;
     int queued_index = -1;
     for (int i = 0; i < kMaxSegments; i++) {
