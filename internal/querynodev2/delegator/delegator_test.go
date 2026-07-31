@@ -84,6 +84,18 @@ type DelegatorSuite struct {
 	rootPath     string
 }
 
+type materializeTestInsertMessage struct {
+	body *msgpb.InsertRequest
+}
+
+func (m *materializeTestInsertMessage) MustBody() *msgpb.InsertRequest {
+	return m.body
+}
+
+func (m *materializeTestInsertMessage) OverwriteBody(body *msgpb.InsertRequest) {
+	m.body = body
+}
+
 func (s *DelegatorSuite) SetupSuite() {
 	paramtable.Init()
 }
@@ -3449,7 +3461,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		s.NoError(function.GetManager().Alloc(collectionID, walKey, schema1))
 		defer function.GetManager().Release(collectionID, walKey)
 
-		changed, err := function.GetManager().Materialize(context.Background(), collectionID, walKey, schema1.GetVersion(), &msgpb.InsertRequest{
+		changed, err := function.GetManager().Materialize(context.Background(), collectionID, walKey, schema1.GetVersion(), &materializeTestInsertMessage{body: &msgpb.InsertRequest{
 			FieldsData: []*schemapb.FieldData{{
 				Type:    schemapb.DataType_VarChar,
 				FieldId: 102,
@@ -3462,7 +3474,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 				},
 			}},
 			NumRows: 1,
-		})
+		}})
 		s.False(changed)
 		s.ErrorContains(err, "minhash function should only have one output field")
 	})

@@ -591,6 +591,118 @@ func TestParseExternalSpec_ArnKeys(t *testing.T) {
 }
 
 func TestValidateExtfsComplete_Azure(t *testing.T) {
+	azureBrokerSpec := func() map[string]string {
+		return map[string]string{ //nolint:gosec // synthetic test values, not credentials
+			"access_key_id":             "mystorageacct",
+			"cloud_provider":            "azure",
+			"region":                    "westus3",
+			"azure_client_id":           "client",
+			"azure_tenant_id":           "tenant",
+			"azure_credential_endpoint": "https://broker.example.com/v1/credentials/assume-role",
+		}
+	}
+
+	t.Run("azure_credential_broker", func(t *testing.T) {
+		err := ValidateExtfsComplete(
+			"azure://core.windows.net/container/path",
+			azureBrokerSpec(),
+		)
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_credential_broker_rejects_noncanonical_provider_case", func(t *testing.T) {
+		extfs := azureBrokerSpec()
+		extfs["cloud_provider"] = "Azure"
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must use the canonical lowercase value \"azure\"")
+	})
+
+	t.Run("azure_credential_mode_missing", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
+			"cloud_provider": "azure",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "credential mode missing")
+	})
+
+	t.Run("azure_credential_broker_missing_required_field", func(t *testing.T) {
+		for _, key := range []string{
+			"access_key_id",
+			"region",
+			"azure_client_id",
+			"azure_tenant_id",
+			"azure_credential_endpoint",
+		} {
+			t.Run(key, func(t *testing.T) {
+				extfs := azureBrokerSpec()
+				delete(extfs, key)
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "is required for Azure credential broker mode")
+			})
+		}
+	})
+
+	t.Run("azure_credential_broker_invalid_endpoint", func(t *testing.T) {
+		for _, endpoint := range []string{
+			"file:///tmp/credentials",
+			"http:///v1/credentials/assume-role",
+			"not-a-url",
+		} {
+			t.Run(endpoint, func(t *testing.T) {
+				extfs := azureBrokerSpec()
+				extfs["azure_credential_endpoint"] = endpoint
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "must be a valid HTTP(S) URL")
+			})
+		}
+	})
+
+	t.Run("azure_credential_broker_requires_azure_provider_and_scheme", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			source   string
+			provider string
+		}{
+			{name: "wrong_provider", source: "azure://core.windows.net/container/path", provider: "aws"},
+			{name: "wrong_scheme", source: "s3://bucket/path", provider: "azure"},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				extfs := azureBrokerSpec()
+				extfs["cloud_provider"] = test.provider
+				err := ValidateExtfsComplete(test.source, extfs)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "requires scheme=\"azure\"")
+			})
+		}
+	})
+
+	t.Run("azure_credential_broker_rejects_other_credential_modes", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			key   string
+			value string
+		}{
+			{name: "account_key", key: "access_key_value", value: "base64key"},
+			{name: "workload_identity", key: "use_iam", value: "true"},
+			{name: "role_arn", key: "role_arn", value: "arn:aws:iam::1:role/r"},
+			{name: "gcp_impersonation", key: "gcp_target_service_account", value: "sa@proj.iam.gserviceaccount.com"},
+			{name: "anonymous", key: "anonymous", value: "true"},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				extfs := azureBrokerSpec()
+				extfs[test.key] = test.value
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "credential modes are mutually exclusive")
+			})
+		}
+	})
+
 	t.Run("azure_shared_key", func(t *testing.T) {
 		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"access_key_id":    "mystorageacct",

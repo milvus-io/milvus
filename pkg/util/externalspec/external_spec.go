@@ -58,6 +58,9 @@ const (
 	ExtfsKeyUseSSL                  = specutil.ExtfsKeyUseSSL
 	ExtfsKeyUseVirtualHost          = specutil.ExtfsKeyUseVirtualHost
 	ExtfsKeyLoadFrequency           = specutil.ExtfsKeyLoadFrequency
+	ExtfsKeyAzureClientID           = specutil.ExtfsKeyAzureClientID
+	ExtfsKeyAzureTenantID           = specutil.ExtfsKeyAzureTenantID
+	ExtfsKeyAzureCredentialEndpoint = specutil.ExtfsKeyAzureCredentialEndpoint
 )
 
 // Scheme* are URL schemes accepted in external_source.
@@ -313,8 +316,9 @@ func RedactExternalSpecForLog(specStr string) string {
 
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one
 // credential mode (AK/SK, role_arn, use_iam=true, gcp_target_service_account,
-// anonymous=true), and region for AWS-family schemes. role_arn subsumes
-// use_iam (do not double-count). No inheritance from Milvus fs.* config.
+// Azure credential broker, anonymous=true), and region for AWS-family
+// schemes. role_arn subsumes use_iam (do not double-count). No inheritance
+// from Milvus fs.* config.
 func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
 	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
 	u, err := url.Parse(externalSource)
@@ -328,7 +332,12 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// a local classification only; it is not written back to external_spec.
 	// Inferring cloud_provider from s3:// is ambiguous (AWS S3 vs self-hosted
 	// MinIO), so s3-family URIs still require the caller to be explicit.
-	cp := strings.ToLower(extfs[ExtfsKeyCloudProvider])
+	rawCP := extfs[ExtfsKeyCloudProvider]
+	cp := strings.ToLower(rawCP)
+	if rawCP != cp {
+		return merr.WrapErrParameterInvalidMsg(
+			"extfs.cloud_provider=%q must use the canonical lowercase value %q", rawCP, cp)
+	}
 	if scheme == SchemeMinIO && cp == "" {
 		cp = CloudProviderMinIO
 	}
@@ -342,8 +351,42 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		return merr.WrapErrParameterInvalidMsg("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
+	hasAzureBroker := extfs[ExtfsKeyAzureClientID] != "" ||
+		extfs[ExtfsKeyAzureTenantID] != "" ||
+		extfs[ExtfsKeyAzureCredentialEndpoint] != ""
+	if hasAzureBroker {
+		if cp != CloudProviderAzure || scheme != SchemeAzure {
+			return merr.WrapErrParameterInvalidMsg(
+				"Azure credential broker mode requires scheme=%q and extfs.cloud_provider=%q, got scheme=%q cloud_provider=%q",
+				SchemeAzure, CloudProviderAzure, scheme, cp)
+		}
+		for _, required := range []struct {
+			key   string
+			value string
+		}{
+			{ExtfsKeyAzureClientID, extfs[ExtfsKeyAzureClientID]},
+			{ExtfsKeyAzureTenantID, extfs[ExtfsKeyAzureTenantID]},
+			{ExtfsKeyAzureCredentialEndpoint, extfs[ExtfsKeyAzureCredentialEndpoint]},
+			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
+			{ExtfsKeyRegion, extfs[ExtfsKeyRegion]},
+		} {
+			if required.value == "" {
+				return merr.WrapErrParameterMissingMsg(
+					"extfs.%s is required for Azure credential broker mode", required.key)
+			}
+		}
+
+		brokerEndpoint, err := url.Parse(extfs[ExtfsKeyAzureCredentialEndpoint])
+		if err != nil || brokerEndpoint.Host == "" ||
+			(brokerEndpoint.Scheme != "http" && brokerEndpoint.Scheme != "https") {
+			return merr.WrapErrParameterInvalidMsg(
+				"extfs.%s must be a valid HTTP(S) URL", ExtfsKeyAzureCredentialEndpoint)
+		}
+	}
+
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
-	hasAKOnly := (extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != "")
+	hasAKOnly := !hasAzureBroker &&
+		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
 	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
 	hasGCPImpersonation := extfs[ExtfsKeyGCPTargetServiceAccount] != ""
@@ -354,16 +397,16 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 
 	modes := 0
-	for _, set := range []bool{hasAKSK, hasRoleARN, hasUseIAMAlone, hasGCPImpersonation, hasAnonymous} {
+	for _, set := range []bool{hasAKSK, hasRoleARN, hasUseIAMAlone, hasGCPImpersonation, hasAzureBroker, hasAnonymous} {
 		if set {
 			modes++
 		}
 	}
 	if modes == 0 {
-		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, Azure credential broker, or anonymous=true")
 	}
 	if modes > 1 {
-		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, Azure credential broker, or anonymous=true")
 	}
 
 	if hasGCPImpersonation {
