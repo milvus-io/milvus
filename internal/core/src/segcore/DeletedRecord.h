@@ -173,10 +173,10 @@ class DeletedRecord {
 
                 // The main delete list keeps the first-arriving delete for a
                 // physical row. If an out-of-order delete for the same row
-                // arrives later, preserve the minimum duplicate timestamp in
-                // a sparse overlay so historical queries can move the row's
-                // visibility boundary backward without expanding per-row
-                // storage for the whole segment.
+                // arrives later, append each decreasing timestamp to a sparse
+                // overlay so historical queries can move the row's visibility
+                // boundary backward without expanding per-row storage for the
+                // whole segment.
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
                     auto [it, inserted] =
                         rollback_min_timestamps_.try_emplace(row_id, delete_ts);
@@ -185,12 +185,10 @@ class DeletedRecord {
                             std::make_pair(delete_ts, row_id));
                         mem_add += DELETE_PAIR_SIZE;
                     } else if (delete_ts < it->second) {
-                        auto previous_ts = it->second;
                         rollback_accessor.insert(
                             std::make_pair(delete_ts, row_id));
-                        rollback_accessor.erase(
-                            std::make_pair(previous_ts, row_id));
                         it->second = delete_ts;
+                        mem_add += DELETE_PAIR_SIZE;
                     }
                     return;
                 }
@@ -468,9 +466,12 @@ class DeletedRecord {
         search_pk_func_;
     int64_t segment_id_{0};
     std::shared_ptr<SortedDeleteList> deleted_lists_;
-    // Sparse timestamp correction for physical rows whose duplicate deletes
-    // arrive out of order. The main list keeps the first-arriving timestamp;
-    // this overlay keeps the minimum timestamp among later arrivals.
+    // Append-only timestamp corrections for physical rows whose duplicate
+    // deletes arrive out of order. The main list keeps the first-arriving
+    // timestamp, while rollback_min_timestamps_ tracks the current minimum so
+    // only corrections that move the visibility boundary backward are added.
+    // Older corrections stay in the list so a concurrent reader can observe
+    // either boundary without racing with node removal.
     std::shared_ptr<SortedDeleteList> rollback_delete_list_;
     std::unordered_map<Offset, Timestamp> rollback_min_timestamps_;
     // max timestamp of deleted records which replayed in load process
