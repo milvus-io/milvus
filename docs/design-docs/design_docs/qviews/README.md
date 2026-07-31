@@ -89,11 +89,10 @@ Version numbers are ordered lexicographically by `(streaming_version, compact_ve
 
 ### 5.2 Data Structures
 
-TODO: `DataViewOfCollection`, `DataViewOfShard`, and `DataViewOfPartition` are
-not part of the state-machine-only proto extraction. Add their definitions when
-the DataView module is picked. `DataVersion` is already defined in
-[view.proto](../../../../pkg/proto/view.proto) because QueryViewVersion depends
-on it.
+`DataViewOfCollection`, `DataViewOfShard`, and `DataViewOfPartition` are
+immutable builder inputs defined in [view.proto](../../../../pkg/proto/view.proto).
+This change does not include a DataView manager, persistence catalog, DataCoord
+integration, or garbage collection implementation.
 
 ### 5.3 Storage View Version Evolution Example
 
@@ -195,6 +194,12 @@ when the QueryView documentation assets are picked.
 
 For detailed per-node, per-state analysis (entry conditions, automatic behavior, transitions, peer state handling, persistence, and recovery), see [QueryView State Machine Per-Node Analysis](query_view_state_machine.md).
 
+Component details:
+
+- [Shard View Manager](shard_view_management.md)
+- [Reliable Syncer](syncer.md)
+- [Work-node QueryView Handler](query_view_handler.md)
+
 Key constraints:
 - Workflows across multiple view versions are completely independent, but through Coord state machine constraints, each node has at most one view in Preparing state.
 - QueryNode loss is handled only for active QN-targeted syncs: in Preparing it makes the view Unrecoverable, and in Dropping it counts that QN cleanup as complete. StreamingNode unavailability is handled by channel assignment, not by the QueryView per-view state machine.
@@ -239,29 +244,15 @@ Loaded → Release
 - Resources are released when their associated query views are released.
 - Multi-version view support enables atomic updates on nodes to ensure resource liveness, reducing the frequency of resource operations.
 
-StreamingNode resources are prepared by QueryView state machines. The QueryView's
-`load_info_version` resolves the required partitions, fields, and index metadata;
-`AlterLoadConfig` no longer creates vchannel-local state in `VChannelMeta`.
-When QueryView state enters the local Preparing/UpRecovering path, the state
-machine calls the PChannel-local
-`VChannelRecoveryModule` through `Acquire`; the module builds the query input
-view from its owned DataView, Segment state, and TransformLog, then keeps
-consuming DML so the recovered DataView only grows while the QueryView is live.
-Long-term resource retention is driven by local QueryView references.
-QueryNode sealed segment resources continue to follow QueryNode's segment/view resource
-lifecycle.
+This change defines only the asynchronous resource lifecycle boundaries:
 
-TODO(qnview/querynode_queryview_resource_preparation.md): add the QueryNode-side
-sealed segment resource preparation design when that resource module is picked.
+- QueryNode injects `SegmentManager.Acquire/Release`.
+- StreamingNode injects `StreamingNodeResourceManager.Acquire/Release`.
 
-Example: If view A is unreasonable and causes OOM on a node, it is marked as Unrecoverable, but view A still exists on the node and already-loaded resources are not rolled back. After Coord detects this, the Balancer generates a new view B and pushes both views for atomic modification (A Dropped, B Preparing). Resources in (A diff B) are released, resources in (B diff A) are loaded, and resources in A∩B are retained.
-
-TODO(snview/streamingnode_resource_manager.md): add the StreamingNode query
-runtime manager design when that resource module is picked.
-TODO(snview/growing_segment_runtime.md): add the StreamingNode growing segment
-runtime design when that resource module is picked.
-TODO(snview/idf_oracle_runtime.md): add the StreamingNode IDF oracle runtime
-design when that resource module is picked.
+Concrete sealed-segment loading, TransformLog handling, growing/IDF runtimes,
+load-info watching, and query resource implementations are intentionally out of
+scope. The handler/state-machine layer requires callbacks to be asynchronous and
+keeps production resource policy behind those interfaces.
 
 ## 11. Coord and Node Interactions
 
@@ -277,16 +268,9 @@ design when that resource module is picked.
 | Coord | Node Manager | Service discovery, maintaining the global available QueryNode list |
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
-| Coord | DataView Manager | Maintaining the storage view list |
-| Coord | Sealed Segment Balancer | Gathering information from all Managers, generating and distributing QueryViews |
-| Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
-| Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |
-| Streaming Node | QueryView Manager | Listening for view state machine changes, checking prepared view resources, and publishing the required DataVersion watermark for SN-only eviction |
-| Streaming Node | Pure Delete Stream Manager | Acting as subscription server, publishing Delete data to QueryNodes. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
-| Streaming Node | Growing Segment Manager | Incremental data management, maintaining Growing Segment lifecycle |
-| Query Node | QueryView Manager | Listening for view state machine changes, applying to Sealed Segments |
-| Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
-| Query Node | Pure Delete Stream Manager | Acting as subscription client, applying Delete data to each Segment. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
+| Coord | QueryView Manager | View persistence, state transitions, statistics, and reliable synchronization |
+| Streaming Node | QueryView Handler | Persistent local state machine and injected resource lifecycle interface |
+| Query Node | QueryView Handler | Stateless local state machine and injected segment lifecycle interface |
 
 ### 11.3 SyncQueryView RPC
 
@@ -294,7 +278,7 @@ The sole RPC that unifies the synchronization layer behavior of StreamingNode
 and QueryNode. See the definitions of `ViewSyncService`, `SyncRequest`,
 `SyncResponse`, and related messages in
 [view.proto](../../../../pkg/proto/view.proto).
-TODO(syncer.md): add the Coord-side transport design when the syncer is picked.
+See [Reliable Syncer](syncer.md) for the Coord-side transport design.
 
 RPC rules:
 - The QueryView list is atomically applied to the local QueryViewManager.

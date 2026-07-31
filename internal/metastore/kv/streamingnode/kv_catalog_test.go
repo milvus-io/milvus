@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -17,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -61,6 +63,52 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("err"))
 	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
 	assert.Error(t, err)
+}
+
+func TestCatalogQueryViews(t *testing.T) {
+	catalog := newTestEtcdCatalog(t, "testCatalogQueryViews")
+	ctx := context.Background()
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{{
+			NodeId: 100,
+			Partitions: []*viewpb.QueryViewOfPartition{{
+				PartitionId:     200,
+				SegmentIds:      []int64{300},
+				ReadySegmentIds: []int64{300},
+			}},
+		}},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{view}))
+	views, err := catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Empty(t, views[0].GetQueryNode()[0].GetPartitions()[0].GetReadySegmentIds())
+
+	next := proto.Clone(view).(*viewpb.QueryViewOfShard)
+	next.Meta.Version.QueryVersion++
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{next}))
+	views, err = catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 2)
+
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+	require.NoError(t, catalog.SaveQueryViews(ctx, "p1", []*viewpb.QueryViewOfShard{view}))
+	views, err = catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Equal(t, int64(31), views[0].GetMeta().GetVersion().GetQueryVersion())
 }
 
 // TestCatalogSegmentAssignments round-trips segment assignments through the

@@ -15,10 +15,17 @@ Coord is the leader of the global state machine. It generates QueryViews, drives
 
 Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahead), **Dropped** (deletion).
 
+The Coord state machine exposes pending persistence and node-sync effects as one
+atomic `ConsumeFlush` result. Persist and sync values are independently
+latest-wins until consumed, so the manager cannot drain only one half of a
+transition and leave an inconsistent externalization boundary.
+
 ### 1.1 Preparing
 
 **Entry Conditions:**
-- Balancer generates a new view (triggers: DataView version change, balance request, QN online/offline, previous view becomes Unrecoverable, load config change such as LoadPartition/ReleasePartition).
+- The lifecycle caller generates a new view (for example after a DataVersion
+  change, node membership change, previous Unrecoverable view, or load-config
+  change).
 - Recovery: loaded from ETCD in Preparing state.
 
 **Automatic Behavior:**
@@ -206,11 +213,10 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 ## 2. StreamingNode State Machine
 
-StreamingNode manages growing data and generates query plans. It persists Up
-recovery records for crash recovery. Each persisted recovery record is the
+StreamingNode persists Up recovery records for crash recovery. Each record is the
 complete `QueryViewOfShard` received from Coord, including both
-`QueryViewOfStreamingNode` and `QueryViewOfQueryNode`; the latter is required to
-rebuild Phase 1 query plans after StreamingNode restart.
+`QueryViewOfStreamingNode` and `QueryViewOfQueryNode`, so recovery retains the
+complete shard topology without depending on a separate metadata source.
 
 Persisted states: **Up** recovery info only. Every version that has reached Up
 is persisted independently until that view receives Down or Dropped, so
@@ -383,6 +389,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ## 3. QueryNode State Machine
 
 QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
+
+QN stores the complete pending report proto at the moment a state/progress
+event occurs. `ConsumeReport` returns that immutable snapshot and clears it;
+later local progress does not retroactively mutate an already-pending report.
 
 ### 3.1 Preparing
 
