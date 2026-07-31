@@ -155,6 +155,7 @@ type segmentInsertResult struct {
 	growingSegmentAdded bool
 	err                 error
 	panicValue          any
+	panicked            bool
 }
 
 // Append appends another delete data into this one.
@@ -198,7 +199,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			})
 		}
 		for index, future := range futures {
-			if _, err := future.Await(); err != nil && results[index].err == nil && results[index].panicValue == nil {
+			if _, err := future.Await(); err != nil && !results[index].panicked && results[index].err == nil {
 				results[index].err = err
 			}
 		}
@@ -213,7 +214,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	}
 
 	for _, result := range results {
-		if result.panicValue != nil {
+		if result.panicked {
 			panic(result.panicValue)
 		}
 		if result.err != nil {
@@ -225,10 +226,15 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 }
 
 func (sd *shardDelegator) runProcessInsertTask(segmentID int64, insertData *InsertData) (result segmentInsertResult) {
+	completed := false
 	defer func() {
-		result.panicValue = recover()
+		if !completed {
+			result.panicked = true
+			result.panicValue = recover()
+		}
 	}()
 	result.err = sd.processInsert(segmentID, insertData, &result.growingSegmentAdded)
+	completed = true
 	return result
 }
 

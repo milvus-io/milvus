@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -352,17 +353,23 @@ func validInsertData() *InsertData {
 
 type processInsertResult struct {
 	panicValue any
+	panicked   bool
 }
 
 func processInsertAsync(sd *shardDelegator, insertRecords map[int64]*InsertData) <-chan processInsertResult {
 	done := make(chan processInsertResult, 1)
 	go func() {
 		var result processInsertResult
+		completed := false
 		defer func() {
-			result.panicValue = recover()
+			if !completed {
+				result.panicked = true
+				result.panicValue = recover()
+			}
 			done <- result
 		}()
 		sd.ProcessInsert(insertRecords)
+		completed = true
 	}()
 	return done
 }
@@ -442,10 +449,15 @@ func (s *DelegatorDataSuite) TestProcessInsertRunsDistinctSegmentsConcurrently()
 		select {
 		case segmentID := <-entered:
 			enteredIDs = append(enteredIDs, segmentID)
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			close(release)
-			result := <-done
-			s.Nil(result.panicValue)
+			select {
+			case result := <-done:
+				s.False(result.panicked)
+				s.Nil(result.panicValue)
+			case <-time.After(5 * time.Second):
+				s.Fail("ProcessInsert did not finish during overlap-test cleanup")
+			}
 			s.Fail("distinct segment inserts did not overlap")
 			return
 		}
@@ -454,6 +466,7 @@ func (s *DelegatorDataSuite) TestProcessInsertRunsDistinctSegmentsConcurrently()
 
 	select {
 	case result := <-done:
+		s.False(result.panicked)
 		s.Nil(result.panicValue)
 	case <-time.After(5 * time.Second):
 		s.FailNow("ProcessInsert did not finish after releasing inserts")
@@ -623,8 +636,76 @@ func (s *DelegatorDataSuite) TestProcessInsertPreservesWorkerPanicValueAfterAllT
 	s.True(panicStarted, "panicking insert did not start while the other insert was blocked")
 	s.True(blockedStarted, "blocked insert did not start while the panicking insert ran")
 	s.False(panickedBeforeRelease, "ProcessInsert propagated worker panic before all tasks completed")
+	s.True(result.panicked)
 	s.Same(panicValue, result.panicValue)
 	s.Equal(int32(1), notifyCount.Load(), "leader view callback must run before propagating the worker panic")
+}
+
+func (s *DelegatorDataSuite) TestProcessInsertPreservesNilWorkerPanicAfterAllTasks() {
+	const (
+		panicSegmentID   = int64(425)
+		blockedSegmentID = int64(426)
+	)
+
+	panicEntered := make(chan struct{})
+	blockedEntered := make(chan struct{})
+	releaseBlocked := make(chan struct{})
+	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		switch segment.ID() {
+		case panicSegmentID:
+			close(panicEntered)
+			panic(nil)
+		case blockedSegmentID:
+			close(blockedEntered)
+			<-releaseBlocked
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+
+	var notifyCount atomic.Int32
+	s.delegator.leaderViewUpdatedCallback = func(string) { notifyCount.Add(1) }
+	defer func() { s.delegator.leaderViewUpdatedCallback = nil }()
+
+	done := processInsertAsync(s.delegator, map[int64]*InsertData{
+		panicSegmentID:   validInsertData(),
+		blockedSegmentID: validInsertData(),
+	})
+	waitSignal := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		case <-time.After(5 * time.Second):
+			return false
+		}
+	}
+	panicStarted := waitSignal(panicEntered)
+	blockedStarted := waitSignal(blockedEntered)
+	panickedBeforeRelease := false
+	if panicStarted && blockedStarted {
+		select {
+		case <-done:
+			panickedBeforeRelease = true
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	s.Zero(notifyCount.Load(), "leader view callback must wait for the blocked segment task")
+	close(releaseBlocked)
+
+	var result processInsertResult
+	select {
+	case result = <-done:
+	case <-time.After(5 * time.Second):
+		s.FailNow("ProcessInsert did not finish after releasing the blocked nil-panic batch")
+	}
+	s.True(panicStarted, "nil-panicking insert did not start while the other insert was blocked")
+	s.True(blockedStarted, "blocked insert did not start while the nil-panicking insert ran")
+	s.False(panickedBeforeRelease, "ProcessInsert propagated nil panic before all tasks completed")
+	s.True(result.panicked, "caller goroutine must re-panic even when the panic value is nil")
+	if os.Getenv("GODEBUG") == "panicnil=1" {
+		s.Nil(result.panicValue, "panic(nil) must remain nil when panicnil=1")
+	}
+	s.Equal(int32(1), notifyCount.Load(), "leader view callback must run before propagating nil panic")
 }
 
 func (s *DelegatorDataSuite) TestProcessInsertNotifiesAfterPostRegistrationPanic() {
@@ -633,9 +714,11 @@ func (s *DelegatorDataSuite) TestProcessInsertNotifiesAfterPostRegistrationPanic
 		blockedSegmentID = int64(452)
 	)
 
-	setupPatch := mockey.Mock((*segments.LocalSegment).Insert).Return(nil).Build()
-	s.delegator.ProcessInsert(map[int64]*InsertData{blockedSegmentID: validInsertData()})
-	setupPatch.UnPatch()
+	func() {
+		setupPatch := mockey.Mock((*segments.LocalSegment).Insert).Return(nil).Build()
+		defer setupPatch.UnPatch()
+		s.delegator.ProcessInsert(map[int64]*InsertData{blockedSegmentID: validInsertData()})
+	}()
 	s.Require().NotNil(s.manager.Segment.GetGrowing(blockedSegmentID))
 
 	panicValue := &struct{ name string }{name: "post-registration panic"}
@@ -714,6 +797,7 @@ waitForRegistration:
 	s.True(blockedStarted, "existing segment insert did not block concurrently")
 	s.True(registeredBeforeRelease, "new segment was not registered before its post-registration panic")
 	s.False(panickedBeforeRelease, "ProcessInsert propagated panic before the blocked task completed")
+	s.True(result.panicked)
 	s.Same(panicValue, result.panicValue)
 	s.Equal(int32(1), notifyCount.Load(), "registered segment must notify before propagating its later panic")
 }
@@ -753,9 +837,13 @@ func (s *DelegatorDataSuite) TestProcessInsertRegistersParallelBM25Stats() {
 		select {
 		case segmentID := <-entered:
 			enteredIDs = append(enteredIDs, segmentID)
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			close(release)
-			<-done
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				s.Fail("ProcessInsert did not finish during BM25 overlap-test cleanup")
+			}
 			s.Fail("BM25 segment inserts did not overlap")
 			return
 		}
@@ -764,6 +852,7 @@ func (s *DelegatorDataSuite) TestProcessInsertRegistersParallelBM25Stats() {
 
 	select {
 	case result := <-done:
+		s.False(result.panicked)
 		s.Nil(result.panicValue)
 	case <-time.After(5 * time.Second):
 		s.FailNow("ProcessInsert did not finish BM25 inserts")
