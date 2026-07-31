@@ -32,7 +32,8 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "folly/CancellationToken.h"
-#include "folly/futures/Future.h"
+#include "folly/OperationCancelled.h"
+#include "folly/coro/Promise.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
@@ -129,19 +130,23 @@ class TransientMemoryBudget {
         GetLoadTransientBudget().SetCapacityBytes(bytes);
     }
 
-    folly::SemiFuture<TransientBudgetLease>
+    folly::coro::Future<TransientBudgetLease>
     AcquireAsync(size_t bytes,
                  TransientBudgetPriority priority,
                  const folly::CancellationToken& cancellation_token = {}) {
+        auto [promise, future] =
+            folly::coro::makePromiseContract<TransientBudgetLease>();
         auto pending = std::make_shared<PendingAdmission>();
-        auto future = pending->promise.getSemiFuture();
+        pending->promise = std::move(promise);
         pending->bytes = bytes;
 
-        if (cancellation_token.canBeCancelled()) {
+        auto merged_cancellation_token = folly::cancellation_token_merge(
+            cancellation_token, pending->promise.getCancellationToken());
+        if (merged_cancellation_token.canBeCancelled()) {
             std::weak_ptr<PendingAdmission> weak_pending = pending;
             pending->cancellation_callback =
                 std::make_unique<folly::CancellationCallback>(
-                    cancellation_token, [this, weak_pending]() {
+                    merged_cancellation_token, [this, weak_pending]() {
                         if (auto admission = weak_pending.lock()) {
                             CancelPending(std::move(admission));
                         }
@@ -292,7 +297,7 @@ class TransientMemoryBudget {
         };
 
         size_t bytes{0};
-        folly::Promise<TransientBudgetLease> promise;
+        folly::coro::Promise<TransientBudgetLease> promise;
         std::unique_ptr<folly::CancellationCallback> cancellation_callback;
         State state{State::Pending};
     };
@@ -404,8 +409,9 @@ class TransientMemoryBudget {
 
     void
     FulfillAdmission(std::shared_ptr<PendingAdmission> pending) {
+        auto lease = TransientBudgetLease(this, pending->bytes);
         pending->cancellation_callback.reset();
-        pending->promise.setValue(TransientBudgetLease(this, pending->bytes));
+        pending->promise.trySetValue(std::move(lease));
     }
 
     void
@@ -429,7 +435,7 @@ class TransientMemoryBudget {
             }
         }
         if (cancelled) {
-            pending->promise.setException(folly::FutureCancellation());
+            pending->promise.trySetException(folly::OperationCancelled{});
             ResolvePending(std::move(resolution));
             cv_.notify_all();
         }
