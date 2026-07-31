@@ -23,16 +23,26 @@ namespace milvus::storage {
 
 // Returns the bytes referenced by this record-batch slice. Unlike
 // TotalBufferSize, this accounts for array offsets and does not charge every
-// slice for its entire shared backing buffer. Falls back to the row count if
-// Arrow cannot compute the referenced ranges.
+// slice for its entire shared backing buffer.
+//
+// ReferencedBufferSize cannot walk every layout. On the pinned arrow 17 its
+// byte-range visitor has no overload for STRING_VIEW / BINARY_VIEW /
+// LIST_VIEW and falls through to a TypeError catch-all, which
+// ReferencedBufferSize(RecordBatch) propagates for the whole batch -- and
+// external (vortex schemaless) readers do produce those layouts, on the
+// pre-normalization batch this is called with. Fall back to the plain buffer
+// sum, which works for any type. It over-charges slices that share a backing
+// buffer, but for a memory cap over-charging is the safe direction: the row
+// count would charge a 64MB batch as 8192 bytes and silently disable byte
+// backpressure altogether, leaving only the batch-count limit.
 inline int64_t
 EstimateRecordBatchBytes(const arrow::RecordBatch& batch) {
     auto size_result = arrow::util::ReferencedBufferSize(batch);
-    if (!size_result.ok()) {
-        return batch.num_rows();
+    if (size_result.ok() && size_result.ValueOrDie() > 0) {
+        return size_result.ValueOrDie();
     }
-    auto referenced_bytes = size_result.ValueOrDie();
-    return referenced_bytes > 0 ? referenced_bytes : batch.num_rows();
+    auto total_bytes = arrow::util::TotalBufferSize(batch);
+    return total_bytes > 0 ? total_bytes : batch.num_rows();
 }
 
 }  // namespace milvus::storage
