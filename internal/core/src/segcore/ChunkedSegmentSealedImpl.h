@@ -84,11 +84,16 @@
 #include "storage/MmapChunkManager.h"
 #include "segcore/TextColumnCache.h"
 
+#ifdef MILVUS_UNIT_TEST
+#include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#endif
+
 namespace milvus::segcore {
 
 namespace storagev2translator {
 class TimestampIndexCell;
 class PkIndexCell;
+struct ColumnSizeEstimateResult;
 }  // namespace storagev2translator
 
 class TimestampData;
@@ -2019,7 +2024,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool eager_load,
         milvus::OpContext* op_ctx,
         bool is_replace,
-        StagedStateCommitter& committer);
+        StagedStateCommitter& committer,
+        storagev2translator::ColumnSizeEstimateResult column_size_estimate);
 
     void
     LoadColumnGroup(
@@ -2341,6 +2347,29 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto current = CapturePublishedState();
         auto runtime = CloneMutableRuntimeResourceState();
         runtime->reader = std::move(reader);
+        AssertInfo(runtime->reader != nullptr,
+                   "reader must exist before estimating manifest column group, "
+                   "segment {}",
+                   get_segment_id());
+
+        auto estimate_columns = std::make_shared<std::vector<std::string>>();
+        estimate_columns->reserve(field_ids.size());
+        for (const auto& field_id : field_ids) {
+            estimate_columns->push_back(
+                schema_snapshot->get_storage_column_name(field_id));
+        }
+        auto estimate_reader_result =
+            runtime->reader->get_chunk_reader(index, estimate_columns);
+        AssertInfo(estimate_reader_result.ok(),
+                   "get estimate chunk reader failed, segment {}, column "
+                   "group index {}, status msg: {}",
+                   get_segment_id(),
+                   index,
+                   estimate_reader_result.status().ToString());
+        auto estimate_reader = std::move(estimate_reader_result).ValueOrDie();
+        auto size_estimate =
+            storagev2translator::FetchColumnSizeEstimates(*estimate_reader);
+
         auto staged = ClonePublishedState(current);
         staged->schema = schema_snapshot;
         staged->load_info =
@@ -2359,7 +2388,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         eager_load,
                         nullptr,
                         false,
-                        committer);
+                        committer,
+                        std::move(size_estimate));
 
         auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");

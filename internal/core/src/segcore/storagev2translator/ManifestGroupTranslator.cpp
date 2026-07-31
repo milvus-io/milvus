@@ -62,14 +62,25 @@ namespace milvus::segcore::storagev2translator {
 // See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
 static std::atomic<uint64_t> g_mmap_path_generation{0};
 
+ColumnSizeEstimateResult
+FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
+    auto column_size_result = chunk_reader.get_chunk_column_estimated_size();
+    if (!column_size_result.ok()) {
+        return {nullptr, column_size_result.status().ToString()};
+    }
+    auto sizes = std::make_shared<const ColumnSizeEstimateMatrix>(
+        std::move(column_size_result).ValueOrDie());
+    return {std::move(sizes), ""};
+}
+
 ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t segment_id,
     GroupChunkType group_chunk_type,
     int64_t column_group_index,
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
+    const std::vector<std::string>& column_group_columns,
     const std::vector<std::string>& projected_columns,
-    bool full_projection,
     bool use_mmap,
     bool mmap_populate,
     const std::string& mmap_dir_path,
@@ -79,7 +90,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& warmup_policy,
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
-    std::string shard)
+    std::string shard,
+    std::optional<ColumnSizeEstimateResult> column_size_estimate)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -149,80 +161,150 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::vector<uint64_t> row_group_sizes(row_group_rows.size(), 0);
     std::vector<uint64_t> projected_row_group_sizes(row_group_rows.size(), 0);
     std::string projected_estimate_error;
+    std::string total_estimate_error;
     bool projected_estimate_available = !projected_columns.empty();
+    bool used_total_estimate = false;
+    const bool full_projection = projected_columns == column_group_columns;
     if (!projected_estimate_available) {
         projected_estimate_error = "projection contains no columns";
     }
 
-    if (projected_estimate_available && full_projection) {
-        // Full projections cover the whole column group. Use the aggregate
-        // estimate directly to avoid a linear name scan for every projected
-        // column in wide groups such as JSON shredding output.
+    if (projected_estimate_available) {
+        if (!column_size_estimate.has_value()) {
+            column_size_estimate = FetchColumnSizeEstimates(*chunk_reader_);
+        }
+
+        projected_estimate_error = column_size_estimate->error;
+        if (!projected_estimate_error.empty() ||
+            column_size_estimate->sizes == nullptr) {
+            projected_estimate_available = false;
+            if (projected_estimate_error.empty()) {
+                projected_estimate_error =
+                    "column size estimate result contains no data";
+            }
+        } else {
+            const auto& all_column_sizes = *column_size_estimate->sizes;
+            if (all_column_sizes.size() != column_group_columns.size()) {
+                projected_estimate_available = false;
+                projected_estimate_error = fmt::format(
+                    "column count mismatched, expected {}, actual {}",
+                    column_group_columns.size(),
+                    all_column_sizes.size());
+            } else {
+                std::unordered_map<std::string, size_t> column_indices;
+                column_indices.reserve(column_group_columns.size());
+                for (size_t i = 0; i < column_group_columns.size(); ++i) {
+                    const auto& column_name = column_group_columns[i];
+                    if (!column_indices.emplace(column_name, i).second) {
+                        projected_estimate_available = false;
+                        projected_estimate_error =
+                            fmt::format("duplicate column in column group: {}",
+                                        column_name);
+                        break;
+                    }
+                }
+
+                std::vector<bool> selected_columns(column_group_columns.size(),
+                                                   false);
+                for (const auto& column_name : projected_columns) {
+                    if (!projected_estimate_available) {
+                        break;
+                    }
+                    auto it = column_indices.find(column_name);
+                    if (it == column_indices.end()) {
+                        projected_estimate_available = false;
+                        projected_estimate_error = fmt::format(
+                            "projected column is not in column group: {}",
+                            column_name);
+                        break;
+                    }
+                    const auto column_index = it->second;
+                    if (selected_columns[column_index]) {
+                        projected_estimate_available = false;
+                        projected_estimate_error = fmt::format(
+                            "duplicate projected column: {}", column_name);
+                        break;
+                    }
+                    selected_columns[column_index] = true;
+
+                    const auto& column_sizes = all_column_sizes[column_index];
+                    if (column_sizes.size() !=
+                        projected_row_group_sizes.size()) {
+                        projected_estimate_available = false;
+                        projected_estimate_error = fmt::format(
+                            "column {} row group count mismatched, expected "
+                            "{}, actual {}",
+                            column_name,
+                            projected_row_group_sizes.size(),
+                            column_sizes.size());
+                        break;
+                    }
+                    for (size_t i = 0; i < projected_row_group_sizes.size();
+                         ++i) {
+                        if (column_sizes[i] >
+                            std::numeric_limits<uint64_t>::max() -
+                                projected_row_group_sizes[i]) {
+                            projected_estimate_available = false;
+                            projected_estimate_error = fmt::format(
+                                "projected column sizes exceed the uint64_t "
+                                "range at row group {}",
+                                i);
+                            break;
+                        }
+                        projected_row_group_sizes[i] += column_sizes[i];
+                    }
+                }
+            }
+        }
+    }
+
+    // Keep the old full-projection behavior as a fallback for formats that do
+    // not expose per-column estimates. The aggregate may include physical-only
+    // fields, so logical column estimates always take precedence when present.
+    if (!projected_estimate_available && full_projection) {
         auto total_size_result = chunk_reader_->get_chunk_estimated_size();
         if (!total_size_result.ok()) {
-            projected_estimate_available = false;
-            projected_estimate_error = total_size_result.status().ToString();
+            total_estimate_error = total_size_result.status().ToString();
         } else {
             const auto& total_sizes = total_size_result.ValueOrDie();
             if (total_sizes.size() != projected_row_group_sizes.size()) {
-                projected_estimate_available = false;
-                projected_estimate_error = fmt::format(
+                total_estimate_error = fmt::format(
                     "row group count mismatched, expected {}, actual {}",
                     projected_row_group_sizes.size(),
                     total_sizes.size());
             } else {
                 projected_row_group_sizes = total_sizes;
-            }
-        }
-    } else if (projected_estimate_available) {
-        // FIXME: milvus-storage resolves each column name with a linear scan,
-        // so a P-column projection costs O(P * N). Each projected reader also
-        // retains group-wide per-row-group size metadata; one lazy reader per
-        // column makes an N-column group O(N^2 * R) in retained metadata.
-        // Share indexed immutable metadata across projected readers.
-        for (const auto& column_name : projected_columns) {
-            auto column_size_result =
-                chunk_reader_->get_chunk_column_estimated_size(column_name);
-            if (!column_size_result.ok()) {
-                projected_estimate_available = false;
-                projected_estimate_error =
-                    fmt::format("column {}: {}",
-                                column_name,
-                                column_size_result.status().ToString());
-                break;
-            }
-            const auto& column_sizes = column_size_result.ValueOrDie();
-            if (column_sizes.size() != projected_row_group_sizes.size()) {
-                projected_estimate_available = false;
-                projected_estimate_error = fmt::format(
-                    "column {} row group count mismatched, expected {}, "
-                    "actual {}",
-                    column_name,
-                    projected_row_group_sizes.size(),
-                    column_sizes.size());
-                break;
-            }
-            for (size_t i = 0; i < projected_row_group_sizes.size(); ++i) {
-                projected_row_group_sizes[i] += column_sizes[i];
+                projected_estimate_available = true;
+                used_total_estimate = true;
             }
         }
     }
 
     SizeEstimateSource size_estimate_source;
-    std::string total_estimate_error;
     if (projected_estimate_available) {
         // TODO: Lance single-page variable-width estimates can be lower than
         // decoded Arrow memory. Add a per-projected-field sampled safety floor
         // once that metadata is propagated; fallback_bytes_per_row currently
         // covers the whole column group and would erase projection savings.
         row_group_sizes = std::move(projected_row_group_sizes);
-        size_estimate_source = SizeEstimateSource::PROJECTED_COLUMNS;
-        LOG_DEBUG(
-            "[StorageV2] translator {} uses projected column size estimates "
-            "(columns={}, row_groups={})",
-            key_,
-            projected_columns.size(),
-            row_group_sizes.size());
+        if (used_total_estimate) {
+            size_estimate_source = SizeEstimateSource::TOTAL_FALLBACK;
+            LOG_WARN(
+                "[StorageV2] translator {} cannot use logical column size "
+                "estimates ({}); using total chunk estimates for full "
+                "projection (row_groups={})",
+                key_,
+                projected_estimate_error,
+                row_group_sizes.size());
+        } else {
+            size_estimate_source = SizeEstimateSource::PROJECTED_COLUMNS;
+            LOG_DEBUG(
+                "[StorageV2] translator {} uses projected column size "
+                "estimates (columns={}, row_groups={})",
+                key_,
+                projected_columns.size(),
+                row_group_sizes.size());
+        }
     } else if (fallback_bytes_per_row > 0) {
         const auto fallback = static_cast<uint64_t>(fallback_bytes_per_row);
         for (size_t i = 0; i < row_group_rows.size(); ++i) {
@@ -245,7 +327,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             projected_estimate_error,
             fallback_bytes_per_row,
             row_group_sizes.size());
-    } else {
+    } else if (total_estimate_error.empty()) {
         auto total_size_result = chunk_reader_->get_chunk_estimated_size();
         if (total_size_result.ok() &&
             total_size_result.ValueOrDie().size() == row_group_sizes.size()) {
@@ -268,6 +350,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     : total_size_result.status().ToString();
             size_estimate_source = SizeEstimateSource::LAST_RESORT;
         }
+    } else {
+        size_estimate_source = SizeEstimateSource::LAST_RESORT;
     }
 
     // A zero estimate for live rows can mean that a projected field is absent

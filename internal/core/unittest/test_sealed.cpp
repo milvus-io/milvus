@@ -183,11 +183,6 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
         return std::vector<uint64_t>{1};
     }
 
-    arrow::Result<std::vector<uint64_t>>
-    get_chunk_column_estimated_size(const std::string&) override {
-        return std::vector<uint64_t>{1};
-    }
-
     arrow::Result<std::vector<std::vector<uint64_t>>>
     get_chunk_column_estimated_size() override {
         return std::vector<std::vector<uint64_t>>{{1}};
