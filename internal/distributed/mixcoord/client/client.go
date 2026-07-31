@@ -83,15 +83,16 @@ func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
 
-	if Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
+	clientTLSEnabled, caPemPath, serverName := Params.ResolveMixCoordClientTLS()
+	if clientTLSEnabled {
 		client.grpcClient.EnableEncryption()
-		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "RootCoord")
+		cp, err := utils.CreateCertPoolforClient(caPemPath, "MixCoord")
 		if err != nil {
-			mlog.Error(ctx, "Failed to create cert pool for RootCoord client")
+			mlog.Error(ctx, "Failed to create cert pool for MixCoord client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
-		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
+		client.grpcClient.SetInternalTLSServerName(serverName)
 	}
 	return client, nil
 }

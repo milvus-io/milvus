@@ -623,6 +623,50 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func Test_NewClient_MixCoordClientTLS(t *testing.T) {
+	paramtable.Init()
+
+	setParam := func(t *testing.T, item *paramtable.ParamItem, value string) {
+		t.Helper()
+		old := item.SwapTempValue(value)
+		t.Cleanup(func() { item.SwapTempValue(old) })
+	}
+
+	t.Run("external TLS mode keeps the client plaintext", func(t *testing.T) {
+		setParam(t, &Params.RootCoordGrpcClientCfg.TLSMode, "1")
+		setParam(t, &Params.InternalTLSCfg.InternalTLSEnabled, "false")
+		setParam(t, &Params.MixCoordCfg.ClientTLSEnabled, "false")
+		setParam(t, &Params.RootCoordGrpcClientCfg.CaPemPath, "/does/not/exist.pem")
+
+		client, err := NewClient(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+		assert.NoError(t, client.Close())
+	})
+
+	t.Run("directional TLS uses the external CA", func(t *testing.T) {
+		setParam(t, &Params.InternalTLSCfg.InternalTLSEnabled, "false")
+		setParam(t, &Params.MixCoordCfg.ClientTLSEnabled, "true")
+		setParam(t, &Params.RootCoordGrpcClientCfg.CaPemPath, "../../../../configs/cert/ca.pem")
+		setParam(t, &Params.InternalTLSCfg.InternalTLSCaPemPath, "/does/not/exist.pem")
+
+		client, err := NewClient(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+		assert.NoError(t, client.Close())
+	})
+
+	t.Run("directional TLS fails closed for an invalid CA", func(t *testing.T) {
+		setParam(t, &Params.InternalTLSCfg.InternalTLSEnabled, "false")
+		setParam(t, &Params.MixCoordCfg.ClientTLSEnabled, "true")
+		setParam(t, &Params.RootCoordGrpcClientCfg.CaPemPath, "/does/not/exist.pem")
+
+		client, err := NewClient(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, client)
+	})
+}
+
 func Test_Flush(t *testing.T) {
 	paramtable.Init()
 

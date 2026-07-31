@@ -332,6 +332,9 @@ rocksmq:
 # Related configuration of mixCoord
 mixCoord:
   enableActiveStandby: false
+  grpc:
+    # Enable TLS only for outbound connections to MixCoord. This does not enable TLS on this component's gRPC server.
+    clientTlsEnabled: false
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:

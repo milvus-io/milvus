@@ -1935,6 +1935,7 @@ Once the log message exceeds the max bytes per log, it will be truncated.`,
 // --- mixcoord ---
 type mixCoordConfig struct {
 	EnableActiveStandby ParamItem `refreshable:"false"`
+	ClientTLSEnabled    ParamItem `refreshable:"false"`
 }
 
 func (p *mixCoordConfig) init(base *BaseTable) {
@@ -1946,6 +1947,30 @@ func (p *mixCoordConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"rootCoord.enableActiveStandby"},
 	}
 	p.EnableActiveStandby.Init(base.mgr)
+
+	p.ClientTLSEnabled = ParamItem{
+		Key:          "mixCoord.grpc.clientTlsEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable TLS only for outbound gRPC connections to MixCoord",
+		Export:       true,
+	}
+	p.ClientTLSEnabled.Init(base.mgr)
+}
+
+// ResolveMixCoordClientTLS returns the TLS settings for outbound MixCoord
+// connections. Cluster-wide internal TLS keeps its existing certificate
+// settings and takes precedence. The directional setting intentionally uses
+// the external TLS CA while reusing the internal SNI setting.
+func (p *ComponentParam) ResolveMixCoordClientTLS() (enabled bool, caPemPath, serverName string) {
+	serverName = p.InternalTLSCfg.InternalTLSSNI.GetValue()
+	if p.InternalTLSCfg.InternalTLSEnabled.GetAsBool() {
+		return true, p.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), serverName
+	}
+	if p.MixCoordCfg.ClientTLSEnabled.GetAsBool() {
+		return true, p.RootCoordGrpcClientCfg.CaPemPath.GetValue(), serverName
+	}
+	return false, "", serverName
 }
 
 // /////////////////////////////////////////////////////////////////////////////
