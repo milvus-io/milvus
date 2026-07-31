@@ -208,11 +208,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
-    std::shared_mutex&
-    get_chunk_mutex() const {
-        return chunk_mutex_;
-    }
-
     const Schema&
     get_schema() const override {
         // Compatibility path for the legacy reference API; readers should keep
@@ -279,9 +274,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
         return chunk_id * segcore_config_.get_chunk_rows();
     }
-
-    void
-    try_remove_chunks(FieldId fieldId);
 
     void
     try_remove_chunks(FieldId fieldId, const Schema& schema);
@@ -901,7 +893,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;
 
-    mutable std::shared_mutex chunk_mutex_;
+    // No chunk lock. Readers pin the generation they walk via
+    // VectorBase::acquire_chunks(); try_remove_chunks swaps the container's
+    // collection out and lets the last pin holder free it. Reclamation and
+    // reads no longer exclude each other in either direction.
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;

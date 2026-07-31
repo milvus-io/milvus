@@ -110,6 +110,7 @@ CachedSearchIterator::InitializeChunkedIterators(
 CachedSearchIterator::CachedSearchIterator(
     const dataset::SearchDataset& query_ds,
     const segcore::VectorBase* vec_data,
+    const ChunkSnapshot& chunks,
     const int64_t row_count,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
@@ -148,10 +149,18 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, &vec_data, vec_size_per_chunk, row_count, is_element_level](
-            int64_t chunk_id) {
-            const void* chunk_data = vec_data->get_chunk_data(chunk_id);
-            // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
+        [this,
+         &vec_data,
+         &chunks,
+         vec_size_per_chunk,
+         row_count,
+         is_element_level](int64_t chunk_id) {
+            // Read through the caller's snapshot, not the live container: the
+            // generation behind `chunks` is pinned and cannot be reclaimed
+            // under us. There is no PinWrapper here (unlike the sealed path)
+            // because the snapshot itself is the pin, and the caller holds it
+            // for at least as long as this iterator lives.
+            const void* chunk_data = vec_data->get_chunk_data(chunks, chunk_id);
             int64_t chunk_size = std::min(
                 vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
             if (!is_element_level) {
