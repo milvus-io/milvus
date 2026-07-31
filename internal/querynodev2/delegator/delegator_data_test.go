@@ -375,7 +375,6 @@ func processInsertAsync(sd *shardDelegator, insertRecords map[int64]*InsertData)
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
-
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
 			100: validInsertData(),
@@ -654,7 +653,7 @@ func (s *DelegatorDataSuite) TestProcessInsertPreservesNilWorkerPanicAfterAllTas
 		switch segment.ID() {
 		case panicSegmentID:
 			close(panicEntered)
-			panic(nil)
+			panic(nil) //nolint:govet // Exercise panic(nil) compatibility semantics explicitly.
 		case blockedSegmentID:
 			close(blockedEntered)
 			<-releaseBlocked
