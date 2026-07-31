@@ -4118,7 +4118,20 @@ TEST(SealedSegmentLoad, LoadPublishesDefaultFilledStateAfterCompact) {
         }
     }
 
+    // Storage V3 manifests are historical and may still expose text stats for
+    // a field dropped from the collection schema.  Fresh Load (not Reopen)
+    // must consume the schema-effective projection and never try this path.
+    constexpr int64_t dropped_text_field = 107;
+    auto& stale_text_stats =
+        (*proto.mutable_textstatslogs())[dropped_text_field];
+    stale_text_stats.set_fieldid(dropped_text_field);
+    stale_text_stats.set_version(1);
+    stale_text_stats.set_buildid(5001);
+    stale_text_stats.add_files("/must/not/be/read/dropped-text-index");
+
     sealed->SetLoadInfo(proto);
+    EXPECT_FALSE(
+        sealed->TestGetSegmentLoadInfo()->HasTextStatsLog(dropped_text_field));
 
     milvus::tracer::TraceContext trace_ctx;
     milvus::OpContext op_ctx;
@@ -4126,6 +4139,8 @@ TEST(SealedSegmentLoad, LoadPublishesDefaultFilledStateAfterCompact) {
     EXPECT_TRUE(sealed->HasFieldData(new_field));
     EXPECT_TRUE(
         sealed->TestGetSegmentLoadInfo()->IsFieldFilledWithDefault(new_field));
+    EXPECT_FALSE(
+        sealed->TestGetSegmentLoadInfo()->HasTextStatsLog(dropped_text_field));
 }
 
 TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
@@ -4200,7 +4215,7 @@ TEST(SealedSegmentReopen, RejectsRowCountChangeBeforePublication) {
         sealed->Reopen(&op_ctx, reopen_proto);
         FAIL() << "row-count-changing reopen should fail";
     } catch (const SegcoreError& err) {
-        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_EQ(err.get_error_code(), kNeedFullSegmentReplacement);
         EXPECT_NE(std::string(err.what())
                       .find("online reopen cannot change row count"),
                   std::string::npos);
@@ -4262,7 +4277,7 @@ TEST(SealedSegmentReopen, RejectsStorageV2BinlogRowCountMismatchBeforeIO) {
         sealed->Reopen(&op_ctx, reopen_proto);
         FAIL() << "actual binlog row-count mismatch should fail";
     } catch (const SegcoreError& err) {
-        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_EQ(err.get_error_code(), kNeedFullSegmentReplacement);
         EXPECT_NE(std::string(err.what()).find("field binlog group"),
                   std::string::npos);
         EXPECT_NE(std::string(err.what()).find("expected 4, actual 5"),
@@ -4361,6 +4376,7 @@ TEST(SealedSegmentReopen, FullReopenPrunesDroppedPrebuiltTextIndexMetadata) {
     text_stats.set_buildid(5001);
     text_stats.add_files("/must/not/be/read/dropped-text-index");
     sealed->SetLoadInfo(load_info);
+    sealed->SetTextLobPathForTesting(text_fid, "/stale/dropped-text-lob");
 
     milvus::OpContext op_ctx;
     EXPECT_NO_THROW(sealed->Reopen(&op_ctx, load_info, new_schema));
@@ -4370,6 +4386,7 @@ TEST(SealedSegmentReopen, FullReopenPrunesDroppedPrebuiltTextIndexMetadata) {
     EXPECT_EQ(first->schema->get_schema_version(), 200);
     EXPECT_FALSE(first->load_info->HasFieldInSchema(text_fid));
     EXPECT_FALSE(first->load_info->HasTextStatsLog(text_fid.get()));
+    EXPECT_EQ(first->runtime->text_lob_paths.count(text_fid), 0);
 
     // A stale dropped-field textstats entry in the first published load info
     // would make ComputeDiffTextIndexes reject every subsequent reopen.
@@ -4591,7 +4608,7 @@ TEST(SealedSegmentReopen, RejectsRawBuiltToPrebuiltTextIndexBeforePublication) {
         sealed->Reopen(&op_ctx, reopen_proto);
         FAIL() << "raw-built to pre-built text index reopen should fail";
     } catch (const SegcoreError& err) {
-        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_EQ(err.get_error_code(), kNeedFullSegmentReplacement);
         EXPECT_NE(std::string(err.what()).find("raw-built to pre-built"),
                   std::string::npos);
         EXPECT_NE(std::string(err.what()).find("full segment replacement"),

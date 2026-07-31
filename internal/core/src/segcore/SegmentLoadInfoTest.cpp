@@ -44,6 +44,21 @@
 using namespace milvus;
 using namespace milvus::segcore;
 
+namespace {
+
+template <typename Fn>
+void
+ExpectNeedFullSegmentReplacement(Fn&& fn) {
+    try {
+        fn();
+        FAIL() << "transition should require full segment replacement";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), kNeedFullSegmentReplacement);
+    }
+}
+
+}  // namespace
+
 class SegmentLoadInfoTest : public ::testing::Test {
  protected:
     void
@@ -439,7 +454,7 @@ TEST_F(SegmentLoadInfoTest,
     new_schema->set_schema_version(schema_->get_schema_version() + 1);
 
     SegmentLoadInfo new_info(current_info);
-    new_info.ReplaceSchemaForReopen(new_schema);
+    new_info.ProjectToSchema(new_schema);
     auto diff = current_info.ComputeDiff(new_info);
 
     EXPECT_TRUE(diff.indexes_to_load.empty());
@@ -451,8 +466,7 @@ TEST_F(SegmentLoadInfoTest,
               diff.fields_to_fill_default.end());
 }
 
-TEST_F(SegmentLoadInfoTest,
-       ReplaceSchemaForReopenPrunesDroppedFieldRuntimeState) {
+TEST_F(SegmentLoadInfoTest, ProjectToSchemaPrunesDroppedFieldRuntimeState) {
     SegmentLoadInfo current_info(proto_, schema_);
     current_info.SetColumnGroupsForTesting(
         std::make_shared<milvus_storage::api::ColumnGroups>());
@@ -472,7 +486,7 @@ TEST_F(SegmentLoadInfoTest,
     new_schema->set_schema_version(schema_->get_schema_version() + 1);
 
     SegmentLoadInfo new_info(current_info);
-    new_info.ReplaceSchemaForReopen(new_schema);
+    new_info.ProjectToSchema(new_schema);
 
     EXPECT_FALSE(new_info.HasIndexInfo(FieldId(101)));
     EXPECT_FALSE(new_info.HasIndexInfo(FieldId(102)));
@@ -486,11 +500,88 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_EQ(diff.indexes_to_drop, std::set<FieldId>({FieldId(101)}));
 
     SegmentLoadInfo next_info(new_info);
-    next_info.ReplaceSchemaForReopen(new_schema);
+    next_info.ProjectToSchema(new_schema);
     auto second_diff = new_info.ComputeDiff(next_info);
     EXPECT_TRUE(second_diff.indexes_to_load.empty());
     EXPECT_TRUE(second_diff.indexes_to_replace.empty());
     EXPECT_TRUE(second_diff.indexes_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ProjectToSchemaNormalizesAllSchemaScopedMetadata) {
+    auto raw = proto_;
+    auto* dropped_index = raw.add_index_infos();
+    dropped_index->set_fieldid(110);
+    dropped_index->set_indexid(9999);
+    dropped_index->add_index_file_paths("/path/to/dropped-index");
+
+    auto& dropped_text = (*raw.mutable_textstatslogs())[110];
+    dropped_text.set_fieldid(110);
+    dropped_text.set_version(1);
+    auto& dropped_json = (*raw.mutable_jsonkeystatslogs())[110];
+    dropped_json.set_fieldid(110);
+    dropped_json.set_version(1);
+
+    auto* mixed_stats = raw.add_statslogs();
+    mixed_stats->set_fieldid(200);
+    mixed_stats->add_child_fields(105);
+    mixed_stats->add_child_fields(110);
+    mixed_stats->add_binlogs()->set_log_path("/path/to/mixed-stats");
+
+    auto projected_schema = std::make_shared<Schema>();
+    projected_schema->AddField(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt);
+    projected_schema->AddField(FieldName("json_field"),
+                               FieldId(102),
+                               DataType::JSON,
+                               false,
+                               std::nullopt);
+    projected_schema->AddField(FieldName("child_field1"),
+                               FieldId(105),
+                               DataType::FLOAT,
+                               false,
+                               std::nullopt);
+    projected_schema->set_primary_field_id(FieldId(100));
+    projected_schema->set_schema_version(schema_->get_schema_version() + 1);
+
+    // Construct against the target schema so historical metadata for dropped
+    // fields is not interpreted before canonical projection removes it.
+    SegmentLoadInfo info(raw, projected_schema);
+    info.SetFieldFilledWithDefault(FieldId(110));
+    info.SetTextIndexCreated(FieldId(110));
+    info.ProjectToSchema(projected_schema);
+
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(110)));
+    EXPECT_FALSE(info.HasTextStatsLog(110));
+    EXPECT_FALSE(info.HasJsonKeyStatsLog(110));
+    EXPECT_FALSE(info.IsFieldFilledWithDefault(FieldId(110)));
+    EXPECT_FALSE(info.HasTextIndexCreated(FieldId(110)));
+    EXPECT_EQ(info.GetDeltalogCount(), proto_.deltalogs_size());
+
+    ASSERT_EQ(info.GetBinlogPathCount(), 1);
+    ASSERT_EQ(info.GetBinlogPath(0).child_fields_size(), 1);
+    EXPECT_EQ(info.GetBinlogPath(0).child_fields(0), 105);
+
+    ASSERT_EQ(info.GetStatslogCount(), 1);
+    ASSERT_EQ(info.GetStatslog(0).child_fields_size(), 1);
+    EXPECT_EQ(info.GetStatslog(0).child_fields(0), 105);
+    EXPECT_EQ(info.GetBm25logCount(), 0);
+    EXPECT_NO_THROW(info.ValidateSchemaProjection());
+}
+
+TEST_F(SegmentLoadInfoTest, ProjectToSchemaRejectsStatsMapFieldIdMismatch) {
+    auto raw = proto_;
+    (*raw.mutable_textstatslogs())[101].set_fieldid(102);
+    SegmentLoadInfo info(raw, schema_);
+
+    try {
+        info.ProjectToSchema(schema_);
+        FAIL() << "structurally corrupt text stats should be rejected";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::DataFormatBroken);
+        EXPECT_NE(
+            std::string(err.what()).find("disagrees with embedded field id"),
+            std::string::npos);
+    }
 }
 
 TEST_F(SegmentLoadInfoTest, BinlogInfo) {
@@ -541,7 +632,7 @@ TEST_F(SegmentLoadInfoTest, ValidateReopenRowCountRejectsRetainedGroup) {
         info.ValidateReopenRowCount(1000);
         FAIL() << "mismatched retained column group should be rejected";
     } catch (const SegcoreError& err) {
-        EXPECT_EQ(err.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_EQ(err.get_error_code(), kNeedFullSegmentReplacement);
         EXPECT_NE(std::string(err.what()).find("field binlog group 104"),
                   std::string::npos);
         EXPECT_NE(std::string(err.what()).find("expected 1000, actual 999"),
@@ -564,6 +655,35 @@ TEST_F(SegmentLoadInfoTest, ValidateReopenRowCountIgnoresDroppedGroup) {
 
     SegmentLoadInfo info(proto, reduced_schema);
     EXPECT_NO_THROW(info.ValidateReopenRowCount(1000));
+}
+
+TEST_F(SegmentLoadInfoTest, ManifestToBinlogRequiresFullReplacement) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path("/manifest/current");
+
+    auto new_proto = current_proto;
+    new_proto.clear_manifest_path();
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
+}
+
+TEST_F(SegmentLoadInfoTest, BinlogToManifestRequiresFullReplacement) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    auto new_proto = current_proto;
+    new_proto.set_manifest_path("/manifest/new");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
 }
 
 TEST_F(SegmentLoadInfoTest, ColumnGroup) {
@@ -1825,7 +1945,8 @@ TEST_F(SegmentLoadInfoTest, RejectsPrebuiltTextIndexIdentityChange) {
 
     SegmentLoadInfo current_info(current_proto, text_schema);
     SegmentLoadInfo new_info(new_proto, text_schema);
-    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
 }
 
 TEST_F(SegmentLoadInfoTest, RejectsPrebuiltTextIndexSchemaIdentityChange) {
@@ -1859,7 +1980,8 @@ TEST_F(SegmentLoadInfoTest, RejectsPrebuiltTextIndexSchemaIdentityChange) {
 
     SegmentLoadInfo current_info(proto, old_schema);
     SegmentLoadInfo new_info(proto, new_schema);
-    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
 }
 
 TEST_F(SegmentLoadInfoTest, RejectsPrebuiltToRawBuiltTextIndexChange) {
@@ -1880,7 +2002,8 @@ TEST_F(SegmentLoadInfoTest, RejectsPrebuiltToRawBuiltTextIndexChange) {
 
     SegmentLoadInfo current_info(current_proto, text_schema);
     SegmentLoadInfo new_info(new_proto, text_schema);
-    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreatedFromRawData) {
@@ -1924,7 +2047,8 @@ TEST_F(SegmentLoadInfoTest, RejectsRawBuiltToPrebuiltTextIndexChange) {
     SegmentLoadInfo current_info(current_proto, text_schema);
     current_info.SetTextIndexCreated(FieldId(102));
     SegmentLoadInfo new_info(new_proto, text_schema);
-    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
 }
 
 TEST_F(SegmentLoadInfoTest, RebuildsRawBuiltTextIndexOnSchemaIdentityChange) {
@@ -2089,7 +2213,8 @@ TEST_F(SegmentLoadInfoTest, RejectsRawBuiltTextIndexRemovalWithFieldRetained) {
     SegmentLoadInfo current_info(proto, old_schema);
     current_info.SetTextIndexCreated(FieldId(102));
     SegmentLoadInfo new_info(proto, new_schema);
-    EXPECT_THROW(current_info.ComputeDiff(new_info), SegcoreError);
+    ExpectNeedFullSegmentReplacement(
+        [&] { current_info.ComputeDiff(new_info); });
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreateForUnindexed) {
@@ -4118,8 +4243,7 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexesDroppedField) {
         << "Dropped field 102 should not be in text_indexes_to_create";
 }
 
-TEST_F(SegmentLoadInfoTest,
-       ReplaceSchemaForReopenPrunesDroppedRawBuiltTextIndex) {
+TEST_F(SegmentLoadInfoTest, ProjectToSchemaPrunesDroppedRawBuiltTextIndex) {
     auto old_schema = CreateSchemaWithTextMatchField();
 
     proto::segcore::SegmentLoadInfo proto;
@@ -4147,7 +4271,7 @@ TEST_F(SegmentLoadInfoTest,
     new_schema->set_schema_version(old_schema->get_schema_version() + 1);
 
     SegmentLoadInfo new_info(current_info);
-    new_info.ReplaceSchemaForReopen(new_schema);
+    new_info.ProjectToSchema(new_schema);
     EXPECT_FALSE(new_info.HasTextIndexCreated(FieldId(102)));
 
     auto diff = current_info.ComputeDiff(new_info);

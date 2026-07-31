@@ -368,6 +368,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t row_count{0};
     };
 
+    enum class PublishedStatePhase {
+        Bootstrap,
+        Serving,
+    };
+
     struct PublishedSegmentState {
         SchemaPtr schema;
         std::shared_ptr<const SegmentLoadInfo> load_info;
@@ -382,6 +387,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         BitsetType index_ready_bitset;
         BitsetType binlog_index_bitset;
         std::unordered_map<FieldId, bool> index_has_raw_data;
+        PublishedStatePhase phase{PublishedStatePhase::Bootstrap};
     };
 
     struct StateDelta {
@@ -393,6 +399,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::optional<BitsetType> published_binlog_index_ready_bitset;
         std::optional<std::unordered_map<FieldId, bool>>
             published_index_has_raw_data;
+        std::optional<PublishedStatePhase> phase;
     };
 
     static std::shared_ptr<const RuntimeResourceState>
@@ -1499,7 +1506,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                             FieldId field_id);
 
     std::shared_ptr<PublishedSegmentState>
-    BuildNextPublishedState(
+    PrepareTargetState(
         const std::shared_ptr<const PublishedSegmentState>& current,
         const StateDelta& delta) const;
 
@@ -1512,6 +1519,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     ValidateTextIndexState(const PublishedSegmentState& state) const;
+
+    void
+    ValidatePublishedState(const PublishedSegmentState& state) const;
 
     enum class PublishMode {
         Drain,
@@ -1593,8 +1603,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             std::shared_ptr<PublishedSegmentState> next;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                next = segment_.BuildNextPublishedState(current, delta);
-                segment_.ValidateTextIndexState(*next);
+                next = segment_.PrepareTargetState(current, delta);
                 retired_indexings.swap(retired_vector_indexings_);
                 retired_cache_indexings.swap(retired_cache_indexings_);
             }
@@ -2412,7 +2421,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     TestBuildNextPublishedState(
         const std::shared_ptr<const PublishedSegmentState>& current,
         const StateDelta& delta) const {
-        return BuildNextPublishedState(current, delta);
+        return PrepareTargetState(current, delta);
     }
 
     std::shared_ptr<RuntimeResourceState>

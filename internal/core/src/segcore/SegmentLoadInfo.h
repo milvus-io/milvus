@@ -40,6 +40,12 @@
 
 namespace milvus::segcore {
 
+// Online reopen cannot complete these transitions in place.  Keep this code
+// local to Milvus until it is promoted into the milvus-common ErrorCode enum;
+// it is projected to a named merr sentinel at the CGO boundary.
+inline constexpr auto kNeedFullSegmentReplacement =
+    static_cast<ErrorCode>(2047);
+
 enum class RawTextIndexSource {
     Unknown,
     FieldData,
@@ -1117,13 +1123,27 @@ class SegmentLoadInfo {
         BuildCache();
     }
 
+    /**
+     * @brief Build the schema-effective view of persisted segment metadata.
+     *
+     * Storage manifests are historical inputs and can legitimately retain
+     * metadata for fields dropped by a newer collection schema.  Every load
+     * path must project that raw input before diff computation or publication.
+     * Structural inconsistencies inside the persisted metadata are rejected;
+     * historical entries for dropped fields are removed silently.
+     */
     void
-    ReplaceSchemaForReopen(SchemaPtr schema) {
-        if (!schema) {
-            return;
-        }
-        schema_ = std::move(schema);
-        PruneRuntimeStateNotInSchema();
+    ProjectToSchema(SchemaPtr schema);
+
+    /**
+     * @brief Validate that this instance is a canonical schema projection.
+     */
+    void
+    ValidateSchemaProjection() const;
+
+    [[nodiscard]] const SchemaPtr&
+    GetSchema() const {
+        return schema_;
     }
 
     void
@@ -1223,6 +1243,13 @@ class SegmentLoadInfo {
 
  private:
     void
+    ValidateStructuralMetadata() const;
+
+    void
+    ProjectFieldBinlogs(
+        google::protobuf::RepeatedPtrField<proto::segcore::FieldBinlog>* logs);
+
+    void
     PruneRuntimeStateNotInSchema() {
         auto prune_map = [this](auto& values) {
             for (auto it = values.begin(); it != values.end();) {
@@ -1249,17 +1276,6 @@ class SegmentLoadInfo {
         prune_set(field_index_has_raw_data_);
         prune_set(fields_filled_with_default_);
         prune_map(created_text_indexes_);
-
-        std::vector<int64_t> dropped_text_stats_fields;
-        for (const auto& [field_id, _] : info_.textstatslogs()) {
-            if (!HasFieldInSchema(FieldId(field_id))) {
-                dropped_text_stats_fields.push_back(field_id);
-            }
-        }
-        auto* text_stats_logs = info_.mutable_textstatslogs();
-        for (auto field_id : dropped_text_stats_fields) {
-            text_stats_logs->erase(field_id);
-        }
     }
 
     void

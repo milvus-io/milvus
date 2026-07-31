@@ -239,9 +239,17 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		mlog.Warn(context.TODO(), "failed to get collection", mlog.Err(err))
 		return nil, err
 	}
+	schema := collection.Schema()
+	projectedSegments := make([]*querypb.SegmentLoadInfo, 0, len(segments))
 	for _, segment := range segments {
-		configureUseTakeForOutput(segment, collection.Schema())
+		projected, err := projectSegmentLoadInfoToSchema(segment, schema)
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to project load metadata for segment %d", segment.GetSegmentID())
+		}
+		configureUseTakeForOutput(projected, schema)
+		projectedSegments = append(projectedSegments, projected)
 	}
+	segments = projectedSegments
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)

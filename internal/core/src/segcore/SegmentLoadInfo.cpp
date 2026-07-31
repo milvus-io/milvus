@@ -36,6 +36,165 @@
 
 namespace milvus::segcore {
 
+namespace {
+
+template <typename StatsMap>
+void
+ValidateStatsMapFieldIds(const StatsMap& stats,
+                         std::string_view kind,
+                         int64_t segment_id) {
+    for (const auto& [field_id, value] : stats) {
+        if (value.fieldid() != field_id) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{} metadata key {} disagrees with embedded field id {} "
+                      "for segment {}",
+                      kind,
+                      field_id,
+                      value.fieldid(),
+                      segment_id);
+        }
+    }
+}
+
+template <typename Repeated, typename Predicate>
+void
+PruneRepeatedByField(Repeated* values, Predicate&& keep) {
+    Repeated projected;
+    for (const auto& value : *values) {
+        if (keep(FieldId(value.fieldid()))) {
+            *projected.Add() = value;
+        }
+    }
+    values->Swap(&projected);
+}
+
+}  // namespace
+
+void
+SegmentLoadInfo::ValidateStructuralMetadata() const {
+    ValidateStatsMapFieldIds(
+        info_.textstatslogs(), "text index stats", GetSegmentID());
+    ValidateStatsMapFieldIds(
+        info_.jsonkeystatslogs(), "JSON key stats", GetSegmentID());
+}
+
+void
+SegmentLoadInfo::ProjectFieldBinlogs(
+    google::protobuf::RepeatedPtrField<proto::segcore::FieldBinlog>* logs) {
+    google::protobuf::RepeatedPtrField<proto::segcore::FieldBinlog> projected;
+    for (const auto& field_binlog : *logs) {
+        if (field_binlog.child_fields().empty()) {
+            if (HasFieldInSchema(FieldId(field_binlog.fieldid()))) {
+                *projected.Add() = field_binlog;
+            }
+            continue;
+        }
+
+        auto* retained = projected.Add();
+        *retained = field_binlog;
+        retained->clear_child_fields();
+        for (auto child_id : field_binlog.child_fields()) {
+            if (HasFieldInSchema(FieldId(child_id))) {
+                retained->add_child_fields(child_id);
+            }
+        }
+        if (retained->child_fields().empty()) {
+            projected.RemoveLast();
+        }
+    }
+    logs->Swap(&projected);
+}
+
+void
+SegmentLoadInfo::ProjectToSchema(SchemaPtr schema) {
+    AssertInfo(schema != nullptr,
+               "cannot project segment {} load info to a null schema",
+               GetSegmentID());
+    schema_ = std::move(schema);
+    ValidateStructuralMetadata();
+
+    auto keep = [this](FieldId field_id) { return HasFieldInSchema(field_id); };
+    PruneRepeatedByField(info_.mutable_index_infos(), keep);
+    ProjectFieldBinlogs(info_.mutable_binlog_paths());
+    ProjectFieldBinlogs(info_.mutable_statslogs());
+    ProjectFieldBinlogs(info_.mutable_bm25logs());
+
+    auto prune_stats = [this](auto* stats) {
+        for (auto it = stats->begin(); it != stats->end();) {
+            if (!HasFieldInSchema(FieldId(it->first))) {
+                it = stats->erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+    prune_stats(info_.mutable_textstatslogs());
+    prune_stats(info_.mutable_jsonkeystatslogs());
+
+    PruneRuntimeStateNotInSchema();
+    BuildFieldBinlogCache();
+    ValidateSchemaProjection();
+}
+
+void
+SegmentLoadInfo::ValidateSchemaProjection() const {
+    AssertInfo(schema_ != nullptr,
+               "segment {} load info has no schema projection",
+               GetSegmentID());
+    ValidateStructuralMetadata();
+
+    auto validate_field = [this](int64_t field_id, std::string_view kind) {
+        AssertInfo(HasFieldInSchema(FieldId(field_id)),
+                   "projected {} references dropped field {} for segment {}",
+                   kind,
+                   field_id,
+                   GetSegmentID());
+    };
+    for (const auto& index_info : info_.index_infos()) {
+        validate_field(index_info.fieldid(), "index metadata");
+    }
+    for (const auto& [field_id, _] : info_.textstatslogs()) {
+        validate_field(field_id, "text index stats");
+    }
+    for (const auto& [field_id, _] : info_.jsonkeystatslogs()) {
+        validate_field(field_id, "JSON key stats");
+    }
+
+    auto validate_binlogs = [&](const auto& logs, std::string_view kind) {
+        for (const auto& field_binlog : logs) {
+            if (field_binlog.child_fields().empty()) {
+                validate_field(field_binlog.fieldid(), kind);
+                continue;
+            }
+            for (auto child_id : field_binlog.child_fields()) {
+                validate_field(child_id, kind);
+            }
+        }
+    };
+    validate_binlogs(info_.binlog_paths(), "field binlog");
+    validate_binlogs(info_.statslogs(), "stats binlog");
+    validate_binlogs(info_.bm25logs(), "BM25 binlog");
+
+    for (const auto& [field_id, _] : converted_field_index_cache_) {
+        validate_field(field_id.get(), "converted index cache");
+    }
+    for (const auto& [field_id, _] : field_index_identity_cache_) {
+        validate_field(field_id.get(), "index identity cache");
+    }
+    for (const auto& [field_id, _] : json_index_path_cache_) {
+        validate_field(field_id.get(), "JSON index path cache");
+    }
+    for (const auto& field_id : field_index_has_raw_data_) {
+        validate_field(field_id.get(), "index raw-data marker");
+    }
+    for (const auto& field_id : fields_filled_with_default_) {
+        validate_field(field_id.get(), "default-filled marker");
+    }
+    for (const auto& [field_id, _] : created_text_indexes_) {
+        validate_field(field_id.get(), "raw-built text index marker");
+    }
+}
+
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 SegmentLoadInfo::GetColumnGroups() const {
     auto manifest_path = GetManifestPath();
@@ -77,13 +236,15 @@ SegmentLoadInfo::HasManifestColumn(const std::string& column_name) const {
 
 void
 SegmentLoadInfo::ValidateReopenRowCount(int64_t expected) const {
-    AssertInfo(
-        GetNumOfRows() == expected,
-        "online reopen cannot change row count for segment {}: current {}, "
-        "incoming {}; use full segment replacement instead",
-        GetSegmentID(),
-        expected,
-        GetNumOfRows());
+    if (GetNumOfRows() != expected) {
+        ThrowInfo(kNeedFullSegmentReplacement,
+                  "online reopen cannot change row count for segment {}: "
+                  "current {}, incoming {}; use full segment replacement "
+                  "instead",
+                  GetSegmentID(),
+                  expected,
+                  GetNumOfRows());
+    }
 
     if (HasManifestPath()) {
         return;
@@ -109,13 +270,16 @@ SegmentLoadInfo::ValidateReopenRowCount(int64_t expected) const {
         for (const auto& binlog : field_binlog.binlogs()) {
             actual += binlog.entries_num();
         }
-        AssertInfo(actual == expected,
-                   "online reopen row count mismatch for segment {}, field "
-                   "binlog group {}: expected {}, actual {}",
-                   GetSegmentID(),
-                   field_binlog.fieldid(),
-                   expected,
-                   actual);
+        if (actual != expected) {
+            ThrowInfo(kNeedFullSegmentReplacement,
+                      "online reopen row count mismatch for segment {}, "
+                      "field binlog group {}: expected {}, actual {}; use "
+                      "full segment replacement instead",
+                      GetSegmentID(),
+                      field_binlog.fieldid(),
+                      expected,
+                      actual);
+        }
     }
 }
 
@@ -962,26 +1126,34 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
 
         const auto* incoming_stats = new_info.GetTextStatsLog(field_id);
         const auto& incoming_meta = new_info.schema_->operator[](fid);
-        AssertInfo(
-            incoming_stats != nullptr,
-            "online reopen cannot change text index source for segment {}, "
-            "field {} from pre-built to {}; use full segment replacement "
-            "instead",
-            new_info.GetSegmentID(),
-            field_id,
-            incoming_meta.enable_match() ? "raw-built" : "none");
-        AssertInfo(
-            TextStatsLoadIdentityEqual(current_stats, *incoming_stats),
-            "online reopen cannot replace pre-built text index identity for "
-            "segment {}, field {}; use full segment replacement instead",
-            new_info.GetSegmentID(),
-            field_id);
-        AssertInfo(TextIndexSchemaIdentityEqual(schema_->operator[](fid),
-                                                incoming_meta),
-                   "online reopen cannot change text index schema identity for "
-                   "segment {}, field {}; use full segment replacement instead",
-                   new_info.GetSegmentID(),
-                   field_id);
+        if (incoming_stats == nullptr) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot change text index source for segment "
+                "{}, field {} from pre-built to {}; use full segment "
+                "replacement instead",
+                new_info.GetSegmentID(),
+                field_id,
+                incoming_meta.enable_match() ? "raw-built" : "none");
+        }
+        if (!TextStatsLoadIdentityEqual(current_stats, *incoming_stats)) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot replace pre-built text index identity "
+                "for segment {}, field {}; use full segment replacement "
+                "instead",
+                new_info.GetSegmentID(),
+                field_id);
+        }
+        if (!TextIndexSchemaIdentityEqual(schema_->operator[](fid),
+                                          incoming_meta)) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot change text index schema identity for "
+                "segment {}, field {}; use full segment replacement instead",
+                new_info.GetSegmentID(),
+                field_id);
+        }
     }
 
     for (const auto& [fid, _] : created_text_indexes_) {
@@ -999,21 +1171,25 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
             continue;
         }
 
-        AssertInfo(
-            new_info.GetTextStatsLog(fid.get()) == nullptr,
-            "online reopen cannot change text index source for segment {}, "
-            "field {} from raw-built to pre-built; use full segment "
-            "replacement instead",
-            new_info.GetSegmentID(),
-            fid.get());
+        if (new_info.GetTextStatsLog(fid.get()) != nullptr) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot change text index source for segment "
+                "{}, field {} from raw-built to pre-built; use full segment "
+                "replacement instead",
+                new_info.GetSegmentID(),
+                fid.get());
+        }
         const auto& incoming_meta = new_info.schema_->operator[](fid);
-        AssertInfo(
-            incoming_meta.enable_match(),
-            "online reopen cannot remove raw-built text index for segment "
-            "{}, field {} while keeping the field; use full segment "
-            "replacement instead",
-            new_info.GetSegmentID(),
-            fid.get());
+        if (!incoming_meta.enable_match()) {
+            ThrowInfo(
+                kNeedFullSegmentReplacement,
+                "online reopen cannot remove raw-built text index for segment "
+                "{}, field {} while keeping the field; use full segment "
+                "replacement instead",
+                new_info.GetSegmentID(),
+                fid.get());
+        }
         // Raw-built indexes can be rebuilt from the staged target data when
         // analyzer/schema identity changes. The rebuild is planned after all
         // field/index source diffs have been computed.
@@ -1262,8 +1438,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        AssertInfo(new_info.HasManifestPath(),
-                   "manifest could only be updated with other manifest");
+        if (!new_info.HasManifestPath()) {
+            ThrowInfo(kNeedFullSegmentReplacement,
+                      "online reopen cannot change segment {} from manifest "
+                      "to binlog storage; use full segment replacement instead",
+                      GetSegmentID());
+        }
         if (GetManifestPath() != new_info.GetManifestPath()) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
@@ -1276,9 +1456,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             ComputeDiffColumnGroups(diff, new_info);
         }
     } else {
-        AssertInfo(
-            !new_info.HasManifestPath(),
-            "field binlogs could only be updated with non-manfest load info");
+        if (new_info.HasManifestPath()) {
+            ThrowInfo(kNeedFullSegmentReplacement,
+                      "online reopen cannot change segment {} from binlog to "
+                      "manifest storage; use full segment replacement instead",
+                      GetSegmentID());
+        }
         ComputeDiffBinlogs(diff, new_info);
     }
 

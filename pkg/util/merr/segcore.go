@@ -88,6 +88,7 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2039: {sentinel: ErrSegcoreOutOfRange},                                // OutOfRange (internal bounds bug, not a signal)
 	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},           // GcpNativeError (object storage; transient)
 	2046: {sentinel: ErrCollectionSchemaVersionNotReady, retriable: true}, // CollectionSchemaVersionNotReady (stale QueryNode schema snapshot; retry with fresh schema)
+	2047: {sentinel: ErrNeedFullSegmentReplacement},                       // NeedFullSegmentReplacement (valid target state, unsupported in-place transition)
 	2099: {sentinel: KnowhereError},                                       // KnowhereError
 
 	// Wrapper-path special cases (preserve existing errors.Is behavior that

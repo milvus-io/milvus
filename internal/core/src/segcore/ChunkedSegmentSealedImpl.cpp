@@ -1064,6 +1064,7 @@ ChunkedSegmentSealedImpl::BuildPublishedState(
     state->load_info = load_info;
     state->runtime = BuildRuntimeResourceState();
     state->commit_ts = commit_ts;
+    state->phase = PublishedStatePhase::Bootstrap;
     NormalizePublishedState(*state);
     return state;
 }
@@ -1238,6 +1239,7 @@ ChunkedSegmentSealedImpl::ClonePublishedState(
     state->index_ready_bitset = current->index_ready_bitset.clone();
     state->binlog_index_bitset = current->binlog_index_bitset.clone();
     state->index_has_raw_data = current->index_has_raw_data;
+    state->phase = current->phase;
     return state;
 }
 
@@ -1267,6 +1269,9 @@ ChunkedSegmentSealedImpl::ApplyDeltaToState(PublishedSegmentState& state,
     if (delta.published_index_has_raw_data.has_value()) {
         state.published_index_has_raw_data =
             *delta.published_index_has_raw_data;
+    }
+    if (delta.phase.has_value()) {
+        state.phase = *delta.phase;
     }
 }
 
@@ -1436,13 +1441,164 @@ ChunkedSegmentSealedImpl::ValidateTextIndexState(
     }
 }
 
+void
+ChunkedSegmentSealedImpl::ValidatePublishedState(
+    const PublishedSegmentState& state) const {
+    AssertInfo(state.schema != nullptr,
+               "published segment {} state has no schema",
+               id_);
+    AssertInfo(state.load_info != nullptr,
+               "published segment {} state has no load info",
+               id_);
+    AssertInfo(state.load_info->GetSchema() != nullptr,
+               "published segment {} load info has no projected schema",
+               id_);
+    AssertInfo(state.load_info->GetSchema() == state.schema,
+               "published segment {} schema/load-info do not share the same "
+               "schema snapshot",
+               id_);
+    AssertInfo(state.load_info->GetSchema()->get_schema_version() ==
+                   state.schema->get_schema_version(),
+               "published segment {} schema/load-info version mismatch: {} "
+               "vs {}",
+               id_,
+               state.schema->get_schema_version(),
+               state.load_info->GetSchema()->get_schema_version());
+    state.load_info->ValidateSchemaProjection();
+
+    if (state.phase == PublishedStatePhase::Bootstrap) {
+        return;
+    }
+
+    AssertInfo(state.runtime != nullptr,
+               "serving segment {} state has no runtime resources",
+               id_);
+    AssertInfo(state.runtime->row_count == state.load_info->GetNumOfRows(),
+               "published segment {} row count mismatch: runtime {}, load "
+               "info {}",
+               id_,
+               state.runtime->row_count,
+               state.load_info->GetNumOfRows());
+
+    auto validate_runtime_field = [&](FieldId field_id, std::string_view kind) {
+        AssertInfo(field_exists_in_schema(state.schema, field_id),
+                   "published {} references dropped field {} for segment {}",
+                   kind,
+                   field_id.get(),
+                   id_);
+    };
+    for (const auto& [field_id, _] : state.runtime->fields) {
+        validate_runtime_field(field_id, "field data");
+    }
+    for (const auto& [field_id, _] : state.runtime->array_offsets_map) {
+        validate_runtime_field(field_id, "array-offset metadata");
+    }
+    for (const auto& [field_id, _] : state.runtime->scalar_indexings) {
+        validate_runtime_field(field_id, "scalar index");
+    }
+    for (const auto& [field_id, _] : state.runtime->vector_indexings) {
+        validate_runtime_field(field_id, "vector index");
+    }
+    for (const auto& [field_id, _] : state.runtime->vec_binlog_config) {
+        validate_runtime_field(field_id, "vector binlog config");
+    }
+    for (const auto& field_id : state.runtime->ngram_fields) {
+        validate_runtime_field(field_id, "ngram index");
+    }
+    for (const auto& [field_id, _] : state.runtime->ngram_indexings) {
+        validate_runtime_field(field_id, "JSON ngram index");
+    }
+    for (const auto& [field_id, _] : state.runtime->text_lob_paths) {
+        validate_runtime_field(field_id, "TEXT LOB path");
+    }
+    for (const auto& [field_id, _] : state.runtime->json_stats) {
+        validate_runtime_field(field_id, "JSON key stats runtime");
+        AssertInfo(state.load_info->HasJsonKeyStatsLog(field_id.get()),
+                   "published JSON key stats runtime for field {} has no "
+                   "matching metadata in segment {}",
+                   field_id.get(),
+                   id_);
+    }
+    for (const auto& index : state.runtime->json_indices) {
+        validate_runtime_field(index.field_id, "JSON index");
+    }
+    for (const auto& field_id : state.runtime->mmap_field_ids) {
+        validate_runtime_field(field_id, "mmap field marker");
+    }
+    for (const auto& [field_id, _] : state.runtime->variable_fields_avg_size) {
+        validate_runtime_field(field_id, "variable-field size metadata");
+    }
+    std::unordered_set<std::string> schema_structs;
+    for (const auto& [_, field_meta] : state.schema->get_fields()) {
+        if (auto struct_name = GetStructNameForArrayField(field_meta);
+            struct_name.has_value()) {
+            schema_structs.insert(*struct_name);
+        }
+    }
+    for (const auto& [struct_name, _] :
+         state.runtime->struct_to_array_offsets) {
+        AssertInfo(schema_structs.count(struct_name) > 0,
+                   "published array-offset metadata references dropped "
+                   "struct {} for segment {}",
+                   struct_name,
+                   id_);
+    }
+
+    auto runtime_index_ready = [&](FieldId field_id) {
+        return state.runtime->scalar_indexings.count(field_id) > 0 ||
+               state.runtime->vector_indexings.count(field_id) > 0 ||
+               state.runtime->ngram_fields.count(field_id) > 0 ||
+               RuntimeJsonNgramIndexReady(*state.runtime, field_id);
+    };
+    for (size_t i = 0; i < state.index_ready_bitset.size(); ++i) {
+        if (!state.index_ready_bitset[i]) {
+            continue;
+        }
+        auto field_id = FieldId(START_USER_FIELDID + static_cast<int64_t>(i));
+        AssertInfo(runtime_index_ready(field_id),
+                   "published index-ready bit for field {} has no runtime "
+                   "index in segment {}",
+                   field_id.get(),
+                   id_);
+    }
+    for (size_t i = 0; i < state.binlog_index_bitset.size(); ++i) {
+        if (!state.binlog_index_bitset[i]) {
+            continue;
+        }
+        auto field_id = FieldId(START_USER_FIELDID + static_cast<int64_t>(i));
+        AssertInfo(state.runtime->vector_indexings.count(field_id) > 0,
+                   "published binlog-index-ready bit for field {} has no "
+                   "runtime vector index in segment {}",
+                   field_id.get(),
+                   id_);
+    }
+    for (size_t i = 0; i < state.field_data_ready_bitset.size(); ++i) {
+        if (!state.field_data_ready_bitset[i]) {
+            continue;
+        }
+        auto field_id = FieldId(START_USER_FIELDID + static_cast<int64_t>(i));
+        auto it = state.runtime->fields.find(field_id);
+        AssertInfo(it != state.runtime->fields.end() && it->second != nullptr,
+                   "published field-data-ready bit for field {} has no runtime "
+                   "column in segment {}",
+                   field_id.get(),
+                   id_);
+    }
+
+    ValidateTextIndexState(state);
+}
+
 std::shared_ptr<ChunkedSegmentSealedImpl::PublishedSegmentState>
-ChunkedSegmentSealedImpl::BuildNextPublishedState(
+ChunkedSegmentSealedImpl::PrepareTargetState(
     const std::shared_ptr<const PublishedSegmentState>& current,
     const StateDelta& delta) const {
     auto next = ClonePublishedState(current);
     ApplyDeltaToState(*next, delta);
     NormalizePublishedState(*next);
+    // Validate before returning so callers cannot perform retirement or other
+    // publication side effects for an invalid target state. PublishState()
+    // validates again immediately before the atomic store as the final gate.
+    ValidatePublishedState(*next);
     return next;
 }
 
@@ -1649,6 +1805,7 @@ ChunkedSegmentSealedImpl::DropIndexFromState(PublishedSegmentState& state,
 
 void
 ChunkedSegmentSealedImpl::ClearState(PublishedSegmentState& state) {
+    state.phase = PublishedStatePhase::Bootstrap;
     state.system_field_ready = false;
     state.runtime = nullptr;
     state.published_index_ready_bitset.reset();
@@ -1664,7 +1821,7 @@ void
 ChunkedSegmentSealedImpl::PublishReopenState(
     const std::shared_ptr<const PublishedSegmentState>& current,
     const StateDelta& delta) {
-    PublishStateOnline(BuildNextPublishedState(current, delta));
+    PublishStateOnline(PrepareTargetState(current, delta));
 }
 
 void
@@ -1942,7 +2099,7 @@ ChunkedSegmentSealedImpl::PublishRuntimeStateLocked(
         return;
     }
     auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
+    PublishStateOnline(PrepareTargetState(
         current,
         MakeStateDelta(
             current->schema, current->load_info, runtime, current->commit_ts)));
@@ -2009,7 +2166,7 @@ ChunkedSegmentSealedImpl::RefreshPublishedLoadInfoLocked(
     const std::shared_ptr<const SegmentLoadInfo>& load_info,
     Timestamp commit_ts) {
     auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
+    PublishStateOnline(PrepareTargetState(
         current, MakeStateDelta(current->schema, load_info, commit_ts)));
 }
 
@@ -2017,10 +2174,12 @@ void
 ChunkedSegmentSealedImpl::RefreshPublishedSchemaLocked(
     const SchemaPtr& schema_snapshot) {
     auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
+    SegmentLoadInfo projected(*current->load_info);
+    projected.ProjectToSchema(schema_snapshot);
+    auto load_info = std::make_shared<const SegmentLoadInfo>(projected);
+    PublishStateOnline(PrepareTargetState(
         current,
-        MakeStateDelta(
-            schema_snapshot, current->load_info, current->commit_ts)));
+        MakeStateDelta(schema_snapshot, load_info, current->commit_ts)));
 }
 
 void
@@ -2029,7 +2188,7 @@ ChunkedSegmentSealedImpl::RefreshPublishedStateLocked(
     const std::shared_ptr<const SegmentLoadInfo>& load_info,
     Timestamp commit_ts) {
     auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
+    PublishStateOnline(PrepareTargetState(
         current, MakeStateDelta(schema_snapshot, load_info, commit_ts)));
 }
 
@@ -2039,9 +2198,11 @@ ChunkedSegmentSealedImpl::PrepareMutableStateForPublish(
     Timestamp commit_ts,
     std::shared_ptr<PublishedSegmentState>& next) const {
     auto current = CapturePublishedState();
-    next = BuildNextPublishedState(
-        current,
-        MakeStateDelta(schema_snapshot, current->load_info, commit_ts));
+    SegmentLoadInfo projected(*current->load_info);
+    projected.ProjectToSchema(schema_snapshot);
+    auto load_info = std::make_shared<const SegmentLoadInfo>(projected);
+    next = PrepareTargetState(
+        current, MakeStateDelta(schema_snapshot, load_info, commit_ts));
 }
 
 void
@@ -2052,6 +2213,7 @@ ChunkedSegmentSealedImpl::PublishState(
         return;
     }
     AssertInfo(publish_lease.valid(), "online publication requires a lease");
+    ValidatePublishedState(*state);
     std::atomic_store(&published_state_, state);
     publish_lease.MarkPublished();
 }
@@ -4894,8 +5056,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           segment_id) {
     auto load_info = std::make_shared<const SegmentLoadInfo>(
         milvus::proto::segcore::SegmentLoadInfo(), schema);
-    std::atomic_store(&published_state_,
-                      BuildPublishedState(schema, load_info, 0));
+    auto initial_state = BuildPublishedState(schema, load_info, 0);
+    ValidatePublishedState(*initial_state);
+    std::atomic_store(&published_state_, std::move(initial_state));
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
@@ -7597,6 +7760,29 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
                     ++it;
                 }
             }
+            for (auto it = runtime.text_lob_paths.begin();
+                 it != runtime.text_lob_paths.end();) {
+                if (!field_exists_in_schema(schema_snapshot, it->first)) {
+                    it = runtime.text_lob_paths.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            std::unordered_set<std::string> schema_structs;
+            for (const auto& [_, field_meta] : schema_snapshot->get_fields()) {
+                if (auto struct_name = GetStructNameForArrayField(field_meta);
+                    struct_name.has_value()) {
+                    schema_structs.insert(*struct_name);
+                }
+            }
+            for (auto it = runtime.struct_to_array_offsets.begin();
+                 it != runtime.struct_to_array_offsets.end();) {
+                if (schema_structs.count(it->first) == 0) {
+                    it = runtime.struct_to_array_offsets.erase(it);
+                } else {
+                    ++it;
+                }
+            }
         });
 }
 
@@ -7632,7 +7818,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(*current->load_info);
-    new_local.ReplaceSchemaForReopen(sch);
+    new_local.ProjectToSchema(sch);
 
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
@@ -7702,9 +7888,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
-    // Construction filters derived caches, while reopen normalization also
-    // removes proto-backed state for fields dropped from the target schema.
-    new_local.ReplaceSchemaForReopen(target_schema);
+    new_local.ProjectToSchema(target_schema);
     new_local.ValidateReopenRowCount(current->load_info->GetNumOfRows());
     new_local.InheritCachedColumnGroupsFrom(*current->load_info);
     for (const auto& [fid, meta] :
@@ -7743,6 +7927,7 @@ ChunkedSegmentSealedImpl::Reopen(
                                 published,
                                 ToConstRuntimeState(std::move(next_runtime)),
                                 current->commit_ts);
+    delta.phase = PublishedStatePhase::Serving;
     delta.published_index_ready_bitset =
         staged->published_index_ready_bitset.clone();
     delta.published_binlog_index_ready_bitset =
@@ -7778,6 +7963,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
                                 published,
                                 ToConstRuntimeState(std::move(next_runtime)),
                                 current->commit_ts);
+    delta.phase = PublishedStatePhase::Serving;
     delta.published_index_ready_bitset =
         staged->published_index_ready_bitset.clone();
     delta.published_binlog_index_ready_bitset =
@@ -8141,12 +8327,15 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         static_cast<milvus::Timestamp>(load_info.commit_timestamp());
     // Do not parse manifest here: Load() must be able to observe a
     // pre-cancelled OpContext before any storage/manifest IO happens.
-    auto published = std::make_shared<const SegmentLoadInfo>(
-        std::move(load_info), schema_snapshot);
-    PublishStateOnline(BuildNextPublishedState(
-        current,
-        MakeStateDelta(
-            schema_snapshot, published, static_cast<Timestamp>(commit_ts))));
+    auto projected = std::make_shared<SegmentLoadInfo>(std::move(load_info),
+                                                       schema_snapshot);
+    projected->ProjectToSchema(schema_snapshot);
+    auto published =
+        std::const_pointer_cast<const SegmentLoadInfo>(std::move(projected));
+    auto delta = MakeStateDelta(
+        schema_snapshot, published, static_cast<Timestamp>(commit_ts));
+    delta.phase = PublishedStatePhase::Bootstrap;
+    PublishStateOnline(PrepareTargetState(current, delta));
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
         "storage_version: {}, use_take_for_output: {}, commit_ts: {}",
@@ -8996,6 +9185,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     SegmentLoadInfo mutable_copy(snapshot->load_info->GetProto(),
                                  snapshot->schema);
+    mutable_copy.ProjectToSchema(snapshot->schema);
     mutable_copy.SetFieldsFilledWithDefault(
         snapshot->load_info->GetFieldsFilledWithDefault());
     for (const auto& [fid, meta] :
