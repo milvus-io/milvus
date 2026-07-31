@@ -217,6 +217,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			panic(result.panicValue)
 		}
 		if result.err != nil {
+			// panic here, insert failure
 			panic(result.err)
 		}
 	}
@@ -227,11 +228,11 @@ func (sd *shardDelegator) runProcessInsertTask(segmentID int64, insertData *Inse
 	defer func() {
 		result.panicValue = recover()
 	}()
-	result.growingSegmentAdded, result.err = sd.processInsert(segmentID, insertData)
+	result.err = sd.processInsert(segmentID, insertData, &result.growingSegmentAdded)
 	return result
 }
 
-func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData) (bool, error) {
+func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData, growingSegmentAdded *bool) error {
 	log := sd.getLogger(context.Background())
 	growing := sd.segmentManager.GetGrowing(segmentID)
 	newGrowingSegment := false
@@ -259,7 +260,7 @@ func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData)
 			log.Error(context.TODO(), "failed to create new segment",
 				mlog.FieldSegmentID(segmentID),
 				mlog.Err(err))
-			return false, err
+			return err
 		}
 		newGrowingSegment = true
 	}
@@ -272,13 +273,12 @@ func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData)
 		)
 		if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
 			log.Warn(context.TODO(), "try to insert data into released segment, skip it", mlog.Err(err))
-			return false, nil
+			return nil
 		}
-		return false, err
+		return err
 	}
 	growing.UpdatePkCandidate(insertData.PrimaryKeys)
 
-	growingSegmentAdded := false
 	excluded := false
 	if newGrowingSegment {
 		func() {
@@ -312,12 +312,12 @@ func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData)
 					TargetVersion: initialTargetVersion,
 					Candidate:     growing, // growing segment itself is the Candidate
 				})
-				growingSegmentAdded = true
+				*growingSegmentAdded = true
 			}
 		}()
 		if excluded {
 			growing.Release(context.Background())
-			return false, nil
+			return nil
 		}
 	} else if idfOracle := sd.getIDFOracle(); idfOracle != nil {
 		idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
@@ -328,7 +328,7 @@ func (sd *shardDelegator) processInsert(segmentID int64, insertData *InsertData)
 		mlog.Int("rowCount", len(insertData.RowIDs)),
 		mlog.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
 	)
-	return growingSegmentAdded, nil
+	return nil
 }
 
 // ProcessDelete handles delete data in delegator.

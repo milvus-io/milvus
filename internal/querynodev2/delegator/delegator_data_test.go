@@ -467,15 +467,19 @@ func (s *DelegatorDataSuite) TestProcessInsertRunsDistinctSegmentsConcurrently()
 
 func (s *DelegatorDataSuite) TestProcessInsertMixedSkipAndSuccess() {
 	const (
-		excludedSegmentID = int64(201)
-		releasedSegmentID = int64(202)
-		successSegmentID  = int64(203)
+		excludedSegmentID  = int64(201)
+		notLoadedSegmentID = int64(202)
+		notFoundSegmentID  = int64(203)
+		successSegmentID   = int64(204)
 	)
 	s.delegator.AddExcludedSegments(map[int64]uint64{excludedSegmentID: 1})
 
 	patch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
-		if segment.ID() == releasedSegmentID {
-			return merr.WrapErrSegmentNotLoaded(releasedSegmentID, "test segment released")
+		switch segment.ID() {
+		case notLoadedSegmentID:
+			return merr.WrapErrSegmentNotLoaded(notLoadedSegmentID, "test segment released")
+		case notFoundSegmentID:
+			return merr.WrapErrSegmentNotFound(notFoundSegmentID, "test segment not found")
 		}
 		return nil
 	}).Build()
@@ -483,13 +487,15 @@ func (s *DelegatorDataSuite) TestProcessInsertMixedSkipAndSuccess() {
 
 	s.NotPanics(func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
-			excludedSegmentID: validInsertData(),
-			releasedSegmentID: validInsertData(),
-			successSegmentID:  validInsertData(),
+			excludedSegmentID:  validInsertData(),
+			notLoadedSegmentID: validInsertData(),
+			notFoundSegmentID:  validInsertData(),
+			successSegmentID:   validInsertData(),
 		})
 	})
 	s.Nil(s.manager.Segment.GetGrowing(excludedSegmentID))
-	s.Nil(s.manager.Segment.GetGrowing(releasedSegmentID))
+	s.Nil(s.manager.Segment.GetGrowing(notLoadedSegmentID))
+	s.Nil(s.manager.Segment.GetGrowing(notFoundSegmentID))
 	s.NotNil(s.manager.Segment.GetGrowing(successSegmentID))
 }
 
@@ -621,6 +627,97 @@ func (s *DelegatorDataSuite) TestProcessInsertPreservesWorkerPanicValueAfterAllT
 	s.Equal(int32(1), notifyCount.Load(), "leader view callback must run before propagating the worker panic")
 }
 
+func (s *DelegatorDataSuite) TestProcessInsertNotifiesAfterPostRegistrationPanic() {
+	const (
+		panicSegmentID   = int64(451)
+		blockedSegmentID = int64(452)
+	)
+
+	setupPatch := mockey.Mock((*segments.LocalSegment).Insert).Return(nil).Build()
+	s.delegator.ProcessInsert(map[int64]*InsertData{blockedSegmentID: validInsertData()})
+	setupPatch.UnPatch()
+	s.Require().NotNil(s.manager.Segment.GetGrowing(blockedSegmentID))
+
+	panicValue := &struct{ name string }{name: "post-registration panic"}
+	panicInsertEntered := make(chan struct{})
+	blockedInsertEntered := make(chan struct{})
+	releaseBlocked := make(chan struct{})
+	insertPatch := mockey.Mock((*segments.LocalSegment).Insert).To(func(segment *segments.LocalSegment, _ context.Context, _ []int64, _ []typeutil.Timestamp, _ *segcorepb.InsertRecord) error {
+		switch segment.ID() {
+		case panicSegmentID:
+			close(panicInsertEntered)
+		case blockedSegmentID:
+			close(blockedInsertEntered)
+			<-releaseBlocked
+		}
+		return nil
+	}).Build()
+	defer insertPatch.UnPatch()
+	collectionPatch := mockey.Mock((*segments.LocalSegment).Collection).To(func(segment *segments.LocalSegment) int64 {
+		if segment.ID() == panicSegmentID && s.delegator.distribution.GrowingSegmentExists(panicSegmentID) {
+			panic(panicValue)
+		}
+		return s.collectionID
+	}).Build()
+	defer collectionPatch.UnPatch()
+
+	var notifyCount atomic.Int32
+	s.delegator.leaderViewUpdatedCallback = func(string) { notifyCount.Add(1) }
+	defer func() { s.delegator.leaderViewUpdatedCallback = nil }()
+
+	done := processInsertAsync(s.delegator, map[int64]*InsertData{
+		panicSegmentID:   validInsertData(),
+		blockedSegmentID: validInsertData(),
+	})
+	waitSignal := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		case <-time.After(500 * time.Millisecond):
+			return false
+		}
+	}
+	panicStarted := waitSignal(panicInsertEntered)
+	blockedStarted := waitSignal(blockedInsertEntered)
+
+	registeredBeforeRelease := false
+	deadline := time.After(500 * time.Millisecond)
+
+waitForRegistration:
+	for !registeredBeforeRelease {
+		registeredBeforeRelease = s.delegator.distribution.GrowingSegmentExists(panicSegmentID)
+		if registeredBeforeRelease {
+			break
+		}
+		select {
+		case <-deadline:
+			break waitForRegistration
+		case <-time.After(time.Millisecond):
+		}
+	}
+	panickedBeforeRelease := false
+	select {
+	case <-done:
+		panickedBeforeRelease = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	s.Zero(notifyCount.Load(), "leader view callback must wait for every segment task")
+	close(releaseBlocked)
+
+	var result processInsertResult
+	select {
+	case result = <-done:
+	case <-time.After(5 * time.Second):
+		s.FailNow("ProcessInsert did not finish after releasing the existing segment insert")
+	}
+	s.True(panicStarted, "post-registration panic segment insert did not start")
+	s.True(blockedStarted, "existing segment insert did not block concurrently")
+	s.True(registeredBeforeRelease, "new segment was not registered before its post-registration panic")
+	s.False(panickedBeforeRelease, "ProcessInsert propagated panic before the blocked task completed")
+	s.Same(panicValue, result.panicValue)
+	s.Equal(int32(1), notifyCount.Load(), "registered segment must notify before propagating its later panic")
+}
+
 func (s *DelegatorDataSuite) TestProcessInsertRegistersParallelBM25Stats() {
 	s.genCollectionWithFunction()
 	const (
@@ -675,6 +772,18 @@ func (s *DelegatorDataSuite) TestProcessInsertRegistersParallelBM25Stats() {
 	s.NotNil(s.manager.Segment.GetGrowing(firstSegmentID))
 	s.NotNil(s.manager.Segment.GetGrowing(secondSegmentID))
 	oracle := s.getIDFOracleForTest()
+	firstGrowingStats, ok := oracle.growing[firstSegmentID]
+	s.Require().True(ok)
+	firstFieldStats, ok := firstGrowingStats.bm25Stats[bm25FieldID]
+	s.Require().True(ok)
+	s.Equal(int64(2), firstFieldStats.NumRow())
+	s.Equal(int64(2), firstFieldStats.NumToken())
+	secondGrowingStats, ok := oracle.growing[secondSegmentID]
+	s.Require().True(ok)
+	secondFieldStats, ok := secondGrowingStats.bm25Stats[bm25FieldID]
+	s.Require().True(ok)
+	s.Equal(int64(3), secondFieldStats.NumRow())
+	s.Equal(int64(3), secondFieldStats.NumToken())
 	fieldStats, err := oracle.current.GetStats(bm25FieldID)
 	s.Require().NoError(err)
 	s.Equal(int64(5), fieldStats.NumRow())
