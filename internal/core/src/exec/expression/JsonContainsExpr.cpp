@@ -135,8 +135,10 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    if (expr_->vals_.empty() && (expr_->column_.data_type_ != DataType::ARRAY ||
-                                 !expr_->column_.element_level_)) {
+    const bool is_element_level_array =
+        expr_->column_.data_type_ == DataType::ARRAY &&
+        expr_->column_.element_level_;
+    if (expr_->vals_.empty() && !is_element_level_array) {
         auto real_batch_size =
             has_offset_input_ ? input->size() : GetNextBatchSize();
         if (real_batch_size == 0) {

@@ -1478,7 +1478,8 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     (void)op_ctx;
 
-    const auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
     AssertInfo(field_meta.get_data_type() == DataType::ARRAY &&
                    field_meta.has_element_schema(),
                "chunk_array_value_view_impl only supports recursive ARRAY "
@@ -1674,7 +1675,8 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
     const FixedVector<int32_t>& offsets) const {
     (void)op_ctx;
 
-    const auto& field_meta = schema_->operator[](field_id);
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
     AssertInfo(field_meta.get_data_type() == DataType::ARRAY &&
                    field_meta.has_element_schema(),
                "chunk_array_value_views_by_offsets only supports recursive "
