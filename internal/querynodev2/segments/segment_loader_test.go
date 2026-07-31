@@ -2696,6 +2696,143 @@ func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
 	})
 }
 
+func TestIndexLoadingMemoryContribution(t *testing.T) {
+	const peak = uint64(4 << 30) // 4 GiB transient upload peak
+
+	tests := []struct {
+		name          string
+		tieredEnabled bool
+		isGpuIndex    bool
+		expected      uint64
+	}{
+		{
+			name:          "tiered disabled, cpu index: charge peak (caching layer bypassed)",
+			tieredEnabled: false,
+			isGpuIndex:    false,
+			expected:      peak,
+		},
+		{
+			name:          "tiered disabled, gpu index: charge peak",
+			tieredEnabled: false,
+			isGpuIndex:    true,
+			expected:      peak,
+		},
+		{
+			// The regression: with tiered eviction on, MCL tracks resident cost
+			// only, and GPU_HNSW's resident host cost is ~0, so its transient
+			// upload peak is invisible unless charged here. Must charge the peak.
+			name:          "tiered enabled, gpu index: still charge transient peak (OOM fix)",
+			tieredEnabled: true,
+			isGpuIndex:    true,
+			expected:      peak,
+		},
+		{
+			// CPU index resident cost is tracked by the caching layer, so nothing
+			// extra is charged to the loading estimate.
+			name:          "tiered enabled, cpu index: caching layer accounts for it",
+			tieredEnabled: true,
+			isGpuIndex:    false,
+			expected:      0,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected,
+				indexLoadingMemoryContribution(test.tieredEnabled, test.isGpuIndex, peak))
+		})
+	}
+}
+
+func TestApplyLoadStageOverrides(t *testing.T) {
+	paramtable.Init()
+
+	newInfos := func() []*querypb.SegmentLoadInfo {
+		return []*querypb.SegmentLoadInfo{
+			{
+				SegmentID: 1,
+				IndexInfos: []*querypb.FieldIndexInfo{
+					{
+						FieldID: 101,
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "HNSW"},
+							{Key: common.MetricTypeKey, Value: "L2"},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("override configured: HNSW swapped to GPU_HNSW", func(t *testing.T) {
+		p := paramtable.Get()
+		overrideKey := p.KnowhereConfig.IndexParam.KeyPrefix + "HNSW.load.override_index_type"
+		p.Save(overrideKey, "GPU_HNSW")
+		defer p.Reset(overrideKey)
+
+		infos := newInfos()
+		err := ApplyLoadStageOverrides(infos)
+		assert.NoError(t, err)
+
+		got := funcutil.KeyValuePair2Map(infos[0].GetIndexInfos()[0].GetIndexParams())
+		assert.Equal(t, "GPU_HNSW", got[common.IndexTypeKey],
+			"override must swap index_type HNSW -> GPU_HNSW before resource estimation")
+		assert.Equal(t, "GPU_HNSW", got[paramtable.OverrideIndexTypeKey])
+	})
+
+	t.Run("no override configured: index_type untouched", func(t *testing.T) {
+		infos := newInfos()
+		err := ApplyLoadStageOverrides(infos)
+		assert.NoError(t, err)
+
+		got := funcutil.KeyValuePair2Map(infos[0].GetIndexInfos()[0].GetIndexParams())
+		assert.Equal(t, "HNSW", got[common.IndexTypeKey])
+		assert.NotContains(t, got, paramtable.OverrideIndexTypeKey)
+	})
+
+	t.Run("nil infos: no-op", func(t *testing.T) {
+		assert.NoError(t, ApplyLoadStageOverrides(nil))
+	})
+}
+
+func TestGpuAdmissionCost(t *testing.T) {
+	const (
+		deviceFootprint = uint64(2 << 30) // 2 GiB VRAM the index reports it retains
+		hostPeak        = uint64(4 << 30) // 4 GiB transient host upload peak
+	)
+
+	tests := []struct {
+		name          string
+		gpuMemoryCost uint64
+		maxMemoryCost uint64
+		expected      uint64
+	}{
+		{
+			// int8 L2/IP (native) and fp16/bf16 report a device footprint; use it
+			// so admission reserves actual VRAM rather than the larger host peak.
+			name:          "device footprint reported: prefer it",
+			gpuMemoryCost: deviceFootprint,
+			maxMemoryCost: hostPeak,
+			expected:      deviceFootprint,
+		},
+		{
+			// A GPU index that does not report a distinct device footprint (0)
+			// must fall back to the host transient peak so admission is not free.
+			name:          "no device footprint: fall back to host peak",
+			gpuMemoryCost: 0,
+			maxMemoryCost: hostPeak,
+			expected:      hostPeak,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected,
+				gpuAdmissionCost(test.gpuMemoryCost, test.maxMemoryCost))
+		})
+	}
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})

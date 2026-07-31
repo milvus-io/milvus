@@ -505,6 +505,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		fallbackBinlogMemorySize(s.GetDeltalogs())
 	}
 
+	// Apply knowhere load-stage overrides (e.g. override_index_type: GPU_HNSW) to all
+	// index params in the request. This provides defense-in-depth at the handler entry
+	// point: regardless of whether the caller (QueryCoord executor, streamingnode, etc.)
+	// already applied the override, it is always present before reaching the loader/delegator.
+	if err := segments.ApplyLoadStageOverrides(req.GetInfos()); err != nil {
+		mlog.Warn(ctx, "failed to apply load-stage overrides", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
 		defer node.markDataDistributionLeaderSegmentLoad(req)
