@@ -172,12 +172,17 @@ func (suite *UtilSuite) TestCreateStorageConfig() {
 	suite.Run("local", func() {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
 		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, "/tmp/milvus-local")
+		paramtable.Get().Save(Params.MinioCfg.MaxConnections.Key, "237")
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+		defer paramtable.Get().Reset(Params.MinioCfg.MaxConnections.Key)
 
 		config := createStorageConfig()
 		suite.Equal("local", config.StorageType)
 		suite.Equal("/tmp/milvus-local", config.RootPath)
+		// An external collection can still read from s3:// while the primary
+		// storage is local, so the connection cap must survive this branch.
+		suite.Equal(uint32(237), config.MaxConnections)
 	})
 
 	suite.Run("remote", func() {
