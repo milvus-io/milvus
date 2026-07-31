@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1177,6 +1178,89 @@ class ScopedFlagOnExit {
     std::atomic<bool>& flag_;
 };
 
+// Spins until `flag` is set or the timeout expires; returns the final value.
+bool
+WaitFlag(const std::atomic<bool>& flag, int timeout_ms) {
+    for (int waited = 0; waited < timeout_ms && !flag.load(); waited += 5) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return flag.load();
+}
+
+// Spins until `counter` reaches `target` or the timeout expires.
+bool
+WaitAtLeast(const std::atomic<int>& counter, int target, int timeout_ms) {
+    for (int waited = 0; waited < timeout_ms && counter.load() < target;
+         waited += 5) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return counter.load() >= target;
+}
+
+// For the one hook that writes to the segment (StallFallbackForcesFinalize):
+// stops further hook writes and waits until no hook call is inside the segment
+// any more. Declare it *after* the segment so it runs before the segment
+// destructor on every exit path -- a hook insert racing that destructor would
+// touch half-destroyed members. Pairs with HookSegmentGate below.
+class ScopedHookQuiesce {
+ public:
+    ScopedHookQuiesce(std::atomic<bool>& disabled, std::atomic<int>& inflight)
+        : disabled_(disabled), inflight_(inflight) {
+    }
+
+    ~ScopedHookQuiesce() {
+        disabled_.store(true);
+        while (inflight_.load() != 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    ScopedHookQuiesce(const ScopedHookQuiesce&) = delete;
+    ScopedHookQuiesce&
+    operator=(const ScopedHookQuiesce&) = delete;
+
+ private:
+    std::atomic<bool>& disabled_;
+    std::atomic<int>& inflight_;
+};
+
+// Admission ticket for a hook call that is about to touch the segment. The
+// counter is incremented *before* `disabled` is read while ScopedHookQuiesce
+// sets `disabled` before reading the counter, so under seq_cst at least one
+// side always observes the other: either the quiesce waits for this call, or
+// this call declines. Releases the ticket on every exit path (an exception out
+// of Insert would otherwise strand the quiesce forever).
+class HookSegmentGate {
+ public:
+    HookSegmentGate(const std::atomic<bool>& disabled,
+                    std::atomic<int>& inflight)
+        : inflight_(inflight) {
+        inflight_.fetch_add(1);
+        admitted_ = !disabled.load();
+        if (!admitted_) {
+            inflight_.fetch_sub(1);
+        }
+    }
+
+    ~HookSegmentGate() {
+        if (admitted_) {
+            inflight_.fetch_sub(1);
+        }
+    }
+
+    explicit operator bool() const {
+        return admitted_;
+    }
+
+    HookSegmentGate(const HookSegmentGate&) = delete;
+    HookSegmentGate&
+    operator=(const HookSegmentGate&) = delete;
+
+ private:
+    std::atomic<int>& inflight_;
+    bool admitted_;
+};
+
 }  // namespace
 
 TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
@@ -1499,6 +1583,31 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
     ScopedAsyncGrowingBuild async_build(config, true);
     ApplyAsyncBuildConfig(config);
 
+    // The raw-side counters asserted below only keep advancing while the raw
+    // ConcurrentVector still owns the vector data. The moment the background
+    // build publishes (sync_with_index_ true and the interim index reporting
+    // HasRawData), SegmentGrowingImpl::Insert stops calling set_data_raw for
+    // this field, so offset_mapping_ -- and with it get_valid_count() --
+    // freezes at whatever had been inserted by then. Under a free-running
+    // build that hand-off lands at an arbitrary point inside the insert loop
+    // below, which used to drop exactly one or two batches' worth of valid
+    // rows from get_valid_count() at random (the only assertion that ever
+    // failed; every index-side counter stayed correct). Parking the build
+    // before Phase 1 until the loop is done pins the hand-off after the last
+    // batch, and additionally guarantees batches 4 and 5 go through the
+    // catch-up path rather than racing it.
+    std::atomic<bool> build_parked{false};
+    std::atomic<bool> release_build{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase != VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            return;
+        }
+        build_parked.store(true);
+        while (!release_build.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+
     // DataGen marks 50% of rows null, so a 100k max row count (build_threshold
     // 10000 valid rows) puts the trigger on the third 8k batch and leaves two
     // more batches for the catch-up phase.
@@ -1509,6 +1618,10 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
                               /*nullable=*/true,
                               /*max_index_row_count=*/100000);
     auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    // Declared after `segment` so it runs BEFORE the segment destructor on
+    // every exit path, including an ASSERT_* early return: that destructor
+    // joins the build task, which is parked in the hook above.
+    ScopedFlagOnExit release_on_exit(release_build);
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
@@ -1526,6 +1639,17 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
         auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
         EXPECT_EQ(sr->total_nq_, num_queries);
     }
+    // The state machine has no back edge out of kBuilding except through the
+    // parked task, so no batch of the loop above could have been inserted
+    // after the publish.
+    EXPECT_EQ(segment_impl->get_indexing_record()
+                  .get_vec_field_indexing(fixture.vec)
+                  .get_growing_index_state(),
+              VectorFieldIndexing::GrowingIndexState::kBuilding);
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    ASSERT_TRUE(WaitFlag(build_parked, /*timeout_ms=*/60000));
+    release_build.store(true);
 
     ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
     auto* raw = segment_impl->get_insert_record().get_data_base(fixture.vec);
@@ -1559,6 +1683,12 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
               (n_batch + 1) * valid_per_batch);
     EXPECT_EQ(vec_index->GetOffsetMapping().GetTotalCount(),
               (n_batch + 1) * per_batch);
+    // The ownership hand-off, pinned explicitly: this batch never reached the
+    // raw vector (Insert skipped set_data_raw because the index reports
+    // HasRawData), so the raw counters stay where the publish left them. This
+    // is exactly the mechanism that made the assertion above flaky while the
+    // hand-off point was unpinned.
+    EXPECT_EQ(raw->get_valid_count(), n_batch * valid_per_batch);
 }
 
 // Regression for the kSynced AddBatchDense nullable arm: it derives add_count
@@ -1815,4 +1945,527 @@ TEST(GrowingIndexAsyncBuildTest, DestroySegmentDuringBuildIsSafe) {
         // it because IndexingRecord is destroyed before InsertRecord.
     }
     SUCCEED();
+}
+
+// Spec §7 G2 step 1. While the first build is in flight the read path must
+// stay on brute force, which is only correct as long as the raw chunks are
+// still there. Both windows of the kBuilding state are pinned with the phase
+// hook -- before Phase 1 starts, and after Phase 1 finished but before the
+// catch-up published -- and in both the chunks must be intact (review item
+// Min#8) and an exact-vector probe must find its row, which is only possible
+// by scanning those chunks.
+TEST(GrowingIndexAsyncBuildTest, SearchDuringBuildUsesBruteForce) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    std::atomic<bool> at_before_build{false};
+    std::atomic<bool> release_before_build{false};
+    std::atomic<bool> at_after_build{false};
+    std::atomic<bool> release_after_build{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase == VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            at_before_build.store(true);
+            while (!release_before_build.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        } else if (phase ==
+                   VectorFieldIndexing::GrowingBuildPhase::kAfterBuild) {
+            at_after_build.store(true);
+            while (!release_after_build.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    // Declared after `segment` so both flags are set before the segment
+    // destructor joins the parked build task (see
+    // InsertRacingFinalizeIsAbsorbed).
+    ScopedFlagOnExit release_before_on_exit(release_before_build);
+    ScopedFlagOnExit release_after_on_exit(release_after_build);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int num_queries = 5;
+    constexpr int top_k = 5;
+    auto ph_group =
+        MakeAsyncPlaceholders(DataType::VECTOR_FLOAT, plan.get(), num_queries);
+
+    // One batch crosses the build threshold on its own, so the whole segment
+    // is exactly this batch and every seg_offset is a local row index.
+    constexpr int64_t per_batch = 25000;
+    constexpr int64_t probe_row = 4237;
+    auto batch = InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 5);
+    auto probe_vectors = batch.get_col<float>(fixture.vec);
+    ASSERT_EQ(probe_vectors.size(), per_batch * kAsyncDim);
+    auto probe_ph = MakeSingleDensePlaceholder(
+        plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
+
+    auto* field_data =
+        segment_impl->get_insert_record().get_data<milvus::FloatVector>(
+            fixture.vec);
+    const auto& indexing =
+        segment_impl->get_indexing_record().get_vec_field_indexing(fixture.vec);
+    auto expect_searchable = [&](const char* when) {
+        auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+        EXPECT_EQ(sr->total_nq_, num_queries) << when;
+        EXPECT_EQ(sr->distances_.size(), num_queries * top_k) << when;
+        EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k) << when;
+        auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+        ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k) << when;
+        EXPECT_EQ(probe_sr->seg_offsets_[0], probe_row) << when;
+        EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5) << when;
+    };
+
+    // Window 1: the background task is parked before Phase 1. Nothing has been
+    // built, so brute force is the only way this probe can be answered.
+    ASSERT_TRUE(WaitFlag(at_before_build, /*timeout_ms=*/60000));
+    EXPECT_EQ(indexing.get_growing_index_state(),
+              VectorFieldIndexing::GrowingIndexState::kBuilding);
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    EXPECT_GT(field_data->num_chunk(), 0);
+    expect_searchable("parked before the first build");
+
+    // Window 2: Phase 1 is done but nothing is published. The read path still
+    // reads sync_with_index_ == false, so the chunks must NOT have been
+    // reclaimed by the half-built index.
+    release_before_build.store(true);
+    ASSERT_TRUE(WaitFlag(at_after_build, /*timeout_ms=*/60000));
+    EXPECT_EQ(indexing.get_growing_index_state(),
+              VectorFieldIndexing::GrowingIndexState::kBuilding);
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    EXPECT_GT(field_data->num_chunk(), 0);
+    expect_searchable("parked after the first build, before the publish");
+
+    // After the publish the same probes must still hold, now served by the
+    // index.
+    release_after_build.store(true);
+    ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), per_batch);
+    expect_searchable("after the publish");
+}
+
+// Spec §7 G2 step 2. Complements InsertRacingFinalizeIsAbsorbed, which parks
+// at kBeforeFinalize (the last, locked window): here the task is parked at
+// kAfterBuild, i.e. Phase 1 is complete and the catch-up has not started, so
+// every batch inserted while parked is *structurally* guaranteed to reach the
+// index through AddRange -> CopyDenseRows rather than AddBatchDense. Each of
+// those batches is then probed by content, not just counted -- a misaligned
+// catch-up slice would put another row's data at the probed offset.
+TEST(GrowingIndexAsyncBuildTest, InsertDuringCatchupLosesNoRows) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    std::atomic<bool> at_after_build{false};
+    std::atomic<bool> release_after_build{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase != VectorFieldIndexing::GrowingBuildPhase::kAfterBuild) {
+            return;
+        }
+        at_after_build.store(true);
+        while (!release_after_build.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    ScopedFlagOnExit release_on_exit(release_after_build);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int top_k = 5;
+
+    constexpr int64_t trigger_batch = 25000;
+    InsertAsyncBatch(segment.get(), fixture.schema, trigger_batch, 5);
+    ASSERT_TRUE(WaitFlag(at_after_build, /*timeout_ms=*/60000));
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+
+    // DataGen seeds row n of a batch with (seed + n), so seeds spaced further
+    // apart than the batch size keep every inserted vector unique -- which is
+    // what makes the exact-match probes below unambiguous.
+    constexpr int64_t catchup_batch = 5000;
+    constexpr int64_t n_catchup = 3;
+    constexpr int64_t probe_row = 1234;
+    std::vector<std::unique_ptr<GeneratedData>> during_build;
+    for (int64_t i = 0; i < n_catchup; i++) {
+        during_build.push_back(std::make_unique<GeneratedData>(
+            InsertAsyncBatch(segment.get(),
+                             fixture.schema,
+                             catchup_batch,
+                             100000 + i * 2 * catchup_batch)));
+        // Still parked: these inserts only advanced pending_upto_.
+        EXPECT_EQ(segment_impl->get_indexing_record()
+                      .get_vec_field_indexing(fixture.vec)
+                      .get_growing_index_state(),
+                  VectorFieldIndexing::GrowingIndexState::kBuilding)
+            << "catch-up batch " << i;
+    }
+
+    release_after_build.store(true);
+    ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
+    // Not one row of the three batches was dropped by the catch-up.
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec),
+              trigger_batch + n_catchup * catchup_batch);
+
+    for (int64_t i = 0; i < n_catchup; i++) {
+        auto vectors = during_build[i]->get_col<float>(fixture.vec);
+        ASSERT_EQ(vectors.size(), catchup_batch * kAsyncDim);
+        int64_t expected_offset = trigger_batch + i * catchup_batch + probe_row;
+        auto ph = MakeSingleDensePlaceholder(
+            plan.get(), vectors.data() + probe_row * kAsyncDim);
+        auto sr = segment->Search(plan.get(), ph.get(), 1000000);
+        ASSERT_EQ(sr->seg_offsets_.size(), top_k) << "catch-up batch " << i;
+        EXPECT_EQ(sr->seg_offsets_[0], expected_offset)
+            << "catch-up batch " << i;
+        EXPECT_NEAR(sr->distances_[0], 0.0f, 1e-5) << "catch-up batch " << i;
+    }
+
+    // A post-sync batch takes the kSynced arm, whose source offset is derived
+    // from index_cur_: if the catch-up had lost or double-counted a row, this
+    // batch would be read out of bounds or land at the wrong offset.
+    auto post_sync =
+        InsertAsyncBatch(segment.get(), fixture.schema, catchup_batch, 900000);
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec),
+              trigger_batch + (n_catchup + 1) * catchup_batch);
+    auto post_vectors = post_sync.get_col<float>(fixture.vec);
+    ASSERT_EQ(post_vectors.size(), catchup_batch * kAsyncDim);
+    int64_t post_offset = trigger_batch + n_catchup * catchup_batch + probe_row;
+    auto post_ph = MakeSingleDensePlaceholder(
+        plan.get(), post_vectors.data() + probe_row * kAsyncDim);
+    auto post_sr = segment->Search(plan.get(), post_ph.get(), 1000000);
+    ASSERT_EQ(post_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(post_sr->seg_offsets_[0], post_offset);
+    EXPECT_NEAR(post_sr->distances_[0], 0.0f, 1e-5);
+}
+
+// Spec §7 G2 step 3 / §4.6, the kRunning half of the destructor handshake.
+// DestroySegmentDuringBuildIsSafe only shows the destructor survives a running
+// task; this one pins the two properties that make it correct: the destructor
+// really blocks until the task lets go (it does not return while the task is
+// parked), and the cancel flag it set is honored at the next phase boundary
+// (Phase 1 is skipped entirely, so kAfterBuild never fires).
+TEST(GrowingIndexAsyncBuildTest, DestroyDuringBuildJoinsCleanly) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    std::atomic<bool> at_before_build{false};
+    std::atomic<bool> release_build{false};
+    std::atomic<bool> after_build_seen{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase == VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            at_before_build.store(true);
+            while (!release_build.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        } else if (phase ==
+                   VectorFieldIndexing::GrowingBuildPhase::kAfterBuild) {
+            after_build_seen.store(true);
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    ScopedFlagOnExit release_on_exit(release_build);
+
+    InsertAsyncBatch(segment.get(), fixture.schema, 25000, 13);
+    ASSERT_TRUE(WaitFlag(at_before_build, /*timeout_ms=*/60000));
+
+    std::atomic<bool> destroyed{false};
+    // No ASSERT_* (i.e. no early return) between this thread's creation and
+    // its join: an unjoined std::thread destructor calls std::terminate.
+    std::thread destroyer([&] {
+        segment.reset();
+        destroyed.store(true);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    // The task won the TryAbandon race (it is kRunning), so the destructor
+    // must be sitting in build_ctrl_->finished.wait() instead of returning
+    // and freeing the object under the still-parked task.
+    EXPECT_FALSE(destroyed.load());
+    release_build.store(true);
+    destroyer.join();
+    EXPECT_TRUE(destroyed.load());
+    // BuildAsync re-checks IsCancelled() right after the kBeforeBuild hook, so
+    // no first build was ever run for a segment that was already going away.
+    EXPECT_FALSE(after_build_seen.load());
+}
+
+// Spec §7 G2 step 3b / §4.6, the kQueued half of the destructor handshake
+// (review item Min#6). A build task that is still waiting in the pool queue
+// must be abandoned, not waited for: the destructor CASes kQueued->kAbandoned
+// and returns, and when the pool later schedules that task it loses TryStart
+// and returns after touching nothing but the shared control block.
+TEST(GrowingIndexAsyncBuildTest, DestroyWhileQueuedReturnsImmediately) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    // Every started build parks here, so `parked` is the number of tasks the
+    // pool has actually picked up. The hook cannot tell segments apart, but it
+    // does not need to: tasks start in FIFO order, so after k segments with
+    // only p < k parked, the queued ones are exactly the last k - p.
+    std::atomic<int> parked{0};
+    std::atomic<bool> release_builds{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase != VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            return;
+        }
+        parked.fetch_add(1);
+        while (!release_builds.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    std::vector<SegmentGrowingPtr> segments;
+    // Declared after `segments` so the parked builds are released before any
+    // segment destructor tries to join them.
+    ScopedFlagOnExit release_on_exit(release_builds);
+
+    // The pool holds max(1, round(CPU_NUM * growing_index_build_pool_ratio))
+    // threads -- one in this binary, where CPU_NUM defaults to 1 -- but rather
+    // than hard-coding that, add segments until one of them fails to start
+    // within the settle window. That segment's task is the queued one, and by
+    // construction it is the only queued one.
+    constexpr int kMaxSegments = 8;
+    constexpr int64_t per_batch = 25000;
+    int queued_index = -1;
+    for (int i = 0; i < kMaxSegments; i++) {
+        segments.push_back(CreateGrowingSegment(
+            fixture.schema, fixture.meta, /*segment_id=*/i));
+        InsertAsyncBatch(
+            segments.back().get(), fixture.schema, per_batch, 21 + i);
+        if (!WaitAtLeast(parked, i + 1, /*timeout_ms=*/3000)) {
+            if (i == 0) {
+                // The pool was idle when this task was submitted, so it must
+                // have started. Anything else means the environment, not the
+                // code under test, is broken -- and reset()ing a *running*
+                // task's segment here would join a build parked forever.
+                release_builds.store(true);
+                FAIL() << "the first build task never started; the growing "
+                          "build pool is not running";
+            }
+            queued_index = i;
+            break;
+        }
+    }
+    ASSERT_GE(queued_index, 0)
+        << "the growing build pool never saturated with " << kMaxSegments
+        << " parked builds; cannot produce a queued task";
+    // Once the settle window expires, `parked` can no longer move on its own:
+    // every pool thread is occupied by a build parked in the hook, so nothing
+    // can pick the queued task up until release_builds is set. Bail out loudly
+    // rather than reset() a segment whose task turned out to be running -- that
+    // destructor would join a task parked forever.
+    const int running = parked.load();
+    if (running != queued_index) {
+        release_builds.store(true);
+        FAIL() << "raced the pool while sizing it: " << running
+               << " parked builds for " << queued_index + 1 << " segments";
+    }
+
+    // Safety net for the sizing decision above: if the "queued" task were in
+    // fact already running, the reset() below would join a build that parks
+    // until release_builds is set -- which the main thread is about to do, but
+    // would no longer reach. This releases them anyway, so a mis-sized run
+    // fails on the timing expectation instead of hanging the binary. In the
+    // normal path the main thread releases first and this thread just exits.
+    // No ASSERT_* (early return) between here and the join below: an unjoined
+    // std::thread destructor calls std::terminate.
+    std::thread release_watchdog([&] {
+        for (int waited = 0; waited < 10000 && !release_builds.load();
+             waited += 10) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        release_builds.store(true);
+    });
+
+    // The abandon path must not wait for the queue to drain: every other task
+    // is parked indefinitely, so anything that waited would hang here.
+    auto start = std::chrono::steady_clock::now();
+    segments[queued_index].reset();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - start)
+                       .count();
+    EXPECT_LT(elapsed, 500);
+
+    // Let the pool drain: the parked builds finish, and only then can the
+    // abandoned task be scheduled. It must lose TryStart and return without
+    // running its body -- if it ran, `parked` would tick past `running`.
+    release_builds.store(true);
+    for (int i = 0; i < static_cast<int>(segments.size()); i++) {
+        if (segments[i] == nullptr) {
+            continue;
+        }
+        auto* impl = dynamic_cast<SegmentGrowingImpl*>(segments[i].get());
+        if (impl == nullptr) {
+            ADD_FAILURE() << "segment " << i << " is not a growing segment";
+            continue;
+        }
+        EXPECT_TRUE(WaitSynced(impl, fixture.vec, /*timeout_ms=*/60000))
+            << "segment " << i;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(parked.load(), running);
+
+    release_watchdog.join();
+    segments.clear();
+}
+
+// Spec §7 G2 step 4. A writer that keeps outpacing the catch-up must not keep
+// the field in kBuilding forever: after kMaxStallRounds (8) rounds without the
+// gap improving, CatchUp gives up on the lock-free loop and forces the locked
+// finalize. The hook below re-opens the gap after *every* catch-up round, so
+// the loop can never observe gap == 0 -- the only exit left is the stall
+// fallback, and WaitSynced returning true is the proof that it fired.
+TEST(GrowingIndexAsyncBuildTest, StallFallbackForcesFinalize) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+
+    constexpr int64_t trigger_batch = 25000;
+    // Smaller than the gap left by the triggering batch (25000 - 22698 = 2302)
+    // so that the *second* round already sets the running minimum and every
+    // later round ties it: gap >= min_gap on each of them, which is what makes
+    // stall_rounds climb monotonically to kMaxStallRounds.
+    constexpr int64_t stall_batch = 2000;
+    // Safety valve only: with the arithmetic above the fallback fires around
+    // round 10, so reaching this cap would mean the fallback did not fire and
+    // the loop exited because the hook stopped feeding it.
+    constexpr int kHookRoundCap = 40;
+    // VectorFieldIndexing::kMaxStallRounds, which is private.
+    constexpr int kMaxStallRounds = 8;
+
+    std::atomic<SegmentGrowing*> segment_ptr{nullptr};
+    std::atomic<int> rounds{0};
+    std::atomic<bool> hook_disabled{false};
+    std::atomic<int> hook_inflight{0};
+    std::mutex probe_mutex;
+    std::unique_ptr<GeneratedData> first_stall_batch;
+
+    // The only hook in this file that writes to the segment. Legal at this
+    // phase boundary: the background task holds no segcore lock between
+    // catch-up rounds, so Insert can take append_mutex_, bump pending_upto_
+    // and return.
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase !=
+            VectorFieldIndexing::GrowingBuildPhase::kAfterCatchupRound) {
+            return;
+        }
+        int round = rounds.load();
+        if (round >= kHookRoundCap) {
+            return;
+        }
+        HookSegmentGate gate(hook_disabled, hook_inflight);
+        if (!gate) {
+            return;
+        }
+        auto* seg = segment_ptr.load();
+        if (seg == nullptr) {
+            return;
+        }
+        auto dataset = InsertAsyncBatch(seg,
+                                        fixture.schema,
+                                        stall_batch,
+                                        1000000 + round * 2 * stall_batch);
+        if (round == 0) {
+            std::lock_guard<std::mutex> lock(probe_mutex);
+            first_stall_batch =
+                std::make_unique<GeneratedData>(std::move(dataset));
+        }
+        // Counted only after the rows are in, so `rounds` read after the
+        // publish is an exact row-count multiplier.
+        rounds.fetch_add(1);
+    });
+
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    // Declared after `segment`: stops the hook from writing and waits for any
+    // in-flight hook insert to leave the segment before its destructor runs.
+    ScopedHookQuiesce quiesce(hook_disabled, hook_inflight);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    segment_ptr.store(segment.get());
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int num_queries = 5;
+    constexpr int top_k = 5;
+    auto ph_group =
+        MakeAsyncPlaceholders(DataType::VECTOR_FLOAT, plan.get(), num_queries);
+
+    InsertAsyncBatch(segment.get(), fixture.schema, trigger_batch, 5);
+    ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/120000));
+
+    const int64_t observed_rounds = rounds.load();
+    EXPECT_LT(observed_rounds, kHookRoundCap)
+        << "the catch-up loop only terminated after the hook stopped writing, "
+           "so the stall fallback was not what ended it";
+    EXPECT_GE(observed_rounds, kMaxStallRounds);
+    // Every row ever inserted -- including the ones the hook slipped in after
+    // the last catch-up round -- is in the index: the forced finalize absorbs
+    // the remainder under append_mutex_ before publishing.
+    const int64_t total_rows = trigger_batch + observed_rounds * stall_batch;
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), total_rows);
+    EXPECT_EQ(segment->get_row_count(), total_rows);
+
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+    EXPECT_EQ(sr->total_nq_, num_queries);
+    EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
+
+    // Content probe on a row the hook inserted during the first catch-up
+    // round, i.e. deep inside the stalling window.
+    std::unique_ptr<GeneratedData> stall_probe;
+    {
+        std::lock_guard<std::mutex> lock(probe_mutex);
+        stall_probe = std::move(first_stall_batch);
+    }
+    ASSERT_NE(stall_probe, nullptr);
+    constexpr int64_t probe_row = 137;
+    auto probe_vectors = stall_probe->get_col<float>(fixture.vec);
+    ASSERT_EQ(probe_vectors.size(), stall_batch * kAsyncDim);
+    auto probe_ph = MakeSingleDensePlaceholder(
+        plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], trigger_batch + probe_row);
+    EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
 }
