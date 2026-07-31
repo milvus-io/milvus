@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -101,16 +102,17 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli         *clientv3.Client
-	tikvCli         *txnkv.Client
-	address         string
-	watchClient     kv.WatchKV
-	kv              kv.MetaKv
-	metaRootPath    string
-	meta            *meta
-	dataViewManager DataViewManager
-	segmentManager  Manager
-	allocator       allocator.Allocator
+	etcdCli            *clientv3.Client
+	tikvCli            *txnkv.Client
+	address            string
+	watchClient        kv.WatchKV
+	kv                 kv.MetaKv
+	metaRootPath       string
+	meta               *meta
+	dataViewManager    DataViewManager
+	dataViewReferences *dataViewReferenceManager
+	segmentManager     Manager
+	allocator          allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -201,12 +203,6 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
-	}
-}
-
-func WithDataViewReferenceChecker(checker DataViewReferenceChecker) Option {
-	return func(svr *Server) {
-		svr.gcOpt.dataViewRefs = checker
 	}
 }
 
@@ -500,7 +496,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-		dataViewRefs:     s.gcOpt.dataViewRefs,
+		dataViewGC:       s.dataViewReferences,
 	})
 }
 
@@ -669,15 +665,32 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
 			return err
 		}
+		s.dataViewReferences, err = recoverDataViewReferenceManager(
+			s.ctx,
+			catalog,
+			s.dataViewManager,
+			func(collectionID int64) bool { return s.meta.GetCollection(collectionID) != nil },
+		)
+		if err != nil {
+			return err
+		}
 		// DataView repair must see the current collection/partition cache so
 		// DDL trim intent from RootCoord is applied before reconciling segments.
-		if err := s.dataViewManager.RepairCollections(s.ctx, s.meta.recoveredCollectionIDs); err != nil {
+		repairCollectionIDs := make([]int64, 0, len(s.meta.recoveredCollectionIDs))
+		for _, collectionID := range s.meta.recoveredCollectionIDs {
+			if !s.dataViewReferences.IsTerminal(collectionID) {
+				repairCollectionIDs = append(repairCollectionIDs, collectionID)
+			}
+		}
+		if err := s.dataViewManager.RepairCollections(s.ctx, repairCollectionIDs); err != nil {
 			return err
 		}
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
+
+var _ qviews.DataViewReferenceManager = (*Server)(nil)
 
 func (s *Server) initAnalyzeInspector() {
 	if s.analyzeInspector == nil {

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -181,15 +182,30 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
-	// DataCoord and QueryCoord are independent of each other;
-	// both only depend on RootCoord being ready. Initialize and start them in parallel.
+	if err := s.initDataAndQueryCoord(); err != nil {
+		return err
+	}
+
+	s.fileResourceObserver.Start()
+	return nil
+}
+
+func (s *mixCoordImpl) initDataAndQueryCoord() error {
+	// DataCoord recovers terminal collection state first. QueryCoord then
+	// rebuilds every persisted QueryView pin before DataCoord starts GC.
+	s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.datacoordServer.Init(); err != nil {
+		mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
+		return err
+	}
+	s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.queryCoordServer.Init(); err != nil {
+		mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
+		return err
+	}
+
 	g, _ := errgroup.WithContext(s.ctx)
 	g.Go(func() error {
-		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.datacoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
-			return err
-		}
 		if err := s.datacoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
 			return err
@@ -197,23 +213,13 @@ func (s *mixCoordImpl) initInternal() error {
 		return nil
 	})
 	g.Go(func() error {
-		s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.queryCoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
-			return err
-		}
 		if err := s.queryCoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
 			return err
 		}
 		return nil
 	})
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	s.fileResourceObserver.Start()
-	return nil
+	return g.Wait()
 }
 
 func (s *mixCoordImpl) initKVCreator() {
@@ -259,6 +265,26 @@ func (s *mixCoordImpl) DataViewProvider() balancer.DataViewProvider {
 func (s *mixCoordImpl) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error {
 	_, err := s.datacoordServer.CreateCollectionDataView(ctx, collectionID, vchannels)
 	return err
+}
+
+func (s *mixCoordImpl) DropCollectionDataView(ctx context.Context, collectionID int64) error {
+	return s.datacoordServer.DropCollectionDataView(ctx, collectionID)
+}
+
+func (s *mixCoordImpl) FinalizeDropCollectionDataView(ctx context.Context, collectionID int64) error {
+	return s.datacoordServer.FinalizeDropCollectionDataView(ctx, collectionID)
+}
+
+func (s *mixCoordImpl) PinDataView(ctx context.Context, collectionID int64, version qviews.DataVersion) error {
+	return s.datacoordServer.PinDataView(ctx, collectionID, version)
+}
+
+func (s *mixCoordImpl) RecoverDataViewReference(ctx context.Context, collectionID int64, version qviews.DataVersion) (bool, error) {
+	return s.datacoordServer.RecoverDataViewReference(ctx, collectionID, version)
+}
+
+func (s *mixCoordImpl) UnpinDataView(collectionID int64, version qviews.DataVersion) {
+	s.datacoordServer.UnpinDataView(collectionID, version)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {

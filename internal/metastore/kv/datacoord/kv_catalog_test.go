@@ -2247,9 +2247,9 @@ func TestDataViewCatalog(t *testing.T) {
 	value, err := proto.Marshal(dataView)
 	assert.NoError(t, err)
 
-	dataViewKey := "datacoord-meta/dataview/100/versions/2/1"
-	dataViewPrefix := "datacoord-meta/dataview/100/versions/"
-	allDataViewsPrefix := "datacoord-meta/dataview/"
+	dataViewKey := "coord/dv/100/versions/2/1"
+	dataViewPrefix := "coord/dv/100/versions/"
+	allDataViewsPrefix := "coord/dv/"
 	txn.EXPECT().Save(ctx, dataViewKey, string(value)).Return(nil).Once()
 	assert.NoError(t, catalog.SaveDataView(ctx, dataView))
 
@@ -2267,9 +2267,10 @@ func TestDataViewCatalog(t *testing.T) {
 	otherDataView.DataVersion = &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0}
 	otherValue, err := proto.Marshal(otherDataView)
 	assert.NoError(t, err)
-	otherDataViewKey := "datacoord-meta/dataview/200/versions/1/0"
+	otherDataViewKey := "coord/dv/200/versions/1/0"
 	txn.EXPECT().WalkWithPrefix(ctx, allDataViewsPrefix, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			assert.NoError(t, f([]byte("/meta-root/coord/dv/drop/100"), []byte("1")))
 			assert.NoError(t, f([]byte(dataViewKey), value))
 			return f([]byte(otherDataViewKey), otherValue)
 		}).Once()
@@ -2284,4 +2285,23 @@ func TestDataViewCatalog(t *testing.T) {
 
 	txn.EXPECT().RemoveWithPrefix(ctx, dataViewPrefix).Return(nil).Once()
 	assert.NoError(t, catalog.DropDataViews(ctx, 100))
+}
+
+func TestDataViewDropMarkerCatalog(t *testing.T) {
+	ctx := context.Background()
+	txn := mocks.NewMetaKv(t)
+	catalog := NewCatalog(txn, rootPath, "")
+
+	const markerKey = "coord/dv/drop/100"
+	txn.EXPECT().Save(ctx, markerKey, "1").Return(nil).Once()
+	require.NoError(t, catalog.MarkDataViewCollectionDropped(ctx, 100))
+
+	txn.EXPECT().LoadWithPrefix(ctx, "coord/dv/drop/").
+		Return([]string{"/meta-root/" + markerKey}, []string{"1"}, nil).Once()
+	ids, err := catalog.ListDroppedDataViewCollections(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []int64{100}, ids)
+
+	txn.EXPECT().Remove(ctx, markerKey).Return(nil).Once()
+	require.NoError(t, catalog.UnmarkDataViewCollectionDropped(ctx, 100))
 }

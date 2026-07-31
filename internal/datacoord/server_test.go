@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -2916,15 +2917,24 @@ func Test_initGarbageCollection(t *testing.T) {
 }
 
 func TestServerGarbageCollectionReferences(t *testing.T) {
-	dataRefs := &fakeDataViewReferenceChecker{}
-	server := CreateServer(context.Background(), dependency.NewDefaultFactory(true),
-		WithDataViewReferenceChecker(dataRefs),
+	dataViews := &testDataViewReferenceDataViews{
+		dataViewFn: func(context.Context, int64, *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error) {
+			return nil, nil
+		},
+		garbageCollectFn: func(context.Context, int64, []*viewpb.DataVersion, int) error { return nil },
+		dropCollectionFn: func(context.Context, int64) (*viewpb.DataVersion, error) { return nil, nil },
+	}
+	server := CreateServer(context.Background(), dependency.NewDefaultFactory(true))
+	server.dataViewReferences = newTestDataViewReferenceManager(t,
+		&testDataViewReferenceCatalog{markerPresent: make(map[int64]struct{})},
+		dataViews,
+		func(int64) bool { return true },
 	)
 
 	server.initGarbageCollection(nil)
 	defer server.garbageCollector.close()
 
-	assert.Same(t, dataRefs, server.garbageCollector.option.dataViewRefs)
+	assert.Same(t, server.dataViewReferences, server.garbageCollector.option.dataViewGC)
 }
 
 func TestLoadCollectionFromRootCoord(t *testing.T) {
