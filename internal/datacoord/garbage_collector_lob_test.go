@@ -24,9 +24,11 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -408,12 +410,12 @@ func TestCollectUsedLOBFilesSnapshotProtection(t *testing.T) {
 // not there yet. Because a read failure aborts the whole GC round, one pending
 // V3 restore would stall LOB reclamation cluster-wide for as long as it runs.
 func TestCollectUsedLOBFilesToleratesImportingSegments(t *testing.T) {
-	newGCWithSegments := func(segments ...*SegmentInfo) *garbageCollector {
+	newGCWithSegments := func(cli storage.ChunkManager, segments ...*SegmentInfo) *garbageCollector {
 		m := &meta{ctx: context.Background(), segments: NewSegmentsInfo()}
 		for _, segment := range segments {
 			m.segments.SetSegment(segment.GetID(), segment)
 		}
-		return &garbageCollector{meta: m}
+		return &garbageCollector{meta: m, option: GcOption{cli: cli}}
 	}
 
 	// Stand in for "the manifest object does not exist yet": the real FFI read
@@ -424,22 +426,71 @@ func TestCollectUsedLOBFilesToleratesImportingSegments(t *testing.T) {
 	}
 
 	t.Run("importing segment with unmaterialized manifest does not abort the round", func(t *testing.T) {
+		basePath := "files/insert_log/100/200/2001"
 		importing := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             2001,
 			CollectionID:   100,
 			State:          commonpb.SegmentState_Importing,
 			IsImporting:    true,
 			StorageVersion: storage.StorageV3,
-			ManifestPath:   "files/insert_log/100/200/2001/_metadata/manifest.json:1",
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
 		}}
-		lobCtx := newLOBGCContext(newGCWithSegments(importing))
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().Exist(mock.Anything, basePath+"/_metadata/manifest-1.avro").Return(false, nil).Once()
+		lobCtx := newLOBGCContext(newGCWithSegments(cm, importing))
 
-		mock := mockMissingManifest()
-		defer mock.UnPatch()
+		ffiMock := mockMissingManifest()
+		defer ffiMock.UnPatch()
 
 		used, err := lobCtx.collectUsedLOBFiles(context.Background())
 		assert.NoError(t, err, "a not-yet-materialized manifest must not abort LOB GC")
 		assert.Equal(t, 0, len(used))
+	})
+
+	t.Run("flushed importing segment with materialized manifest still aborts the round", func(t *testing.T) {
+		// Bulk-import segments and completed restore tasks can have a materialized
+		// manifest while IsImporting remains true until the whole job commits. A
+		// transient read failure must not make their live LOB files look unused.
+		basePath := "files/insert_log/100/200/2003"
+		flushedImporting := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             2003,
+			CollectionID:   100,
+			State:          commonpb.SegmentState_Flushed,
+			IsImporting:    true,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		}}
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().Exist(mock.Anything, basePath+"/_metadata/manifest-1.avro").Return(true, nil).Once()
+		lobCtx := newLOBGCContext(newGCWithSegments(cm, flushedImporting))
+
+		ffiMock := mockMissingManifest()
+		defer ffiMock.UnPatch()
+
+		_, err := lobCtx.collectUsedLOBFiles(context.Background())
+		assert.Error(t, err, "an unreadable materialized manifest must abort LOB GC")
+	})
+
+	t.Run("importing segment aborts when manifest existence cannot be checked", func(t *testing.T) {
+		basePath := "files/insert_log/100/200/2004"
+		importing := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             2004,
+			CollectionID:   100,
+			State:          commonpb.SegmentState_Importing,
+			IsImporting:    true,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		}}
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().Exist(mock.Anything, basePath+"/_metadata/manifest-1.avro").
+			Return(false, errors.New("SlowDown: please reduce your request rate")).Once()
+		lobCtx := newLOBGCContext(newGCWithSegments(cm, importing))
+
+		ffiMock := mockMissingManifest()
+		defer ffiMock.UnPatch()
+
+		_, err := lobCtx.collectUsedLOBFiles(context.Background())
+		assert.Error(t, err, "an unclassifiable manifest read failure must abort LOB GC")
 	})
 
 	t.Run("flushed segment with unreadable manifest still aborts the round", func(t *testing.T) {
@@ -451,12 +502,12 @@ func TestCollectUsedLOBFilesToleratesImportingSegments(t *testing.T) {
 			CollectionID:   100,
 			State:          commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
-			ManifestPath:   "files/insert_log/100/200/2002/_metadata/manifest.json:1",
+			ManifestPath:   packed.MarshalManifestPath("files/insert_log/100/200/2002", 1),
 		}}
-		lobCtx := newLOBGCContext(newGCWithSegments(flushed))
+		lobCtx := newLOBGCContext(newGCWithSegments(mocks.NewChunkManager(t), flushed))
 
-		mock := mockMissingManifest()
-		defer mock.UnPatch()
+		ffiMock := mockMissingManifest()
+		defer ffiMock.UnPatch()
 
 		_, err := lobCtx.collectUsedLOBFiles(context.Background())
 		assert.Error(t, err, "an unreadable committed manifest must still abort LOB GC")
