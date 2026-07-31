@@ -17,6 +17,8 @@
 #include "common/Array.h"
 #include "common/CDataType.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "index/Meta.h"
 #include "index/Utils.h"
 #include "storage/Util.h"
 #include "indexbuilder/IndexFactory.h"
@@ -312,4 +314,57 @@ TEST(ScalarIndexCreatorTest, EmptyRawIndexBuildSkipsPersistence) {
         EXPECT_EQ(stats->GetSerializedSize(), 0);
         EXPECT_TRUE(stats->GetIndexFiles().empty());
     }
+}
+
+TEST(ScalarIndexCreatorTest, FMIndexParamsRejectInvalidValuesWithInputCode) {
+    auto expect_invalid = [](const std::string& key,
+                             const nlohmann::json& value) {
+        milvus::Config config;
+        config[milvus::index::INDEX_TYPE] = milvus::index::FMINDEX_INDEX_TYPE;
+        config[key] = value;
+
+        try {
+            (void)milvus::indexbuilder::CreateScalarIndex(
+                milvus::DataType::VARCHAR,
+                config,
+                milvus::storage::FileManagerContext());
+            FAIL() << "expected invalid FMINDEX parameter " << key << "="
+                   << value.dump();
+        } catch (const milvus::SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::InvalidParameter);
+        }
+    };
+
+    for (const auto& value : {nlohmann::json("abc"),
+                              nlohmann::json("3"),
+                              nlohmann::json("257"),
+                              nlohmann::json("8junk"),
+                              nlohmann::json(-1),
+                              nlohmann::json(8.5)}) {
+        expect_invalid(milvus::index::FM_SA_SAMPLE_RATE, value);
+    }
+    for (const auto& value : {nlohmann::json("abc"),
+                              nlohmann::json("4"),
+                              nlohmann::json("24"),
+                              nlohmann::json("256"),
+                              nlohmann::json("64junk"),
+                              nlohmann::json(-1),
+                              nlohmann::json(64.5)}) {
+        expect_invalid(milvus::index::FM_BLOCK_BYTES, value);
+    }
+}
+
+TEST(ScalarIndexCreatorTest, FMIndexParamsMatchGoLeadingPlusValidation) {
+    milvus::Config config;
+    config[milvus::index::INDEX_TYPE] = milvus::index::FMINDEX_INDEX_TYPE;
+    config[milvus::index::FM_SA_SAMPLE_RATE] = "+8";
+    config[milvus::index::FM_BLOCK_BYTES] = "+64";
+
+    EXPECT_NO_THROW({
+        auto index = milvus::indexbuilder::CreateScalarIndex(
+            milvus::DataType::VARCHAR,
+            config,
+            milvus::storage::FileManagerContext());
+        EXPECT_NE(index, nullptr);
+    });
 }

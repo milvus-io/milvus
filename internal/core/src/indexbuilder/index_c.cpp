@@ -14,6 +14,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -100,6 +101,9 @@ CreateIndexForUT(enum CDataType dtype,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
+    } catch (std::bad_alloc& e) {
+        status.error_code = MemAllocateFailed;
+        status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
@@ -381,6 +385,11 @@ CreateIndex(CIndex* res_index,
     } catch (SegcoreError& e) {
         auto status = CStatus();
         status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::bad_alloc& e) {
+        auto status = CStatus();
+        status.error_code = MemAllocateFailed;
         status.error_msg = strdup(e.what());
         return status;
     } catch (std::exception& e) {
@@ -1070,6 +1079,9 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
         status.error_msg = "";
     } catch (const SegcoreError& e) {
         status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+    } catch (const std::bad_alloc& e) {
+        status.error_code = MemAllocateFailed;
         status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;

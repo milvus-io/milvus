@@ -2196,6 +2196,51 @@ func TestNewSnapshotManager(t *testing.T) {
 	assert.NotNil(t, sm)
 }
 
+func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(100)
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+		&milvuspb.DescribeCollectionResponse{DbName: "default"}, nil,
+	).Once()
+
+	sm := NewSnapshotManager(
+		nil,
+		nil,
+		nil,
+		mockAllocator,
+		nil,
+		mockBroker,
+		nil,
+		nil, // indexEngineVersionManager
+	)
+
+	broadcasterCalled := false
+	startBroadcaster := func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+		broadcasterCalled = true
+		return nil, nil
+	}
+
+	err := sm.RestoreIndexes(ctx, &snapshotstorage.SnapshotData{
+		Indexes: []*indexpb.IndexInfo{
+			{
+				IndexName: "fm_idx",
+				FieldID:   101,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FMINDEX"},
+				},
+			},
+		},
+	}, collectionID, startBroadcaster, "snapshot")
+
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	assert.False(t, broadcasterCalled)
+}
+
 func TestSnapshotManager_ReadSnapshotData_Success(t *testing.T) {
 	ctx := context.Background()
 
