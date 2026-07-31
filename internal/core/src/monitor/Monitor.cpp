@@ -283,9 +283,14 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_growing_index_latency,
     growingIndexCatchupLabels,
     growingIndexLatencyBuckets)
+// Rows, not milliseconds: own family so a single metric name never mixes
+// units with internal_core_growing_index_latency.
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
+    internal_core_growing_index_rows,
+    "[cpp]rows absorbed during growing interim index catch-up")
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_growing_index_catchup_rows,
-    internal_core_growing_index_latency,
+    internal_core_growing_index_rows,
     growingIndexCatchupRowsLabels,
     growingIndexRowsBuckets)
 DEFINE_PROMETHEUS_GAUGE_FAMILY(
@@ -300,6 +305,34 @@ DEFINE_PROMETHEUS_COUNTER_FAMILY(
 DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_build_failures,
                           internal_core_growing_index_failures,
                           growingIndexFailureLabels)
+
+// Saturation of the background build pool: queue_depth rising while capacity
+// stays flat is the signal that first builds are waiting on the executor
+// rather than on knowhere.
+std::map<std::string, std::string> growingIndexPoolCapacityLabels{
+    {"type", "capacity"}};
+std::map<std::string, std::string> growingIndexPoolActiveLabels{
+    {"type", "active_threads"}};
+std::map<std::string, std::string> growingIndexPoolIdleLabels{
+    {"type", "idle_threads"}};
+std::map<std::string, std::string> growingIndexPoolQueueDepthLabels{
+    {"type", "queue_depth"}};
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(
+    internal_core_growing_index_pool,
+    "[cpp]growing interim index async build thread pool")
+DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_capacity,
+                        internal_core_growing_index_pool,
+                        growingIndexPoolCapacityLabels)
+DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_active_threads,
+                        internal_core_growing_index_pool,
+                        growingIndexPoolActiveLabels)
+DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_idle_threads,
+                        internal_core_growing_index_pool,
+                        growingIndexPoolIdleLabels)
+DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_queue_depth,
+                        internal_core_growing_index_pool,
+                        growingIndexPoolQueueDepthLabels)
 
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {

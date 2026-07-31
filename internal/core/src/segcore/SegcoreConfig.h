@@ -292,13 +292,24 @@ class SegcoreConfig {
     // Async first build of the growing interim index (spec:
     // docs/superpowers/specs/2026-07-30-growing-index-async-build-design.md).
     // SegmentGrowingImpl copies SegcoreConfig by value at segment creation, so
-    // a hot update only affects segments created afterwards; per-segment the
-    // value is immutable, hence a plain bool is race-free.
+    // the per-segment copy is immutable for that segment's whole life and a
+    // hot toggle only affects segments created afterwards. The singleton's
+    // field itself is NOT synchronized: the Go config watcher writes
+    // default_config()'s copy while segment construction reads it, a formal
+    // data race on a non-atomic bool. That is the same shape as every
+    // inline-static switch above (existing repo precedent) and benign in
+    // practice on the platforms we ship -- a racing reader observes either the
+    // old or the new value, both of which are self-consistent whole-segment
+    // choices. Deliberately NOT std::atomic: that would delete SegcoreConfig's
+    // copy constructor, which SegmentGrowingImpl's by-value copy relies on.
     bool enable_async_growing_index_build_ = true;
     // Capacity ratio (x CPU) of the background build pool; mirrors
     // queryNode.segcore.interimIndex.buildParallelRate so this layer never
-    // out-submits the knowhere build pool.
-    float growing_index_build_pool_ratio_ = 0.5f;
+    // out-submits the knowhere build pool. inline static because the pool is
+    // process-global: only default_config()'s value is ever read, and only
+    // once, snapshotted at first use of the pool (the param is
+    // refreshable:false, so a per-segment copy would be dead weight).
+    inline static float growing_index_build_pool_ratio_ = 0.5f;
     inline static bool enable_gis_split_fusion_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static bool reject_remote_vector_output_ = false;

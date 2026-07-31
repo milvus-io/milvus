@@ -52,6 +52,7 @@
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "segcore/ConcurrentVector.h"
+#include "segcore/IndexConfigGenerator.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
@@ -1009,6 +1010,33 @@ struct AsyncBuildFixture {
     std::string plan_str;
 };
 
+// kAsyncBuildThreshold is hand-computed from build_ratio/nlist/max row count,
+// and every async test's row arithmetic is built on it. Re-derive it from the
+// production VecIndexConfig -- the exact object the segment's FieldIndexing
+// will hold -- so a drift in GetBuildThreshold() fails loudly here instead of
+// silently turning the tests' catch-up windows into no-ops. Runs inside
+// MakeAsyncBuildFixture, so every async test inherits it. (A helper, not the
+// fixture builder itself, because ASSERT_* only returns from a void function.)
+void
+AssertAsyncBuildThreshold(const FieldIndexMeta& field_index_meta,
+                          int64_t max_index_row_count,
+                          bool is_sparse) {
+    if (max_index_row_count != kAsyncMaxIndexRowCount) {
+        // Fixtures that deliberately pick another row count carry their own
+        // expectations.
+        return;
+    }
+    milvus::segcore::VecIndexConfig index_config(
+        max_index_row_count,
+        field_index_meta,
+        SegcoreConfig::default_config(),
+        SegmentType::Growing,
+        is_sparse);
+    ASSERT_EQ(kAsyncBuildThreshold, index_config.GetBuildThreshold())
+        << "production get_build_threshold() drifted away from the "
+           "hand-computed kAsyncBuildThreshold the async tests are built on";
+}
+
 AsyncBuildFixture
 MakeAsyncBuildFixture(DataType data_type,
                       const std::string& index_type,
@@ -1033,6 +1061,10 @@ MakeAsyncBuildFixture(DataType data_type,
         {fixture.vec, field_index_meta}};
     fixture.meta = std::make_shared<CollectionIndexMeta>(max_index_row_count,
                                                          std::move(field_map));
+    AssertAsyncBuildThreshold(
+        field_index_meta,
+        max_index_row_count,
+        /*is_sparse=*/data_type == DataType::VECTOR_SPARSE_U32_F32);
 
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
@@ -1497,6 +1529,92 @@ TEST(GrowingIndexAsyncBuildTest, BuildFailureDisablesIndexPermanently) {
     EXPECT_EQ(sr->total_nq_, num_queries);
     EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
+}
+
+// Spec §7 G2. Failure in *Phase 2*, after Phase 1 already produced a real
+// index and the first catch-up round already added rows to it. This is the
+// only path that runs handle_failure with a live index in `index_` -- it must
+// still land in kDisabled, never publish, never re-trigger, and leave the raw
+// chunks (which the index never took ownership of, since sync_with_index_
+// stayed false) intact for the brute-force scan.
+TEST(GrowingIndexAsyncBuildTest, CatchupFailureDisablesIndexAfterFirstBuild) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    std::atomic<int> build_calls{0};
+    std::atomic<int> catchup_calls{0};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase == VectorFieldIndexing::GrowingBuildPhase::kAfterBuild) {
+            build_calls.fetch_add(1);
+            return;
+        }
+        if (phase ==
+            VectorFieldIndexing::GrowingBuildPhase::kAfterCatchupRound) {
+            catchup_calls.fetch_add(1);
+            ThrowInfo(UnexpectedError, "injected catch-up failure");
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int top_k = 5;
+
+    // Phase 1 builds rows [0, kAsyncBuildThreshold) and leaves a
+    // 25000 - 22698 = 2302 row gap, so the catch-up loop is guaranteed to run
+    // at least one round with gap > 0 -- i.e. to reach the hook at all.
+    constexpr int64_t per_batch = 25000;
+    static_assert(per_batch > kAsyncBuildThreshold,
+                  "the triggering batch must leave a non-empty catch-up gap");
+    auto first_batch =
+        InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 11);
+    ASSERT_TRUE(WaitState(segment_impl,
+                          fixture.vec,
+                          VectorFieldIndexing::GrowingIndexState::kDisabled,
+                          /*timeout_ms=*/30000));
+    EXPECT_EQ(build_calls.load(), 1) << "Phase 1 must have succeeded";
+    EXPECT_EQ(catchup_calls.load(), 1);
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+
+    // kDisabled has no back edge: later inserts neither re-build nor publish.
+    for (int i = 0; i < 2; i++) {
+        InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 21 + i);
+    }
+    EXPECT_EQ(segment->get_row_count(), per_batch * 3);
+    EXPECT_EQ(build_calls.load(), 1);
+    EXPECT_EQ(catchup_calls.load(), 1);
+    EXPECT_EQ(segment_impl->get_indexing_record()
+                  .get_vec_field_indexing(fixture.vec)
+                  .get_growing_index_state(),
+              VectorFieldIndexing::GrowingIndexState::kDisabled);
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+
+    // Content probe below the build threshold: that row *was* inside the
+    // torn-down index, so finding it exactly proves the raw chunks it was
+    // built from are still there and the brute-force scan covers them.
+    constexpr int64_t probe_row = 4242;
+    static_assert(probe_row < kAsyncBuildThreshold,
+                  "probe must be a row Phase 1 had already absorbed");
+    auto probe_vectors = first_batch.get_col<float>(fixture.vec);
+    ASSERT_EQ(probe_vectors.size(), per_batch * kAsyncDim);
+    auto probe_ph = MakeSingleDensePlaceholder(
+        plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], probe_row);
+    EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
 }
 
 TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
@@ -2439,8 +2557,8 @@ TEST(GrowingIndexAsyncBuildTest, StallFallbackForcesFinalize) {
     // round 10, so reaching this cap would mean the fallback did not fire and
     // the loop exited because the hook stopped feeding it.
     constexpr int kHookRoundCap = 40;
-    // VectorFieldIndexing::kMaxStallRounds, which is private.
-    constexpr int kMaxStallRounds = 8;
+    // The production constant itself, not a copy of it.
+    constexpr int kMaxStallRounds = VectorFieldIndexing::kMaxStallRounds;
 
     std::atomic<SegmentGrowing*> segment_ptr{nullptr};
     std::atomic<int> rounds{0};

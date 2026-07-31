@@ -90,6 +90,22 @@ GrowingIndexBuildPool() {
     static milvus::ThreadPool pool(
         SegcoreConfig::default_config().get_growing_index_build_pool_ratio(),
         "growing_index_build");
+    // Queue depth is the saturation signal for this layer: a task waiting here
+    // is not yet even blocked on the knowhere build pool. Task counters and
+    // duration histograms are deliberately left unwired -- first-build and
+    // catch-up latency already have dedicated histograms.
+    [[maybe_unused]] static const bool metrics_wired = [] {
+        pool.SetMetrics(
+            &milvus::monitor::internal_core_growing_index_pool_capacity,
+            &milvus::monitor::internal_core_growing_index_pool_active_threads,
+            &milvus::monitor::internal_core_growing_index_pool_idle_threads,
+            &milvus::monitor::internal_core_growing_index_pool_queue_depth,
+            /*submitted=*/nullptr,
+            /*completed=*/nullptr,
+            /*queue_duration=*/nullptr,
+            /*execute_duration=*/nullptr);
+        return true;
+    }();
     return pool;
 }
 
@@ -846,21 +862,45 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
                 reason);
             return;
         }
-        LOG_WARN(
-            "async growing index build failed, disabling interim index for "
-            "this field, falling back to brute-force scan permanently: {}",
-            reason);
         std::lock_guard<std::mutex> lock(append_mutex_);
-        // Legal here because the index has NOT taken raw-data ownership yet:
-        // sync_with_index_ was never set, so HasRawData() stayed false and
-        // try_remove_chunks never cleared the source chunks (unlike the
-        // post-sync recreate_index documented as a design defect in
-        // AddBatch*). Recreate only to free the half-built index memory.
-        recreate_index(get_data_type(), field_raw_data);
+        // Terminal state FIRST, and with nothing throwable between the lock
+        // and here: everything below (recreate_index's allocations, the log
+        // sinks) can throw, and a throw that escaped before this point would
+        // strand the field in kBuilding forever -- no kDisabled, no counter,
+        // no terminal log, and every later insert silently no-ops into the
+        // kBuilding branch.
         built_ = false;
         index_cur_.store(0);
         state_.store(GrowingIndexState::kDisabled);
         milvus::monitor::internal_core_growing_index_build_failures.Increment();
+        try {
+            LOG_WARN(
+                "async growing index build failed, disabling interim index "
+                "for this field, falling back to brute-force scan "
+                "permanently: {}",
+                reason);
+            // Legal here because the index has NOT taken raw-data ownership
+            // yet: sync_with_index_ was never set, so HasRawData() stayed
+            // false and try_remove_chunks never cleared the source chunks
+            // (unlike the post-sync recreate_index documented as a design
+            // defect in AddBatch*). Recreate only to free the half-built
+            // index memory.
+            recreate_index(get_data_type(), field_raw_data);
+        } catch (...) {
+            // Best effort only. The field is already terminally kDisabled and
+            // correctness (brute-force scan over the untouched raw chunks) no
+            // longer depends on anything below; the sole casualty is that the
+            // half-built index's memory stays held until the segment is
+            // dropped. Swallowing beats unwinding out of the pool task and
+            // losing the terminal state.
+            try {
+                LOG_WARN(
+                    "failed to release the half-built growing index after a "
+                    "build failure; the index is disabled and its memory is "
+                    "held until the segment is dropped");
+            } catch (...) {
+            }
+        }
     };
 
     try {

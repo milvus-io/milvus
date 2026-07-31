@@ -386,6 +386,11 @@ class VectorFieldIndexing : public FieldIndexing {
     SearchInfo
     get_search_params(const SearchInfo& searchInfo) const;
 
+    // Catch-up rounds without the gap shrinking before CatchUp gives up on
+    // converging and forces the locked finalize. Public so the stall test
+    // asserts against the production value instead of a copy of it.
+    static constexpr int kMaxStallRounds = 8;
+
  private:
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
@@ -484,7 +489,6 @@ class VectorFieldIndexing : public FieldIndexing {
 
     static constexpr int64_t kCatchupStagingBytes = 8 << 20;
     static constexpr int64_t kCatchupSparseRows = 4096;
-    static constexpr int kMaxStallRounds = 8;
 
     // Destructor/task handshake (spec §4.6). The task CASes kQueued->kRunning
     // on the control block BEFORE touching `this`; the destructor CASes
