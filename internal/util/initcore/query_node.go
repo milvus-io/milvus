@@ -72,6 +72,10 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	// override the FM-index count-first guard threshold (queryNode.fmindexCostRatio)
+	cFmindexCostRatio := C.float(paramtable.Get().QueryNodeCfg.FmindexCostRatio.GetAsFloat())
+	C.SegcoreSetFMIndexCostRatio(cFmindexCostRatio)
+
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 

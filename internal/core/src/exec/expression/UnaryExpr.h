@@ -1077,6 +1077,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return active_count_;
     }
 
+    // The concrete string literal to hand to a scalar index's ShouldUseOp cost
+    // guard, for the anchored pattern ops (PrefixMatch/PostfixMatch/InnerMatch)
+    // whose index cost depends on the literal. Empty for every other op
+    // (including the equality family, which FMINDEX declines outright), so the
+    // guard is judged on the op alone. Lets FMINDEX decline degenerate high-hit
+    // LIKE literals to the raw-data scan on the VARCHAR path.
+    std::string
+    StringLiteralForCostGuard() const;
+
     // Check if ngram index can be used (index exists + literal is valid + no offset input)
     bool
     CanUseNgramIndex() const override;

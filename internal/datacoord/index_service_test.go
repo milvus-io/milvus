@@ -3073,3 +3073,32 @@ func TestJsonIndex(t *testing.T) {
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
 }
+
+// Test_checkFMIndexEngineVersion covers the shared FMINDEX rolling-upgrade gate
+// used by BOTH Server.CreateIndex and snapshotManager.RestoreIndexes (so a
+// snapshot restore cannot bypass it). MinScalarIndexVersionForFMINDEX is 5:
+// resolved version 4 must be rejected, 5 accepted; non-FMINDEX always passes.
+func Test_checkFMIndexEngineVersion(t *testing.T) {
+	fmParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FMINDEX"}}
+	invertedParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}}
+
+	t.Run("fmindex below min version rejected", func(t *testing.T) {
+		err := checkFMIndexEngineVersion(fmParams, common.MinScalarIndexVersionForFMINDEX-1)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+		assert.Contains(t, err.Error(), "FMINDEX requires scalar index engine version")
+		assert.True(t, merr.Status(err).GetRetriable())
+	})
+
+	t.Run("fmindex at min version accepted", func(t *testing.T) {
+		assert.NoError(t, checkFMIndexEngineVersion(fmParams, common.MinScalarIndexVersionForFMINDEX))
+	})
+
+	t.Run("fmindex above min version accepted", func(t *testing.T) {
+		assert.NoError(t, checkFMIndexEngineVersion(fmParams, common.MinScalarIndexVersionForFMINDEX+1))
+	})
+
+	t.Run("non-fmindex always accepted regardless of version", func(t *testing.T) {
+		assert.NoError(t, checkFMIndexEngineVersion(invertedParams, 0))
+	})
+}
