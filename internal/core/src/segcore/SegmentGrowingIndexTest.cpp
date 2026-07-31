@@ -971,6 +971,16 @@ constexpr int64_t kAsyncDim = 16;
 // build_threshold = max(22698, 3900) = 22698, i.e. the third 10k batch
 // triggers the first build and two more batches must be caught up.
 constexpr int64_t kAsyncMaxIndexRowCount = 226985;
+// get_build_threshold() for kAsyncMaxIndexRowCount above. The only
+// structurally guaranteed catch-up window is
+// [kAsyncBuildThreshold, trigger_batch_end): the triggering batch (the one
+// whose insert flips kNotBuilt -> kBuilding) has rows below the threshold
+// absorbed by the synchronous Phase 1 build, and the rest of that same
+// batch can only reach the index via AddRange -> Copy*Rows during catch-up.
+// Anything inserted in a *later* batch may instead land there through
+// AddBatch* if the background finalize already published by then, so it
+// only *probabilistically* exercises the catch-up slice arithmetic.
+constexpr int64_t kAsyncBuildThreshold = 22698;
 
 // Clears the process-wide test hook no matter how the test exits.
 class ScopedBuildHook {
@@ -1193,20 +1203,30 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
 
     constexpr int64_t per_batch = 10000;
     constexpr int64_t n_batch = 5;
-    // The build threshold (22698) is crossed by the third batch, so the last
-    // batch is squarely inside the catch-up range -- it reaches the index
-    // through CopyDenseRows with from > 0, the slice arithmetic this test
-    // exists to pin down.
+    // The build threshold (kAsyncBuildThreshold == 22698) is crossed by the
+    // third batch (index 2, rows [20000, 30000)), so the last batch is
+    // *probabilistically* inside the catch-up range: it only exercises
+    // CopyDenseRows with from > 0 if the background finalize hasn't already
+    // published by the time it's inserted. The triggering batch itself is
+    // the structurally guaranteed catch-up window -- see threshold_batch
+    // below.
+    static_assert(kAsyncBuildThreshold / per_batch < n_batch - 1,
+                  "triggering batch must precede the last batch");
+    constexpr int64_t kThresholdBatchIdx = kAsyncBuildThreshold / per_batch;
     std::unique_ptr<GeneratedData> last_batch;
+    std::unique_ptr<GeneratedData> threshold_batch;
     for (int64_t i = 0; i < n_batch; i++) {
         // DataGen seeds row n of a batch with (batch seed + n), so batches
         // whose seeds are closer together than per_batch share vectors
         // verbatim. Spacing them apart keeps every inserted vector unique,
-        // which is what makes the exact-match probe below unambiguous.
+        // which is what makes the exact-match probes below unambiguous.
         auto dataset = InsertAsyncBatch(
             segment.get(), fixture.schema, per_batch, 42 + i * 2 * per_batch);
         if (i == n_batch - 1) {
             last_batch = std::make_unique<GeneratedData>(std::move(dataset));
+        } else if (i == kThresholdBatchIdx) {
+            threshold_batch =
+                std::make_unique<GeneratedData>(std::move(dataset));
         }
         // Insert must not wait for the build: the segment stays searchable
         // through the whole build/catch-up window.
@@ -1244,6 +1264,32 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k);
     EXPECT_EQ(probe_sr->seg_offsets_[0], probe_offset);
     EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
+
+    // Second content check, this one at a seg_offset inside the
+    // *structurally guaranteed* catch-up window [kAsyncBuildThreshold,
+    // threshold-batch end) -- rows here can only have reached the index via
+    // AddRange -> CopyDenseRows, unlike the last-batch probe above which
+    // depends on winning the race against the background finalize.
+    ASSERT_NE(threshold_batch, nullptr);
+    constexpr int64_t threshold_probe_offset = 25000;
+    static_assert(
+        threshold_probe_offset >= kAsyncBuildThreshold &&
+            threshold_probe_offset < (kThresholdBatchIdx + 1) * per_batch,
+        "threshold probe offset must land inside the structurally "
+        "guaranteed catch-up window");
+    constexpr int64_t threshold_probe_row =
+        threshold_probe_offset - kThresholdBatchIdx * per_batch;
+    auto threshold_probe_vectors = threshold_batch->get_col<float>(fixture.vec);
+    ASSERT_EQ(threshold_probe_vectors.size(), per_batch * kAsyncDim);
+    auto threshold_probe_ph = MakeSingleDensePlaceholder(
+        plan.get(),
+        threshold_probe_vectors.data() + threshold_probe_row * kAsyncDim);
+    auto threshold_probe_sr =
+        segment->Search(plan.get(), threshold_probe_ph.get(), 1000000);
+    ASSERT_EQ(threshold_probe_sr->total_nq_, 1);
+    ASSERT_EQ(threshold_probe_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(threshold_probe_sr->seg_offsets_[0], threshold_probe_offset);
+    EXPECT_NEAR(threshold_probe_sr->distances_[0], 0.0f, 1e-5);
 
     // A post-sync batch takes the kSynced Add branch; try_remove_chunks only
     // runs on the insert path, so this batch is what reclaims the chunks
@@ -1338,11 +1384,14 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
 
     constexpr int64_t per_batch = 10000;
     constexpr int64_t n_batch = 4;
-    // Planted in the last batch, i.e. inside the catch-up range (the build
-    // threshold 22698 is crossed by the third batch), so the assertion below
-    // exercises CopySparseRows with from > 0. Values of 100 on three dims make
-    // the row's IP self-similarity (3e4) unreachable for any generated row,
-    // whose values are all in [0, 1) -- the top-1 hit is deterministic.
+    // Planted in the last batch. The build threshold (kAsyncBuildThreshold ==
+    // 22698) is crossed by the third batch (index 2), so this last-batch
+    // probe only *probabilistically* lands in the catch-up range: it
+    // exercises CopySparseRows with from > 0 only if the background finalize
+    // hasn't already published by the time this batch is inserted. Values of
+    // 100 on three dims make the row's IP self-similarity (3e4) unreachable
+    // for any generated row, whose values are all in [0, 1) -- the top-1 hit
+    // is deterministic.
     constexpr int64_t probe_row = 4237;
     constexpr int64_t probe_offset = (n_batch - 1) * per_batch + probe_row;
     knowhere::sparse::SparseRow<milvus::SparseValueType> probe(3);
@@ -1363,14 +1412,51 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
         }
     };
 
+    // Second probe, planted in the triggering batch (index 2) at a seg_offset
+    // inside the *structurally guaranteed* catch-up window
+    // [kAsyncBuildThreshold, threshold-batch end): the triggering batch never
+    // goes through AddBatch*, so this row can only reach the index via
+    // AddRange -> CopySparseRows. Distinct dims/values from `probe` so the
+    // two planted rows don't collide with each other's top-1 match (zero
+    // overlap in sparse ids means zero cross IP contribution).
+    constexpr int64_t kThresholdBatchIdx = kAsyncBuildThreshold / per_batch;
+    constexpr int64_t threshold_probe_offset = 25000;
+    static_assert(
+        threshold_probe_offset >= kAsyncBuildThreshold &&
+            threshold_probe_offset < (kThresholdBatchIdx + 1) * per_batch,
+        "threshold probe offset must land inside the structurally "
+        "guaranteed catch-up window");
+    static_assert(kThresholdBatchIdx < n_batch - 1,
+                  "triggering batch must precede the last batch");
+    constexpr int64_t threshold_probe_row =
+        threshold_probe_offset - kThresholdBatchIdx * per_batch;
+    knowhere::sparse::SparseRow<milvus::SparseValueType> threshold_probe(3);
+    threshold_probe.set_at(0, 5, 200.0f);
+    threshold_probe.set_at(1, 29, 200.0f);
+    threshold_probe.set_at(2, 55, 200.0f);
+    auto plant_threshold_probe = [&](GeneratedData& dataset) {
+        for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+            if (field_data.field_id() != fixture.vec.get()) {
+                continue;
+            }
+            field_data.mutable_vectors()
+                ->mutable_sparse_float_vector()
+                ->set_contents(threshold_probe_row,
+                               std::string(static_cast<const char*>(
+                                               threshold_probe.data()),
+                                           threshold_probe.data_byte_size()));
+        }
+    };
+
     for (int64_t i = 0; i < n_batch; i++) {
-        InsertAsyncBatch(segment.get(),
-                         fixture.schema,
-                         per_batch,
-                         11 + i,
-                         i == n_batch - 1
-                             ? plant_probe
-                             : std::function<void(GeneratedData&)>{});
+        std::function<void(GeneratedData&)> patch;
+        if (i == n_batch - 1) {
+            patch = plant_probe;
+        } else if (i == kThresholdBatchIdx) {
+            patch = plant_threshold_probe;
+        }
+        InsertAsyncBatch(
+            segment.get(), fixture.schema, per_batch, 11 + i, patch);
         auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
         EXPECT_EQ(sr->total_nq_, num_queries);
         EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
@@ -1388,6 +1474,16 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
     ASSERT_EQ(probe_sr->total_nq_, 1);
     ASSERT_GE(probe_sr->seg_offsets_.size(), 1);
     EXPECT_EQ(probe_sr->seg_offsets_[0], probe_offset);
+
+    // Same content check for the structurally-guaranteed threshold-batch
+    // probe.
+    auto threshold_probe_ph =
+        MakeSingleSparsePlaceholder(plan.get(), threshold_probe);
+    auto threshold_probe_sr =
+        segment->Search(plan.get(), threshold_probe_ph.get(), 1000000);
+    ASSERT_EQ(threshold_probe_sr->total_nq_, 1);
+    ASSERT_GE(threshold_probe_sr->seg_offsets_.size(), 1);
+    EXPECT_EQ(threshold_probe_sr->seg_offsets_[0], threshold_probe_offset);
 
     // Post-sync batch on the kSynced Add path.
     InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 77);

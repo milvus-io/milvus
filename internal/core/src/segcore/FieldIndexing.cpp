@@ -236,6 +236,17 @@ VectorFieldIndexing::~VectorFieldIndexing() {
     // Submit can throw *after* enqueueing the task, leaving build_task_
     // invalid while the task runs -- waiting on build_task_ would then return
     // immediately and free the object under the running task.
+    // Invariant at this point: phase is kRunning, never kAbandoned. The only
+    // two call sites that can win the TryAbandon() CAS are this destructor
+    // (which returns immediately above, never reaching here) and the
+    // Submit-catch block in AppendBuild (which resets build_ctrl_ to nullptr
+    // on a win, so the destructor takes the early `build_ctrl_ == nullptr`
+    // return instead of getting here). TryAbandon() above already lost, so
+    // the running task owns the state machine and phase can only be
+    // kRunning.
+    AssertInfo(build_ctrl_->phase.load() != BuildTaskCtrl::Phase::kAbandoned,
+               "abandoned build ctrl must have been cleared before the "
+               "destructor waits");
     build_ctrl_->finished.wait();
 }
 
@@ -798,6 +809,26 @@ VectorFieldIndexing::StartBuildLocked(const VectorBase* field_raw_data,
 void
 VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
                                 int64_t new_data_dim) {
+    // RAII so the inflight gauge is decremented on every exit path,
+    // including handle_failure itself throwing (recreate_index's
+    // make_unique hitting bad_alloc, or LOG_WARN throwing) -- a plain
+    // Increment/Decrement pair around the try block below would leak the
+    // gauge in that case, since the throw propagates straight out of the
+    // catch clause it originated in.
+    struct InflightBuildGuard {
+        InflightBuildGuard() {
+            milvus::monitor::internal_core_growing_index_inflight_builds
+                .Increment();
+        }
+        ~InflightBuildGuard() {
+            milvus::monitor::internal_core_growing_index_inflight_builds
+                .Decrement();
+        }
+        InflightBuildGuard(const InflightBuildGuard&) = delete;
+        InflightBuildGuard&
+        operator=(const InflightBuildGuard&) = delete;
+    } inflight_guard;
+
     // Shared by both catch clauses below (a non-std exception must not leak
     // the inflight gauge nor strand the field in kBuilding forever).
     auto handle_failure = [&](const char* reason) {
@@ -832,7 +863,6 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
         milvus::monitor::internal_core_growing_index_build_failures.Increment();
     };
 
-    milvus::monitor::internal_core_growing_index_inflight_builds.Increment();
     try {
         CallBuildHook(GrowingBuildPhase::kBeforeBuild);
         if (!IsCancelled()) {
@@ -866,7 +896,6 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
     } catch (...) {
         handle_failure("unknown exception");
     }
-    milvus::monitor::internal_core_growing_index_inflight_builds.Decrement();
 }
 
 void
