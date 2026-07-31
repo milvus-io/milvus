@@ -35,6 +35,18 @@
 using namespace milvus;
 using namespace milvus::storage;
 
+namespace milvus::storage {
+
+class FileWriterTestAccessor {
+ public:
+    static bool
+    ShouldFdatasyncOnFinish(const FileWriter& writer) {
+        return writer.ShouldFdatasyncOnFinish();
+    }
+};
+
+}  // namespace milvus::storage
+
 class FileWriterTest : public testing::Test {
  protected:
     void
@@ -95,6 +107,24 @@ TEST_F(FileWriterTest, FinishWithFdatasyncWriteback) {
     std::string filename = (test_dir_ / "fdatasync_writeback.txt").string();
     FileWriter writer(filename);
     writer.SetFdatasyncOnFinish();
+    EXPECT_TRUE(FileWriterTestAccessor::ShouldFdatasyncOnFinish(writer));
+
+    std::string test_data(kBufferSize + 17, 'x');
+    writer.Write(test_data.data(), test_data.size());
+    writer.Finish();
+
+    EXPECT_EQ(ReadFile(filename), test_data);
+}
+
+TEST_F(FileWriterTest, FinishSkipsFdatasyncWritebackWithDirectIO) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "direct_io_skips_fdatasync.txt").string();
+    FileWriter writer(filename);
+    writer.SetFdatasyncOnFinish();
+    EXPECT_FALSE(FileWriterTestAccessor::ShouldFdatasyncOnFinish(writer));
 
     std::string test_data(kBufferSize + 17, 'x');
     writer.Write(test_data.data(), test_data.size());

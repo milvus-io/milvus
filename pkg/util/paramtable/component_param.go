@@ -4630,7 +4630,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.mmap.writeback",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "Enable fdatasync after writing each mmap field data file.",
+		Doc:          "Enable fdatasync after writing each mmap field data file with buffered I/O.",
 		Export:       false,
 	}
 	p.MmapWriteback.Init(base.mgr)

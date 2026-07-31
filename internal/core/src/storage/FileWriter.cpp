@@ -218,10 +218,15 @@ FileWriter::PositionedWriteWithCheck(const void* data,
 
 void
 FileWriter::SyncWrittenData() {
-    if (!fdatasync_on_finish_ || file_size_ == 0) {
+    if (!ShouldFdatasyncOnFinish() || file_size_ == 0) {
         return;
     }
     SyncFileData();
+}
+
+bool
+FileWriter::ShouldFdatasyncOnFinish() const {
+    return fdatasync_on_finish_ && !use_direct_io_;
 }
 
 void
