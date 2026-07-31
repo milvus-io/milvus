@@ -1561,6 +1561,167 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
               (n_batch + 1) * per_batch);
 }
 
+// Regression for the kSynced AddBatchDense nullable arm: it derives add_count
+// from index_->GetOffsetMapping().GetTotalCount() vs. the incoming batch's
+// [reserved_offset, reserved_offset + size) range. A misaligned watermark
+// there makes that arithmetic negative (wrapping add_count to a huge value)
+// or skips rows silently. NullableVectorBuildsAsynchronously above already
+// checks the resulting counters; this test additionally plants a known
+// vector at a specific logical row of a batch inserted *after* WaitSynced
+// and confirms it comes back as an exact top-1 hit, and that no null row --
+// pre- or post-sync -- ever appears in a search result.
+TEST(GrowingIndexAsyncBuildTest, NullableCatchupKeepsValidDataConsistent) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    // Same threshold/batch geometry as NullableVectorBuildsAsynchronously:
+    // DataGen's default 50% null rate makes build_threshold 10000 valid rows,
+    // which the third 8k batch crosses, leaving two more batches to exercise
+    // catch-up.
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/true,
+                              /*max_index_row_count=*/100000);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int num_queries = 5;
+    constexpr int top_k = 5;
+    auto ph_group =
+        MakeAsyncPlaceholders(DataType::VECTOR_FLOAT, plan.get(), num_queries);
+
+    // Tracks [start, start + size) of every batch inserted so far, so a
+    // seg_offset returned by any search can be traced back to the local row
+    // index whose nullability DataGen decided ((local % 100) >= 50 is
+    // valid, DataGen's default null_percent).
+    struct BatchSpan {
+        int64_t start;
+        int64_t size;
+    };
+    std::vector<BatchSpan> batches;
+    auto record_batch = [&](int64_t size) {
+        int64_t start =
+            batches.empty() ? 0 : batches.back().start + batches.back().size;
+        batches.push_back({start, size});
+        return start;
+    };
+    auto is_valid_offset = [&](int64_t global_offset) {
+        for (const auto& b : batches) {
+            if (global_offset >= b.start && global_offset < b.start + b.size) {
+                return ((global_offset - b.start) % 100) >= 50;
+            }
+        }
+        ADD_FAILURE() << "seg_offset " << global_offset
+                      << " is outside every known batch";
+        return false;
+    };
+    // Null rows must never surface in search results: every returned offset
+    // must land on a row DataGen marked valid.
+    auto assert_no_null_hits = [&](const auto& sr) {
+        for (auto off : sr->seg_offsets_) {
+            if (off < 0) {
+                continue;
+            }
+            EXPECT_TRUE(is_valid_offset(off))
+                << "search returned a seg_offset landing on a null row: "
+                << off;
+        }
+    };
+
+    constexpr int64_t per_batch = 8000;
+    constexpr int64_t n_batch = 5;
+    for (int64_t i = 0; i < n_batch; i++) {
+        InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 31 + i);
+        record_batch(per_batch);
+        auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+        EXPECT_EQ(sr->total_nq_, num_queries);
+        assert_no_null_hits(sr);
+    }
+
+    ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
+
+    // Search correctness right after sync: null rows still never surface.
+    auto synced_sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+    EXPECT_EQ(synced_sr->seg_offsets_.size(), num_queries * top_k);
+    assert_no_null_hits(synced_sr);
+
+    int64_t pre_post_sync_indexed = IndexedRowCount(segment_impl, fixture.vec);
+
+    // Post-sync batch on the kSynced AddBatchDense nullable arm. Local row 50
+    // is the first valid row of its 100-block (local rows 0-49 are null
+    // under DataGen's default pattern), so it lands at compact physical
+    // offset 0 within this batch -- easy to plant a known vector at without
+    // disturbing any other row, and immediately preceded by 50 null rows, so
+    // finding it exercises "a null row doesn't break the valid rows around
+    // it" directly.
+    constexpr int64_t post_sync_batch_size = 100;
+    constexpr int64_t probe_local_row = 50;
+    constexpr int64_t probe_physical_offset = 0;  // no valid rows before it
+    std::vector<float> probe_vector(kAsyncDim);
+    for (int64_t d = 0; d < kAsyncDim; d++) {
+        probe_vector[d] = 100.0f + static_cast<float>(d);
+    }
+    auto plant_probe = [&](GeneratedData& dataset) {
+        for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+            if (field_data.field_id() != fixture.vec.get()) {
+                continue;
+            }
+            auto* floats = field_data.mutable_vectors()
+                               ->mutable_float_vector()
+                               ->mutable_data();
+            for (int64_t d = 0; d < kAsyncDim; d++) {
+                floats->Set(probe_physical_offset * kAsyncDim + d,
+                            probe_vector[d]);
+            }
+        }
+    };
+    int64_t post_sync_start = record_batch(post_sync_batch_size);
+    InsertAsyncBatch(
+        segment.get(), fixture.schema, post_sync_batch_size, 999, plant_probe);
+
+    // Accounting: the kSynced arm must add exactly this batch's 50 valid
+    // rows to the index -- not fewer (skipped rows) and not a negative delta
+    // (would wrap add_count to a huge value and either crash inside
+    // AddWithDataset or silently corrupt the index).
+    constexpr int64_t valid_in_post_sync_batch = post_sync_batch_size / 2;
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec),
+              pre_post_sync_indexed + valid_in_post_sync_batch);
+
+    const auto& indexing =
+        segment_impl->get_indexing_record().get_vec_field_indexing(fixture.vec);
+    auto pinned = indexing.get_segment_indexing();
+    auto* vec_index = dynamic_cast<index::VectorIndex*>(pinned.get());
+    ASSERT_NE(vec_index, nullptr);
+    EXPECT_EQ(vec_index->GetOffsetMapping().GetTotalCount(),
+              post_sync_start + post_sync_batch_size);
+
+    // The key content probe: the planted row is found at its exact logical
+    // offset with distance 0. A misaligned catch-up/accounting watermark
+    // would either miss it, put it at the wrong offset, or (if add_count
+    // went negative) crash before reaching this point.
+    int64_t probe_offset = post_sync_start + probe_local_row;
+    auto probe_ph = MakeSingleDensePlaceholder(plan.get(), probe_vector.data());
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_EQ(probe_sr->total_nq_, 1);
+    ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], probe_offset);
+    EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
+
+    // Broad search once more: the post-sync batch's own null rows (its local
+    // rows 0-49, immediately preceding the probe row planted above) must not
+    // leak into results either.
+    auto final_sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+    EXPECT_EQ(final_sr->seg_offsets_.size(), num_queries * top_k);
+    assert_no_null_hits(final_sr);
+}
+
 // Regression for spec §4.2: a batch that lands between the last watermark read
 // and the finalize lock must still be absorbed before sync_with_index_ flips.
 // Otherwise the next kSynced batch computes a negative source offset.
