@@ -172,8 +172,13 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 		return opener, nil
 	}
 
-	// Build and cache new opener
-	builderImpl := registry.MustGetBuilder(walName)
+	// Build and cache new opener. WAL names in a historical consumer position
+	// may come from an untrusted wire enum, so never use the panicking lookup on
+	// this path.
+	builderImpl, ok := registry.GetBuilder(walName)
+	if !ok {
+		return nil, status.NewWALNameMismatchError("registered WAL", walName.String())
+	}
 	opener, err := builderImpl.Build()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to build walimpls opener for %s", walName)

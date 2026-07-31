@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -58,6 +59,19 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 	l, err := opener.Open(context.Background(), &wal.OpenOption{})
 	assert.ErrorIs(t, err, errExpected)
 	assert.Nil(t, l)
+}
+
+func TestGetOrCreateOpenerImplReturnsErrorForUnregisteredWAL(t *testing.T) {
+	opener := &openerAdaptorImpl{
+		openerCache: make(map[message.WALName]walimpls.OpenerImpls),
+	}
+
+	var err error
+	assert.NotPanics(t, func() {
+		_, err = opener.getOrCreateOpenerImpl(context.Background(), message.WALName(12345))
+	})
+	require.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsWALNameMismatch())
 }
 
 func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testing.T) {
