@@ -380,6 +380,9 @@ func createStorageConfig() *indexpb.StorageConfig {
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
 			StorageType: Params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
