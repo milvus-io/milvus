@@ -96,6 +96,38 @@ func (t *queryTask) getQueryLabel() string {
 	return metrics.QueryLabel
 }
 
+func (t *queryTask) getStorageMetricLabel() string {
+	if t.plan == nil {
+		return metrics.QueryLabel
+	}
+	query := t.plan.GetQuery()
+	if isPureCountQuery(query) {
+		return metrics.CountLabel
+	}
+	if isAggregateQuery(query) {
+		return metrics.AggLabel
+	}
+	if query.GetIsCount() {
+		return metrics.CountLabel
+	}
+	return metrics.QueryLabel
+}
+
+func isAggregateQuery(query *planpb.QueryPlanNode) bool {
+	return query != nil &&
+		(len(query.GetGroupByFieldIds()) > 0 || len(query.GetAggregates()) > 0)
+}
+
+func isPureCountQuery(query *planpb.QueryPlanNode) bool {
+	if query == nil {
+		return false
+	}
+	aggregates := query.GetAggregates()
+	return len(query.GetGroupByFieldIds()) == 0 &&
+		len(aggregates) == 1 &&
+		aggregates[0].GetOp() == planpb.AggregateOp_count
+}
+
 type queryParams struct {
 	limit               int64
 	offset              int64
@@ -569,6 +601,11 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 	t.plan.GetQuery().GroupByFieldIds = groupByFieldsIDs
 	t.GroupByFieldIds = groupByFieldsIDs
+	isCount := isPureCountQuery(t.plan.GetQuery())
+	t.plan.GetQuery().IsCount = isCount
+	// Keep the request field aligned for QueryNode-side diagnostics and mixed
+	// version deployments that still read the denormalized flag.
+	t.IsCount = isCount
 
 	// Validate ORDER BY fields compatibility with GROUP BY
 	// When GROUP BY is used, ORDER BY can only reference groupBy columns or aggregate results

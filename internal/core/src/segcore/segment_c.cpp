@@ -54,6 +54,7 @@
 #include "index/Meta.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "monitor/Monitor.h"
 #include "monitor/scope_metric.h"
 #include "nlohmann/json.hpp"
 #include "opentelemetry/trace/span.h"
@@ -93,6 +94,40 @@
 #include <arrow/builder.h>
 #include <arrow/record_batch.h>
 #include <arrow/type.h>
+
+namespace {
+
+const char*
+RetrieveOperationLabel(milvus::query::RetrieveOperation operation) {
+    switch (operation) {
+        case milvus::query::RetrieveOperation::Query:
+            return "query";
+        case milvus::query::RetrieveOperation::Count:
+            return "count";
+        case milvus::query::RetrieveOperation::Aggregate:
+            return "agg";
+    }
+    ThrowInfo(milvus::UnexpectedError, "unknown retrieve operation");
+}
+
+void
+ObserveCompletedAsyncRetrieveStorageCost(
+    const milvus::segcore::SegmentInterface& segment,
+    const milvus::proto::segcore::RetrieveResults& results,
+    milvus::query::RetrieveOperation operation) {
+    if (!segment.storage_usage_tracked()) {
+        return;
+    }
+    const auto& schema = segment.get_schema();
+    milvus::monitor::observe_core_query_scanned_bytes(
+        schema.db_name(),
+        schema.collection_name(),
+        RetrieveOperationLabel(operation),
+        results.scanned_total_bytes(),
+        results.scanned_remote_bytes());
+}
+
+}  // namespace
 
 //////////////////////////////    common interfaces    //////////////////////////////
 
@@ -356,6 +391,33 @@ DeleteSearchResult(CSearchResult search_result) {
     delete res;
 }
 
+void
+ReportSearchResultStorageMetrics(CSearchResult search_result) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto result = static_cast<milvus::SearchResult*>(search_result);
+    if (result == nullptr || result->storage_metrics_reported_) {
+        return;
+    }
+    result->storage_metrics_reported_ = true;
+    if (result->segment_ == nullptr) {
+        return;
+    }
+
+    auto segment = static_cast<milvus::segcore::SegmentInternalInterface*>(
+        result->segment_);
+    if (!segment->storage_usage_tracked()) {
+        return;
+    }
+    const auto& schema = segment->get_schema();
+    milvus::monitor::observe_core_query_scanned_bytes(
+        schema.db_name(),
+        schema.collection_name(),
+        "search",
+        result->search_storage_cost_.scanned_total_bytes,
+        result->search_storage_cost_.scanned_remote_bytes);
+}
+
 int64_t
 GetSearchResultValidCount(CSearchResult search_result) {
     auto res = static_cast<milvus::SearchResult*>(search_result);
@@ -615,6 +677,9 @@ AsyncRetrieve(CTraceContext c_trace,
                                   collection_ttl,
                                   entity_ttl_physical_time_us);
 
+            ObserveCompletedAsyncRetrieveStorageCost(
+                *segment, *retrieve_result, plan->operation_);
+
             auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
             read_lease.reset();
@@ -655,6 +720,9 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
+
+            ObserveCompletedAsyncRetrieveStorageCost(
+                *segment, *retrieve_result, plan->operation_);
 
             auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));

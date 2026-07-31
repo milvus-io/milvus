@@ -216,6 +216,9 @@ func (t *SearchTask) Execute() error {
 				},
 			}
 		}
+		for _, result := range results {
+			result.ReportStorageMetrics()
+		}
 		mlog.Debug(t.ctx, "filter-only search completed", mlog.Int("segments", len(segmentIDs)))
 		return nil
 	}

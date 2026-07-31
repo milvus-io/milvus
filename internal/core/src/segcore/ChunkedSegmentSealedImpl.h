@@ -189,6 +189,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return id_;
     }
 
+    bool
+    storage_usage_tracked() const override {
+        return storage_usage_tracked_;
+    }
+
     std::shared_ptr<SegmentReadLease>
     AcquireReadLease(const folly::CancellationToken& cancel_token) const {
         return operation_gate_.AcquireRead(cancel_token, id_);
@@ -2145,7 +2150,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         RuntimeResourceState* runtime,
-        std::optional<ParquetStatistics> statistics = {},
+        std::shared_ptr<ChunkStatsSource> stats_source = nullptr,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
@@ -2158,7 +2163,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         DataType data_type,
         bool enable_mmap,
         bool is_proxy_column,
-        std::optional<ParquetStatistics> statistics = {},
+        std::shared_ptr<ChunkStatsSource> stats_source = nullptr,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
@@ -2256,6 +2261,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
+
+    // tieredStorage.storageUsageTrackingEnabled, read once when this segment
+    // was built. The setting is startup-only, so every cache slot this segment
+    // ever creates -- including through Reopen or a column-group replacement --
+    // freezes the same value, and this is exactly what they all accumulate
+    // under. See SegmentInternalInterface::storage_usage_tracked.
+    const bool storage_usage_tracked_;
 
     // Query-time reader calls remain non-thread-safe and must be serialized.
     // The reader object itself now lives in RuntimeResourceState snapshots so
@@ -2481,7 +2493,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                *current->load_info,
                                schema_snapshot,
                                runtime.get(),
-                               std::nullopt,
+                               /*stats_source=*/nullptr,
                                nullptr,
                                /*is_replace=*/true,
                                &committer);
@@ -2682,17 +2694,16 @@ CreateSealedSegment(
         schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 
-using ParquetStatisticsByField =
-    std::map<int64_t, ChunkedSegmentSealedImpl::ParquetStatistics>;
-
 struct LoadedGroupChunkMetadata {
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-    ParquetStatisticsByField parquet_stats_by_field;
+    // Parsed footers of the same files, kept so the skip index can build its
+    // statistics without reopening what the loader already read.
+    std::vector<std::shared_ptr<milvus_storage::PackedFileMetadata>>
+        file_metadata_list;
 };
 
 LoadedGroupChunkMetadata
 LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
-                       const std::vector<FieldId>& field_ids_for_stats,
                        const std::string& debug_key);
 
 }  // namespace milvus::segcore

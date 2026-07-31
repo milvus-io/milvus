@@ -328,6 +328,10 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 tmp_retrieve_result.field_data_[i] = std::move(data_array);
             }
         }
+        tmp_retrieve_result.retrieve_storage_cost_.scanned_remote_bytes =
+            op_context.storage_usage.scanned_cold_bytes.load();
+        tmp_retrieve_result.retrieve_storage_cost_.scanned_total_bytes =
+            op_context.storage_usage.scanned_total_bytes.load();
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
         return;
     }
@@ -467,6 +471,10 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                     valid_count = active_count - view.count();
                 }
             }
+            filter_only_result.search_storage_cost_.scanned_remote_bytes =
+                op_context.storage_usage.scanned_cold_bytes.load();
+            filter_only_result.search_storage_cost_.scanned_total_bytes =
+                op_context.storage_usage.scanned_total_bytes.load();
         }
         LOG_DEBUG("filter only result validCount: {}, activeCount: {}",
                   valid_count,

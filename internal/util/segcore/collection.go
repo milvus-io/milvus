@@ -136,6 +136,18 @@ func (c *CCollection) Release() {
 	c.ptr = nil
 }
 
+// CleanupCoreCollectionMetrics removes the C++ Prometheus series whose
+// dynamic labels belong to a released collection. Call this only after the
+// collection's final QueryNode reference is gone, so no query can still hold
+// a reference returned by prometheus::Family::Add.
+func CleanupCoreCollectionMetrics(dbName, collectionName string) {
+	cDBName := C.CString(dbName)
+	defer C.free(unsafe.Pointer(cDBName))
+	cCollectionName := C.CString(collectionName)
+	defer C.free(unsafe.Pointer(cCollectionName))
+	C.CleanupCoreCollectionMetrics(cDBName, cCollectionName)
+}
+
 func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
 	mlog.Info(context.TODO(), "PutOrRefPluginContext",
 		mlog.Int64("ez_id", ez.EzID),

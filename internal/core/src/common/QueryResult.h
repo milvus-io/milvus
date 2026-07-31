@@ -359,6 +359,10 @@ struct SearchResult {
         vector_iterators_;
     // record the storage usage in search
     StorageCost search_storage_cost_;
+    // Set by the explicit final-report C API after late materialization. This
+    // prevents merged-task bookkeeping from observing the same segment result
+    // more than once.
+    bool storage_metrics_reported_{false};
 
     bool element_level_{false};
     std::vector<int32_t> element_indices_;

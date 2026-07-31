@@ -280,19 +280,23 @@ class BooleanFieldChunkMetrics : public FieldChunkMetrics {
         return false;
     }
 
+    // `values` is the IN list itself — each entry is one queried bool value,
+    // as produced by SetElement<bool>::GetElements() and the TermExpr
+    // prefetch ({true}, {false} or {true, false} after dedup). The chunk may
+    // be skipped only when NONE of the listed values can be present in it;
+    // any unexpected entry degrades to "cannot skip" (conservative).
     bool
     CanSkipIn(const std::vector<Metrics>& values) const override {
-        if (!this->has_value_ || values.size() != 2) {
+        if (!this->has_value_ || values.empty()) {
             return false;
         }
-        if (!std::holds_alternative<bool>(values[0]) ||
-            !std::holds_alternative<bool>(values[1])) {
-            return false;
-        }
-        bool contains_true = std::get<bool>(values[0]);
-        bool contains_false = std::get<bool>(values[1]);
-        if ((contains_true && has_true_) || (contains_false && has_false_)) {
-            return false;
+        for (const auto& v : values) {
+            if (!std::holds_alternative<bool>(v)) {
+                return false;
+            }
+            if (std::get<bool>(v) ? has_true_ : has_false_) {
+                return false;
+            }
         }
         return true;
     }
@@ -628,12 +632,21 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
             string_values.push_back(*sv);
         }
         if (!bloom_filter_) {
-            std::string_view min, max;
-            for (auto v : string_values) {
-                if (min.empty() || v < min) {
+            // Seed the IN-list hull from the first value and fold in the rest.
+            // Do NOT use string_view::empty() as an "unset" sentinel here: the
+            // empty string "" is a legitimate queried value, so seeding with a
+            // default-constructed (empty) view would let "" masquerade as the
+            // current min/max and collapse the hull (e.g. IN("", "zzz") would
+            // otherwise reduce to ["zzz","zzz"] and wrongly skip a chunk that
+            // spans ["", "b"]). string_values is guaranteed non-empty here.
+            std::string_view min = string_values[0];
+            std::string_view max = string_values[0];
+            for (size_t i = 1; i < string_values.size(); ++i) {
+                const auto v = string_values[i];
+                if (v < min) {
                     min = v;
                 }
-                if (max.empty() || v > max) {
+                if (v > max) {
                     max = v;
                 }
             }
@@ -817,12 +830,17 @@ class SkipIndexStatsBuilder {
     };
 
     template <typename ParquetType, typename T>
-    metricsInfo<T>
+    std::optional<metricsInfo<T>>
     ProcessFieldMetrics(
         const std::shared_ptr<parquet::Statistics>& statistics) const {
         auto typed_statistics =
             std::dynamic_pointer_cast<parquet::TypedStatistics<ParquetType>>(
                 statistics);
+        if (typed_statistics == nullptr) {
+            // The statistics' physical type does not match what the field's
+            // data type requires; the caller degrades to NONE metrics.
+            return std::nullopt;
+        }
         MetricsDataType<T> min;
         MetricsDataType<T> max;
         if constexpr (std::is_same_v<T, std::string>) {
@@ -832,13 +850,13 @@ class SkipIndexStatsBuilder {
             min = static_cast<T>(typed_statistics->min());
             max = static_cast<T>(typed_statistics->max());
         }
-        return {typed_statistics->num_values(),
-                typed_statistics->null_count(),
-                min,
-                max,
-                false,
-                false,
-                {}};
+        return metricsInfo<T>{typed_statistics->num_values(),
+                              typed_statistics->null_count(),
+                              min,
+                              max,
+                              false,
+                              false,
+                              {}};
     }
 
     template <typename T, typename ArrayType>

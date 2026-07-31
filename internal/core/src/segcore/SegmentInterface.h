@@ -135,7 +135,8 @@ class SegmentInterface {
              Timestamp collection_ttl,
              int64_t entity_ttl_physical_time_us = 0) const = 0;
 
-    // Only used for test
+    // Test-only synchronous convenience overload. Production request paths
+    // enter through AsyncRetrieve and call the full primitive above.
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
@@ -201,6 +202,19 @@ class SegmentInterface {
 
     virtual int64_t
     get_segment_id() const = 0;
+
+    // Whether this segment's cache slots accumulate OpContext::storage_usage.
+    // Each CacheSlot freezes tieredStorage.storageUsageTrackingEnabled when it
+    // is created; the setting is startup-only, so every slot in the process
+    // holds the same value and a segment can answer for all of its own -- which
+    // is what lets a reporter tell "this operation moved no bytes" apart from
+    // "this operation was never measured", without having to conflate the two
+    // by looking at whether any bytes were seen. Segments that hold their data
+    // in memory rather than in cache slots never accumulate, hence false.
+    virtual bool
+    storage_usage_tracked() const {
+        return false;
+    }
 
     virtual SegmentType
     type() const = 0;
@@ -515,6 +529,10 @@ class SegmentInternalInterface : public SegmentInterface {
     // Bring in base class Retrieve overloads to avoid name hiding
     using SegmentInterface::Retrieve;
 
+    // Active synchronous execution primitive used by AsyncRetrieve and
+    // AsyncRetrieveByOffsets. QueryNode user requests enter and publish
+    // operation metrics through that C async boundary; internal callers may
+    // invoke this primitive directly without being counted as user queries.
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
@@ -587,15 +605,6 @@ class SegmentInternalInterface : public SegmentInterface {
                   DataType data_type,
                   std::shared_ptr<ChunkedColumnInterface> column) {
         skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
-    }
-
-    void
-    LoadSkipIndexFromStatistics(
-        FieldId field_id,
-        DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_->LoadSkipFromStatistics(
-            get_segment_id(), field_id, data_type, statistics);
     }
 
     virtual DataType

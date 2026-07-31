@@ -298,6 +298,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema->set_external_spec(schema_proto.external_spec());
     }
 
+    schema->set_collection_name(schema_proto.name());
+    schema->set_db_name(schema_proto.dbname());
+
     return schema;
 }
 
@@ -391,6 +394,8 @@ Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
 proto::schema::CollectionSchema
 Schema::ToProto() const {
     proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_name(collection_name_);
+    schema_proto.set_dbname(db_name_);
     schema_proto.set_enable_dynamic_field(dynamic_field_id_opt_.has_value());
 
     for (const auto& field_id : field_ids_) {

@@ -75,7 +75,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     bool mmap_populate,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
-    const std::string& warmup_policy)
+    const std::string& warmup_policy,
+    bool force_one_row_group_per_cell)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -165,8 +166,16 @@ GroupChunkTranslator::GroupChunkTranslator(
     // runtime-configurable target cell byte size so avg cell size ≈ target.
     const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     meta_.total_row_groups_ = total_row_groups;
+    // force_one_row_group_per_cell is the caller's single snapshot of the
+    // stats-skip-index flag for this load. When set, force exactly one row
+    // group per cell so the per-row-group footer statistics that back the skip
+    // index are 1:1 with cache cells: the skip check (which judges per cell)
+    // needs no cross-row-group aggregation and cannot produce a false negative.
+    // Trade-off: while enabled, cells are as fine as one row group.
     const size_t rgs_per_cell =
-        ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
+        force_one_row_group_per_cell
+            ? 1
+            : ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
     size_t global_rg_offset = 0;
     for (const auto& rg_meta : row_group_meta_list_) {
         size_t file_rg_count = rg_meta.size();

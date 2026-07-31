@@ -120,7 +120,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
-    auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
+    auto metadata = LoadGroupChunkMetadata(paths_, "test_group_chunk");
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
@@ -287,7 +287,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     std::filesystem::create_directory(temp_dir);
     auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
     auto metadata =
-        LoadGroupChunkMetadata(multi_file_paths, {}, "test_group_chunk");
+        LoadGroupChunkMetadata(multi_file_paths, "test_group_chunk");
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,

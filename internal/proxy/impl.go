@@ -3784,16 +3784,17 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	res, storageCost, err := node.query(ctx, qt, sp)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		storageMetricLabel := qt.getStorageMetricLabel()
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			storageMetricLabel,
 			request.DbName,
 			request.CollectionName,
 		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			storageMetricLabel,
 			request.DbName,
 			request.CollectionName,
 		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)

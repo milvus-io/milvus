@@ -236,14 +236,18 @@ func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
 	for _, n := range t.originNqs {
 		totalNq += n
 	}
-	if totalNq == 0 {
-		return
-	}
 	var totalCost segcore.StorageCost
 	for _, r := range results {
+		if r == nil {
+			continue
+		}
 		c := r.GetMetadata().StorageCost
 		totalCost.ScannedRemoteBytes += c.ScannedRemoteBytes
 		totalCost.ScannedTotalBytes += c.ScannedTotalBytes
+		r.ReportStorageMetrics()
+	}
+	if totalNq == 0 {
+		return
 	}
 	for i, sliceNq := range t.originNqs {
 		task := t.subTaskAt(i)

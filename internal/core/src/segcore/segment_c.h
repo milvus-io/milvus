@@ -149,6 +149,11 @@ ClearSegmentData(CSegmentInterface c_segment);
 void
 DeleteSearchResult(CSearchResult search_result);
 
+// Report the final per-segment search storage cost exactly once. Call only
+// after PK/output-field export and late materialization have completed.
+void
+ReportSearchResultStorageMetrics(CSearchResult search_result);
+
 /**
  * @brief Get the valid_count from a search result (used for two-stage search)
  * @param search_result: The search result to extract valid_count from
