@@ -305,10 +305,19 @@ Data scan supports:
 - validity;
 - validity-only projection.
 
-Scan cursors are streaming. Implementations that materialize per-row views or
-wrappers must honor `ScanOptions::max_batch_rows` and create only the next
-bounded batch in `Next()`. Fixed-width zero-copy cursors may expose a larger
-natural source batch because doing so does not allocate one wrapper per row.
+`ValidityView` has one unambiguous no-mask state: `AllValid`. A non-empty mask
+uses either `BoolArray` or storage-native `Bitmap` with a non-null data pointer.
+The expression boundary normalizes either encoded mask to the legacy evaluator
+bool-array contract before evaluating values; evaluators therefore never
+interpret a bitmap-backed NULL row as valid.
+
+Scan cursors are streaming. For dense data scans, `Position()` is the next row
+not yet returned to the expression layer. `Next(max_rows)` returns a complete
+batch starting at that position, bounded by both `max_rows` and the current
+column chunk, then advances the cursor position. This keeps reader, file,
+buffer, and batch-slicing state inside the cursor. Materialized views are
+therefore bounded by the current execution request, while fixed-width batches
+remain zero-copy subviews.
 
 Row-id scan supports:
 
@@ -392,6 +401,16 @@ Expr data path
 This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
+
+The expression layer keeps only its segment-global execution position. Normal
+evaluation consumes complete cursor batches and advances that position. If a
+conjunction short-circuits an execution batch, the expression advances its
+logical position and closes the active cursor. The next real read reopens a
+cursor at the new position on the same retained column generation. A future
+cursor seek operation can replace reopen without changing this ownership split.
+Legacy Chunk access follows the same position rule: chunk id and in-chunk offset
+are derived caches. A short-circuit invalidates that cache, and the next Chunk
+read reconstructs it from the segment-global execution position.
 
 ### Offset Input Execution
 

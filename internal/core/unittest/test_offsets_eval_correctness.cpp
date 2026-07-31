@@ -50,7 +50,7 @@ class InspectableSegmentExpr : public SegmentExpr {
 
     bool
     DataScanInitialized() const {
-        return data_scan_initialized_;
+        return data_access_mode_ != DataAccessMode::Uninitialized;
     }
 
     const ChunkedColumnInterface::ScanCursor*
@@ -59,13 +59,18 @@ class InspectableSegmentExpr : public SegmentExpr {
     }
 
     int64_t
-    DataScanBatchPosition() const {
-        return data_scan_batch_pos_;
+    CurrentDataChunkPosition() const {
+        return current_data_chunk_pos_;
     }
 
     int64_t
-    CurrentDataChunkPosition() const {
-        return current_data_chunk_pos_;
+    CurrentExecutionPosition() const {
+        return current_data_global_pos_;
+    }
+
+    int64_t
+    NextBatchSize() {
+        return GetNextBatchSize();
     }
 };
 
@@ -653,8 +658,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
         *seg_expr, &offsets, 0, /*use_sorted_scan=*/true);
 }
 
-TEST_F(OffsetsEvalCorrectnessTest,
-       SequentialScanPreservesPartiallyConsumedBatch) {
+TEST_F(OffsetsEvalCorrectnessTest, SequentialScanCursorOwnsItsLogicalPosition) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
@@ -687,7 +691,9 @@ TEST_F(OffsetsEvalCorrectnessTest,
     ASSERT_TRUE(seg_expr.DataScanInitialized());
     const auto* cursor = seg_expr.DataScanCursor();
     ASSERT_NE(cursor, nullptr);
-    EXPECT_EQ(seg_expr.DataScanBatchPosition(), 4);
+    EXPECT_EQ(cursor->Position(), 4);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
 
     TargetBitmap second_res(4, false);
     TargetBitmap second_valid(4, true);
@@ -698,7 +704,171 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                             TargetBitmapView(second_valid)),
         4);
     EXPECT_EQ(seg_expr.DataScanCursor(), cursor);
-    EXPECT_EQ(seg_expr.DataScanBatchPosition(), 8);
+    EXPECT_EQ(cursor->Position(), 8);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanExecutionBatchCrossesColumnChunks) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "cross-chunk scan cursor probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/20,
+                                    query_context->get_consistency_level());
+    std::vector<int64_t> callback_sizes;
+    auto evaluate_batch =
+        [&callback_sizes]<FilterType filter_type = FilterType::sequential>(
+            const int64_t* data,
+            const bool*,
+            const int32_t*,
+            int size,
+            TargetBitmapView,
+            TargetBitmapView) {
+        ASSERT_NE(data, nullptr);
+        callback_sizes.push_back(size);
+    };
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+    TargetBitmap res(20, false);
+    TargetBitmap valid(20, true);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                  no_skip,
+                                                  TargetBitmapView(res),
+                                                  TargetBitmapView(valid)),
+              20);
+    EXPECT_EQ(callback_sizes, (std::vector<int64_t>{16, 4}));
+    ASSERT_NE(seg_expr.DataScanCursor(), nullptr);
+    EXPECT_EQ(seg_expr.DataScanCursor()->Position(), 20);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanUsesGlobalPositionBeforeBackendSelection) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "pre-bind scan position probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/20,
+                                    query_context->get_consistency_level());
+
+    // Skip the first execution batch before Scan has selected or retained a
+    // column generation. The old generation has chunk sizes [16, 16], so its
+    // cached chunk coordinate for row 20 would be (1, 4).
+    ASSERT_FALSE(seg_expr.DataScanInitialized());
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
+    ASSERT_FALSE(seg_expr.DataScanInitialized());
+
+    // Publish the same logical rows with different chunk geometry. Reusing the
+    // old (1, 4) coordinate against [24, 8] would incorrectly report row 28 as
+    // the execution position. Batch sizing and the first Scan must instead use
+    // the segment-global row 20.
+    std::vector<FieldDataPtr> chunks;
+    int64_t next_value = 1000;
+    for (const int64_t rows : {24, 8}) {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        std::vector<int64_t> values(rows);
+        std::iota(values.begin(), values.end(), next_value);
+        next_value += rows;
+        field_data->FillFieldData(values.data(), rows);
+        chunks.push_back(std::move(field_data));
+    }
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    i64_fid_.get(),
+                                                    std::move(chunks),
+                                                    cm);
+    sealed_->DropFieldData(i64_fid_);
+    const auto status = LoadFieldData(sealed_.get(), &load_info);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(sealed_->chunk_size(i64_fid_, 0), 24);
+    ASSERT_EQ(sealed_->chunk_size(i64_fid_, 1), 8);
+
+    ASSERT_EQ(seg_expr.NextBatchSize(), 12);
+    std::vector<int64_t> values_seen;
+    auto evaluate_batch =
+        [&values_seen]<FilterType filter_type = FilterType::sequential>(
+            const int64_t* data,
+            const bool*,
+            const int32_t*,
+            int size,
+            TargetBitmapView,
+            TargetBitmapView) {
+        ASSERT_NE(data, nullptr);
+        values_seen.insert(values_seen.end(), data, data + size);
+    };
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    TargetBitmap res(12, false);
+    TargetBitmap valid(12, true);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                  no_skip,
+                                                  TargetBitmapView(res),
+                                                  TargetBitmapView(valid)),
+              12);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), N);
+    std::vector<int64_t> expected(12);
+    std::iota(expected.begin(), expected.end(), 1020);
+    EXPECT_EQ(values_seen, expected);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       GrowingChunkCacheRebasesFromGlobalPositionAfterShortCircuit) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, growing_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "growing chunk position probe",
+                                    query_context->get_op_context(),
+                                    growing_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/4,
+                                    query_context->get_consistency_level());
+    auto evaluate_batch =
+        []<FilterType filter_type = FilterType::sequential>(const int64_t*,
+                                                            const bool*,
+                                                            const int32_t*,
+                                                            int,
+                                                            TargetBitmapView,
+                                                            TargetBitmapView){};
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+    auto process_batch = [&]() {
+        TargetBitmap res(4, false);
+        TargetBitmap valid(4, true);
+        EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                      no_skip,
+                                                      TargetBitmapView(res),
+                                                      TargetBitmapView(valid)),
+                  4);
+    };
+
+    process_batch();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+    process_batch();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 12);
 }
 
 TEST_F(OffsetsEvalCorrectnessTest,
@@ -750,6 +920,13 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ASSERT_FALSE(sealed_->HasFieldData(i64_fid_));
         ASSERT_FALSE(weak_column.expired())
             << "the active scan cursor must retain its source column";
+
+        // Skip one execution batch after the live segment drops the field.
+        // Reopening must use the retained column generation instead of asking
+        // the segment for its now-missing field again.
+        seg_expr.MoveCursor();
+        EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
+        EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
 
         TargetBitmap second_res(4, false);
         TargetBitmap second_valid(4, true);
@@ -959,19 +1136,29 @@ TEST_F(OffsetsEvalCorrectnessTest,
     };
 
     process_batch();
-    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 4);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
 
     ASSERT_NE(seg_expr.DataScanCursor(), nullptr);
 
     // Simulate a conjunction short-circuit: skip the second expression batch
     // and reset the active scan without evaluating it.
     seg_expr.MoveCursor();
-    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 8);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
+    EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
+
+    // A second consecutive short-circuit must advance only the execution
+    // position. There is no cursor generation or chunk geometry to reuse.
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 12);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
     EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
 
     // Recreate the VECTOR_ARRAY scan at the post-skip global position.
     process_batch();
-    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 12);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 16);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
     EXPECT_NE(seg_expr.DataScanCursor(), nullptr);
 }
 

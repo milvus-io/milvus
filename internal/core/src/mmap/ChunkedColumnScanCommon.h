@@ -77,18 +77,17 @@ struct ValidityView {
     int64_t offset = 0;
     int64_t size = 0;
     bool nullable = false;
-    bool all_valid = true;
 
     bool
     IsValid(int64_t i) const {
-        AssertInfo(i >= 0 && (size == 0 || i < size),
-                   "validity offset {} out of range {}",
-                   i,
-                   size);
-        if (encoding == ValidityEncoding::AllValid || all_valid ||
-            data == nullptr) {
+        AssertInfo(
+            i >= 0 && i < size, "validity offset {} out of range {}", i, size);
+        if (encoding == ValidityEncoding::AllValid) {
             return true;
         }
+        AssertInfo(data != nullptr,
+                   "validity data is null for encoding {}",
+                   static_cast<int>(encoding));
         const auto pos = offset + i;
         switch (encoding) {
             case ValidityEncoding::BoolArray:
@@ -101,6 +100,32 @@ struct ValidityView {
                 return true;
         }
         return true;
+    }
+
+    // Expression evaluators use a legacy bool-array contract where nullptr
+    // means every row is valid. Keep storage-native encodings at the Scan
+    // boundary and normalize them exactly once before invoking an evaluator.
+    const bool*
+    bool_data(FixedVector<bool>& scratch) const {
+        scratch.clear();
+        if (encoding == ValidityEncoding::AllValid || size == 0) {
+            return nullptr;
+        }
+        AssertInfo(data != nullptr,
+                   "validity data is null for encoding {}",
+                   static_cast<int>(encoding));
+        if (encoding == ValidityEncoding::BoolArray) {
+            return static_cast<const bool*>(data) + offset;
+        }
+        AssertInfo(encoding == ValidityEncoding::Bitmap,
+                   "cannot materialize validity encoding {} as bool data",
+                   static_cast<int>(encoding));
+
+        scratch.resize(size);
+        for (int64_t i = 0; i < size; ++i) {
+            scratch[i] = IsValid(i);
+        }
+        return scratch.data();
     }
 };
 
@@ -119,12 +144,17 @@ class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
 
-    // Return the next batch from the underlying source. Materializing cursors
-    // must honor ScanOptions::max_batch_rows so one Next() call cannot allocate
-    // view wrappers for an arbitrarily large storage chunk. Zero-copy cursors
-    // may still expose a larger natural source batch.
+    // The next dense row that has not yet been returned to the caller.
+    virtual int64_t
+    Position() const = 0;
+
+    // Return the next dense batch from the underlying source. A successful
+    // call starts at Position(), returns at most max_rows without crossing a
+    // column chunk boundary, and advances Position() by the returned size.
+    // Callers consume the returned batch as a whole; physical reader and
+    // buffered-batch positions remain private to the cursor.
     virtual bool
-    Next(ScanBatch* out) = 0;
+    Next(int64_t max_rows, ScanBatch* out) = 0;
 };
 
 enum class ScanProjection {
@@ -135,50 +165,38 @@ enum class ScanProjection {
 };
 
 struct ScanOptions {
-    static constexpr int64_t kDefaultMaxBatchRows = 8192;
-
     ScanOptions() = default;
 
     ScanOptions(int64_t start_offset,
                 int64_t length,
                 ScanProjection projection = ScanProjection::Data,
-                ScanValueKind value_kind = ScanValueKind::Default,
-                int64_t max_batch_rows = kDefaultMaxBatchRows)
+                ScanValueKind value_kind = ScanValueKind::Default)
         : start_offset(start_offset),
           length(length),
           projection(projection),
-          value_kind(value_kind),
-          max_batch_rows(max_batch_rows) {
+          value_kind(value_kind) {
     }
 
     static ScanOptions
     ForData(int64_t start_offset,
             int64_t length,
             ScanProjection projection = ScanProjection::Data,
-            ScanValueKind value_kind = ScanValueKind::Default,
-            int64_t max_batch_rows = kDefaultMaxBatchRows) {
-        return ScanOptions(
-            start_offset, length, projection, value_kind, max_batch_rows);
+            ScanValueKind value_kind = ScanValueKind::Default) {
+        return ScanOptions(start_offset, length, projection, value_kind);
     }
 
     static ScanOptions
     ForNoData(int64_t start_offset,
               int64_t length,
-              ScanValueKind value_kind = ScanValueKind::Default,
-              int64_t max_batch_rows = kDefaultMaxBatchRows) {
-        return ForData(start_offset,
-                       length,
-                       ScanProjection::NoData,
-                       value_kind,
-                       max_batch_rows);
+              ScanValueKind value_kind = ScanValueKind::Default) {
+        return ForData(
+            start_offset, length, ScanProjection::NoData, value_kind);
     }
 
     int64_t start_offset = 0;
     int64_t length = 0;
     ScanProjection projection = ScanProjection::Data;
     ScanValueKind value_kind = ScanValueKind::Default;
-    // Upper bound for batches that allocate per-row materialized views.
-    int64_t max_batch_rows = kDefaultMaxBatchRows;
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;
