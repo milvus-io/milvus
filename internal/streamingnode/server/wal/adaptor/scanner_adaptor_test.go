@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
@@ -66,6 +67,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 			DeliverPolicy: options.DeliverPolicyAll(),
 			MessageFilter: nil,
 		},
+		switchableScannerOptions{},
 		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 		func() {}, false)
 	// wait for timetick inspector first round
@@ -78,20 +80,31 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	assert.NoError(t, s.Error())
 }
 
-func TestScannerAdaptorPropagatesHistoricalMigrationError(t *testing.T) {
+func TestScannerAdaptorFallsBackWhenMigrationChainIsUnavailable(t *testing.T) {
 	resource.InitForTest(t)
 	channel := types.PChannelInfo{Name: "test-channel", AccessMode: types.AccessModeRO}
+
+	currentMessages := make(chan message.ImmutableMessage, 1)
+	currentMessages <- newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentScanner := mock_walimpls.NewMockScannerImpls(t)
+	currentScanner.EXPECT().Chan().Return(currentMessages).Maybe()
+	currentScanner.EXPECT().Close().Return(nil).Once()
 
 	currentWAL := mock_walimpls.NewMockWALImpls(t)
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
+		return ok
+	})).Return(currentScanner, nil).Once()
 
 	historicalWAL := mock_walimpls.NewMockWALImpls(t)
 	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
 	historicalWAL.EXPECT().Close().Return().Once()
 
-	messageCh := make(chan message.ImmutableMessage, 1)
+	messageCh := make(chan message.ImmutableMessage, 2)
 	messageCh <- newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	messageCh <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
 	innerScanner := mock_walimpls.NewMockScannerImpls(t)
 	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
 	innerScanner.EXPECT().Close().Return(nil).Once()
@@ -102,20 +115,28 @@ func TestScannerAdaptorPropagatesHistoricalMigrationError(t *testing.T) {
 		currentWAL,
 		historicalWAL,
 		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1))},
+		switchableScannerOptions{
+			historicalWALOpener: func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+				return nil, status.NewWALNameMismatchError(message.WALNameTest.String(), message.WALNameWoodpecker.String())
+			},
+		},
 		metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
 		func() {},
 		false,
 	)
 
-	select {
-	case <-scanner.Done():
-	case <-time.After(time.Second):
-		t.Fatal("scanner did not stop after an unsupported WAL migration chain")
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case msg := <-scanner.Chan():
+			if msg.TimeTick() == 101 {
+				require.NoError(t, scanner.Close())
+				return
+			}
+		case <-deadline:
+			t.Fatal("scanner did not fall back to the current WAL")
+		}
 	}
-	err := scanner.Error()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported WAL migration chain")
-	assert.Error(t, scanner.Close())
 }
 
 func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
@@ -149,7 +170,7 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
 	historicalWAL.EXPECT().Close().Return().Once()
 	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartAfter)
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
 		return ok
 	})).Return(historicalScanner, nil).Once()
 
@@ -179,6 +200,75 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for bridged TimeTicks, got %v", timeTicks)
+		}
+	}
+	assert.Equal(t, []uint64{100, 101}, timeTicks)
+}
+
+func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
+	resource.InitForTest(t)
+	channel := types.PChannelInfo{Name: "cross-wal-start-after-marker", AccessMode: types.AccessModeRO}
+
+	currentMessages := make(chan message.ImmutableMessage, 1)
+	currentMessages <- newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentScanner := mock_walimpls.NewMockScannerImpls(t)
+	currentScanner.EXPECT().Chan().Return(currentMessages).Maybe()
+	currentScanner.EXPECT().Close().Return(nil).Once()
+	currentWAL := mock_walimpls.NewMockWALImpls(t)
+	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentWAL.EXPECT().Close().Return().Once()
+	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
+		return ok
+	})).Return(currentScanner, nil).Once()
+
+	markerID := rmq.NewRmqID(2)
+	historicalMessages := make(chan message.ImmutableMessage, 2)
+	historicalMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 100, markerID, rmq.NewRmqID(1))
+	historicalMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), markerID)
+	historicalScanner := mock_walimpls.NewMockScannerImpls(t)
+	historicalScanner.EXPECT().Chan().Return(historicalMessages).Maybe()
+	historicalScanner.EXPECT().Close().Return(nil).Once()
+	historicalWAL := mock_walimpls.NewMockWALImpls(t)
+	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	historicalWAL.EXPECT().Close().Return().Once()
+	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+		policy, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
+		if !ok {
+			return false
+		}
+		messageID, err := message.UnmarshalMessageID(policy.StartFrom)
+		return err == nil && messageID.EQ(markerID)
+	})).Return(historicalScanner, nil).Once()
+
+	roWAL := adaptImplsToROWAL(currentWAL, func() {}, func(
+		_ context.Context,
+		walName message.WALName,
+		gotChannel types.PChannelInfo,
+	) (walimpls.ROWALImpls, error) {
+		assert.Equal(t, message.WALNameRocksmq, walName)
+		assert.Equal(t, channel, gotChannel)
+		return historicalWAL, nil
+	})
+	defer roWAL.Close()
+
+	scanner, err := roWAL.Read(context.Background(), wal.ReadOption{
+		DeliverPolicy: options.DeliverPolicyStartAfter(markerID),
+	})
+	require.NoError(t, err)
+
+	var timeTicks []uint64
+	deadline := time.After(time.Second)
+	for len(timeTicks) < 2 {
+		select {
+		case msg := <-scanner.Chan():
+			assert.NotEqual(t, message.MessageTypeAlterWAL, msg.MessageType())
+			if msg.MessageType() == message.MessageTypeTimeTick {
+				timeTicks = append(timeTicks, msg.TimeTick())
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for StartAfter(marker) bridge, got %v", timeTicks)
 		}
 	}
 	assert.Equal(t, []uint64{100, 101}, timeTicks)

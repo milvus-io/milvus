@@ -24,6 +24,12 @@ var (
 	_ switchableScanner = (*historicalScanner)(nil)
 )
 
+type switchableScannerOptions struct {
+	historicalWALOpener               historicalWALOpener
+	historicalWALFallbackTimeout      time.Duration
+	historicalStartExclusiveMessageID message.MessageID
+}
+
 // newSwitchableScanner creates a new switchable scanner.
 func newSwithableScanner(
 	scannerName string,
@@ -33,21 +39,25 @@ func newSwithableScanner(
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
-	onWALSwitch func(message.WALName),
+	options switchableScannerOptions,
+	onReaderSwitch func(message.WALName, string),
 ) switchableScanner {
 	impl := switchableScannerImpl{
-		scannerName:      scannerName,
-		logger:           logger,
-		innerWAL:         currentWAL,
-		msgChan:          msgChan,
-		writeAheadBuffer: writeAheadBuffer,
-		onWALSwitch:      onWALSwitch,
+		scannerName:                  scannerName,
+		logger:                       logger,
+		innerWAL:                     currentWAL,
+		msgChan:                      msgChan,
+		writeAheadBuffer:             writeAheadBuffer,
+		historicalWALOpener:          options.historicalWALOpener,
+		historicalWALFallbackTimeout: options.historicalWALFallbackTimeout,
+		onReaderSwitch:               onReaderSwitch,
 	}
 	if initialWAL.WALName() != currentWAL.WALName() {
 		return &historicalScanner{
-			switchableScannerImpl: impl,
-			historicalWAL:         initialWAL,
-			deliverPolicy:         deliverPolicy,
+			switchableScannerImpl:   impl,
+			historicalWAL:           initialWAL,
+			deliverPolicy:           deliverPolicy,
+			exclusiveStartMessageID: options.historicalStartExclusiveMessageID,
 		}
 	}
 	return &catchupScanner{
@@ -66,12 +76,14 @@ type switchableScanner interface {
 }
 
 type switchableScannerImpl struct {
-	scannerName      string
-	logger           *mlog.Logger
-	innerWAL         walimpls.ROWALImpls
-	msgChan          chan<- message.ImmutableMessage
-	writeAheadBuffer wab.ROWriteAheadBuffer
-	onWALSwitch      func(message.WALName)
+	scannerName                  string
+	logger                       *mlog.Logger
+	innerWAL                     walimpls.ROWALImpls
+	msgChan                      chan<- message.ImmutableMessage
+	writeAheadBuffer             wab.ROWriteAheadBuffer
+	historicalWALOpener          historicalWALOpener
+	historicalWALFallbackTimeout time.Duration
+	onReaderSwitch               func(message.WALName, string)
 }
 
 func (s *switchableScannerImpl) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
@@ -128,6 +140,8 @@ type historicalScanner struct {
 	switchableScannerImpl
 	historicalWAL                  walimpls.ROWALImpls
 	deliverPolicy                  options.DeliverPolicy
+	exclusiveStartTimeTick         uint64
+	exclusiveStartMessageID        message.MessageID
 	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
 }
 
@@ -137,15 +151,15 @@ func (s *historicalScanner) Do(ctx context.Context) (switchableScanner, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		scanner, err := s.createReaderWithBackoff(ctx, s.historicalWAL, s.deliverPolicy)
+		scanner, fallback, err := s.createHistoricalReaderWithFallback(ctx)
 		if err != nil {
 			return nil, err
 		}
-		switchedScanner, fatal, err := s.consumeWithScanner(ctx, scanner)
+		if fallback {
+			return s.newCurrentCatchupScanner(ctx, s.exclusiveStartTimeTick, "historical reader unavailable"), nil
+		}
+		switchedScanner, err := s.consumeWithScanner(ctx, scanner)
 		if err != nil {
-			if fatal {
-				return nil, err
-			}
 			s.logger.Warn(ctx, "historical scanner consumption was interrupted, retrying", mlog.Err(err))
 			continue
 		}
@@ -156,17 +170,35 @@ func (s *historicalScanner) Do(ctx context.Context) (switchableScanner, error) {
 func (s *historicalScanner) consumeWithScanner(
 	ctx context.Context,
 	scanner walimpls.ScannerImpls,
-) (switchableScanner, bool, error) {
+) (switchableScanner, error) {
 	defer scanner.Close()
 	var alterWALTimeTick uint64
+	var targetWALName message.WALName
+	idleTimeout := s.getHistoricalWALFallbackTimeout()
+	idleTimer := time.NewTimer(idleTimeout)
+	defer idleTimer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, false, ctx.Err()
+			return nil, ctx.Err()
+		case <-idleTimer.C:
+			s.logger.Warn(ctx, "historical reader made no progress, falling back to current WAL",
+				mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+				mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+				mlog.Uint64("alterWALTimeTick", alterWALTimeTick),
+				mlog.Duration("idleTimeout", idleTimeout))
+			return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "historical reader idle timeout"), nil
 		case msg, ok := <-scanner.Chan():
 			if !ok {
-				return nil, false, scanner.Error()
+				if err := scanner.Error(); err != nil {
+					return nil, err
+				}
+				s.logger.Info(ctx, "historical reader reached end of stream, falling back to current WAL",
+					mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+					mlog.Stringer("currentWALName", s.innerWAL.WALName()))
+				return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "historical reader exhausted"), nil
 			}
+			resetTimer(idleTimer, idleTimeout)
 
 			if msg.Version() == message.VersionOld {
 				if s.oldVersionLastConfirmedTracker == nil {
@@ -182,32 +214,30 @@ func (s *historicalScanner) consumeWithScanner(
 					continue
 				}
 				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
-					return nil, false, err
+					return nil, err
 				}
 				if err != nil {
 					panic("unreachable: unexpected error found: " + err.Error())
 				}
 			}
 
-			if shouldStartConsumeSpan(msg) {
-				startConsumeSpanForMessage(ctx, msg)
+			if msg.TimeTick() <= s.exclusiveStartTimeTick {
+				continue
 			}
-			if err := s.HandleMessage(ctx, msg); err != nil {
-				return nil, false, err
+
+			shouldDeliver := s.exclusiveStartMessageID == nil || !msg.MessageID().EQ(s.exclusiveStartMessageID)
+			if shouldDeliver {
+				if shouldStartConsumeSpan(msg) {
+					startConsumeSpanForMessage(ctx, msg)
+				}
+				if err := s.HandleMessage(ctx, msg); err != nil {
+					return nil, err
+				}
 			}
 
 			if msg.MessageType() == message.MessageTypeAlterWAL {
 				alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
-				targetWALName := message.WALName(alterWAL.Header().TargetWalName)
-				if targetWALName != s.innerWAL.WALName() {
-					return nil, true, status.NewInner(
-						"unsupported WAL migration chain for channel %s: historical WAL %s targets %s, current WAL is %s",
-						s.innerWAL.Channel().Name,
-						s.historicalWAL.WALName(),
-						targetWALName,
-						s.innerWAL.WALName(),
-					)
-				}
+				targetWALName = message.WALName(alterWAL.Header().TargetWalName)
 				alterWALTimeTick = msg.TimeTick()
 				s.logger.Info(ctx, "historical reader found AlterWAL boundary",
 					mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
@@ -221,17 +251,150 @@ func (s *historicalScanner) consumeWithScanner(
 					mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
 					mlog.Stringer("currentWALName", s.innerWAL.WALName()),
 					mlog.Uint64("timeTick", alterWALTimeTick))
-				if s.onWALSwitch != nil {
-					s.onWALSwitch(s.innerWAL.WALName())
-				}
-				return &catchupScanner{
-					switchableScannerImpl:  s.switchableScannerImpl,
-					deliverPolicy:          options.DeliverPolicyAll(),
-					exclusiveStartTimeTick: alterWALTimeTick,
-				}, false, nil
+				return s.newScannerAfterAlterWAL(ctx, targetWALName, alterWALTimeTick)
 			}
 		}
 	}
+}
+
+func (s *historicalScanner) createHistoricalReaderWithFallback(ctx context.Context) (walimpls.ScannerImpls, bool, error) {
+	timeout := s.getHistoricalWALFallbackTimeout()
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+	backoffTimer := newScannerReadBackoffTimer()
+
+	for {
+		bufSize := paramtable.Get().StreamingCfg.WALReadAheadBufferLength.GetAsInt()
+		if bufSize < 0 {
+			bufSize = 0
+		}
+		innerScanner, err := s.historicalWAL.Read(ctx, walimpls.ReadOption{
+			Name:                s.scannerName,
+			DeliverPolicy:       s.deliverPolicy,
+			ReadAheadBufferSize: bufSize,
+		})
+		if err == nil {
+			return innerScanner, false, nil
+		}
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		if isHistoricalWALUnavailable(err) {
+			s.logger.Warn(ctx, "historical WAL reader is permanently unavailable, falling back to current WAL",
+				mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+				mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+				mlog.Err(err))
+			return nil, true, nil
+		}
+
+		waker, nextInterval := backoffTimer.NextTimer()
+		s.logger.Warn(ctx, "create historical WAL reader failed, retrying before fallback",
+			mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+			mlog.Duration("nextInterval", nextInterval),
+			mlog.Err(err))
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case <-timeoutTimer.C:
+			s.logger.Warn(ctx, "historical WAL reader creation timed out, falling back to current WAL",
+				mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+				mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+				mlog.Duration("timeout", timeout),
+				mlog.Err(err))
+			return nil, true, nil
+		case <-waker:
+		}
+	}
+}
+
+func (s *historicalScanner) newScannerAfterAlterWAL(
+	ctx context.Context,
+	targetWALName message.WALName,
+	alterWALTimeTick uint64,
+) (switchableScanner, error) {
+	if targetWALName == s.innerWAL.WALName() {
+		return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "historical WAL reached current WAL"), nil
+	}
+	if targetWALName == message.WALNameUnknown || targetWALName.String() == "" {
+		s.logger.Warn(ctx, "AlterWAL target is invalid, falling back to current WAL",
+			mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+			mlog.Stringer("currentWALName", s.innerWAL.WALName()))
+		return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "invalid AlterWAL target"), nil
+	}
+	if s.historicalWALOpener == nil {
+		s.logger.Warn(ctx, "historical WAL opener is unavailable for migration chain, falling back to current WAL",
+			mlog.Stringer("targetWALName", targetWALName),
+			mlog.Stringer("currentWALName", s.innerWAL.WALName()))
+		return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "historical WAL opener unavailable"), nil
+	}
+
+	// A migration may legitimately return to a previously used WAL type, for
+	// example rocksmq -> woodpecker -> rocksmq. Reopen it from the beginning and
+	// use the strictly newer AlterWAL timetick as the exclusive boundary instead
+	// of treating a repeated WAL name as a cycle.
+	nextWAL, err := s.historicalWALOpener(ctx, targetWALName, s.innerWAL.Channel())
+	if err != nil {
+		if status.AsStreamingError(err).IsWALNameMismatch() {
+			s.logger.Warn(ctx, "next historical WAL is unavailable, falling back to current WAL",
+				mlog.Stringer("targetWALName", targetWALName),
+				mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+				mlog.Err(err))
+			return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "next historical WAL unavailable"), nil
+		}
+		return nil, err
+	}
+	actualWALName := nextWAL.WALName()
+	if actualWALName != targetWALName {
+		nextWAL.Close()
+		s.logger.Warn(ctx, "historical WAL opener returned unexpected WAL, falling back to current WAL",
+			mlog.Stringer("expectedWALName", targetWALName),
+			mlog.Stringer("actualWALName", actualWALName),
+			mlog.Stringer("currentWALName", s.innerWAL.WALName()))
+		return s.newCurrentCatchupScanner(ctx, alterWALTimeTick, "unexpected historical WAL"), nil
+	}
+
+	if s.onReaderSwitch != nil {
+		s.onReaderSwitch(targetWALName, metrics.WALReaderRoleHistorical)
+	}
+	return &historicalScanner{
+		switchableScannerImpl:  s.switchableScannerImpl,
+		historicalWAL:          nextWAL,
+		deliverPolicy:          options.DeliverPolicyAll(),
+		exclusiveStartTimeTick: alterWALTimeTick,
+	}, nil
+}
+
+func (s *historicalScanner) newCurrentCatchupScanner(ctx context.Context, exclusiveStartTimeTick uint64, reason string) switchableScanner {
+	s.logger.Info(ctx, "historical reader switching to current WAL",
+		mlog.Stringer("historicalWALName", s.historicalWAL.WALName()),
+		mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+		mlog.Uint64("exclusiveStartTimeTick", exclusiveStartTimeTick),
+		mlog.String("reason", reason))
+	if s.onReaderSwitch != nil {
+		s.onReaderSwitch(s.innerWAL.WALName(), metrics.WALReaderRoleCurrent)
+	}
+	return &catchupScanner{
+		switchableScannerImpl:  s.switchableScannerImpl,
+		deliverPolicy:          options.DeliverPolicyAll(),
+		exclusiveStartTimeTick: exclusiveStartTimeTick,
+	}
+}
+
+func (s *historicalScanner) getHistoricalWALFallbackTimeout() time.Duration {
+	if s.historicalWALFallbackTimeout > 0 {
+		return s.historicalWALFallbackTimeout
+	}
+	return defaultHistoricalWALFallbackTimeout
+}
+
+func resetTimer(timer *time.Timer, timeout time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(timeout)
 }
 
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
@@ -336,15 +499,7 @@ func (s *switchableScannerImpl) createReaderWithBackoff(
 	readWAL walimpls.ROWALImpls,
 	deliverPolicy options.DeliverPolicy,
 ) (walimpls.ScannerImpls, error) {
-	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: 5 * time.Second,
-		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 100 * time.Millisecond,
-			Multiplier:      2.0,
-			MaxInterval:     5 * time.Second,
-		},
-	})
-	backoffTimer.EnableBackoff()
+	backoffTimer := newScannerReadBackoffTimer()
 	for {
 		bufSize := paramtable.Get().StreamingCfg.WALReadAheadBufferLength.GetAsInt()
 		if bufSize < 0 {
@@ -373,6 +528,19 @@ func (s *switchableScannerImpl) createReaderWithBackoff(
 		case <-waker:
 		}
 	}
+}
+
+func newScannerReadBackoffTimer() *typeutil.BackoffTimer {
+	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
+		Default: 5 * time.Second,
+		Backoff: typeutil.BackoffConfig{
+			InitialInterval: 100 * time.Millisecond,
+			Multiplier:      2.0,
+			MaxInterval:     5 * time.Second,
+		},
+	})
+	backoffTimer.EnableBackoff()
+	return backoffTimer
 }
 
 // tailingScanner is used to perform a tailing read from the writeaheadbuffer of wal.

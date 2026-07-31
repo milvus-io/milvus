@@ -32,7 +32,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 	}
 	if !exists {
 		if opt.Channel.AccessMode == types.AccessModeRO {
-			return nil, merr.WrapErrMqInternalMsg("woodpecker log %s does not exist", opt.Channel.Name)
+			return nil, merr.WrapErrMqTopicNotFound(opt.Channel.Name, "woodpecker log does not exist")
 		}
 		if err := o.c.CreateLog(ctx, opt.Channel.Name); err != nil {
 			mlog.Error(ctx, "failed to create log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
