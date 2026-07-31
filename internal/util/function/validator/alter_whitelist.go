@@ -46,11 +46,15 @@ import (
 //     differs — altering them mixes old and new vector semantics in one field.
 //
 // url stays alterable because model_name providers keep their identity in model_name
-// and use url only as a relocatable API host.
+// and use url only as a relocatable API host. model_deployment_id is likewise
+// alterable: it re-points the function to a model deployment on the cluster, and
+// keeping the new deployment model-compatible is the user's responsibility.
 var alterableFunctionParams = map[schemapb.FunctionType]typeutil.Set[string]{
 	schemapb.FunctionType_TextEmbedding: typeutil.NewSet(
 		models.URLParamKey,
 		models.CredentialParamKey,
+		models.IntegrationIDKey,
+		models.ModelDeploymentIDKey,
 		models.TimeoutMsParamKey,
 		models.MaxClientBatchSizeParamKey,
 		models.RegionParamKey,
