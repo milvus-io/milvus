@@ -406,7 +406,10 @@ type QueryReqV2 struct {
 	Offset         int32    `json:"offset"`
 	// OrderByFields sorts query results by scalar fields; each item is
 	// "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
-	OrderByFields    []string               `json:"orderByFields"`
+	OrderByFields []string `json:"orderByFields"`
+	// GroupByFields groups query results by scalar fields; used together with
+	// aggregation expressions (e.g. count(*), sum(price)) in outputFields.
+	GroupByFields    []string               `json:"groupByFields"`
 	ExprParams       map[string]interface{} `json:"exprParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 }
@@ -508,6 +511,9 @@ type SearchReqV2 struct {
 	FunctionScore     FunctionScore          `json:"functionScore"`
 	FunctionChains    []FunctionChainReq     `json:"functionChains"`
 	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
+	// OrderByFields re-sorts the final search results by scalar fields; each item
+	// is "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+	OrderByFields []string `json:"orderByFields"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
 }
