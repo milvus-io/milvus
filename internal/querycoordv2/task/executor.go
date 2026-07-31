@@ -758,36 +758,37 @@ func (ex *Executor) getIndexInfoSnapshot(ctx context.Context, collectionID int64
 	return indexInfos, ex.targetMgr.GetCollectionTargetVersion(ctx, collectionID, scope), nil
 }
 
-func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel, priority commonpb.LoadPriority, scope meta.TargetScope) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, int64, error) {
-	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)
-	if err != nil || len(segmentInfos) == 0 {
-		mlog.Warn(context.TODO(), "failed to get segment info from DataCoord", mlog.Err(err))
-		return nil, nil, 0, err
-	}
-	segment := segmentInfos[0]
-
-	indexes, err := ex.broker.GetIndexInfo(ctx, collectionID, segment.GetID())
-	if err != nil {
-		if !errors.Is(err, merr.ErrIndexNotFound) {
-			mlog.Warn(context.TODO(), "failed to get index of segment", mlog.Err(err))
-			return nil, nil, 0, err
+// bindSegmentIndexesToSnapshot keeps SegmentLoadInfo consistent with the
+// immutable collection-index snapshot carried by the target. DataCoord can
+// still report files for an index that was dropped or replaced after those
+// files were built; such an index must not leak into a request whose target
+// snapshot no longer contains its ID. Otherwise the worker loads a stale index
+// and that stale index becomes the segment's authoritative metric source.
+func bindSegmentIndexesToSnapshot(
+	ctx context.Context,
+	segmentID int64,
+	segmentIndexes []*querypb.FieldIndexInfo,
+	indexInfos []*indexpb.IndexInfo,
+	priority commonpb.LoadPriority,
+) []*querypb.FieldIndexInfo {
+	indexByID := make(map[int64]*indexpb.IndexInfo, len(indexInfos))
+	for _, indexInfo := range indexInfos {
+		if indexInfo != nil {
+			indexByID[indexInfo.GetIndexID()] = indexInfo
 		}
-		indexes = nil
 	}
 
-	indexInfos, indexInfoVersion, err := ex.getIndexInfoSnapshot(ctx, collectionID, scope)
-	if err != nil {
-		mlog.Warn(context.TODO(), "fail to get index meta of collection", mlog.Err(err))
-		return nil, nil, 0, err
-	}
-
-	// update the field index params
-	for _, segmentIndex := range indexes[segment.GetID()] {
-		index, found := lo.Find(indexInfos, func(indexInfo *indexpb.IndexInfo) bool {
-			return indexInfo.IndexID == segmentIndex.IndexID
-		})
+	bound := make([]*querypb.FieldIndexInfo, 0, len(segmentIndexes))
+	for _, segmentIndex := range segmentIndexes {
+		if segmentIndex == nil {
+			continue
+		}
+		index, found := indexByID[segmentIndex.GetIndexID()]
 		if !found {
-			mlog.Warn(context.TODO(), "no collection index info for the given segment index", mlog.String("indexName", segmentIndex.GetIndexName()))
+			mlog.Warn(ctx, "drop segment index absent from collection target snapshot",
+				mlog.FieldSegmentID(segmentID),
+				mlog.Int64("indexID", segmentIndex.GetIndexID()),
+				mlog.String("indexName", segmentIndex.GetIndexName()))
 			continue
 		}
 
@@ -800,9 +801,43 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
 		segmentIndex.IndexParams = append(segmentIndex.IndexParams,
 			&commonpb.KeyValuePair{Key: common.LoadPriorityKey, Value: priority.String()})
+		bound = append(bound, segmentIndex)
+	}
+	return bound
+}
+
+func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel, priority commonpb.LoadPriority, scope meta.TargetScope) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, int64, error) {
+	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)
+	if err != nil || len(segmentInfos) == 0 {
+		mlog.Warn(ctx, "failed to get segment info from DataCoord", mlog.Err(err))
+		return nil, nil, 0, err
+	}
+	segment := segmentInfos[0]
+
+	indexes, err := ex.broker.GetIndexInfo(ctx, collectionID, segment.GetID())
+	if err != nil {
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			mlog.Warn(ctx, "failed to get index of segment", mlog.Err(err))
+			return nil, nil, 0, err
+		}
+		indexes = nil
 	}
 
-	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes[segment.GetID()])
+	indexInfos, indexInfoVersion, err := ex.getIndexInfoSnapshot(ctx, collectionID, scope)
+	if err != nil {
+		mlog.Warn(ctx, "fail to get index meta of collection", mlog.Err(err))
+		return nil, nil, 0, err
+	}
+
+	segmentIndexes := bindSegmentIndexesToSnapshot(
+		ctx,
+		segment.GetID(),
+		indexes[segment.GetID()],
+		indexInfos,
+		priority,
+	)
+
+	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), segmentIndexes)
 	loadInfo.Priority = priority
 	return loadInfo, indexInfos, indexInfoVersion, nil
 }

@@ -1333,17 +1333,19 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
     auto placeholder_blob = raw_group.SerializeAsString();
     ScopedSchemaHandle schema_handle(*schema);
 
-    auto run_search_with_predicate = [&](CSegmentInterface target_segment,
-                                         const std::string& predicate,
-                                         const std::string& requested_metric,
-                                         bool clear_plan_metric,
-                                         CSearchResult* result) {
-        auto plan_blob = schema_handle.ParseSearch(
-            predicate,
-            "fakevec",
-            topk,
-            requested_metric,
-            R"({"nprobe": 10})");
+    auto run_search_with_options = [&](CSegmentInterface target_segment,
+                                       const std::string& predicate,
+                                       const std::string& requested_metric,
+                                       bool clear_plan_metric,
+                                       const std::string& hints,
+                                       CSearchResult* result) {
+        auto plan_blob = schema_handle.ParseSearch(predicate,
+                                                   "fakevec",
+                                                   topk,
+                                                   requested_metric,
+                                                   R"({"nprobe": 10})",
+                                                   -1,
+                                                   hints);
         CSearchPlan plan = nullptr;
         auto status = CreateSearchPlanByExpr(
             collection, plan_blob.data(), plan_blob.size(), &plan);
@@ -1372,15 +1374,24 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
         DeletePlaceholderGroup(placeholder_group);
         return std::pair<CStatus, CSearchPlan>{status, plan};
     };
+    auto run_search_with_predicate = [&](CSegmentInterface target_segment,
+                                         const std::string& predicate,
+                                         const std::string& requested_metric,
+                                         bool clear_plan_metric,
+                                         CSearchResult* result) {
+        return run_search_with_options(target_segment,
+                                       predicate,
+                                       requested_metric,
+                                       clear_plan_metric,
+                                       "",
+                                       result);
+    };
     auto run_search = [&](CSegmentInterface target_segment,
                           const std::string& requested_metric,
                           bool clear_plan_metric,
                           CSearchResult* result) {
-        return run_search_with_predicate(target_segment,
-                                         "",
-                                         requested_metric,
-                                         clear_plan_metric,
-                                         result);
+        return run_search_with_predicate(
+            target_segment, "", requested_metric, clear_plan_metric, result);
     };
 
     // Legacy/test-created raw segments may not carry index configuration. An
@@ -1441,6 +1452,33 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
     }
     DeleteSearchResult(result);
     DeleteSearchPlan(plan);
+
+    // The resolved metric must also reach downstream physical operators. An
+    // iterative filter reads its sort direction from QueryContext rather than
+    // SearchResult; leaving the context metric empty reverses IP/COSINE output.
+    CSearchResult iterative_result = nullptr;
+    auto [iterative_status, iterative_plan] =
+        run_search_with_options(segment.get(),
+                                "counter >= 0",
+                                knowhere::metric::IP,
+                                true,
+                                "iterative_filter",
+                                &iterative_result);
+    ASSERT_EQ(iterative_status.error_code, Success);
+    ASSERT_NE(iterative_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(iterative_result),
+                 knowhere::metric::IP);
+    auto iterative_search_result = static_cast<SearchResult*>(iterative_result);
+    ASSERT_EQ(iterative_search_result->distances_.size(), num_queries * topk);
+    for (int64_t query = 0; query < num_queries; ++query) {
+        auto offset = query * topk;
+        for (int64_t i = 1; i < topk; ++i) {
+            EXPECT_GE(iterative_search_result->distances_[offset + i - 1],
+                      iterative_search_result->distances_[offset + i]);
+        }
+    }
+    DeleteSearchResult(iterative_result);
+    DeleteSearchPlan(iterative_plan);
 
     CSearchResult mismatch_result = nullptr;
     auto [mismatch_status, mismatch_plan] = run_search(
@@ -1505,16 +1543,16 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
         dynamic_cast<SegmentGrowingImpl*>(growing_without_meta.get());
     ASSERT_NE(growing_impl, nullptr);
     EXPECT_FALSE(growing_impl->CanUseInterimIndex(FieldId(100)));
-    EXPECT_EQ(growing_impl->GetCurrentIndexParams(FieldId(100)).at(
-                  knowhere::meta::METRIC_TYPE),
+    EXPECT_EQ(growing_impl->GetCurrentIndexParams(FieldId(100))
+                  .at(knowhere::meta::METRIC_TYPE),
               knowhere::metric::IP);
 
     CSearchResult updated_growing_result = nullptr;
-    auto [updated_growing_status, updated_growing_plan] = run_search(
-        growing_without_meta.get(),
-        knowhere::metric::IP,
-        true,
-        &updated_growing_result);
+    auto [updated_growing_status, updated_growing_plan] =
+        run_search(growing_without_meta.get(),
+                   knowhere::metric::IP,
+                   true,
+                   &updated_growing_result);
     ASSERT_EQ(updated_growing_status.error_code, Success);
     ASSERT_NE(updated_growing_result, nullptr);
     EXPECT_STREQ(GetSearchResultMetricType(updated_growing_result),

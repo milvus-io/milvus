@@ -641,33 +641,6 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	return nil
 }
 
-// syncPostLoadCollectionState refreshes shared collection/function state after
-// a non-Reopen load. The RPC entry point publishes the request-level index
-// snapshot only after this entire load succeeds.
-func (sd *shardDelegator) syncPostLoadCollectionState(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if len(req.GetIndexInfoList()) == 0 {
-		return nil
-	}
-
-	schema := req.GetSchema()
-	if schema == nil {
-		schema = sd.collection.Schema()
-	}
-
-	loadMeta := req.GetLoadMeta()
-	if loadMeta == nil {
-		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID: req.GetCollectionID(),
-		}
-	}
-
-	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, req.GetIndexInfoList(), loadMeta); err != nil {
-		return err
-	}
-	sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	return function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
-}
-
 // LoadSegments load segments local or remotely depends on the target node.
 func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	if len(req.GetInfos()) == 0 {
@@ -753,11 +726,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// Neither step advances the served schema.
 	if req.GetLoadScope() == querypb.LoadScope_Reopen {
 		return sd.handleReopenPostLoad(ctx, req)
-	}
-
-	if err := sd.syncPostLoadCollectionState(ctx, req); err != nil {
-		log.Warn(ctx, "failed to sync collection state on delegator", mlog.Err(err))
-		return err
 	}
 
 	return sd.withPostLoadLimit(ctx, func() error {

@@ -1430,10 +1430,16 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
+			Schema:       schema,
+			IndexInfoList: mock_segcore.GenTestIndexInfoList(
+				s.collectionID,
+				schema,
+			),
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:     100,
@@ -1446,6 +1452,19 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.Error(err)
+		// A load request may carry a schema ahead of the WAL UpdateSchema event.
+		// Failing any post-load step must not publish that schema or its function
+		// runners; UpdateSchema is the sole served-schema commit path.
+		s.Equal(int32(0), s.delegator.collection.Schema().GetVersion())
+		ok, runErr := function.GetManager().RunWithRunner(
+			ctx,
+			s.collectionID,
+			delegatorFunctionRunnerKey(s.vchannelName),
+			102,
+			func(function.FunctionRunner) error { return nil },
+		)
+		s.ErrorIs(runErr, merr.ErrServiceUnavailable)
+		s.False(ok)
 	})
 
 	s.Run("worker_load_fail", func() {
@@ -1492,42 +1511,6 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		s.Error(err)
 	})
-}
-
-func (s *DelegatorDataSuite) TestSyncPostLoadCollectionStateUpdatesFunctionRunners() {
-	ctx := context.Background()
-	s.delegator.Start()
-	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	err := s.delegator.syncPostLoadCollectionState(ctx, &querypb.LoadSegmentsRequest{
-		CollectionID:  s.collectionID,
-		Schema:        schema,
-		LoadMeta:      &querypb.LoadMetaInfo{},
-		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
-	})
-	s.Require().NoError(err)
-
-	// The load path advanced the SHARED collection snapshot and registered the
-	// function runner. UpdateSchema no longer no-ops just because the shared
-	// collection already advanced: it gates on THIS delegator's servedSchemaVersion
-	// (still 0 from SetupTest's version-0 collection). So the DDL event converges
-	// the delegator's own state: it issues worker sub-tasks over the online
-	// distribution (empty here, so only the always-issued streaming sub-task on the
-	// local node), re-applies the schema to the collection manager (a same-version
-	// no-op on the real manager), and refreshes the function runner. Assert
-	// convergence, not skip.
-	worker := &cluster.MockWorker{}
-	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil)
-	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil)
-
-	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema))
-	// The delegator committed its own served schema version.
-	s.Equal(uint64(1), s.delegator.servedSchemaVersion)
-	// The function runner is usable after convergence.
-	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
-		return nil
-	})
-	s.Require().NoError(err)
-	s.True(ok)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {

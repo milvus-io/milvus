@@ -364,8 +364,10 @@ UpdateGrowingSegmentIndexMeta(CSegmentInterface c_segment,
         AssertInfo(c_segment != nullptr, "segment pointer is null");
         AssertInfo(load_info_blob != nullptr && load_info_length > 0,
                    "segment load info is empty");
-        auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto growing = dynamic_cast<milvus::segcore::SegmentGrowingImpl*>(segment);
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto growing =
+            dynamic_cast<milvus::segcore::SegmentGrowingImpl*>(segment);
         AssertInfo(growing != nullptr,
                    "index metadata can only be updated on a growing segment");
 

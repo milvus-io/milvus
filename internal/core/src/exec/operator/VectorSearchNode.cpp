@@ -117,6 +117,9 @@ PhyVectorSearchNode::GetOutput() {
     // the VECTOR_ARRAY search mode, but before any zero-candidate fast path can
     // bypass vector_search().
     segment_->PrepareSearchInfo(search_info_);
+    // Downstream operators use QueryContext to choose metric-dependent sort
+    // direction, so publish the segment-resolved metric before they run.
+    query_context_->set_search_info(search_info_);
     span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
     span.GetSpan()->SetAttribute("topk", search_info_.topk_);
 
@@ -159,8 +162,10 @@ PhyVectorSearchNode::GetOutput() {
 
             query_context_->set_active_element_count(element_bitset.size());
             if (element_bitset.empty()) {
-                query_context_->set_search_result(
-                    empty_search_result(num_queries, ph.element_level_));
+                auto search_result =
+                    empty_search_result(num_queries, ph.element_level_);
+                search_result.metric_type_ = search_info_.metric_type_;
+                query_context_->set_search_result(std::move(search_result));
                 return input_;
             }
 
@@ -176,6 +181,7 @@ PhyVectorSearchNode::GetOutput() {
 
         if (view.all()) {
             auto search_result = empty_search_result(num_queries);
+            search_result.metric_type_ = search_info_.metric_type_;
             search_result.total_data_cnt_ = data_cnt;
             search_result.element_level_ = ph.element_level_;
             query_context_->set_search_result(std::move(search_result));

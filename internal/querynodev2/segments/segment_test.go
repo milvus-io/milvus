@@ -32,8 +32,9 @@ import (
 
 type SegmentSuite struct {
 	suite.Suite
-	rootPath     string
-	chunkManager storage.ChunkManager
+	rootPath      string
+	flushRootPath string
+	chunkManager  storage.ChunkManager
 
 	// Data
 	manager      *Manager
@@ -55,6 +56,7 @@ func (suite *SegmentSuite) SetupTest() {
 	msgLength := 100
 
 	suite.rootPath = suite.T().Name()
+	suite.flushRootPath = suite.T().TempDir()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
@@ -550,8 +552,8 @@ func (suite *SegmentSuite) TestFlushData() {
 
 	// Test 1: FlushData on growing segment should work
 	config := &FlushConfig{
-		SegmentBasePath:   suite.rootPath + "/segment",
-		PartitionBasePath: suite.rootPath + "/partition",
+		SegmentBasePath:   filepath.Join(suite.flushRootPath, "segment"),
+		PartitionBasePath: filepath.Join(suite.flushRootPath, "partition"),
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
 		Schema:            suite.collection.Schema(),
@@ -577,8 +579,8 @@ func (suite *SegmentSuite) TestFlushDataSealedSegmentFails() {
 	ctx := context.Background()
 
 	config := &FlushConfig{
-		SegmentBasePath:   suite.rootPath + "/segment",
-		PartitionBasePath: suite.rootPath + "/partition",
+		SegmentBasePath:   filepath.Join(suite.flushRootPath, "segment"),
+		PartitionBasePath: filepath.Join(suite.flushRootPath, "partition"),
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
 		Schema:            suite.collection.Schema(),
@@ -594,8 +596,8 @@ func (suite *SegmentSuite) TestFlushDataInvalidOffsets() {
 	ctx := context.Background()
 
 	config := &FlushConfig{
-		SegmentBasePath:   suite.rootPath + "/segment",
-		PartitionBasePath: suite.rootPath + "/partition",
+		SegmentBasePath:   filepath.Join(suite.flushRootPath, "segment"),
+		PartitionBasePath: filepath.Join(suite.flushRootPath, "partition"),
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
 		Schema:            suite.collection.Schema(),
@@ -616,8 +618,8 @@ func (suite *SegmentSuite) TestFlushDataEmptyRange() {
 	ctx := context.Background()
 
 	config := &FlushConfig{
-		SegmentBasePath:   suite.rootPath + "/segment",
-		PartitionBasePath: suite.rootPath + "/partition",
+		SegmentBasePath:   filepath.Join(suite.flushRootPath, "segment"),
+		PartitionBasePath: filepath.Join(suite.flushRootPath, "partition"),
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
 		Schema:            suite.collection.Schema(),
@@ -633,8 +635,8 @@ func (suite *SegmentSuite) TestFlushDataPartialRange() {
 	ctx := context.Background()
 
 	config := &FlushConfig{
-		SegmentBasePath:   suite.rootPath + "/segment_partial",
-		PartitionBasePath: suite.rootPath + "/partition_partial",
+		SegmentBasePath:   filepath.Join(suite.flushRootPath, "segment_partial"),
+		PartitionBasePath: filepath.Join(suite.flushRootPath, "partition_partial"),
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
 		Schema:            suite.collection.Schema(),

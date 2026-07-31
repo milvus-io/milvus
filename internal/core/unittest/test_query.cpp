@@ -968,11 +968,8 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
             schema, index_meta, SegcoreConfig::default_config(), dataset);
 
         ScopedSchemaHandle handle(*schema);
-        auto plan_blob = handle.ParseSearch(zero_hit ? "pk < 0" : "",
-                                            "structA[array_vec]",
-                                            topk,
-                                            "",
-                                            R"({})");
+        auto plan_blob = handle.ParseSearch(
+            zero_hit ? "pk < 0" : "", "structA[array_vec]", topk, "", R"({})");
         auto plan =
             CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
 
@@ -1000,7 +997,7 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
                 ASSERT_NE(result, nullptr);
                 EXPECT_EQ(result->metric_type_, segment_metric);
                 EXPECT_EQ(result->element_level_, !embedding_list_placeholder);
-                EXPECT_FALSE(result->distances_.empty());
+                EXPECT_EQ(result->distances_.empty(), zero_hit);
                 return;
             }
 
@@ -1022,6 +1019,12 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
     // Both valid omitted-metric modes execute on sealed and growing segments.
     run_case(knowhere::metric::MAX_SIM, true, true, false);
     run_case(knowhere::metric::COSINE, false, true, false);
+
+    // Zero-candidate fast paths still carry the segment-resolved metric. Proxy
+    // search iterators need it to choose the correct +/-MaxFloat32 bound when
+    // the first page is empty and the request omitted metric_type.
+    run_case(knowhere::metric::MAX_SIM, true, true, true);
+    run_case(knowhere::metric::COSINE, false, true, true);
 
     // The segment-resolved metric remains authoritative and rejects both
     // placeholder/metric mode mismatch directions before vector search.
