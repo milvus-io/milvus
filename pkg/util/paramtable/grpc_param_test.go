@@ -220,3 +220,33 @@ func TestInternalTLSParams(t *testing.T) {
 	assert.Equal(t, internalTLSCfg.InternalTLSCaPemPath.GetValue(), "/ca")
 	assert.Equal(t, internalTLSCfg.InternalTLSSNI.GetValue(), "localhost")
 }
+
+func TestResolveMixCoordClientTLS(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.Equal(t, "mixCoord.grpc.clientTlsEnabled", params.MixCoordCfg.ClientTLSEnabled.Key)
+	assert.False(t, params.MixCoordCfg.ClientTLSEnabled.GetAsBool())
+
+	params.Save("common.security.tlsMode", "1")
+	params.Save("tls.caPemPath", "/external/ca.pem")
+	params.Save("internaltls.caPemPath", "/internal/ca.pem")
+	params.Save("internaltls.sni", "mixcoord.test")
+
+	enabled, caPemPath, serverName := params.ResolveMixCoordClientTLS()
+	assert.False(t, enabled, "external tlsMode must not enable MixCoord client TLS")
+	assert.Empty(t, caPemPath)
+	assert.Equal(t, "mixcoord.test", serverName)
+
+	params.Save("mixCoord.grpc.clientTlsEnabled", "true")
+	enabled, caPemPath, serverName = params.ResolveMixCoordClientTLS()
+	assert.True(t, enabled)
+	assert.Equal(t, "/external/ca.pem", caPemPath)
+	assert.Equal(t, "mixcoord.test", serverName)
+
+	params.Save("common.security.internaltlsEnabled", "true")
+	enabled, caPemPath, serverName = params.ResolveMixCoordClientTLS()
+	assert.True(t, enabled)
+	assert.Equal(t, "/internal/ca.pem", caPemPath, "cluster-wide internal TLS must retain precedence")
+	assert.Equal(t, "mixcoord.test", serverName)
+}

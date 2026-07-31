@@ -7,6 +7,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -24,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -110,7 +113,6 @@ func NewClient(etcdCli *clientv3.Client) Client {
 // getDialOptions returns grpc dial options.
 func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	cfg := &paramtable.Get().StreamingCoordGrpcClientCfg
-	tlsCfg := &paramtable.Get().InternalTLSCfg
 	retryPolicy := cfg.GetDefaultRetryPolicy()
 	retryPolicy["retryableStatusCodes"] = []string{"UNAVAILABLE"}
 	defaultServiceConfig := map[string]interface{}{
@@ -131,7 +133,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	if err != nil {
 		panic(err)
 	}
-	creds, err := tlsCfg.GetClientCreds(context.Background())
+	creds, err := getMixCoordClientCredentials(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -156,4 +158,17 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		grpc.WithDefaultServiceConfig(string(defaultServiceConfigJSON)),
 	)
 	return dialOptions
+}
+
+func getMixCoordClientCredentials(ctx context.Context) (credentials.TransportCredentials, error) {
+	enabled, caPemPath, serverName := paramtable.Get().ResolveMixCoordClientTLS()
+	if !enabled {
+		return insecure.NewCredentials(), nil
+	}
+	creds, err := credentials.NewClientTLSFromFile(caPemPath, serverName)
+	if err != nil {
+		mlog.Error(ctx, "Failed to create MixCoord client TLS credentials", mlog.Err(err))
+		return nil, merr.Wrap(err, "failed to create MixCoord client TLS credentials")
+	}
+	return creds, nil
 }
