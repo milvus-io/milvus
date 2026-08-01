@@ -64,7 +64,8 @@ func TestCatalog_Update_IndexSnapshotAndRevisionAreAtomic(t *testing.T) {
 	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
 			assert.Empty(t, removals)
-			assert.Contains(t, saves, BuildIndexKey(index.CollectionID, index.IndexID))
+			assert.Contains(t, saves, buildIndexSnapshotKey(index.CollectionID, revision, index.IndexID))
+			assert.NotContains(t, saves, BuildIndexKey(index.CollectionID, index.IndexID))
 			assert.Equal(t, "12345", saves[buildIndexSnapshotRevisionKey(index.CollectionID)])
 			return nil
 		}).Once()
@@ -72,22 +73,53 @@ func TestCatalog_Update_IndexSnapshotAndRevisionAreAtomic(t *testing.T) {
 	c := NewCatalog(metakv, "", "")
 	err := c.Update(context.TODO(),
 		metastore.AddIndex(index),
-		metastore.SaveIndexSnapshotRevision(index.CollectionID, revision),
+		metastore.SaveIndexSnapshotRevision(index.CollectionID, revision, index),
 	)
 	assert.NoError(t, err)
 }
 
-func TestCatalog_Update_IndexSnapshotRejectsChunkedFallback(t *testing.T) {
+func TestCatalog_Update_LargeIndexSnapshotUsesCommitMarker(t *testing.T) {
 	metakv := mocks.NewMetaKv(t)
-	metakv.EXPECT().MaxTxnOps().Return(1).Once()
-	index := &model.Index{CollectionID: 10, IndexID: 20, IndexName: "idx"}
+	metakv.EXPECT().MaxTxnOps().Return(64).Once()
+	indexes := make([]*model.Index, 64)
+	for i := range indexes {
+		indexes[i] = &model.Index{CollectionID: 10, IndexID: int64(i + 1), IndexName: "idx"}
+	}
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string) error {
+			assert.Len(t, saves, 64)
+			assert.NotContains(t, saves, buildIndexSnapshotRevisionKey(10))
+			return nil
+		}).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, removals)
+			assert.Equal(t, map[string]string{buildIndexSnapshotRevisionKey(10): "12345"}, saves)
+			return nil
+		}).Once()
 
 	c := NewCatalog(metakv, "", "")
-	err := c.Update(context.TODO(),
-		metastore.AddIndex(index),
-		metastore.SaveIndexSnapshotRevision(index.CollectionID, 12345),
-	)
-	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	err := c.Update(context.TODO(), metastore.SaveIndexSnapshotRevision(10, 12345, indexes...))
+	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_CleanupIndexSnapshotRemovesMarkerFirst(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	markerRemoved := false
+	metakv.EXPECT().Remove(mock.Anything, buildIndexSnapshotRevisionKey(10)).
+		RunAndReturn(func(context.Context, string) error {
+			markerRemoved = true
+			return nil
+		}).Once()
+	metakv.EXPECT().RemoveWithPrefix(mock.Anything, buildIndexSnapshotCollectionPrefix(10)).
+		RunAndReturn(func(context.Context, string) error {
+			assert.True(t, markerRemoved)
+			return nil
+		}).Once()
+	metakv.EXPECT().RemoveWithPrefix(mock.Anything, buildIndexCollectionPrefix(10)).Return(nil).Once()
+
+	c := NewCatalog(metakv, "", "")
+	assert.NoError(t, c.Update(context.Background(), metastore.CleanupIndexSnapshot(10)))
 }
 
 // TestCatalog_Update_AddSegmentEncodingMatchesLegacy proves AddSegment writes

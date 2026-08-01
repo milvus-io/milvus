@@ -963,7 +963,9 @@ func TestCatalog_CreateIndex(t *testing.T) {
 func TestCatalog_ListIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index-revision/", mock.Anything, mock.Anything).Return(nil).Once()
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index-snapshot/", mock.Anything, mock.Anything).Return(nil).Once()
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index/", mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			i := &indexpb.FieldIndex{
 				IndexInfo: &indexpb.IndexInfo{
 					CollectionID: 0,
@@ -978,8 +980,8 @@ func TestCatalog_ListIndexes(t *testing.T) {
 			}
 			v, err := proto.Marshal(i)
 			assert.NoError(t, err)
-			return f([]byte("1"), v)
-		})
+			return f([]byte("field-index/0/1"), v)
+		}).Once()
 
 		catalog := &Catalog{
 			MetaKv: metakv,
@@ -991,7 +993,7 @@ func TestCatalog_ListIndexes(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
+		txn.EXPECT().WalkWithPrefix(mock.Anything, "field-index-revision/", mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: txn,
 		}
@@ -1001,15 +1003,53 @@ func TestCatalog_ListIndexes(t *testing.T) {
 
 	t.Run("unmarshal failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
-			return f([]byte("1"), []byte("invalid"))
-		})
+		txn.EXPECT().WalkWithPrefix(mock.Anything, "field-index-revision/", mock.Anything, mock.Anything).Return(nil).Once()
+		txn.EXPECT().WalkWithPrefix(mock.Anything, "field-index-snapshot/", mock.Anything, mock.Anything).Return(nil).Once()
+		txn.EXPECT().WalkWithPrefix(mock.Anything, "field-index/", mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte("field-index/0/1"), []byte("invalid"))
+		}).Once()
 
 		catalog := &Catalog{
 			MetaKv: txn,
 		}
 		_, err := catalog.ListIndexes(context.Background())
 		assert.Error(t, err)
+	})
+
+	t.Run("committed snapshot hides legacy and uncommitted revisions", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index-revision/", mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				return f([]byte("field-index-revision/10"), []byte("200"))
+			}).Once()
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index-snapshot/", mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				for _, tc := range []struct {
+					key  string
+					name string
+				}{
+					{"field-index-snapshot/10/100/1", "old"},
+					{"field-index-snapshot/10/200/2", "committed"},
+					{"field-index-snapshot/10/300/3", "partial"},
+				} {
+					value, err := proto.Marshal(&indexpb.FieldIndex{IndexInfo: &indexpb.IndexInfo{CollectionID: 10, IndexID: int64(tc.name[0]), IndexName: tc.name}})
+					require.NoError(t, err)
+					require.NoError(t, f([]byte(tc.key), value))
+				}
+				return nil
+			}).Once()
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index/", mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				value, err := proto.Marshal(&indexpb.FieldIndex{IndexInfo: &indexpb.IndexInfo{CollectionID: 10, IndexID: 4, IndexName: "legacy-partial"}})
+				require.NoError(t, err)
+				return f([]byte("field-index/10/4"), value)
+			}).Once()
+
+		catalog := &Catalog{MetaKv: metakv}
+		indexes, err := catalog.ListIndexes(context.Background())
+		require.NoError(t, err)
+		require.Len(t, indexes, 1)
+		assert.Equal(t, "committed", indexes[0].IndexName)
 	})
 }
 

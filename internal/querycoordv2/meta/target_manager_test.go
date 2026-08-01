@@ -477,13 +477,8 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 
 func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	ctx := suite.ctx
-	t1 := time.Now().UnixNano()
 	target := NewCollectionTarget(nil, nil, nil)
-	t2 := time.Now().UnixNano()
-
-	version := target.GetTargetVersion()
-	suite.True(t1 <= version)
-	suite.True(t2 >= version)
+	suite.Zero(target.GetTargetVersion(), "unpublished targets receive a version from TargetManager")
 
 	collectionID := suite.collections[0]
 	t3 := time.Now().UnixNano()
@@ -493,6 +488,30 @@ func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	collectionVersion := suite.mgr.GetCollectionTargetVersion(ctx, collectionID, NextTarget)
 	suite.True(t3 <= collectionVersion)
 	suite.True(t4 >= collectionVersion)
+}
+
+func TestTargetManagerMonotonicVersionAndPromotion(t *testing.T) {
+	paramtable.Init()
+	mgr := NewTargetManager(NewMockBroker(t), NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager()))
+	collectionID := int64(100)
+	channel := &DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "ch"}}
+
+	// Simulate recovering a target written by a host whose clock was one hour
+	// ahead. The new host must allocate above it instead of trusting wall time.
+	futureVersion := time.Now().Add(time.Hour).UnixNano()
+	mgr.observeTargetVersion(futureVersion)
+	next := NewCollectionTarget(nil, map[string]*DmChannel{"ch": channel}, []int64{1})
+	mgr.assignTargetVersion(next)
+	assert.Greater(t, next.GetTargetVersion(), futureVersion)
+
+	// If an externally recovered/stale next target is nevertheless not newer,
+	// promotion must retain it for retry rather than silently discarding it.
+	current := NewCollectionTarget(nil, map[string]*DmChannel{"ch": channel}, []int64{1})
+	current.version = next.GetTargetVersion() + 1
+	mgr.current.updateCollectionTarget(collectionID, current)
+	mgr.next.updateCollectionTarget(collectionID, next)
+	assert.False(t, mgr.UpdateCollectionCurrentTarget(context.Background(), collectionID))
+	assert.Same(t, next, mgr.next.getCollectionTarget(collectionID))
 }
 
 func (suite *TargetManagerSuite) TestGetSegmentByChannel() {

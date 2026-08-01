@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -157,6 +158,7 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	mock0Allocator := newMockAllocator(t)
 
@@ -363,6 +365,8 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	t.Run("save index fail", func(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+		metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string, value string) error {
 			if rand.Intn(3) == 0 {
 				return errors.New("failed")
@@ -524,7 +528,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("AlterIndexes",
+	catalog.On("Update",
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
@@ -1489,7 +1493,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 	)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("AlterIndexes",
+	catalog.On("Update",
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
@@ -2054,7 +2058,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 	)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("AlterIndexes",
+	catalog.On("Update",
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
@@ -2359,7 +2363,7 @@ func TestServer_DropIndex(t *testing.T) {
 	)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("AlterIndexes",
+	catalog.On("Update",
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
@@ -2493,7 +2497,7 @@ func TestServer_DropIndex(t *testing.T) {
 
 	t.Run("drop fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, indexes []*model.Index) error {
+		catalog.EXPECT().Update(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, actions ...metastore.UpdateAction) error {
 			if rand.Intn(3) == 0 {
 				return errors.New("fail")
 			}
@@ -2560,7 +2564,7 @@ func TestServer_DropIndex_DroppedField(t *testing.T) {
 	)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("AlterIndexes", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 
 	// Broker returns a schema that does NOT contain fieldID=10 (simulating a dropped field)
 	b := broker.NewMockBroker(t)
@@ -2878,6 +2882,7 @@ func TestJsonIndex(t *testing.T) {
 	collID := UniqueID(1)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)
 	indexMeta := newSegmentIndexMeta(catalog)
 	b := mocks.NewMixCoord(t)

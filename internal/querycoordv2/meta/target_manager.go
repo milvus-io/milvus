@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -121,6 +123,11 @@ type TargetManager struct {
 	// all remove segment/channel operation happens on Both current and next -> delete status should be consistent
 	current *target
 	next    *target
+
+	// lastTargetVersion turns wall time into a process-local logical clock.
+	// Recover observes persisted versions before allocating new ones, so a
+	// failover onto a host with a slower clock still produces a newer target.
+	lastTargetVersion atomic.Int64
 }
 
 func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
@@ -147,7 +154,12 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 		log.Info(ctx, "next target does not exist, skip it")
 		return false
 	}
-	mgr.current.updateCollectionTarget(collectionID, newTarget)
+	if !mgr.current.updateCollectionTarget(collectionID, newTarget) {
+		log.Warn(ctx, "next target is not newer than current target; retain it for retry",
+			mlog.Int64("nextVersion", newTarget.GetTargetVersion()),
+			mlog.Int64("currentVersion", mgr.current.getCollectionTarget(collectionID).GetTargetVersion()))
+		return false
+	}
 	mgr.next.removeCollectionTarget(collectionID)
 
 	partStatsVersionInfo := "partitionStats:"
@@ -246,6 +258,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	}
 
 	allocatedTarget := newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, indexInfoPresent, indexInfoVersion)
+	mgr.assignTargetVersion(allocatedTarget)
 
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
@@ -392,7 +405,37 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 	})
 
 	indexInfos, indexInfoPresent := oldTarget.GetIndexInfoSnapshot()
-	return newCollectionTarget(segments, channels, partitions, indexInfos, indexInfoPresent, oldTarget.GetIndexInfoVersion())
+	newTarget := newCollectionTarget(segments, channels, partitions, indexInfos, indexInfoPresent, oldTarget.GetIndexInfoVersion())
+	mgr.assignTargetVersion(newTarget)
+	return newTarget
+}
+
+func (mgr *TargetManager) assignTargetVersion(target *CollectionTarget) {
+	for {
+		last := mgr.lastTargetVersion.Load()
+		candidate := time.Now().UnixNano()
+		if candidate <= last {
+			candidate = last + 1
+		}
+		if mgr.lastTargetVersion.CompareAndSwap(last, candidate) {
+			target.version = candidate
+			if target.indexInfoPresent && target.indexInfoVersion == 0 {
+				// Compatibility with DataCoords that predate the dedicated index
+				// revision. Once a revision is returned this fallback is unused.
+				target.indexInfoVersion = candidate
+			}
+			return
+		}
+	}
+}
+
+func (mgr *TargetManager) observeTargetVersion(version int64) {
+	for {
+		last := mgr.lastTargetVersion.Load()
+		if version <= last || mgr.lastTargetVersion.CompareAndSwap(last, version) {
+			return
+		}
+	}
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -663,6 +706,7 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 
 	for _, t := range targets {
 		newTarget := FromPbCollectionTarget(t)
+		mgr.observeTargetVersion(newTarget.GetTargetVersion())
 		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
 		mlog.Info(ctx, "recover current target for collection",
 			mlog.FieldCollectionID(t.GetCollectionID()),

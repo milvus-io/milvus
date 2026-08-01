@@ -18,7 +18,6 @@ package meta
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
 
@@ -76,20 +75,13 @@ func newCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
 		totalRowCount += segment.GetNumOfRows()
 	}
-	version := time.Now().UnixNano()
-	if indexInfoPresent && indexInfoVersion == 0 {
-		// Rolling compatibility with DataCoords that return ListIndexes without
-		// the persistent revision field. The first DDL handled by a new
-		// DataCoord switches this collection to the dedicated revision domain.
-		indexInfoVersion = version
-	}
 	return &CollectionTarget{
 		segments:           segments,
 		channel2Segments:   channel2Segments,
 		partition2Segments: partition2Segments,
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
-		version:            version,
+		version:            0,
 		indexInfos:         indexInfos,
 		indexInfoPresent:   indexInfoPresent,
 		indexInfoVersion:   indexInfoVersion,
@@ -288,14 +280,15 @@ func newTarget() *target {
 	}
 }
 
-func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) {
+func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) bool {
 	t.keyLock.Lock(collectionID)
 	defer t.keyLock.Unlock(collectionID)
 	if old, ok := t.collectionTargetMap.Get(collectionID); ok && old != nil && target.GetTargetVersion() <= old.GetTargetVersion() {
-		return
+		return false
 	}
 
 	t.collectionTargetMap.Insert(collectionID, target)
+	return true
 }
 
 func (t *target) removeCollectionTarget(collectionID int64) {

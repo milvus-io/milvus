@@ -94,15 +94,26 @@ type ChannelEntry struct {
 // IndexSnapshotRevisionEntry so readers can order complete collection-index
 // snapshots independently of coordinator-local wall clocks.
 type IndexEntry struct {
-	Index *model.Index
+	Index    *model.Index
+	Revision int64
 }
 
 // IndexSnapshotRevisionEntry targets the persistent collection-level revision
 // of the complete field-index snapshot. The revision save is a commit marker:
 // all index definitions in the same composite update must be staged before it.
 type IndexSnapshotRevisionEntry struct {
+	CollectionID     int64
+	Revision         int64
+	PreviousRevision int64
+	Indexes          []*model.Index
+}
+
+// IndexSnapshotCleanupEntry removes the committed revision and every staged
+// snapshot for a collection after the collection itself has completed GC.
+// Removing this for a live collection would lose the authoritative empty
+// snapshot after DropAll, so callers must establish collection deletion first.
+type IndexSnapshotCleanupEntry struct {
 	CollectionID int64
-	Revision     int64
 }
 
 // CollectionEntry targets a collection and its children.
@@ -171,6 +182,7 @@ func (SegmentEntry) isEntry()               {}
 func (ChannelEntry) isEntry()               {}
 func (IndexEntry) isEntry()                 {}
 func (IndexSnapshotRevisionEntry) isEntry() {}
+func (IndexSnapshotCleanupEntry) isEntry()  {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
 func (RefreshJobEntry) isEntry()            {}
@@ -237,13 +249,43 @@ func UpdateIndex(index *model.Index) UpdateAction {
 // SaveIndexSnapshotRevision persists the visibility marker for a complete
 // collection-index snapshot. Compose it after all AddIndex/UpdateIndex actions
 // belonging to the DDL operation.
-func SaveIndexSnapshotRevision(collectionID, revision int64) UpdateAction {
+func SaveIndexSnapshotRevision(collectionID, revision int64, indexes ...*model.Index) UpdateAction {
+	return SaveIndexSnapshotRevisionFrom(collectionID, revision, 0, indexes...)
+}
+
+// SaveIndexSnapshotRevisionFrom also identifies the previously committed
+// revision so its immutable staging prefix can be reclaimed after the new
+// marker commits. Cleanup is best-effort and never affects visibility.
+func SaveIndexSnapshotRevisionFrom(collectionID, revision, previousRevision int64, indexes ...*model.Index) UpdateAction {
 	return UpdateAction{
 		Type: ActionUpdate,
 		Entry: IndexSnapshotRevisionEntry{
-			CollectionID: collectionID,
-			Revision:     revision,
+			CollectionID:     collectionID,
+			Revision:         revision,
+			PreviousRevision: previousRevision,
+			Indexes:          indexes,
 		},
+	}
+}
+
+// DropIndexDefinition physically removes an index definition from both the
+// legacy key space and the currently committed revision-scoped snapshot.
+func DropIndexDefinition(collectionID, indexID, revision int64) UpdateAction {
+	return UpdateAction{
+		Type: ActionDelete,
+		Entry: IndexEntry{
+			Index:    &model.Index{CollectionID: collectionID, IndexID: indexID},
+			Revision: revision,
+		},
+	}
+}
+
+// CleanupIndexSnapshot removes all revision metadata for a collection whose
+// collection-level GC has completed.
+func CleanupIndexSnapshot(collectionID int64) UpdateAction {
+	return UpdateAction{
+		Type:  ActionDelete,
+		Entry: IndexSnapshotCleanupEntry{CollectionID: collectionID},
 	}
 }
 

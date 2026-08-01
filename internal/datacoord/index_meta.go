@@ -581,10 +581,9 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index, revisio
 	}
 	var err error
 	if revision > 0 {
+		snapshot := m.buildCollectionIndexSnapshot(index.CollectionID, index)
 		err = m.catalog.Update(ctx,
-			metastore.AddIndex(index),
-			metastore.SaveIndexSnapshotRevision(index.CollectionID, revision),
-		)
+			metastore.SaveIndexSnapshotRevisionFrom(index.CollectionID, revision, m.indexSnapshotRevisions[index.CollectionID], snapshot...))
 	} else {
 		err = m.catalog.CreateIndex(ctx, index)
 	}
@@ -597,6 +596,9 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index, revisio
 
 	m.updateCollectionIndex(index)
 	if revision > 0 {
+		if m.indexSnapshotRevisions == nil {
+			m.indexSnapshotRevisions = make(map[UniqueID]int64)
+		}
 		m.indexSnapshotRevisions[index.CollectionID] = revision
 	}
 	mlog.Info(ctx, "meta update: CreateIndex success", mlog.Int64("collectionID", index.CollectionID),
@@ -618,14 +620,16 @@ func (m *indexMeta) alterIndex(ctx context.Context, revision int64, indexes ...*
 
 	var err error
 	if revision > 0 {
-		actions := make([]metastore.UpdateAction, 0, len(indexes)*2)
+		actions := make([]metastore.UpdateAction, 0)
 		collectionIDs := typeutil.NewSet[int64]()
+		replacements := make(map[int64][]*model.Index)
 		for _, index := range indexes {
-			actions = append(actions, metastore.UpdateIndex(index))
 			collectionIDs.Insert(index.CollectionID)
+			replacements[index.CollectionID] = append(replacements[index.CollectionID], index)
 		}
 		for collectionID := range collectionIDs {
-			actions = append(actions, metastore.SaveIndexSnapshotRevision(collectionID, revision))
+			snapshot := m.buildCollectionIndexSnapshot(collectionID, replacements[collectionID]...)
+			actions = append(actions, metastore.SaveIndexSnapshotRevisionFrom(collectionID, revision, m.indexSnapshotRevisions[collectionID], snapshot...))
 		}
 		err = m.catalog.Update(ctx, actions...)
 	} else {
@@ -638,6 +642,9 @@ func (m *indexMeta) alterIndex(ctx context.Context, revision int64, indexes ...*
 	for _, index := range indexes {
 		m.updateCollectionIndex(index)
 		if revision > 0 {
+			if m.indexSnapshotRevisions == nil {
+				m.indexSnapshotRevisions = make(map[UniqueID]int64)
+			}
 			m.indexSnapshotRevisions[index.CollectionID] = revision
 		}
 	}
@@ -905,12 +912,9 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 	}
 	var err error
 	if revision > 0 {
-		actions := make([]metastore.UpdateAction, 0, len(indexes)+1)
-		for _, index := range indexes {
-			actions = append(actions, metastore.UpdateIndex(index))
-		}
-		actions = append(actions, metastore.SaveIndexSnapshotRevision(collID, revision))
-		err = m.catalog.Update(ctx, actions...)
+		snapshot := m.buildCollectionIndexSnapshot(collID, indexes...)
+		err = m.catalog.Update(ctx,
+			metastore.SaveIndexSnapshotRevisionFrom(collID, revision, m.indexSnapshotRevisions[collID], snapshot...))
 	} else {
 		err = m.catalog.AlterIndexes(ctx, indexes)
 	}
@@ -925,6 +929,9 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		deletedSet[index.IndexID] = struct{}{}
 	}
 	if revision > 0 {
+		if m.indexSnapshotRevisions == nil {
+			m.indexSnapshotRevisions = make(map[UniqueID]int64)
+		}
 		m.indexSnapshotRevisions[collID] = revision
 	}
 
@@ -1356,7 +1363,7 @@ func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
 	mlog.Info(ctx, "IndexCoord meta table remove index", mlog.Int64("collectionID", collID), mlog.Int64("indexID", indexID))
-	err := m.catalog.DropIndex(ctx, collID, indexID)
+	err := m.catalog.Update(ctx, metastore.DropIndexDefinition(collID, indexID, m.indexSnapshotRevisions[collID]))
 	if err != nil {
 		mlog.Info(ctx, "IndexCoord meta table remove index fail", mlog.Int64("collectionID", collID),
 			mlog.Int64("indexID", indexID), mlog.Err(err))
@@ -1373,6 +1380,48 @@ func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 	}
 	mlog.Info(ctx, "IndexCoord meta table remove index success", mlog.Int64("collectionID", collID), mlog.Int64("indexID", indexID))
 	return nil
+}
+
+// CleanupIndexSnapshot removes the revision domain only after collection-level
+// GC has established that the collection no longer exists.  In particular,
+// it must not run merely because a live collection has no remaining index
+// definitions: its committed empty snapshot still orders QueryNode updates.
+func (m *indexMeta) CleanupIndexSnapshot(ctx context.Context, collID UniqueID) error {
+	m.fieldIndexLock.Lock()
+	defer m.fieldIndexLock.Unlock()
+
+	if err := m.catalog.Update(ctx, metastore.CleanupIndexSnapshot(collID)); err != nil {
+		return err
+	}
+	delete(m.indexSnapshotRevisions, collID)
+	return nil
+}
+
+func (m *indexMeta) GetIndexSnapshotCollectionIDs() []UniqueID {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	return lo.Keys(m.indexSnapshotRevisions)
+}
+
+func (m *indexMeta) HasIndexDefinitions(collID UniqueID) bool {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	return len(m.indexes[collID]) > 0
+}
+
+// buildCollectionIndexSnapshot clones the complete persisted definition set
+// for a collection and overlays the supplied replacements.  Deleted
+// definitions remain present until index GC physically removes them.
+// Precondition: caller holds fieldIndexLock.
+func (m *indexMeta) buildCollectionIndexSnapshot(collID UniqueID, replacements ...*model.Index) []*model.Index {
+	byID := make(map[UniqueID]*model.Index, len(m.indexes[collID])+len(replacements))
+	for indexID, index := range m.indexes[collID] {
+		byID[indexID] = model.CloneIndex(index)
+	}
+	for _, index := range replacements {
+		byID[index.IndexID] = model.CloneIndex(index)
+	}
+	return lo.Values(byID)
 }
 
 func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.SegmentIndex) {

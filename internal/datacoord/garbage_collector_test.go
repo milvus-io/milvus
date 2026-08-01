@@ -435,8 +435,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("DropIndex",
-			mock.Anything,
+		catalog.On("Update",
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
@@ -446,13 +445,55 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("DropIndex",
-			mock.Anything,
+		catalog.On("Update",
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
 		gc.recycleUnusedIndexes(context.TODO(), nil)
+	})
+
+	t.Run("cleanup revision only after collection and metadata GC", func(t *testing.T) {
+		const collectionID = int64(200)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().GcConfirm(mock.Anything, collectionID, common.AllPartitionsID).Return(true).Once()
+		catalog.EXPECT().Update(mock.Anything, mock.MatchedBy(func(action metastore.UpdateAction) bool {
+			entry, ok := action.Entry.(metastore.IndexSnapshotCleanupEntry)
+			return ok && entry.CollectionID == collectionID
+		})).Return(nil).Once()
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, collectionID).Return(false, nil).Once()
+		meta := &meta{
+			catalog: catalog,
+			indexMeta: &indexMeta{
+				catalog:                catalog,
+				indexes:                make(map[UniqueID]map[UniqueID]*model.Index),
+				indexSnapshotRevisions: map[UniqueID]int64{collectionID: 123},
+			},
+		}
+
+		gc := newGarbageCollector(meta, nil, GcOption{broker: broker})
+		gc.recycleUnusedIndexes(context.Background(), nil)
+		assert.NotContains(t, meta.indexMeta.indexSnapshotRevisions, collectionID)
+	})
+
+	t.Run("retain empty snapshot for live collection", func(t *testing.T) {
+		const collectionID = int64(201)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, collectionID).Return(true, nil).Once()
+		meta := &meta{
+			catalog: catalog,
+			indexMeta: &indexMeta{
+				catalog:                catalog,
+				indexes:                make(map[UniqueID]map[UniqueID]*model.Index),
+				indexSnapshotRevisions: map[UniqueID]int64{collectionID: 123},
+			},
+		}
+
+		gc := newGarbageCollector(meta, nil, GcOption{broker: broker})
+		gc.recycleUnusedIndexes(context.Background(), nil)
+		assert.Equal(t, int64(123), meta.indexMeta.indexSnapshotRevisions[collectionID])
 	})
 }
 

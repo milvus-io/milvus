@@ -43,6 +43,10 @@ const (
 
 	SegmentIndexPrefix = "segment-index"
 	FieldIndexPrefix   = "field-index"
+	// FieldIndexSnapshotPrefix stores immutable, revision-scoped copies of a
+	// collection's complete field-index metadata.  The revision key below is
+	// the commit marker selecting the only visible snapshot.
+	FieldIndexSnapshotPrefix = "field-index-snapshot"
 	// FieldIndexRevisionPrefix stores the persistent collection-level revision
 	// of the complete field-index snapshot. It intentionally uses a separate
 	// key space so the revision survives deletion and GC of the final index.
