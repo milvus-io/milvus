@@ -490,8 +490,11 @@ Two ways to collect a result:
 - **Synchronous** — pass `?wait=30s` to `/config`, `/history`, or the reply endpoint. Waits
   are clamped to 90s and bounded by the request context; expiry is reported as `pending`.
   With a `client_id` exactly one answer is possible, so the wait ends as soon as it lands.
-  Without one the command may have been broadcast, so the wait runs its full budget
-  collecting answers rather than returning the first as if it were the cluster's.
+  Without one the command may have been broadcast, so the wait does not stop at the first
+  reply — that would hand one client's answer back as the cluster's. It ends when every
+  client the lookup can see has answered, or when the budget runs out. That is not proof of
+  completeness (the server does not record who a broadcast command reached), but it avoids
+  blocking for the full budget on a command everyone already answered.
 - **Deferred** — push without `wait`, keep the returned `command_id`, and fetch it later
   from `/api/v1/_telemetry/commands/{commandId}/reply`. Passing `?client_id=` makes that a
   targeted lookup instead of a scan of all clients.

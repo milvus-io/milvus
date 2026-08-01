@@ -516,3 +516,75 @@ func TestWaitShorterThanPollInterval(t *testing.T) {
 	assert.Less(t, elapsed, telemetryReplyPollInterval,
 		"a sub-interval wait must return on its own budget, not on the next poll tick")
 }
+
+// TestUntargetedWaitReturnsOnceEveryoneAnswered covers the stopping condition for a wait
+// with no client_id.
+//
+// Such a wait cannot stop at the first reply -- that would hand one client's answer back as
+// the cluster's -- but it also must not block for the whole budget once there is nothing
+// left to wait for. It used to do exactly that: ?wait=90s on a command every client had
+// already answered still hung for 90 seconds, which makes the endpoint painful for the CLI
+// and agent use it was added for.
+func TestUntargetedWaitReturnsOnceEveryoneAnswered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	proxy := &Proxy{mixCoord: mixCoord}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	// Every known client has already answered.
+	mixCoord.EXPECT().GetClientTelemetry(mock.Anything, mock.Anything).
+		Return(telemetryRespManyReplies("cmd-broadcast", "client-a", "client-b"), nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest("GET", "/?wait=30s", nil)
+	c.Params = gin.Params{{Key: "commandId", Value: "cmd-broadcast"}}
+
+	start := time.Now()
+	getTelemetryCommandReply(proxy)(c)
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Less(t, elapsed, telemetryReplyPollInterval,
+		"must not keep polling once every observed client has answered")
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, replyStatusDone, body["status"])
+	assert.EqualValues(t, 2, body["responded"])
+	assert.EqualValues(t, 2, body["observed_clients"])
+}
+
+// TestUntargetedWaitKeepsWaitingWhileSomeoneIsSilent is the other half: a partial answer
+// must not end the wait, or the early exit above would just be "return the first reply".
+func TestUntargetedWaitKeepsWaitingWhileSomeoneIsSilent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	proxy := &Proxy{mixCoord: mixCoord}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	// Two clients known, only one has answered -- and that never changes.
+	resp := telemetryRespManyReplies("cmd-broadcast", "client-a")
+	resp.Clients = append(resp.Clients, telemetryRespNoReply("client-b").Clients...)
+	mixCoord.EXPECT().GetClientTelemetry(mock.Anything, mock.Anything).Return(resp, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest("GET", "/?wait=600ms", nil)
+	c.Params = gin.Params{{Key: "commandId", Value: "cmd-broadcast"}}
+
+	start := time.Now()
+	getTelemetryCommandReply(proxy)(c)
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.GreaterOrEqual(t, elapsed, 600*time.Millisecond,
+		"a silent client must keep the wait open for the whole budget")
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.EqualValues(t, 1, body["responded"])
+	assert.EqualValues(t, 2, body["observed_clients"])
+}

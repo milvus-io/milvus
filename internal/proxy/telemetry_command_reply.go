@@ -160,10 +160,14 @@ func findCommandReplies(ctx context.Context, node *Proxy, clientID, commandID st
 // canceled. A zero timeout performs exactly one lookup.
 //
 // When clientID is set the command was aimed at one client, so exactly one answer is
-// possible and the first one ends the wait. When it is empty the command may have been
-// broadcast, and there is no way to know how many clients will answer -- returning on the
-// first would hand back one client's answer as though it were the cluster's. So an
-// untargeted wait keeps polling for the whole budget and returns everything accumulated.
+// possible and the first one ends the wait.
+//
+// When it is empty the command may have been broadcast, so returning on the first reply
+// would hand back one client's answer as though it were the cluster's. Instead the wait
+// continues until every client the lookup can see has answered, or the budget runs out.
+// That stopping condition is not proof of completeness -- the server does not record who a
+// broadcast command reached -- but it beats blocking for the full budget on a command that
+// everyone already answered.
 //
 // An empty result with a nil error means "still pending" and is a normal outcome.
 func waitForCommandReply(ctx context.Context, node *Proxy, clientID, commandID string, timeout time.Duration) ([]clientCommandReply, int, error) {
@@ -181,11 +185,29 @@ func waitForCommandReply(ctx context.Context, node *Proxy, clientID, commandID s
 
 	targeted := clientID != ""
 
+	// done reports whether there is anything left to wait for.
+	//
+	// A targeted lookup expects exactly one answer, so the first one ends it. An untargeted
+	// one has no delivery target to compare against -- the server does not record who a
+	// broadcast command reached -- but "every client I can see has answered" is still a far
+	// better stopping condition than "always block for the maximum". Anything that connects
+	// afterwards was not part of the picture the caller is looking at, and re-querying
+	// later returns it.
+	done := func(replies []clientCommandReply, observed int) bool {
+		if len(replies) == 0 {
+			return false
+		}
+		if targeted {
+			return true
+		}
+		return len(replies) >= observed
+	}
+
 	replies, known, err := findCommandReplies(ctx, node, clientID, commandID)
 	if err != nil {
 		return nil, 0, budgetAwareErr(ctx, err)
 	}
-	if timeout <= 0 || (targeted && len(replies) > 0) {
+	if timeout <= 0 || done(replies, known) {
 		return replies, known, nil
 	}
 
@@ -206,7 +228,7 @@ func waitForCommandReply(ctx context.Context, node *Proxy, clientID, commandID s
 				return replies, known, budgetAwareErr(ctx, err)
 			}
 			replies, known = latest, latestKnown
-			if targeted && len(replies) > 0 {
+			if done(replies, known) {
 				return replies, known, nil
 			}
 		}
