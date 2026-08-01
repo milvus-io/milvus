@@ -4131,6 +4131,60 @@ func TestClientMetricsCacheIsRaceFree(t *testing.T) {
 	require.NotEmpty(t, replies, "the heartbeat writer must have recorded replies")
 }
 
+// TestFirstHeartbeatPublishesStableIDAtomically covers the window between a new cache being
+// published and its ClientIDStable being written.
+//
+// The cache used to go into the sync.Map first and get ClientIDStable a few lines later. In
+// that gap a concurrent PushCommand finds the client, reads the zero value -- which means
+// "generated ID" -- and rejects a legitimately pinned client with a non-retriable
+// ParameterInvalid. A provisioning script racing a client's very first heartbeat would be
+// told, permanently, that a correct request was bad input.
+func TestFirstHeartbeatPublishesStableIDAtomically(t *testing.T) {
+	const clientID = "pinned-worker"
+
+	heartbeat := func(m *TelemetryManager) {
+		_, _ = m.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType: "Go",
+				Reserved: map[string]string{
+					"client_id":       clientID,
+					clientIDStableKey: "true",
+				},
+			},
+		})
+	}
+
+	// Repeat: the window is small, so one attempt proves little.
+	for i := 0; i < 200; i++ {
+		m := &TelemetryManager{config: DefaultTelemetryConfig()}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			heartbeat(m)
+		}()
+
+		// Poll until the client appears, then immediately judge it -- landing as close to
+		// the publish as possible.
+		for {
+			if _, ok := m.clientMetrics.Load(clientID); ok {
+				break
+			}
+		}
+		err := m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: clientID,
+			Persistent:     true,
+		})
+		wg.Wait()
+
+		require.False(t, err != nil && errors.Is(err, merr.ErrParameterInvalid),
+			"a visible client that declared a stable ID must never be rejected as bad input; "+
+				"iteration %d saw %v", i, err)
+	}
+}
+
 func TestValidatePersistentTargetIsRaceFree(t *testing.T) {
 	m := &TelemetryManager{}
 

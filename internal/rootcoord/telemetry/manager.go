@@ -440,6 +440,12 @@ func (m *TelemetryManager) HandleHeartbeat(req *milvuspb.ClientHeartbeatRequest)
 		cache = &ClientMetricsCache{
 			ClientID: clientID,
 		}
+		// Fully initialize before publishing. The moment LoadOrStore returns, an admin
+		// goroutine can find this cache and read ClientIDStable -- and a zero value there
+		// means "generated ID", which validatePersistentTarget rejects as a non-retriable
+		// ParameterInvalid. A client that declared a stable ID would be turned away on the
+		// strength of a field that had simply not been written yet.
+		cache.ClientIDStable.Store(declaresStableClientID(req.GetClientInfo()))
 		// Use LoadOrStore to handle race condition
 		if actual, loaded := m.clientMetrics.LoadOrStore(clientID, cache); loaded {
 			cache = actual.(*ClientMetricsCache)

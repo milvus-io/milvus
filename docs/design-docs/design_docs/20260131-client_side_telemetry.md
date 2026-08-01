@@ -380,28 +380,38 @@ existing client-scoped configs are loaded normally at startup and never deleted
 automatically — retire them with `DeleteClientCommand`.
 
 **TTL.** `ttl_seconds` is a field of `PushClientCommandRequest`, not of `ClientCommand`, so
-clients never see it. It is resolved once at push time:
+clients never see it.
 
-| Requested | Stored | Meaning |
-|-----------|--------|---------|
-| unset (`0`) | `3600` | Default: a one-hour safety net |
-| `> 0` | as given | Honored verbatim |
-| `< 0` | as given | Never expires (every expiry check treats `<= 0` as immortal) |
+The RPC and the store keep the meaning the proto documents — *"0 = no expiry, >0 =
+auto-expire in seconds"*:
 
-The default is a **bound on how long an unanswered command occupies memory, not a delivery
+| `ttl_seconds` | Meaning |
+|---------------|---------|
+| `0` | Never expires (every expiry check treats `<= 0` as immortal) |
+| `> 0` | Expires that many seconds after the push |
+| `< 0` | Never expires |
+
+**The one-hour default is applied by the HTTP layer, not the store.** A plain proto3 `int64`
+cannot distinguish an omitted field from an explicit `0`, so defaulting inside the store
+would silently redefine what an existing gRPC caller's `0` means, with no way for them to
+ask for the old behavior. `POST /_telemetry/commands` decodes `ttl_seconds` into a pointer,
+so it *can* see the difference: omit the field and you get 3600; send `0` and you get no
+expiry.
+
+That default is a **bound on how long an unanswered command occupies memory, not a delivery
 window**. It deliberately does not encode "N heartbeat cycles": `HeartbeatInterval` is
 client-side config with no upper bound, the server is never told what it is, and clients
 matched by one scope may use different values. A default expressed in cycles would expire
-before a client on a long interval ever got a chance to read the command. An hour covers
-clients on multi-minute intervals and clients that are briefly disconnected, while still
-bounding the leak. A caller who knows the target's cadence should pass `ttl_seconds`
-explicitly.
+before a client on a long interval ever got a chance to read the command.
 
-Without any default, a client that restarted, crashed, or simply never answered would
-leave the command in RootCoord memory for the life of the process.
+Without any default, a command that no client ever collects stays in RootCoord memory for
+the life of the process.
 
-Replying still deletes a command immediately; the TTL only governs commands that are never
-answered. Persistent configs ignore TTL entirely.
+Persistent configs ignore TTL entirely.
+
+A reply reclaims a command only when the command named a single client — see
+[Replies](#replies). A broadcast command is answered by many clients, so for it the TTL is
+the only thing that ever removes it.
 
 #### 3. HTTP Handlers (Proxy)
 
@@ -544,9 +554,19 @@ fails to execute it, because the client has already advanced its watermark past 
 
 #### Replies
 
-Any reply with a non-empty `command_id` — **whether or not `success` is true** — deletes the
-corresponding non-persistent command server-side. Replies are the fast path for reclaiming
-a command; the TTL above is the backstop for clients that never answer.
+A reply with a non-empty `command_id` — **whether or not `success` is true** — reclaims the
+corresponding non-persistent command server-side, but **only when that command was scoped to
+a single client** (`client:<id>`). There the reply is the whole answer, so the command is
+finished.
+
+A `global` or `database:` command is delivered to every matching client and answered by each
+on its own heartbeat. Deleting it on the first reply would let whichever client heartbeats
+soonest cancel delivery to all the others — with clients on a 30s and a 5min interval, the
+slow one would never receive it at all. Those commands are removed only by their TTL.
+
+So: replies are the fast path for reclaiming a **client-scoped** command; the TTL is the
+backstop for client-scoped commands nobody answers, and the *only* mechanism for broadcast
+ones.
 
 The client queues replies and clears them **only after a successful heartbeat**, so replies
 survive a failed heartbeat and are retried on the next one. Commands already executed still

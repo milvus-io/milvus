@@ -121,34 +121,12 @@ const (
 	clientIDStableKey = "client_id_stable"
 )
 
-const (
-	// defaultCommandTTLSeconds bounds how long an unspecified-TTL one-time command
-	// survives, so that a command nobody ever collects is eventually reclaimed instead of
-	// occupying RootCoord memory for the life of the process.
-	//
-	// This is a safety net, not a delivery window. It deliberately does not try to encode
-	// "N heartbeat cycles": HeartbeatInterval is client-side config with no upper bound,
-	// the server is not told what it is, and different clients matched by one scope may
-	// use different values. An hour is long enough to cover a client on a multi-minute
-	// interval, or one that is briefly disconnected, while still bounding the leak.
-	//
-	// A caller that knows better should pass ttl_seconds explicitly; a negative value
-	// still means "never expire". Replying reclaims a command immediately regardless, so
-	// this only governs commands that are never answered.
-	defaultCommandTTLSeconds = 3600
-)
-
-// resolveCommandTTL maps a requested TTL onto the value stored with the command.
-//
-//	0  -> unspecified, use the default
-//	<0 -> never expire (explicit opt-in; every expiry check treats <=0 as immortal)
-//	>0 -> honor the caller
-func resolveCommandTTL(requested int64) int64 {
-	if requested == 0 {
-		return defaultCommandTTLSeconds
-	}
-	return requested
-}
+// The store honors ttl_seconds exactly as the proto documents it -- "0 = no expiry,
+// >0 = auto-expire in seconds" -- because a plain proto3 int64 cannot distinguish an
+// omitted field from an explicit zero. Substituting a default here would silently change
+// what an existing gRPC caller's 0 means, with no way for them to ask for the old
+// behavior. Defaulting belongs where absence is observable: the HTTP layer, which decodes
+// ttl_seconds into a pointer. See defaultCommandTTLSeconds in internal/proxy.
 
 // cache holds in-memory cache of all commands and configs
 // Loaded at initialization and kept in sync with etcd on writes
@@ -343,9 +321,8 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 			Payload:     req.Payload,
 			CreateTime:  createTime,
 			TargetScope: scope,
-			// Resolved once, at push time, so every downstream expiry check and the
-			// remaining-time shown in the WebUI operate on the effective value.
-			TTLSeconds: resolveCommandTTL(req.TtlSeconds),
+			// Stored verbatim: 0 means no expiry, per the proto. See the note above.
+			TTLSeconds: req.TtlSeconds,
 		}
 		// Update cache
 		s.cacheMu.Lock()
@@ -499,19 +476,26 @@ func (s *CommandStore) DeleteCommand(ctx context.Context, commandID string) erro
 func (s *CommandStore) CleanupExpiredCommands(ctx context.Context) {
 	now := time.Now().UnixMilli()
 
+	// maxReapedSamples bounds the detail in the log line below. A command reaped here is
+	// one no client ever collected, so whoever pushed it is still waiting on a reply that
+	// can never arrive, and the ID and scope are what let them correlate. But nothing
+	// bounds how many commands can expire at once, and formatting every one of them --
+	// inside the read lock, into a single log record -- would turn a large sweep into a
+	// giant allocation, a giant log line, and a long lock hold. A few examples plus the
+	// total is enough to recognize what happened.
+	const maxReapedSamples = 10
+
 	// Find expired commands
 	s.cacheMu.RLock()
 	var expired []string
-	// Describe what is being reaped, not just how many. A command reaped here is one no
-	// client ever collected, so whoever pushed it is still waiting on a reply that can now
-	// never arrive -- typically an operator whose target client went offline. Without the
-	// ID and scope there is nothing to correlate that stuck request against.
 	var reaped []string
 	for _, cmd := range s.cache.commands {
 		if cmd.TTLSeconds > 0 && now > cmd.CreateTime+cmd.TTLSeconds*1000 {
 			expired = append(expired, cmd.CommandID)
-			reaped = append(reaped, fmt.Sprintf("%s(%s,scope=%s,ttl=%ds)",
-				cmd.CommandID, cmd.CommandType, cmd.TargetScope, cmd.TTLSeconds))
+			if len(reaped) < maxReapedSamples {
+				reaped = append(reaped, fmt.Sprintf("%s(%s,scope=%s,ttl=%ds)",
+					cmd.CommandID, cmd.CommandType, cmd.TargetScope, cmd.TTLSeconds))
+			}
 		}
 	}
 	s.cacheMu.RUnlock()
@@ -524,7 +508,8 @@ func (s *CommandStore) CleanupExpiredCommands(ctx context.Context) {
 	if len(expired) > 0 {
 		mlog.Info(ctx, "CleanupExpiredCommands: reaped commands no client collected before their TTL",
 			mlog.Int("deleted", len(expired)),
-			mlog.Strings("commands", reaped))
+			mlog.Int("sampled", len(reaped)),
+			mlog.Strings("sample", reaped))
 	}
 }
 

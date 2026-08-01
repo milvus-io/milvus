@@ -2475,11 +2475,21 @@ func TestHandleShowLatencyHistoryMarshalError(t *testing.T) {
 			manager.createSnapshot()
 		}
 
+		// end_time is a second past "now" on purpose. RFC3339 has second granularity, so
+		// formatting time.Now() rounds the query end *down* by up to 999ms -- and these
+		// five snapshots are all created inside a single millisecond, so their windows now
+		// start after that truncated boundary and fall outside the range.
+		//
+		// This only shows up because snapshot windows are honest now: they run from the
+		// previous window's end rather than always claiming to start one heartbeat
+		// interval ago, which used to put every snapshot 30s in the past no matter when it
+		// was taken. Real snapshots are seconds apart, so their start is never inside the
+		// truncation gap; only a back-to-back test loop can produce a zero-width window.
 		now := time.Now()
 		tenMinAgo := now.Add(-10 * time.Minute)
 		payload := LatencyHistoryPayload{
 			StartTime: tenMinAgo.Format(time.RFC3339),
-			EndTime:   now.Format(time.RFC3339),
+			EndTime:   now.Add(time.Second).Format(time.RFC3339),
 			Detail:    true, // Detail mode
 		}
 		payloadBytes, _ := json.Marshal(payload)
@@ -3563,4 +3573,38 @@ func (s *unhealthyTelemetryServer) ClientHeartbeat(context.Context, *milvuspb.Cl
 	return &milvuspb.ClientHeartbeatResponse{
 		Status: &commonpb.Status{Code: 1, Reason: "telemetry manager not initialized"},
 	}, nil
+}
+
+// TestSnapshotWindowTracksActualElapsedTime covers the window a snapshot claims to cover.
+//
+// Counters accumulate until they are collected, so the window has to be the time actually
+// covered. Deriving it as now - HeartbeatInterval assumes the loop ran on schedule, which
+// the Unimplemented backoff breaks: it can stretch a gap to 30 minutes while the configured
+// interval still says 30 seconds. Half an hour of traffic then gets labeled a 30 second
+// window, and every rate derived from it, plus any history query filtering on the range, is
+// wrong by that factor.
+func TestSnapshotWindowTracksActualElapsedTime(t *testing.T) {
+	cfg := DefaultTelemetryConfig()
+	cfg.HeartbeatInterval = time.Hour // deliberately nothing like the real gap below
+	m := NewClientTelemetryManager(nil, cfg)
+
+	m.createSnapshot()
+	time.Sleep(20 * time.Millisecond)
+	m.createSnapshot()
+
+	m.snapshotsMu.RLock()
+	snapshots := append([]*MetricsSnapshot(nil), m.snapshots...)
+	m.snapshotsMu.RUnlock()
+
+	require.Len(t, snapshots, 2)
+	first, second := snapshots[0], snapshots[1]
+
+	assert.Equal(t, first.EndTime, second.Timestamp,
+		"a window must start where the previous one ended, not one configured interval ago")
+	assert.LessOrEqual(t, second.EndTime-second.Timestamp, int64(5000),
+		"a 20ms gap must not be reported as an hour-long window")
+
+	// The first snapshot has no predecessor, so falling back to the configured interval is
+	// the only estimate available.
+	assert.Equal(t, cfg.HeartbeatInterval.Milliseconds(), first.EndTime-first.Timestamp)
 }

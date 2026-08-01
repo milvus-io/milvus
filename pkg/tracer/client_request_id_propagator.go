@@ -44,23 +44,29 @@ func withSyntheticParent(ctx context.Context, spanID trace.SpanID) context.Conte
 	return context.WithValue(ctx, syntheticParentKey{}, spanID)
 }
 
-// hasSyntheticParent reports whether the parent span context in ctx is one this package
-// synthesized from a client_request_id.
+// syntheticParent reports whether the parent span context in ctx is one this package
+// synthesized from a client_request_id, and returns the SpanID it synthesized.
 //
 // It re-checks the span context rather than trusting the marker alone: the marker stays in
 // the context for the whole request, so a child span started later in the same process
 // would otherwise be misidentified as having a synthetic parent and be re-sampled
 // independently of its real parent.
-func hasSyntheticParent(ctx context.Context) bool {
+//
+// The SpanID matters beyond identification: it is the only server-generated randomness in a
+// trace whose ID came from the caller, so it is what the sampler keys its ratio decision on.
+func syntheticParent(ctx context.Context) (trace.SpanID, bool) {
 	if ctx == nil {
-		return false
+		return trace.SpanID{}, false
 	}
 	spanID, ok := ctx.Value(syntheticParentKey{}).(trace.SpanID)
 	if !ok {
-		return false
+		return trace.SpanID{}, false
 	}
 	psc := trace.SpanContextFromContext(ctx)
-	return psc.IsRemote() && psc.SpanID() == spanID
+	if !psc.IsRemote() || psc.SpanID() != spanID {
+		return trace.SpanID{}, false
+	}
+	return spanID, true
 }
 
 type clientRequestIDPropagator struct{}

@@ -508,6 +508,11 @@ type ClientTelemetryManager struct {
 	lastHeartbeatErr   error
 	lastHeartbeatErrMu sync.RWMutex
 
+	// lastSnapshotEnd is the end of the most recent snapshot window, in Unix milliseconds,
+	// so the next one can start where it left off instead of assuming the configured
+	// interval elapsed. Zero until the first snapshot.
+	lastSnapshotEnd atomic.Int64
+
 	// Deterministic sampling counter
 	samplingCounter uint64
 }
@@ -1256,9 +1261,26 @@ func (m *ClientTelemetryManager) createSnapshot() {
 	metrics := m.collectMetrics()
 
 	now := time.Now().UnixMilli()
+
+	// The window starts where the previous one ended, not one configured interval ago.
+	// Counters accumulate until they are collected, so the window has to be the time
+	// actually covered. Assuming HeartbeatInterval is wrong whenever the loop did not run
+	// on schedule: the Unimplemented backoff can stretch a gap to 30 minutes, and a
+	// server-pushed interval change moves it too. Labeling half an hour of traffic as a
+	// 30 second window makes every rate derived from it, and every history query that
+	// filters on the range, wrong by the same factor.
+	start := m.lastSnapshotEnd.Load()
+	if start == 0 || start > now {
+		// First snapshot of this process, or the clock moved backwards. Fall back to the
+		// configured interval -- it is the best guess available for a window with no
+		// predecessor.
+		start = now - heartbeatInterval.Milliseconds()
+	}
+	m.lastSnapshotEnd.Store(now)
+
 	snapshot := &MetricsSnapshot{
-		Timestamp: now - heartbeatInterval.Milliseconds(), // Start of the snapshot period
-		EndTime:   now,                                    // End of the snapshot period
+		Timestamp: start, // Start of the snapshot period
+		EndTime:   now,   // End of the snapshot period
 		Metrics:   metrics,
 	}
 

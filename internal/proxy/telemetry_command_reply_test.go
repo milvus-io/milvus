@@ -139,6 +139,52 @@ func TestParseWaitParam(t *testing.T) {
 	}
 }
 
+// TestResolveCommandTTL pins where the default lives and why. The proto documents
+// ttl_seconds as "0 = no expiry", and a plain proto3 int64 collapses "omitted" and
+// "explicit 0" into the same value -- so only this layer, which decodes JSON into a
+// pointer, can apply a default without redefining what an existing caller's 0 means.
+func TestResolveCommandTTL(t *testing.T) {
+	ttl := func(v int64) *int64 { return &v }
+
+	cases := []struct {
+		name      string
+		requested *int64
+		expected  int64
+	}{
+		{"omitted gets the default", nil, defaultCommandTTLSeconds},
+		{"explicit zero stays no-expiry", ttl(0), 0},
+		{"positive is honored", ttl(120), 120},
+		{"negative means never expire", ttl(-1), -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, resolveCommandTTL(tc.requested))
+		})
+	}
+
+	assert.EqualValues(t, 3600, defaultCommandTTLSeconds,
+		"a bound on memory, not a delivery window: the server is never told a client's heartbeat interval")
+}
+
+// TestPostCommandTTLFromJSON covers the same distinction through the decoder, since the
+// pointer only helps if the request struct actually keeps it.
+func TestPostCommandTTLFromJSON(t *testing.T) {
+	decode := func(body string) int64 {
+		var req struct {
+			TTLSeconds *int64 `json:"ttl_seconds"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+		return resolveCommandTTL(req.TTLSeconds)
+	}
+
+	assert.EqualValues(t, defaultCommandTTLSeconds, decode(`{"command_type":"show_errors"}`),
+		"a body with no ttl_seconds must get the default")
+	assert.EqualValues(t, 0, decode(`{"command_type":"show_errors","ttl_seconds":0}`),
+		"an explicit 0 must survive as no-expiry, the meaning the proto documents")
+	assert.EqualValues(t, 45, decode(`{"command_type":"show_errors","ttl_seconds":45}`))
+}
+
 func TestCommandReplyPayload(t *testing.T) {
 	t.Run("pending when there is no reply", func(t *testing.T) {
 		body := commandReplyPayload("cmd-1", "client-1", nil, 1, 0)

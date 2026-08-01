@@ -1062,87 +1062,64 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 	})
 }
 
-func TestResolveCommandTTL(t *testing.T) {
+// TestPushCommandKeepsProtoTTLSemantics pins the wire contract. The proto documents
+// ttl_seconds as "0 = no expiry, >0 = auto-expire in seconds", and a plain proto3 int64
+// cannot tell an omitted field from an explicit zero -- so the store must not substitute a
+// default. Doing so silently redefined what an existing gRPC caller's 0 meant. The HTTP
+// layer, which decodes into a pointer and can see the difference, owns the default.
+func TestPushCommandKeepsProtoTTLSemantics(t *testing.T) {
+	ctx := context.Background()
+
 	cases := []struct {
-		name      string
-		requested int64
-		expected  int64
+		name     string
+		ttl      int64
+		expected int64
 	}{
-		{"unset gets the default", 0, defaultCommandTTLSeconds},
-		{"explicit value is honored", 3600, 3600},
+		{"zero is stored as no-expiry", 0, 0},
+		{"positive is honored verbatim", 3600, 3600},
 		{"negative means never expire", -1, -1},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expected, resolveCommandTTL(tc.requested))
+			store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+			id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+				CommandType:    "show_errors",
+				TargetClientId: "client-1",
+				TtlSeconds:     tc.ttl,
+			})
+			require.NoError(t, err)
+
+			store.cacheMu.RLock()
+			cmd := store.cache.commands[id]
+			store.cacheMu.RUnlock()
+
+			require.NotNil(t, cmd)
+			assert.Equal(t, tc.expected, cmd.TTLSeconds)
 		})
 	}
-
-	// A safety net for commands that are never answered, deliberately generous: the
-	// server is not told a client's heartbeat interval, so this cannot be expressed in
-	// heartbeat cycles.
-	assert.Equal(t, int64(3600), int64(defaultCommandTTLSeconds))
 }
 
-func TestPushCommandAppliesDefaultTTL(t *testing.T) {
+func TestExpiredCommandIsSwept(t *testing.T) {
 	ctx := context.Background()
+	store := NewCommandStoreWithKV(newMockKV(), "/test/")
 
-	t.Run("one-time command with unset ttl expires", func(t *testing.T) {
-		store := NewCommandStoreWithKV(newMockKV(), "/test/")
-
-		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
-			CommandType:    "show_errors",
-			TargetClientId: "client-1",
-			TtlSeconds:     0,
-		})
-		require.NoError(t, err)
-
-		store.cacheMu.RLock()
-		cmd := store.cache.commands[id]
-		store.cacheMu.RUnlock()
-
-		require.NotNil(t, cmd)
-		assert.Equal(t, int64(defaultCommandTTLSeconds), cmd.TTLSeconds,
-			"an uncollected command must not live forever")
+	id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+		CommandType: "show_errors",
+		TtlSeconds:  3600,
 	})
+	require.NoError(t, err)
 
-	t.Run("negative ttl still means never expire", func(t *testing.T) {
-		store := NewCommandStoreWithKV(newMockKV(), "/test/")
+	// Backdate past the TTL, as if the client never answered.
+	store.cacheMu.Lock()
+	store.cache.commands[id].CreateTime = time.Now().UnixMilli() - 3601*1000
+	store.cacheMu.Unlock()
 
-		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
-			CommandType: "show_errors",
-			TtlSeconds:  -1,
-		})
-		require.NoError(t, err)
+	store.CleanupExpiredCommands(ctx)
 
-		store.cacheMu.RLock()
-		cmd := store.cache.commands[id]
-		store.cacheMu.RUnlock()
-
-		require.NotNil(t, cmd)
-		assert.Equal(t, int64(-1), cmd.TTLSeconds)
-	})
-
-	t.Run("expired default-ttl command is swept", func(t *testing.T) {
-		store := NewCommandStoreWithKV(newMockKV(), "/test/")
-
-		id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
-			CommandType: "show_errors",
-			TtlSeconds:  0,
-		})
-		require.NoError(t, err)
-
-		// Backdate past the default TTL, as if the client never answered.
-		store.cacheMu.Lock()
-		store.cache.commands[id].CreateTime = time.Now().UnixMilli() - (defaultCommandTTLSeconds+1)*1000
-		store.cacheMu.Unlock()
-
-		store.CleanupExpiredCommands(ctx)
-
-		store.cacheMu.RLock()
-		_, stillThere := store.cache.commands[id]
-		store.cacheMu.RUnlock()
-		assert.False(t, stillThere, "default TTL must actually reclaim the command")
-	})
+	store.cacheMu.RLock()
+	_, stillThere := store.cache.commands[id]
+	store.cacheMu.RUnlock()
+	assert.False(t, stillThere, "an uncollected command must be reclaimed on its TTL")
 }
