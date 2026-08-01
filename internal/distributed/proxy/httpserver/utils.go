@@ -539,6 +539,13 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					continue
 				}
 
+				if !fieldValue.Exists() {
+					return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("field %s is required", fieldName)
+				}
+				if fieldValue.Type == gjson.Null {
+					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s is not nullable", fieldName)
+				}
+
 				switch fieldType {
 				case schemapb.DataType_FloatVector:
 					if dataString == "" {

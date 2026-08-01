@@ -702,8 +702,50 @@ func TestAnyToColumns(t *testing.T) {
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
 		var err error
 		_, _, err = checkAndSetData(body, coll, false)
-		assert.Error(t, err)
-		assert.Equal(t, true, strings.HasPrefix(err.Error(), "strconv.ParseInt: parsing \"\": invalid syntax"))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
+		assert.Contains(t, err.Error(), FieldBookID)
+	})
+
+	t.Run("insert with varchar pk missing when autoid==false", func(t *testing.T) {
+		body := []byte("{\"data\": {\"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
+		coll := generateCollectionSchema(schemapb.DataType_VarChar, false, false)
+
+		_, _, err := checkAndSetData(body, coll, false)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
+		assert.Contains(t, err.Error(), FieldBookID)
+	})
+
+	t.Run("insert with null varchar pk when autoid==false", func(t *testing.T) {
+		body := []byte("{\"data\": {\"book_id\": null, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
+		coll := generateCollectionSchema(schemapb.DataType_VarChar, false, false)
+
+		_, _, err := checkAndSetData(body, coll, false)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), FieldBookID)
+		assert.Contains(t, err.Error(), "not nullable")
+	})
+
+	t.Run("insert with varchar pk missing when autoid==true", func(t *testing.T) {
+		body := []byte("{\"data\": {\"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
+		coll := generateCollectionSchema(schemapb.DataType_VarChar, true, false)
+
+		data, validData, err := checkAndSetData(body, coll, false)
+
+		require.NoError(t, err)
+		require.Len(t, data, 1)
+		assert.NotContains(t, data[0], FieldBookID)
+		assert.Empty(t, validData)
+
+		fieldsData, err := anyToColumns(data, validData, coll, true, false)
+		require.NoError(t, err)
+		for _, fieldData := range fieldsData {
+			assert.NotEqual(t, FieldBookID, fieldData.GetFieldName())
+		}
 	})
 
 	t.Run("insert with autoid==true", func(t *testing.T) {
@@ -1018,7 +1060,6 @@ func TestCheckAndSetData(t *testing.T) {
 	})
 	t.Run("without vector", func(t *testing.T) {
 		body := []byte("{\"data\": {}}")
-		var err error
 		primaryField := generatePrimaryField(schemapb.DataType_Int64, true)
 		floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 		floatVectorField.Name = "floatVector"
@@ -1030,51 +1071,25 @@ func TestCheckAndSetData(t *testing.T) {
 		bfloat16VectorField.Name = "bfloat16Vector"
 		int8VectorField := generateVectorFieldSchema(schemapb.DataType_Int8Vector)
 		int8VectorField.Name = "int8Vector"
-		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
-			Name: DefaultCollectionName,
-			Fields: []*schemapb.FieldSchema{
-				primaryField, floatVectorField,
-			},
-			EnableDynamicField: true,
-		}, false)
-		assert.Error(t, err)
-		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
-			Name: DefaultCollectionName,
-			Fields: []*schemapb.FieldSchema{
-				primaryField, binaryVectorField,
-			},
-			EnableDynamicField: true,
-		}, false)
-		assert.Error(t, err)
-		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
-			Name: DefaultCollectionName,
-			Fields: []*schemapb.FieldSchema{
-				primaryField, float16VectorField,
-			},
-			EnableDynamicField: true,
-		}, false)
-		assert.Error(t, err)
-		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
-			Name: DefaultCollectionName,
-			Fields: []*schemapb.FieldSchema{
-				primaryField, bfloat16VectorField,
-			},
-			EnableDynamicField: true,
-		}, false)
-		assert.Error(t, err)
-		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
-			Name: DefaultCollectionName,
-			Fields: []*schemapb.FieldSchema{
-				primaryField, int8VectorField,
-			},
-			EnableDynamicField: true,
-		}, false)
-		assert.Error(t, err)
-		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+
+		for _, vectorField := range []*schemapb.FieldSchema{
+			floatVectorField,
+			binaryVectorField,
+			float16VectorField,
+			bfloat16VectorField,
+			int8VectorField,
+		} {
+			_, _, err := checkAndSetData(body, &schemapb.CollectionSchema{
+				Name: DefaultCollectionName,
+				Fields: []*schemapb.FieldSchema{
+					primaryField, vectorField,
+				},
+				EnableDynamicField: true,
+			}, false)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterMissing)
+			assert.Contains(t, err.Error(), vectorField.GetName())
+		}
 	})
 
 	t.Run("with pk when autoID == True when upsert", func(t *testing.T) {
