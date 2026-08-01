@@ -21,6 +21,7 @@ type httpConfig struct {
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
+	LegacyArrayResponse   ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
@@ -71,6 +72,19 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AcceptTypeAllowInt64.Init(base.mgr)
+
+	p.LegacyArrayResponse = ParamItem{
+		Key:          "proxy.http.legacyArrayResponse",
+		DefaultValue: "false",
+		Version:      "3.0.0",
+		Doc: `high-level restful api, whether to return Array fields wrapped in the raw protobuf ScalarField shape
+({"tags":{"Data":{"StringData":{"data":["a","b"]}}}}) instead of a native JSON array ({"tags":["a","b"]}).
+Only enable this to keep clients written against the old, incorrect shape working while they migrate;
+it will be removed in a future release.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.LegacyArrayResponse.Init(base.mgr)
 
 	p.EnablePprof = ParamItem{
 		Key:          "proxy.http.enablePprof",

@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
@@ -1448,7 +1449,7 @@ func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.Collecti
 	return accessor, nil
 }
 
-func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{}, error) {
+func (accessor *structArrayRowAccessor) row(rowIdx int, enableInt64 bool) ([]map[string]interface{}, error) {
 	fd := accessor.fieldData
 	subs := accessor.subFields
 	if len(subs) == 0 {
@@ -1492,7 +1493,7 @@ func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{
 			if dataIdx >= len(rowData) {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
-			values := scalarArrayToInterfaces(rowData[dataIdx])
+			values := scalarArrayToInterfaces(rowData[dataIdx], enableInt64)
 			if len(values) != elemCount {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
@@ -1558,7 +1559,9 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]
 		if rowIdx >= len(rowData) {
 			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
-		return len(scalarArrayToInterfaces(rowData[rowIdx])), nil
+		// Element count is independent of the Int64 response mode; pass true to
+		// skip the per-element string conversion.
+		return len(scalarArrayToInterfaces(rowData[rowIdx], true)), nil
 	case schemapb.DataType_ArrayOfVector:
 		va := sub.GetVectors().GetVectorArray()
 		if va == nil || rowIdx >= len(va.GetData()) {
@@ -1575,7 +1578,11 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]
 	}
 }
 
-func scalarArrayToInterfaces(sf *schemapb.ScalarField) []interface{} {
+// scalarArrayToInterfaces flattens one array row into per-element values so the
+// caller can zip them into the struct's per-element maps. enableInt64 carries the
+// Accept-Type-Allow-Int64 semantics down to Int64 elements, matching what
+// scalarFieldToRESTAny does for top-level Array fields.
+func scalarArrayToInterfaces(sf *schemapb.ScalarField, enableInt64 bool) []interface{} {
 	switch sf.GetData().(type) {
 	case *schemapb.ScalarField_BoolData:
 		src := sf.GetBoolData().GetData()
@@ -1595,7 +1602,11 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField) []interface{} {
 		src := sf.GetLongData().GetData()
 		out := make([]interface{}, len(src))
 		for i, v := range src {
-			out[i] = v
+			if enableInt64 {
+				out[i] = v
+			} else {
+				out[i] = strconv.FormatInt(v, 10)
+			}
 		}
 		return out
 	case *schemapb.ScalarField_FloatData:
@@ -2592,7 +2603,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 			return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s for field %s", subs[0].GetType(), fieldData.GetFieldName())
 		}
 	default:
-		return 0, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
+		return 0, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName()))
 	}
 }
 
@@ -2664,6 +2675,119 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 	return rowIdx, true, nil
 }
 
+// safeMessageError marks an error whose message was written for the caller and is
+// therefore safe to echo in an HTTP response. Errors are not safe by default: most
+// of the ParameterInvalid errors on the response path report a server-side shape
+// mismatch (row counts, valid-data bitmap lengths, element counts) whose wording
+// leaks internal layout, so classification alone cannot decide what to echo.
+type safeMessageError struct{ error }
+
+func (e *safeMessageError) Unwrap() error { return e.error }
+
+// asSafeMessage marks err as caller-facing. Apply it only where the message tells
+// the caller what to do about their own request.
+func asSafeMessage(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &safeMessageError{err}
+}
+
+// outputFieldError attributes a response-serialization failure to the output field
+// that caused it. The name comes from the caller's own outputFields, so echoing it
+// back tells them which column to drop or report without exposing anything internal.
+// The wrapped cause is not safe to echo and is only unwrapped for classification.
+type outputFieldError struct {
+	field string
+	inner error
+}
+
+func (e *outputFieldError) Error() string {
+	return fmt.Sprintf("failed to serialize output field %s: %s", e.field, e.inner.Error())
+}
+
+func (e *outputFieldError) Unwrap() error { return e.inner }
+
+func wrapOutputFieldErr(fieldName string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &outputFieldError{field: fieldName, inner: err}
+}
+
+// resultErrMessage builds the client-facing message for a response-serialization
+// failure. Input errors carry guidance the caller can act on (e.g. an output field
+// type the REST layer cannot render — "use other sdk please") and are passed through
+// whole. A server-side fault only yields the offending output field: the rest of its
+// detail names internal structures and row offsets that mean nothing to the caller,
+// and stays in the log line the caller of this function already emits.
+func resultErrMessage(err error) string {
+	base := merr.ErrInvalidSearchResult.Error()
+	// Explicitly marked messages are echoed whole; the mark, not the error type,
+	// is what makes a message safe.
+	var safeErr *safeMessageError
+	if errors.As(err, &safeErr) {
+		return base + ", error: " + safeErr.Error()
+	}
+	var fieldErr *outputFieldError
+	if errors.As(err, &fieldErr) {
+		return base + ", error: failed to serialize output field " + fieldErr.field
+	}
+	return base
+}
+
+func nonNilSlice[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
+}
+
+func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, error) {
+	// A missing row renders as null and an unset oneof as [], matching what the
+	// previous implementation produced. Turning either into a request-level
+	// failure would widen this change beyond the serialization format it fixes.
+	if field == nil {
+		return nil, nil
+	}
+
+	switch data := field.GetData().(type) {
+	case nil:
+		// segcore emits a default-constructed ScalarField for an empty array whose
+		// element type it could not determine (Array.h: `default: { // empty array }`).
+		return []any{}, nil
+	case *schemapb.ScalarField_BoolData:
+		return nonNilSlice(data.BoolData.GetData()), nil
+	case *schemapb.ScalarField_IntData:
+		return nonNilSlice(data.IntData.GetData()), nil
+	case *schemapb.ScalarField_LongData:
+		values := nonNilSlice(data.LongData.GetData())
+		if enableInt64 {
+			return values, nil
+		}
+		return formatInt64(values), nil
+	case *schemapb.ScalarField_FloatData:
+		return nonNilSlice(data.FloatData.GetData()), nil
+	case *schemapb.ScalarField_DoubleData:
+		return nonNilSlice(data.DoubleData.GetData()), nil
+	case *schemapb.ScalarField_StringData:
+		return nonNilSlice(data.StringData.GetData()), nil
+	case *schemapb.ScalarField_ArrayData:
+		elements := data.ArrayData.GetData()
+		values := make([]any, 0, len(elements))
+		for _, element := range elements {
+			value, err := scalarFieldToRESTAny(element, enableInt64)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported array row scalar field type %T", data)
+	}
+}
+
 //nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
@@ -2674,7 +2798,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			var err error
 			rowsNum, err = fieldDataRowCount(fieldDataList[0])
 			if err != nil {
-				return nil, err
+				return nil, wrapOutputFieldErr(fieldDataList[0].GetFieldName(), err)
 			}
 		} else if ids != nil {
 			switch ids.GetIdField().(type) {
@@ -2685,7 +2809,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
 			default:
-				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
+				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
 		}
 	}
@@ -2697,19 +2821,20 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	for idx, fieldData := range fieldDataList {
 		accessor, err := newFieldDataRowAccessor(fieldData)
 		if err != nil {
-			return nil, err
+			return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 		}
 		fieldDataAccessors = append(fieldDataAccessors, accessor)
 		if fieldData.GetType() == schemapb.DataType_ArrayOfStruct {
 			structAccessor, err := newStructArrayRowAccessor(fieldData, collectionSchema)
 			if err != nil {
-				return nil, err
+				return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 			}
 			structArrayAccessors[idx] = structAccessor
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+	legacyArrayResponse := paramtable.Get().HTTPCfg.LegacyArrayResponse.GetAsBool()
 
 	pkFieldName := DefaultPrimaryFieldName
 	if collectionSchema != nil {
@@ -2728,7 +2853,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				fieldData := fieldDataList[j]
 				dataIdx, valid, err := fieldDataAccessors[j].rowIndex(i)
 				if err != nil {
-					return nil, err
+					return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 				}
 				if !valid {
 					if !fieldData.GetIsDynamic() {
@@ -2778,7 +2903,18 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_Int8Vector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetInt8Vector()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
 				case schemapb.DataType_Array:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
+					arrayRow := fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
+					if legacyArrayResponse {
+						// Escape hatch: emit the raw ScalarField so it serializes back into
+						// the protobuf wrapper shape clients may have parsed before the fix.
+						row[fieldDataList[j].GetFieldName()] = arrayRow
+						continue
+					}
+					value, err := scalarFieldToRESTAny(arrayRow, enableInt64)
+					if err != nil {
+						return nil, wrapOutputFieldErr(fieldData.GetFieldName(), merr.Wrapf(err, "row %d", i))
+					}
+					row[fieldDataList[j].GetFieldName()] = value
 				case schemapb.DataType_JSON:
 					data, ok := fieldDataList[j].GetScalars().GetData().(*schemapb.ScalarField_JsonData)
 					if ok && !fieldDataList[j].GetIsDynamic() {
@@ -2790,7 +2926,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						if err != nil {
 							mlog.Error(context.TODO(),
 								fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
-							return nil, err
+							return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 						}
 
 						if containsString(dynamicOutputFields, fieldDataList[j].GetFieldName()) {
@@ -2812,9 +2948,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
 					}
 				case schemapb.DataType_ArrayOfStruct:
-					structRow, err := structArrayAccessors[j].row(int(dataIdx))
+					structRow, err := structArrayAccessors[j].row(int(dataIdx), enableInt64)
 					if err != nil {
-						return nil, err
+						return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 					}
 					row[fieldDataList[j].GetFieldName()] = structRow
 				default:
@@ -2835,7 +2971,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				row[pkFieldName] = stringPks[i]
 			default:
-				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
+				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
