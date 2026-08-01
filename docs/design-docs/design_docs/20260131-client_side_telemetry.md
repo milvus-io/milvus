@@ -626,7 +626,9 @@ A telemetry dashboard served at `/webui/telemetry.html` provides:
 
 ## Compatibility, Deprecation, and Migration Plan
 
-- **Backward Compatible:** No wire or API breaking changes.
+- **Backward Compatible:** No wire or API breaking changes. The only proto change is the
+  additive `GetClientTelemetryRequest.command_id`; leaving it empty preserves the previous
+  response exactly, and no existing field changes type or meaning.
 - **No Breaking Changes:** Existing SDK usage remains unchanged.
 - **Server Compatibility:** Old clients simply never heartbeat; they appear only through
   their `Connect` call, not in telemetry.

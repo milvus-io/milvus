@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -356,9 +355,9 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			TargetClientID string          `json:"target_client_id"`
 			TargetDatabase string          `json:"target_database"`
 			Payload        json.RawMessage `json:"payload"`
-			// A pointer so an omitted ttl_seconds stays distinguishable from an explicit
-			// 0 all the way to the store, which applies the default only to the former.
-			// The proto field is `optional`, so the distinction survives the RPC too.
+			// A pointer because JSON, unlike the RPC field, can distinguish an omitted
+			// ttl_seconds from an explicit 0. That distinction is resolved here and never
+			// travels: the RPC carries a concrete value.
 			TTLSeconds *int64 `json:"ttl_seconds"`
 			Persistent bool   `json:"persistent"`
 		}
@@ -401,7 +400,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			TargetClientId: cmdReq.TargetClientID,
 			TargetDatabase: cmdReq.TargetDatabase,
 			Payload:        payloadBytes,
-			TtlSeconds:     proto.Int64(resolveCommandTTL(cmdReq.TTLSeconds)),
+			TtlSeconds:     resolveCommandTTL(cmdReq.TTLSeconds),
 			Persistent:     cmdReq.Persistent,
 		}
 
@@ -552,7 +551,7 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 			// Bounded on purpose: an answer an hour late is of no use to whoever asked,
 			// and an unbounded command leaks if the client never comes back. The cost is
 			// that a client offline for over an hour never sees this command.
-			TtlSeconds: proto.Int64(defaultCommandTTLSeconds),
+			TtlSeconds: defaultCommandTTLSeconds,
 			Persistent: false,
 		}
 
@@ -620,7 +619,7 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 			// Bounded on purpose: an answer an hour late is of no use to whoever asked,
 			// and an unbounded command leaks if the client never comes back. The cost is
 			// that a client offline for over an hour never sees this command.
-			TtlSeconds: proto.Int64(defaultCommandTTLSeconds),
+			TtlSeconds: defaultCommandTTLSeconds,
 			Persistent: false,
 		}
 

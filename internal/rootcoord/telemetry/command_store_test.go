@@ -34,11 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
-// ttlPtr builds the pointer PushClientCommandRequest.TtlSeconds now takes. The field is
-// `optional` in the proto so an omitted TTL stays distinguishable from an explicit 0; a nil
-// here means "unset", which is what earns the default.
-func ttlPtr(v int64) *int64 { return &v }
-
 // mockKV implements KVInterface for testing
 type mockKV struct {
 	mu   sync.Mutex
@@ -235,7 +230,7 @@ func TestCommandTTLExpiration(t *testing.T) {
 	// Push a command with 1 second TTL
 	expiredID, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "expired_cmd",
-		TtlSeconds:  ttlPtr(1),
+		TtlSeconds:  1,
 	})
 	require.NoError(t, err)
 
@@ -247,7 +242,7 @@ func TestCommandTTLExpiration(t *testing.T) {
 	// Push a valid command (no TTL)
 	validID, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "valid_cmd",
-		TtlSeconds:  ttlPtr(0),
+		TtlSeconds:  0,
 	})
 	require.NoError(t, err)
 
@@ -266,7 +261,7 @@ func TestCleanupExpiredCommands(t *testing.T) {
 	// Push an expired command
 	expiredID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "expired",
-		TtlSeconds:  ttlPtr(1),
+		TtlSeconds:  1,
 	})
 	store.cacheMu.Lock()
 	store.cache.commands[expiredID].CreateTime = time.Now().Add(-2 * time.Second).UnixMilli()
@@ -275,7 +270,7 @@ func TestCleanupExpiredCommands(t *testing.T) {
 	// Push a valid command
 	validID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "valid",
-		TtlSeconds:  ttlPtr(3600),
+		TtlSeconds:  3600,
 	})
 
 	// Run cleanup
@@ -534,7 +529,7 @@ func TestListCommandsWithInfo(t *testing.T) {
 	// Push a command
 	cmdID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "show_errors",
-		TtlSeconds:  ttlPtr(3600),
+		TtlSeconds:  3600,
 	})
 
 	// Push a config
@@ -1009,7 +1004,7 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 		cmdID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 			CommandType: "one_time_cmd",
 			Persistent:  false,
-			TtlSeconds:  ttlPtr(3600),
+			TtlSeconds:  3600,
 		})
 
 		// Add a persistent config
@@ -1071,24 +1066,22 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 // TestPushCommandStoresTTLVerbatim pins the wire contract: the store applies no default of
 // its own, so 0 keeps meaning "no expiry" for every caller.
 //
-// This has to hold even though ttl_seconds is `optional`. Proto3 implicit presence means a
-// client built against the older definition emits nothing for an explicit 0, so the server
-// receives it as absent and cannot tell it apart from unspecified. Defaulting on absence
-// here would convert every such client's deliberate "never expire" into an hour, silently,
-// with no way for them to ask for it back. The default belongs to the HTTP layer, which
-// decodes JSON into a pointer and really can see the difference.
+// No proto declaration could make this safe to do otherwise. Proto3 implicit presence means
+// a client emits nothing for an explicit 0, so "never expire" and "unspecified" arrive as
+// the same bytes; defaulting on that would convert every existing caller's deliberate
+// choice into an hour. The default belongs to the HTTP layer, which decodes JSON into a
+// pointer and really can see the difference.
 func TestPushCommandStoresTTLVerbatim(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
 		name     string
-		ttl      *int64
+		ttl      int64
 		expected int64
 	}{
-		{"absent is no-expiry, not a default", nil, 0},
-		{"explicit zero is no-expiry", ttlPtr(0), 0},
-		{"positive is honored verbatim", ttlPtr(120), 120},
-		{"negative means never expire", ttlPtr(-1), -1},
+		{"zero is no-expiry, not a default", 0, 0},
+		{"positive is honored verbatim", 120, 120},
+		{"negative means never expire", -1, -1},
 	}
 
 	for _, tc := range cases {
@@ -1118,7 +1111,7 @@ func TestExpiredCommandIsSwept(t *testing.T) {
 
 	id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "show_errors",
-		TtlSeconds:  ttlPtr(3600),
+		TtlSeconds:  3600,
 	})
 	require.NoError(t, err)
 
@@ -1159,8 +1152,8 @@ func TestOldClientExplicitZeroKeepsNoExpiry(t *testing.T) {
 
 	var received milvuspb.PushClientCommandRequest
 	require.NoError(t, proto.Unmarshal(onTheWire, &received))
-	require.Nil(t, received.TtlSeconds,
-		"an old client's explicit 0 is indistinguishable from absent; that is the whole trap")
+	require.Equal(t, int64(0), received.TtlSeconds,
+		"an explicit 0 is indistinguishable from absent on the wire; that is the whole trap")
 
 	store := NewCommandStoreWithKV(newMockKV(), "/test/")
 	id, err := store.PushCommand(ctx, &received)

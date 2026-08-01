@@ -121,16 +121,15 @@ const (
 	clientIDStableKey = "client_id_stable"
 )
 
-// The store honors ttl_seconds exactly as the proto documents it: 0 (or absent, which is
-// indistinguishable on the wire) means no expiry, a positive value expires the command that
-// many seconds after the push.
+// The store honors ttl_seconds exactly as the proto documents it: 0 means no expiry, a
+// positive value expires the command that many seconds after the push.
 //
-// It applies no default of its own, and `optional` does not change that. Presence only
-// helps for senders that know about it: proto3 implicit presence means a client built
-// against the old definition emits *nothing* for an explicit 0, so a new server sees the
-// field as absent and cannot tell "0, meaning never expire" from "unspecified". Defaulting
-// on absence would therefore silently convert every old client's deliberate "no expiry"
-// into an hour. Defaulting belongs where absence is genuinely observable -- the HTTP layer,
+// It applies no default of its own, and no proto declaration could let it. Proto3 implicit
+// presence means a client emits *nothing* for an explicit 0, so an absent field and a
+// deliberate "never expire" are the same bytes -- marking the field optional would only
+// give presence to senders rebuilt against the new definition, which are not the ones at
+// risk. Defaulting on absence would silently convert every existing caller's "no expiry"
+// into an hour. Defaulting belongs where absence is genuinely observable: the HTTP layer,
 // which decodes JSON into a pointer. See defaultCommandTTLSeconds in internal/proxy.
 
 // cache holds in-memory cache of all commands and configs
@@ -326,7 +325,7 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 			Payload:     req.Payload,
 			CreateTime:  createTime,
 			TargetScope: scope,
-			// Verbatim; absent decodes to 0, which is "no expiry". See the note above.
+			// Verbatim; 0 is "no expiry". See the note above.
 			TTLSeconds: req.GetTtlSeconds(),
 		}
 		// Update cache
