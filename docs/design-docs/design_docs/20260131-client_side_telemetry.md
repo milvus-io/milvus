@@ -500,11 +500,15 @@ Two ways to collect a result:
   targeted lookup instead of a scan of all clients.
 
 The proxy polls RootCoord every 2s while waiting. It is deliberately not faster: replies
-only land on a heartbeat, 30s by default, so a tighter loop buys nothing. Each poll sets
-`command_id` on `GetClientTelemetryRequest`, so the server returns only the requested reply
-rather than the client's whole history — 50 entries with payloads up to 1MiB each, which
-`IncludeMetrics: false` does *not* exclude, since replies are encoded into
-`ClientInfo.Reserved` regardless of that flag.
+only land on a heartbeat, 30s by default, so a tighter loop buys nothing — and each poll is
+not free. The server returns the target's whole reply history, 50 entries with payloads to
+1MiB each, and `IncludeMetrics: false` does *not* exclude it, because replies are encoded
+into `ClientInfo.Reserved` regardless of that flag.
+
+`GetClientTelemetryRequest.command_id` exists in milvus-proto for exactly this
+([#647](https://github.com/milvus-io/milvus-proto/pull/647)) and narrows the response to the
+requested reply, but this repo still pins the version that predates it. Using it is a
+follow-up, gated on a proto bump — see the note under *Known gaps*.
 
 Replies are also visible in the `command_replies` array of `GET /api/v1/_telemetry/clients`,
 which is how the WebUI polls; on the wire they are JSON-encoded into
@@ -629,9 +633,8 @@ A telemetry dashboard served at `/webui/telemetry.html` provides:
 
 ## Compatibility, Deprecation, and Migration Plan
 
-- **Backward Compatible:** No wire or API breaking changes. The only proto change is the
-  additive `GetClientTelemetryRequest.command_id`; leaving it empty preserves the previous
-  response exactly, and no existing field changes type or meaning.
+- **Backward Compatible:** No wire or API breaking changes, and no proto change at all —
+  this work runs entirely on the existing RPC surface.
 - **No Breaking Changes:** Existing SDK usage remains unchanged.
 - **Server Compatibility:** Old clients simply never heartbeat; they appear only through
   their `Connect` call, not in telemetry.

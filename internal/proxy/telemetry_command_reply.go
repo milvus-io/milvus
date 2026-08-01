@@ -34,7 +34,13 @@ const (
 
 	// telemetryReplyPollInterval is how often the proxy re-reads client state while waiting
 	// for a reply. Replies only ever land on a heartbeat -- 30s by default -- so polling
-	// faster than this buys nothing, whatever each poll costs.
+	// faster than this buys nothing and is not free: every poll ships the target client's
+	// entire stored reply set (up to 50 replies, each with a payload capped at 1MiB) from
+	// RootCoord through the proxy, because command_replies is encoded into
+	// ClientInfo.Reserved regardless of IncludeMetrics.
+	//
+	// Narrowing that server-side needs GetClientTelemetryRequest.command_id, which exists in
+	// milvus-proto but not in the version this repo pins; see the design doc.
 	telemetryReplyPollInterval = 2 * time.Second
 )
 
@@ -122,14 +128,12 @@ func parseWaitParam(raw string) (time.Duration, error) {
 // An empty result with a nil error means the command has not been answered yet -- a normal
 // state, not a failure, because replies only arrive on a client's next heartbeat.
 func findCommandReplies(ctx context.Context, node *Proxy, clientID, commandID string) ([]clientCommandReply, int, error) {
-	// Ask for exactly what this lookup needs. Without CommandId the server returns every
-	// reply each matching client has accumulated -- up to 50, each payload capped at 1MiB --
-	// so polling for one answer would re-transfer the entire history on every attempt.
-	// Metrics are skipped for the same reason: they are the largest thing a client reports
-	// and are not needed to read a reply.
+	// Metrics are the largest thing a client reports, so skip them: they are not needed to
+	// read replies. This does not make the lookup cheap -- command_replies is encoded into
+	// ClientInfo.Reserved regardless of this flag -- which is why the poll interval above
+	// is measured in seconds.
 	resp, err := node.GetClientTelemetry(ctx, &milvuspb.GetClientTelemetryRequest{
 		ClientId:       clientID,
-		CommandId:      commandID,
 		IncludeMetrics: false,
 	})
 	if err != nil {
