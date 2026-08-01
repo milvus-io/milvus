@@ -328,6 +328,21 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 }
 
+func (suite *ServiceSuite) TestWatchDmChannelsIndexInfoVersionCompatibility() {
+	suite.Equal(int64(300), effectiveWatchIndexInfoVersion(&querypb.WatchDmChannelsRequest{
+		Version:          100,
+		TargetVersion:    200,
+		IndexInfoVersion: 300,
+	}))
+	suite.Equal(int64(200), effectiveWatchIndexInfoVersion(&querypb.WatchDmChannelsRequest{
+		Version:       100,
+		TargetVersion: 200,
+	}))
+	suite.Equal(int64(100), effectiveWatchIndexInfoVersion(&querypb.WatchDmChannelsRequest{
+		Version: 100,
+	}))
+}
+
 func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 	ctx := context.Background()
 

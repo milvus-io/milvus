@@ -90,6 +90,21 @@ type ChannelEntry struct {
 	Channel string
 }
 
+// IndexEntry targets a field-index definition. It is composed with a trailing
+// IndexSnapshotRevisionEntry so readers can order complete collection-index
+// snapshots independently of coordinator-local wall clocks.
+type IndexEntry struct {
+	Index *model.Index
+}
+
+// IndexSnapshotRevisionEntry targets the persistent collection-level revision
+// of the complete field-index snapshot. The revision save is a commit marker:
+// all index definitions in the same composite update must be staged before it.
+type IndexSnapshotRevisionEntry struct {
+	CollectionID int64
+	Revision     int64
+}
+
 // CollectionEntry targets a collection and its children.
 type CollectionEntry struct {
 	Collection *model.Collection
@@ -154,6 +169,8 @@ type ReplicaKeyEntry struct {
 
 func (SegmentEntry) isEntry()               {}
 func (ChannelEntry) isEntry()               {}
+func (IndexEntry) isEntry()                 {}
+func (IndexSnapshotRevisionEntry) isEntry() {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
 func (RefreshJobEntry) isEntry()            {}
@@ -205,6 +222,29 @@ func AlterSegment(seg *datapb.SegmentInfo) UpdateAction {
 // MarkChannelDropped returns an UpdateAction that marks channel as removed.
 func MarkChannelDropped(channel string) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: ChannelEntry{Channel: channel}}
+}
+
+// AddIndex persists a new field-index definition.
+func AddIndex(index *model.Index) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: IndexEntry{Index: index}}
+}
+
+// UpdateIndex persists a changed field-index definition.
+func UpdateIndex(index *model.Index) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: IndexEntry{Index: index}}
+}
+
+// SaveIndexSnapshotRevision persists the visibility marker for a complete
+// collection-index snapshot. Compose it after all AddIndex/UpdateIndex actions
+// belonging to the DDL operation.
+func SaveIndexSnapshotRevision(collectionID, revision int64) UpdateAction {
+	return UpdateAction{
+		Type: ActionUpdate,
+		Entry: IndexSnapshotRevisionEntry{
+			CollectionID: collectionID,
+			Revision:     revision,
+		},
+	}
 }
 
 // CreateCollection returns an UpdateAction that creates coll.

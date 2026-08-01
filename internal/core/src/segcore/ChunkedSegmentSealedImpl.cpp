@@ -3667,7 +3667,8 @@ ChunkedSegmentSealedImpl::ResolveMetricType(
 void
 ChunkedSegmentSealedImpl::PrepareSearchInfo(
     const std::shared_ptr<const PublishedSegmentState>& snapshot,
-    SearchInfo& search_info) const {
+    SearchInfo& search_info,
+    bool element_level) const {
     auto field_id = search_info.field_id_;
     auto& field_meta = snapshot->schema->operator[](field_id);
     AssertInfo(field_meta.is_vector(),
@@ -3678,14 +3679,15 @@ ChunkedSegmentSealedImpl::PrepareSearchInfo(
         search_info.metric_type_, segment_metric, field_meta.get_name().get());
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
         ValidateVectorArraySearchMode(
-            search_info.metric_type_, search_info.element_level(), field_id);
+            search_info.metric_type_, element_level, field_id);
     }
 }
 
 void
-ChunkedSegmentSealedImpl::PrepareSearchInfo(SearchInfo& search_info) const {
+ChunkedSegmentSealedImpl::PrepareSearchInfo(SearchInfo& search_info,
+                                            bool element_level) const {
     std::shared_lock vector_state_lck(mutex_);
-    PrepareSearchInfo(CapturePublishedState(), search_info);
+    PrepareSearchInfo(CapturePublishedState(), search_info, element_level);
 }
 
 void
@@ -3703,7 +3705,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     // search_info is a segment-local copy. Resolve the segment's authoritative
     // metric first, then either fill an omitted request metric or reject an
     // explicit mismatch before any vector search runs.
-    PrepareSearchInfo(snapshot, search_info);
+    PrepareSearchInfo(snapshot, search_info, search_info.element_level());
     output.metric_type_ = search_info.metric_type_;
     AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto runtime = snapshot->runtime;

@@ -419,7 +419,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		mlog.Warn(context.TODO(), "failed to get partitions of collection", mlog.Err(err))
 		return err
 	}
-	indexInfo, indexInfoVersion, err := ex.getIndexInfoSnapshot(ctx, task.CollectionID(), meta.NextTargetFirst)
+	indexInfo, indexInfoVersion, targetVersion, err := ex.getIndexInfoSnapshotWithTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
 	if err != nil {
 		mlog.Warn(context.TODO(), "fail to get index meta of collection", mlog.Err(err))
 		return err
@@ -460,6 +460,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		dmChannel,
 		indexInfo,
 		partitions,
+		targetVersion,
 		indexInfoVersion,
 	)
 	err = fillSubChannelRequest(ctx, req, ex.broker, ex.shouldIncludeFlushedSegmentInfo(action.Node()))
@@ -744,8 +745,13 @@ func (ex *Executor) getCollectionInfo(ctx context.Context, collectionID int64) (
 }
 
 func (ex *Executor) getIndexInfoSnapshot(ctx context.Context, collectionID int64, scope meta.TargetScope) ([]*indexpb.IndexInfo, int64, error) {
-	if indexInfos, version, ok := meta.GetCollectionIndexInfoSnapshot(ctx, ex.targetMgr, collectionID, scope); ok {
-		return indexInfos, version, nil
+	indexInfos, indexInfoVersion, _, err := ex.getIndexInfoSnapshotWithTargetVersion(ctx, collectionID, scope)
+	return indexInfos, indexInfoVersion, err
+}
+
+func (ex *Executor) getIndexInfoSnapshotWithTargetVersion(ctx context.Context, collectionID int64, scope meta.TargetScope) ([]*indexpb.IndexInfo, int64, int64, error) {
+	if indexInfos, indexInfoVersion, targetVersion, ok := meta.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, ex.targetMgr, collectionID, scope); ok {
+		return indexInfos, indexInfoVersion, targetVersion, nil
 	}
 
 	// Compatibility for recovered pre-upgrade targets and test adapters that do
@@ -753,9 +759,10 @@ func (ex *Executor) getIndexInfoSnapshot(ctx context.Context, collectionID int64
 	// this version always take the atomic path above.
 	indexInfos, err := ex.broker.ListIndexes(ctx, collectionID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return indexInfos, ex.targetMgr.GetCollectionTargetVersion(ctx, collectionID, scope), nil
+	targetVersion := ex.targetMgr.GetCollectionTargetVersion(ctx, collectionID, scope)
+	return indexInfos, targetVersion, targetVersion, nil
 }
 
 // bindSegmentIndexesToSnapshot keeps SegmentLoadInfo consistent with the

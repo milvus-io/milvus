@@ -42,6 +42,7 @@ type CollectionTarget struct {
 	version            int64
 	indexInfos         []*indexpb.IndexInfo
 	indexInfoPresent   bool
+	indexInfoVersion   int64
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
@@ -51,14 +52,14 @@ type CollectionTarget struct {
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
-	return newCollectionTarget(segments, dmChannels, partitionIDs, nil, false)
+	return newCollectionTarget(segments, dmChannels, partitionIDs, nil, false, 0)
 }
 
 func NewCollectionTargetWithIndexInfo(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo) *CollectionTarget {
-	return newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, true)
+	return newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, true, 0)
 }
 
-func newCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo, indexInfoPresent bool) *CollectionTarget {
+func newCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo, indexInfoPresent bool, indexInfoVersion int64) *CollectionTarget {
 	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
 	totalRowCount := int64(0)
@@ -75,15 +76,23 @@ func newCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
 		totalRowCount += segment.GetNumOfRows()
 	}
+	version := time.Now().UnixNano()
+	if indexInfoPresent && indexInfoVersion == 0 {
+		// Rolling compatibility with DataCoords that return ListIndexes without
+		// the persistent revision field. The first DDL handled by a new
+		// DataCoord switches this collection to the dedicated revision domain.
+		indexInfoVersion = version
+	}
 	return &CollectionTarget{
 		segments:           segments,
 		channel2Segments:   channel2Segments,
 		partition2Segments: partition2Segments,
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
-		version:            time.Now().UnixNano(),
+		version:            version,
 		indexInfos:         indexInfos,
 		indexInfoPresent:   indexInfoPresent,
+		indexInfoVersion:   indexInfoVersion,
 		totalRowCount:      totalRowCount,
 	}
 }
@@ -141,6 +150,10 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		mlog.Info(context.TODO(), "target has lack of segment info", mlog.FieldCollectionID(target.GetCollectionID()))
 	}
 
+	indexInfoVersion := target.GetIndexInfoVersion()
+	if target.GetIndexInfoPresent() && indexInfoVersion == 0 {
+		indexInfoVersion = target.GetVersion()
+	}
 	return &CollectionTarget{
 		segments:           segments,
 		channel2Segments:   channel2Segments,
@@ -150,6 +163,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		version:            target.GetVersion(),
 		indexInfos:         target.GetIndexInfoList(),
 		indexInfoPresent:   target.GetIndexInfoPresent(),
+		indexInfoVersion:   indexInfoVersion,
 		lackSegmentInfo:    lackSegmentInfo,
 		totalRowCount:      totalRowCount,
 	}
@@ -208,6 +222,7 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 		Version:          p.version,
 		IndexInfoList:    p.indexInfos,
 		IndexInfoPresent: p.indexInfoPresent,
+		IndexInfoVersion: p.indexInfoVersion,
 	}
 }
 
@@ -229,6 +244,10 @@ func (p *CollectionTarget) GetTargetVersion() int64 {
 
 func (p *CollectionTarget) GetIndexInfoSnapshot() ([]*indexpb.IndexInfo, bool) {
 	return p.indexInfos, p.indexInfoPresent
+}
+
+func (p *CollectionTarget) GetIndexInfoVersion() int64 {
+	return p.indexInfoVersion
 }
 
 func (p *CollectionTarget) GetAllDmChannels() map[string]*DmChannel {

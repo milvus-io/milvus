@@ -514,12 +514,13 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		ctx:              context.Background(),
-		catalog:          catalog,
-		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		keyLock:                lock.NewKeyLock[UniqueID](),
+		ctx:                    context.Background(),
+		catalog:                catalog,
+		indexes:                make(map[UniqueID]map[UniqueID]*model.Index),
+		indexSnapshotRevisions: make(map[UniqueID]int64),
+		segmentBuildInfo:       newSegmentIndexBuildInfo(),
+		segmentIndexes:         typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
 }
 

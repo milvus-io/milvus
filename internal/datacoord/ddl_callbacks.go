@@ -45,6 +45,19 @@ type DDLCallbacks struct {
 	*Server
 }
 
+const indexSnapshotRevisionDomain uint64 = 1 << 62
+
+// encodeIndexSnapshotRevision places the globally ordered DDL TSO in a
+// dedicated positive int64 domain. The domain bit makes a new persistent
+// revision newer than legacy QueryCoord wall-clock versions during a rolling
+// upgrade, while the remaining bits preserve the TSO's strict ordering.
+func encodeIndexSnapshotRevision(tso uint64) (int64, error) {
+	if tso == 0 || tso >= indexSnapshotRevisionDomain {
+		return 0, merr.WrapErrServiceInternalMsg("invalid index snapshot TSO %d", tso)
+	}
+	return int64(indexSnapshotRevisionDomain | tso), nil
+}
+
 type collectionIndexTargetRefresher interface {
 	RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error
 }

@@ -24,7 +24,11 @@ import (
 
 func (s *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 	header := result.Message.Header()
-	if err := s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds()); err != nil {
+	revision, err := encodeIndexSnapshotRevision(result.GetMaxTimeTick())
+	if err != nil {
+		return err
+	}
+	if err := s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds(), revision); err != nil {
 		return err
 	}
 	s.refreshCollectionIndexTarget(ctx, header.GetCollectionId())

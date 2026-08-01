@@ -1013,6 +1013,21 @@ func TestCatalog_ListIndexes(t *testing.T) {
 	})
 }
 
+func TestCatalog_ListIndexSnapshotRevisions(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().WalkWithPrefix(mock.Anything, "field-index-revision/", mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			assert.NoError(t, f([]byte("field-index-revision/10"), []byte("101")))
+			assert.NoError(t, f([]byte("field-index-revision/20"), []byte("202")))
+			return nil
+		}).Once()
+
+	catalog := &Catalog{MetaKv: metakv}
+	revisions, err := catalog.ListIndexSnapshotRevisions(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]int64{10: 101, 20: 202}, revisions)
+}
+
 func TestCatalog_AlterIndexes(t *testing.T) {
 	i := &model.Index{
 		CollectionID: 0,

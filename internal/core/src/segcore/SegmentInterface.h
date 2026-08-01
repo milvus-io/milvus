@@ -622,10 +622,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
  public:
     // Resolve segment-owned search configuration and validate request/index
-    // compatibility before execution. Operators must call this before any
-    // zero-candidate fast path that can skip vector_search().
+    // compatibility before execution. The request's element-level mode is
+    // passed explicitly because an inaccessible/empty VECTOR_ARRAY field may
+    // not have array offsets from which to infer the placeholder shape.
+    // Operators must call this before any zero-candidate fast path that can
+    // skip vector_search().
     virtual void
-    PrepareSearchInfo(SearchInfo& search_info) const = 0;
+    PrepareSearchInfo(SearchInfo& search_info, bool element_level) const = 0;
 
     // `query_offsets` is not null only for vector array (embedding list) search
     // where it denotes the number of vectors in each embedding list. The length

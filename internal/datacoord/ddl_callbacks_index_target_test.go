@@ -42,3 +42,15 @@ func TestRefreshCollectionIndexTarget(t *testing.T) {
 
 	assert.Equal(t, int64(1000), mixCoord.collectionID.Load())
 }
+
+func TestEncodeIndexSnapshotRevision(t *testing.T) {
+	first, err := encodeIndexSnapshotRevision(100)
+	assert.NoError(t, err)
+	second, err := encodeIndexSnapshotRevision(101)
+	assert.NoError(t, err)
+
+	assert.Greater(t, first, int64(indexSnapshotRevisionDomain-1))
+	assert.Greater(t, second, first)
+	_, err = encodeIndexSnapshotRevision(0)
+	assert.Error(t, err)
+}

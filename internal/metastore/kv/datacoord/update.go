@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -43,6 +44,7 @@ import (
 // error and are rejected with a ServiceInternal error and no write.
 func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
 	b := txn.New()
+	requiresAtomicIndexSnapshot := false
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
 		case metastore.SegmentEntry:
@@ -57,6 +59,27 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			// earlier ops in this composite write land before it on the
 			// ordered fallback path.
 			b.CommitSave(buildChannelRemovePath(e.Channel), RemoveFlagTomestone)
+		case metastore.IndexEntry:
+			if e.Index == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil index in UpdateAction")
+			}
+			if action.Type != metastore.ActionAdd && action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			value, err := proto.Marshal(model.MarshalIndexModel(e.Index))
+			if err != nil {
+				return err
+			}
+			b.Save(BuildIndexKey(e.Index.CollectionID, e.Index.IndexID), string(value))
+		case metastore.IndexSnapshotRevisionEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Revision <= 0 {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: invalid index snapshot revision %d", e.Revision)
+			}
+			requiresAtomicIndexSnapshot = true
+			b.CommitSave(buildIndexSnapshotRevisionKey(e.CollectionID), strconv.FormatInt(e.Revision, 10))
 		case metastore.RefreshTaskEntry:
 			switch action.Type {
 			case metastore.ActionAdd:
@@ -140,6 +163,14 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			}
 		default:
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
+		}
+	}
+	if requiresAtomicIndexSnapshot {
+		limit := kc.MetaKv.MaxTxnOps()
+		if b.Len() > limit {
+			return merr.WrapErrServiceInternalMsg(
+				"datacoord catalog: index snapshot update requires %d operations, exceeding atomic transaction limit %d",
+				b.Len(), limit)
 		}
 	}
 	return txn.Commit(ctx, kc.MetaKv, b)

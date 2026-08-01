@@ -43,6 +43,10 @@ const (
 
 	SegmentIndexPrefix = "segment-index"
 	FieldIndexPrefix   = "field-index"
+	// FieldIndexRevisionPrefix stores the persistent collection-level revision
+	// of the complete field-index snapshot. It intentionally uses a separate
+	// key space so the revision survives deletion and GC of the final index.
+	FieldIndexRevisionPrefix = "field-index-revision"
 
 	HeaderAuthorize     = "authorization"
 	HeaderToken         = "token"

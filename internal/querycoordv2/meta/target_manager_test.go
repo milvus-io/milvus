@@ -73,10 +73,12 @@ type TargetManagerSuite struct {
 
 type targetIndexBrokerMock struct {
 	*MockBroker
+	revision atomic.Int64
 }
 
-func (broker *targetIndexBrokerMock) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
-	return broker.ListIndexes(ctx, collectionID)
+func (broker *targetIndexBrokerMock) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, int64, error) {
+	indexInfos, err := broker.ListIndexes(ctx, collectionID)
+	return indexInfos, broker.revision.Add(1), err
 }
 
 type concurrentTargetIndexBroker struct {
@@ -89,18 +91,18 @@ type concurrentTargetIndexBroker struct {
 	secondSnapshot  []*indexpb.IndexInfo
 }
 
-func (broker *concurrentTargetIndexBroker) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+func (broker *concurrentTargetIndexBroker) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, int64, error) {
 	if broker.listCalls.Add(1) == 1 {
 		close(broker.firstStarted)
 		select {
 		case <-broker.releaseFirst:
-			return broker.firstSnapshot, nil
+			return broker.firstSnapshot, 1, nil
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		}
 	}
 	close(broker.secondCompleted)
-	return broker.secondSnapshot, nil
+	return broker.secondSnapshot, 2, nil
 }
 
 func (suite *TargetManagerSuite) SetupSuite() {
@@ -283,7 +285,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.NoError(err)
 }
 
-func (suite *TargetManagerSuite) TestIndexSnapshotBoundToTargetVersion() {
+func (suite *TargetManagerSuite) TestIndexSnapshotUsesDataCoordRevision() {
 	collectionID := suite.collections[0]
 	broker := NewMockBroker(suite.T())
 	mgr := NewTargetManager(&targetIndexBrokerMock{MockBroker: broker}, suite.meta)

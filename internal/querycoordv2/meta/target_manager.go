@@ -82,8 +82,12 @@ type collectionIndexInfoProvider interface {
 	GetCollectionIndexInfoSnapshot(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool)
 }
 
+type collectionIndexInfoTargetProvider interface {
+	GetCollectionIndexInfoSnapshotWithTargetVersion(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, int64, bool)
+}
+
 type targetIndexBroker interface {
-	ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error)
+	ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, int64, error)
 }
 
 func GetCollectionIndexInfoSnapshot(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
@@ -92,6 +96,14 @@ func GetCollectionIndexInfoSnapshot(ctx context.Context, targetMgr TargetManager
 		return nil, 0, false
 	}
 	return provider.GetCollectionIndexInfoSnapshot(ctx, collectionID, scope)
+}
+
+func GetCollectionIndexInfoSnapshotWithTargetVersion(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, int64, bool) {
+	if provider, ok := targetMgr.(collectionIndexInfoTargetProvider); ok {
+		return provider.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, collectionID, scope)
+	}
+	indexInfos, indexInfoVersion, present := GetCollectionIndexInfoSnapshot(ctx, targetMgr, collectionID, scope)
+	return indexInfos, indexInfoVersion, targetMgr.GetCollectionTargetVersion(ctx, collectionID, scope), present
 }
 
 type TargetManager struct {
@@ -223,8 +235,9 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 
 	var indexInfos []*indexpb.IndexInfo
 	indexInfoPresent := false
+	var indexInfoVersion int64
 	if broker, ok := mgr.broker.(targetIndexBroker); ok {
-		indexInfos, err = broker.ListIndexesForTarget(ctx, collectionID)
+		indexInfos, indexInfoVersion, err = broker.ListIndexesForTarget(ctx, collectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to get index snapshot for next target", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 			return err
@@ -232,7 +245,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		indexInfoPresent = true
 	}
 
-	allocatedTarget := newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, indexInfoPresent)
+	allocatedTarget := newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, indexInfoPresent, indexInfoVersion)
 
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
@@ -379,7 +392,7 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 	})
 
 	indexInfos, indexInfoPresent := oldTarget.GetIndexInfoSnapshot()
-	return newCollectionTarget(segments, channels, partitions, indexInfos, indexInfoPresent)
+	return newCollectionTarget(segments, channels, partitions, indexInfos, indexInfoPresent, oldTarget.GetIndexInfoVersion())
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -575,14 +588,19 @@ func (mgr *TargetManager) GetCollectionTargetVersion(ctx context.Context, collec
 }
 
 func (mgr *TargetManager) GetCollectionIndexInfoSnapshot(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
+	indexInfos, indexInfoVersion, _, present := mgr.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, collectionID, scope)
+	return indexInfos, indexInfoVersion, present
+}
+
+func (mgr *TargetManager) GetCollectionIndexInfoSnapshotWithTargetVersion(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, int64, bool) {
 	targets := mgr.getCollectionTarget(scope, collectionID)
 	for _, target := range targets {
 		indexInfos, present := target.GetIndexInfoSnapshot()
 		if present {
-			return indexInfos, target.GetTargetVersion(), true
+			return indexInfos, target.GetIndexInfoVersion(), target.GetTargetVersion(), true
 		}
 	}
-	return nil, 0, false
+	return nil, 0, 0, false
 }
 
 func (mgr *TargetManager) IsCurrentTargetExist(ctx context.Context, collectionID int64, partitionID int64) bool {

@@ -575,15 +575,14 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		return false
 	}
 
-	indexInfo, indexInfoVersion, snapshotPresent := meta.GetCollectionIndexInfoSnapshot(ctx, ob.targetMgr, collectionID, meta.NextTarget)
-	if snapshotPresent {
-		if indexInfoVersion != newVersion {
-			mlog.Warn(ctx, "next target changed while reading index snapshot",
-				mlog.Int64("expectedVersion", newVersion),
-				mlog.Int64("snapshotVersion", indexInfoVersion))
-			return false
-		}
-	} else {
+	indexInfo, indexInfoVersion, snapshotTargetVersion, snapshotPresent := meta.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, ob.targetMgr, collectionID, meta.NextTarget)
+	if snapshotPresent && snapshotTargetVersion != newVersion {
+		mlog.Warn(ctx, "next target changed while reading index snapshot",
+			mlog.Int64("expectedVersion", newVersion),
+			mlog.Int64("snapshotTargetVersion", snapshotTargetVersion))
+		return false
+	}
+	if !snapshotPresent {
 		// Compatibility for targets recovered from an older QueryCoord. New
 		// targets always carry an authoritative (possibly empty) index snapshot.
 		var err error
@@ -592,6 +591,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
 			return false
 		}
+		indexInfoVersion = newVersion
 	}
 
 	for _, d := range collReadyDelegatorList {
@@ -603,7 +603,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			return false
 		}
 
-		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo) {
+		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo, indexInfoVersion) {
 			return false
 		}
 	}
@@ -611,7 +611,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
-	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo,
+	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo, indexInfoVersion int64,
 ) bool {
 	replicaID := replica.GetID()
 
@@ -637,7 +637,7 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 			ResourceGroup:   replica.GetResourceGroup(),
 			SchemaBarrierTs: schemaBarrierTs,
 		},
-		Version:       action.GetTargetVersion(),
+		Version:       indexInfoVersion,
 		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))

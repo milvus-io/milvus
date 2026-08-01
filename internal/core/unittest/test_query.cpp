@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <variant>
@@ -33,6 +34,8 @@
 #include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "futures/Future.h"
+#include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
@@ -43,6 +46,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/segment_c.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -966,6 +970,7 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
         LoadGeneratedDataIntoSegment(dataset, sealed.get());
         auto growing = CreateGrowingWithFieldDataLoaded(
             schema, index_meta, SegcoreConfig::default_config(), dataset);
+        auto empty_growing = CreateGrowingSegment(schema, index_meta);
 
         ScopedSchemaHandle handle(*schema);
         auto plan_blob = handle.ParseSearch(
@@ -989,7 +994,8 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
         ASSERT_EQ(placeholder->at(0).element_level_,
                   !embedding_list_placeholder);
 
-        auto verify_segment = [&](SegmentInterface* segment) {
+        auto verify_segment = [&](SegmentInterface* segment,
+                                  bool empty_segment) {
             if (expect_success) {
                 auto result = segment->Search(plan.get(),
                                               placeholder.get(),
@@ -997,7 +1003,8 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
                 ASSERT_NE(result, nullptr);
                 EXPECT_EQ(result->metric_type_, segment_metric);
                 EXPECT_EQ(result->element_level_, !embedding_list_placeholder);
-                EXPECT_EQ(result->distances_.empty(), zero_hit);
+                EXPECT_EQ(result->distances_.empty(),
+                          zero_hit || empty_segment);
                 return;
             }
 
@@ -1012,8 +1019,50 @@ TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
             }
         };
 
-        verify_segment(sealed.get());
-        verify_segment(growing.get());
+        verify_segment(sealed.get(), false);
+        verify_segment(growing.get(), false);
+        verify_segment(empty_growing.get(), true);
+
+        // AsyncSearch has a separate inaccessible-field empty-result shortcut
+        // before Segment::Search. Exercise that production entry point so it
+        // cannot bypass either metric resolution or placeholder-mode checks.
+        auto c_future = AsyncSearch({},
+                                    empty_growing.get(),
+                                    plan.get(),
+                                    placeholder.get(),
+                                    dataset.timestamps_.back() + 1,
+                                    0,
+                                    0,
+                                    0,
+                                    false,
+                                    false);
+        auto future = static_cast<milvus::futures::IFuture*>(
+            static_cast<void*>(static_cast<CFuture*>(c_future)));
+        std::mutex mu;
+        mu.lock();
+        future->registerReadyCallback(
+            [](CLockedGoMutex* mutex) {
+                reinterpret_cast<std::mutex*>(mutex)->unlock();
+            },
+            reinterpret_cast<CLockedGoMutex*>(&mu));
+        mu.lock();
+        mu.unlock();
+        auto [raw_result, c_status] = future->leakyGet();
+        future_destroy(c_future);
+        auto c_result = static_cast<CSearchResult>(raw_result);
+        if (expect_success) {
+            ASSERT_EQ(c_status.error_code, Success);
+            ASSERT_NE(c_result, nullptr);
+            EXPECT_EQ(static_cast<SearchResult*>(c_result)->metric_type_,
+                      segment_metric);
+            EXPECT_EQ(static_cast<SearchResult*>(c_result)->element_level_,
+                      !embedding_list_placeholder);
+            DeleteSearchResult(c_result);
+        } else {
+            EXPECT_EQ(c_status.error_code, DataTypeInvalid);
+            EXPECT_EQ(c_result, nullptr);
+            free(const_cast<char*>(c_status.error_msg));
+        }
     };
 
     // Both valid omitted-metric modes execute on sealed and growing segments.

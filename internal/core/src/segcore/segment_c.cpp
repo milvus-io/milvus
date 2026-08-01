@@ -540,10 +540,16 @@ AsyncSearch(CTraceContext c_trace,
             std::unique_ptr<milvus::SearchResult> search_result;
             if (!filter_only &&
                 !internal_segment->FieldAccessible(target_vector_field_id)) {
+                const auto& placeholder = phg_ptr->at(0);
+                auto search_info = plan->plan_node_->search_info_;
+                internal_segment->PrepareSearchInfo(search_info,
+                                                    placeholder.element_level_);
                 search_result = std::make_unique<milvus::SearchResult>();
                 search_result->total_nq_ = num_queries;
                 search_result->unity_topK_ = 0;
                 search_result->total_data_cnt_ = 0;
+                search_result->metric_type_ = search_info.metric_type_;
+                search_result->element_level_ = placeholder.element_level_;
                 search_result->segment_ = internal_segment;
             } else {
                 search_result = segment->Search(plan,

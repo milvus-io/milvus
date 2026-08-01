@@ -1595,7 +1595,8 @@ SegmentGrowingImpl::ResolveMetricType(FieldId field_id) const {
 }
 
 void
-SegmentGrowingImpl::PrepareSearchInfo(SearchInfo& search_info) const {
+SegmentGrowingImpl::PrepareSearchInfo(SearchInfo& search_info,
+                                      bool element_level) const {
     auto schema = get_schema_snapshot();
     auto& field_meta = schema->operator[](search_info.field_id_);
     search_info.metric_type_ =
@@ -1603,9 +1604,8 @@ SegmentGrowingImpl::PrepareSearchInfo(SearchInfo& search_info) const {
                                 ResolveMetricType(search_info.field_id_),
                                 field_meta.get_name().get());
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        ValidateVectorArraySearchMode(search_info.metric_type_,
-                                      search_info.element_level(),
-                                      search_info.field_id_);
+        ValidateVectorArraySearchMode(
+            search_info.metric_type_, element_level, search_info.field_id_);
     }
 }
 
@@ -1621,7 +1621,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
     // Same contract as the sealed path: use the growing segment's immutable
     // construction-time index configuration to fill an omitted request metric or
     // reject an explicit mismatch before brute-force/interim-index search runs.
-    PrepareSearchInfo(search_info);
+    PrepareSearchInfo(search_info, search_info.element_level());
     output.metric_type_ = search_info.metric_type_;
     query::SearchOnGrowing(*this,
                            search_info,

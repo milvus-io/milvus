@@ -27,7 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -107,6 +109,34 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 		s.False(mmapEnable)
 		s.True(ok)
 	}
+}
+
+func (s *UtilsSuite) TestPackSubChannelRequestSeparatesTargetAndIndexVersions() {
+	action := NewChannelAction(1, ActionTypeGrow, "test-ch")
+	task, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		nil,
+		1,
+		newReplicaDefaultRG(10),
+		action,
+	)
+	s.NoError(err)
+
+	req := packSubChannelRequest(
+		task,
+		action,
+		&schemapb.CollectionSchema{},
+		nil,
+		&querypb.LoadMetaInfo{},
+		&meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "test-ch"}},
+		nil,
+		nil,
+		111,
+		222,
+	)
+	s.Equal(int64(111), req.GetTargetVersion())
+	s.Equal(int64(222), req.GetIndexInfoVersion())
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequestMmapDuplicateBug() {

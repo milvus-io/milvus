@@ -1571,6 +1571,32 @@ TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
               std::string::npos);
     free(const_cast<char*>(growing_mismatch_status.error_msg));
     DeleteSearchPlan(growing_mismatch_plan);
+
+    // An empty growing segment is not FieldAccessible yet, so AsyncSearch takes
+    // its request-level empty-result shortcut before Segment::Search. It must
+    // still validate the authoritative metric and publish it on success.
+    auto empty_growing =
+        CreateGrowingSegment(schema, BuildSegmentIndexMeta(&load_info));
+    CSearchResult empty_mismatch_result = nullptr;
+    auto [empty_mismatch_status, empty_mismatch_plan] =
+        run_search(empty_growing.get(),
+                   knowhere::metric::L2,
+                   false,
+                   &empty_mismatch_result);
+    EXPECT_EQ(empty_mismatch_status.error_code, MetricTypeNotMatch);
+    EXPECT_EQ(empty_mismatch_result, nullptr);
+    free(const_cast<char*>(empty_mismatch_status.error_msg));
+    DeleteSearchPlan(empty_mismatch_plan);
+
+    CSearchResult empty_result = nullptr;
+    auto [empty_status, empty_plan] = run_search(
+        empty_growing.get(), knowhere::metric::IP, true, &empty_result);
+    ASSERT_EQ(empty_status.error_code, Success);
+    ASSERT_NE(empty_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(empty_result), knowhere::metric::IP);
+    EXPECT_TRUE(static_cast<SearchResult*>(empty_result)->distances_.empty());
+    DeleteSearchResult(empty_result);
+    DeleteSearchPlan(empty_plan);
     growing.reset();
     segment.reset();
     DeleteCollection(collection);

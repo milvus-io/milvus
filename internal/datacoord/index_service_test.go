@@ -1555,6 +1555,9 @@ func TestServer_DescribeIndex(t *testing.T) {
 			catalog: catalog,
 			indexMeta: &indexMeta{
 				catalog: catalog,
+				indexSnapshotRevisions: map[UniqueID]int64{
+					collID: 12345,
+				},
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
 					collID: {
 						// finished
@@ -1901,7 +1904,8 @@ func TestServer_ListIndexes(t *testing.T) {
 		meta: &meta{
 			catalog: catalog,
 			indexMeta: &indexMeta{
-				catalog: catalog,
+				catalog:                catalog,
+				indexSnapshotRevisions: map[UniqueID]int64{collID: 12345},
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
 					collID: {
 						// finished
@@ -2014,6 +2018,7 @@ func TestServer_ListIndexes(t *testing.T) {
 
 		// assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 5, len(resp.GetIndexInfos()))
+		assert.Equal(t, int64(12345), resp.GetRevision())
 	})
 }
 

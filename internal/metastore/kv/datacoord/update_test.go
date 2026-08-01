@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,6 +53,41 @@ func TestCatalog_Update_Empty(t *testing.T) {
 	c := NewCatalog(metakv, "", "")
 	err := c.Update(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_IndexSnapshotAndRevisionAreAtomic(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	index := &model.Index{CollectionID: 10, IndexID: 20, IndexName: "idx"}
+	const revision = int64(12345)
+
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, removals)
+			assert.Contains(t, saves, BuildIndexKey(index.CollectionID, index.IndexID))
+			assert.Equal(t, "12345", saves[buildIndexSnapshotRevisionKey(index.CollectionID)])
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(),
+		metastore.AddIndex(index),
+		metastore.SaveIndexSnapshotRevision(index.CollectionID, revision),
+	)
+	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_IndexSnapshotRejectsChunkedFallback(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Once()
+	index := &model.Index{CollectionID: 10, IndexID: 20, IndexName: "idx"}
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(),
+		metastore.AddIndex(index),
+		metastore.SaveIndexSnapshotRevision(index.CollectionID, 12345),
+	)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 // TestCatalog_Update_AddSegmentEncodingMatchesLegacy proves AddSegment writes

@@ -25,7 +25,11 @@ import (
 
 func (s *DDLCallbacks) createIndexV2AckCallback(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
 	index := result.Message.MustBody().FieldIndex
-	if err := s.meta.indexMeta.CreateIndex(ctx, model.UnmarshalIndexModel(index)); err != nil {
+	revision, err := encodeIndexSnapshotRevision(result.GetMaxTimeTick())
+	if err != nil {
+		return err
+	}
+	if err := s.meta.indexMeta.CreateIndex(ctx, model.UnmarshalIndexModel(index), revision); err != nil {
 		return err
 	}
 	select {

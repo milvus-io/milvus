@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -639,6 +640,34 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 		return nil, err
 	}
 	return indexes, nil
+}
+
+// ListIndexSnapshotRevisions returns the persistent collection-level revision
+// of every field-index snapshot. It is intentionally separate from ListIndexes
+// so the revision survives GC of deleted index definitions.
+func (kc *Catalog) ListIndexSnapshotRevisions(ctx context.Context) (map[int64]int64, error) {
+	revisions := make(map[int64]int64)
+	applyFn := func(key []byte, value []byte) error {
+		collectionID, err := strconv.ParseInt(path.Base(string(key)), 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid index snapshot revision key %q", string(key))
+		}
+		revision, err := strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid index snapshot revision for collection %d", collectionID)
+		}
+		if revision <= 0 {
+			return merr.WrapErrDataIntegrityMsg("invalid index snapshot revision %d for collection %d", revision, collectionID)
+		}
+		revisions[collectionID] = revision
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexRevisionPrefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return revisions, nil
 }
 
 func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) error {

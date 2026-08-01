@@ -90,6 +90,11 @@ func updateDelegatorIndexInfoList(d delegator.ShardDelegator, indexInfos []*inde
 	return nil
 }
 
+func effectiveWatchIndexInfoVersion(req *querypb.WatchDmChannelsRequest) int64 {
+	legacyVersion := delegator.EffectiveIndexInfoVersion(req.GetTargetVersion(), req.GetVersion())
+	return delegator.EffectiveIndexInfoVersion(req.GetIndexInfoVersion(), legacyVersion)
+}
+
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
@@ -276,7 +281,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		queryView,
 		node.binlogSaver,
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
-		delegator.WithIndexInfoList(req.GetIndexInfoList(), delegator.EffectiveIndexInfoVersion(req.GetTargetVersion(), req.GetVersion())),
+		delegator.WithIndexInfoList(req.GetIndexInfoList(), effectiveWatchIndexInfoVersion(req)),
 	)
 	if err != nil {
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))

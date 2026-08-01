@@ -214,6 +214,7 @@ func packSubChannelRequest(
 	indexInfo []*indexpb.IndexInfo,
 	partitions []int64,
 	targetVersion int64,
+	indexInfoVersion int64,
 ) *querypb.WatchDmChannelsRequest {
 	finalSchema := applyCollectionSettings(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
@@ -221,16 +222,17 @@ func packSubChannelRequest(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
 			commonpbutil.WithMsgID(task.ID()),
 		),
-		NodeID:        action.Node(),
-		CollectionID:  task.CollectionID(),
-		PartitionIDs:  partitions,
-		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
-		Schema:        finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:      loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		ReplicaID:     task.ReplicaID(),
-		Version:       time.Now().UnixNano(),
-		IndexInfoList: indexInfo,
-		TargetVersion: targetVersion,
+		NodeID:           action.Node(),
+		CollectionID:     task.CollectionID(),
+		PartitionIDs:     partitions,
+		Infos:            []*datapb.VchannelInfo{channel.VchannelInfo},
+		Schema:           finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:         loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		ReplicaID:        task.ReplicaID(),
+		Version:          time.Now().UnixNano(),
+		IndexInfoList:    indexInfo,
+		TargetVersion:    targetVersion,
+		IndexInfoVersion: indexInfoVersion,
 	}
 }
 

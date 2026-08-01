@@ -116,7 +116,7 @@ PhyVectorSearchNode::GetOutput() {
     // Resolve the segment-owned metric after the placeholder has established
     // the VECTOR_ARRAY search mode, but before any zero-candidate fast path can
     // bypass vector_search().
-    segment_->PrepareSearchInfo(search_info_);
+    segment_->PrepareSearchInfo(search_info_, ph.element_level_);
     // Downstream operators use QueryContext to choose metric-dependent sort
     // direction, so publish the segment-resolved metric before they run.
     query_context_->set_search_info(search_info_);
