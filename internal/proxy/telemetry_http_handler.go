@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -314,12 +315,22 @@ func getTelemetryClientMetrics(node *Proxy) gin.HandlerFunc {
 //	  "persistent": false
 //	}
 //
-// ttl_seconds bounds how long an unanswered one-time command occupies RootCoord memory; it
+// ttl_seconds bounds how long an unanswered one-time command occupies RootCoord memory. It
 // is not a delivery window and deliberately does not encode a number of heartbeat cycles,
-// because the server is never told a client's heartbeat interval. Omit it (or send 0) for
-// the one-hour default, send a positive value to override it, or a negative value to keep
-// the command until it is answered or deleted. Replying reclaims a command immediately, so
-// this only governs commands nobody ever collects. Persistent configs ignore it.
+// because the server is never told a client's heartbeat interval.
+//
+//	omitted   -> one hour
+//	0         -> never expires
+//	positive  -> expires that many seconds after the push
+//	negative  -> never expires
+//
+// A reply reclaims a command early only when it named a single client. A global or
+// database-scoped command is answered by many clients on their own heartbeats, so its TTL
+// is the only thing that ever removes it -- and until then it is still delivered to clients
+// that connect later. Combining a broadcast scope with ttl_seconds: 0 therefore creates a
+// command that never goes away and keeps being handed to every new client.
+//
+// Persistent configs ignore ttl_seconds entirely.
 func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -390,7 +401,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			TargetClientId: cmdReq.TargetClientID,
 			TargetDatabase: cmdReq.TargetDatabase,
 			Payload:        payloadBytes,
-			TtlSeconds:     cmdReq.TTLSeconds,
+			TtlSeconds:     proto.Int64(resolveCommandTTL(cmdReq.TTLSeconds)),
 			Persistent:     cmdReq.Persistent,
 		}
 
@@ -538,11 +549,10 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 			CommandType:    "show_latency_history",
 			TargetClientId: clientID,
 			Payload:        payloadBytes,
-			// Left unset so the store applies its default. Bounded on purpose: an answer
-			// an hour late is of no use to whoever asked, and an unbounded command leaks
-			// if the client never comes back. The cost is that a client offline for over
-			// an hour never sees this command.
-			TtlSeconds: nil,
+			// Bounded on purpose: an answer an hour late is of no use to whoever asked,
+			// and an unbounded command leaks if the client never comes back. The cost is
+			// that a client offline for over an hour never sees this command.
+			TtlSeconds: proto.Int64(defaultCommandTTLSeconds),
 			Persistent: false,
 		}
 
@@ -607,11 +617,10 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 		pushReq := &milvuspb.PushClientCommandRequest{
 			CommandType:    "get_config",
 			TargetClientId: clientID,
-			// Left unset so the store applies its default. Bounded on purpose: an answer
-			// an hour late is of no use to whoever asked, and an unbounded command leaks
-			// if the client never comes back. The cost is that a client offline for over
-			// an hour never sees this command.
-			TtlSeconds: nil,
+			// Bounded on purpose: an answer an hour late is of no use to whoever asked,
+			// and an unbounded command leaks if the client never comes back. The cost is
+			// that a client offline for over an hour never sees this command.
+			TtlSeconds: proto.Int64(defaultCommandTTLSeconds),
 			Persistent: false,
 		}
 

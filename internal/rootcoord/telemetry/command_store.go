@@ -121,32 +121,17 @@ const (
 	clientIDStableKey = "client_id_stable"
 )
 
-// defaultCommandTTLSeconds bounds how long a one-time command pushed without a ttl_seconds
-// survives, so a command nobody ever collects is eventually reclaimed instead of occupying
-// RootCoord memory for the life of the process.
+// The store honors ttl_seconds exactly as the proto documents it: 0 (or absent, which is
+// indistinguishable on the wire) means no expiry, a positive value expires the command that
+// many seconds after the push.
 //
-// It is a bound on memory, not a delivery window, and deliberately does not try to encode
-// "N heartbeat cycles": HeartbeatInterval is client-side config with no upper bound, the
-// server is not told what it is, and clients matched by one scope may use different values.
-// An hour covers a client on a multi-minute interval, or one briefly disconnected.
-const defaultCommandTTLSeconds = 3600
-
-// resolveCommandTTL applies the default to a request that did not specify a TTL.
-//
-// ttl_seconds is `optional` in the proto precisely so this distinction exists: without
-// presence, an omitted field and an explicit 0 decode identically, and any default applied
-// here would silently redefine what an existing caller's 0 means -- while the proto
-// documents 0 as "no expiry" and gives them no way to ask for it back.
-//
-//	absent -> defaultCommandTTLSeconds
-//	0      -> 0, an explicit "never expire"
-//	other  -> honored verbatim (negative also means never expire)
-func resolveCommandTTL(req *milvuspb.PushClientCommandRequest) int64 {
-	if req.TtlSeconds == nil {
-		return defaultCommandTTLSeconds
-	}
-	return req.GetTtlSeconds()
-}
+// It applies no default of its own, and `optional` does not change that. Presence only
+// helps for senders that know about it: proto3 implicit presence means a client built
+// against the old definition emits *nothing* for an explicit 0, so a new server sees the
+// field as absent and cannot tell "0, meaning never expire" from "unspecified". Defaulting
+// on absence would therefore silently convert every old client's deliberate "no expiry"
+// into an hour. Defaulting belongs where absence is genuinely observable -- the HTTP layer,
+// which decodes JSON into a pointer. See defaultCommandTTLSeconds in internal/proxy.
 
 // cache holds in-memory cache of all commands and configs
 // Loaded at initialization and kept in sync with etcd on writes
@@ -341,9 +326,8 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 			Payload:     req.Payload,
 			CreateTime:  createTime,
 			TargetScope: scope,
-			// Resolved once at push time: absent gets the default, an explicit 0 stays
-			// "never expire". See resolveCommandTTL.
-			TTLSeconds: resolveCommandTTL(req),
+			// Verbatim; absent decodes to 0, which is "no expiry". See the note above.
+			TTLSeconds: req.GetTtlSeconds(),
 		}
 		// Update cache
 		s.cacheMu.Lock()

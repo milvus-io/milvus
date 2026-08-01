@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
@@ -1067,11 +1068,16 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 	})
 }
 
-// TestPushCommandTTLPresence pins the wire contract. ttl_seconds is `optional` precisely so
-// an omitted field is distinguishable from an explicit 0 -- the proto documents 0 as "no
-// expiry", and without presence any server-side default would silently redefine what an
-// existing caller's 0 means, with no way for them to ask for the old behavior back.
-func TestPushCommandTTLPresence(t *testing.T) {
+// TestPushCommandStoresTTLVerbatim pins the wire contract: the store applies no default of
+// its own, so 0 keeps meaning "no expiry" for every caller.
+//
+// This has to hold even though ttl_seconds is `optional`. Proto3 implicit presence means a
+// client built against the older definition emits nothing for an explicit 0, so the server
+// receives it as absent and cannot tell it apart from unspecified. Defaulting on absence
+// here would convert every such client's deliberate "never expire" into an hour, silently,
+// with no way for them to ask for it back. The default belongs to the HTTP layer, which
+// decodes JSON into a pointer and really can see the difference.
+func TestPushCommandStoresTTLVerbatim(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
@@ -1079,8 +1085,8 @@ func TestPushCommandTTLPresence(t *testing.T) {
 		ttl      *int64
 		expected int64
 	}{
-		{"absent earns the default", nil, defaultCommandTTLSeconds},
-		{"explicit zero stays no-expiry", ttlPtr(0), 0},
+		{"absent is no-expiry, not a default", nil, 0},
+		{"explicit zero is no-expiry", ttlPtr(0), 0},
 		{"positive is honored verbatim", ttlPtr(120), 120},
 		{"negative means never expire", ttlPtr(-1), -1},
 	}
@@ -1104,9 +1110,6 @@ func TestPushCommandTTLPresence(t *testing.T) {
 			assert.Equal(t, tc.expected, cmd.TTLSeconds)
 		})
 	}
-
-	assert.EqualValues(t, 3600, defaultCommandTTLSeconds,
-		"a bound on memory, not a delivery window: the server is never told a client's heartbeat interval")
 }
 
 func TestExpiredCommandIsSwept(t *testing.T) {
@@ -1130,4 +1133,44 @@ func TestExpiredCommandIsSwept(t *testing.T) {
 	_, stillThere := store.cache.commands[id]
 	store.cacheMu.RUnlock()
 	assert.False(t, stillThere, "an uncollected command must be reclaimed on its TTL")
+}
+
+// TestOldClientExplicitZeroKeepsNoExpiry is the regression test for the compatibility trap
+// that `optional` does not close.
+//
+// ttl_seconds was a plain proto3 int64 before, and proto3 implicit presence means a zero
+// value is not serialized at all. So a client built against the old definition that
+// deliberately set 0 -- "never expire", exactly as the field is documented -- puts *nothing*
+// on the wire. A server that treats an absent field as "unspecified, use the default" turns
+// that client's deliberate choice into a one-hour expiry, silently, with no way for the
+// client to ask for the old behavior back. Adding `optional` cannot fix this: it gives
+// presence to new senders only.
+//
+// This test reconstructs that exact payload rather than describing it.
+func TestOldClientExplicitZeroKeepsNoExpiry(t *testing.T) {
+	ctx := context.Background()
+
+	// What an old client's encoder produces for TtlSeconds: 0 -- the field is simply absent.
+	onTheWire, err := proto.Marshal(&milvuspb.PushClientCommandRequest{
+		CommandType:    "show_errors",
+		TargetClientId: "legacy-client",
+	})
+	require.NoError(t, err)
+
+	var received milvuspb.PushClientCommandRequest
+	require.NoError(t, proto.Unmarshal(onTheWire, &received))
+	require.Nil(t, received.TtlSeconds,
+		"an old client's explicit 0 is indistinguishable from absent; that is the whole trap")
+
+	store := NewCommandStoreWithKV(newMockKV(), "/test/")
+	id, err := store.PushCommand(ctx, &received)
+	require.NoError(t, err)
+
+	store.cacheMu.RLock()
+	cmd := store.cache.commands[id]
+	store.cacheMu.RUnlock()
+
+	require.NotNil(t, cmd)
+	assert.Equal(t, int64(0), cmd.TTLSeconds,
+		"a command from a client that asked for no expiry must not silently acquire one")
 }

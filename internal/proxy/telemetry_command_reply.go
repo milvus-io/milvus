@@ -44,6 +44,34 @@ const (
 	replyStatusPending = "pending"
 )
 
+// defaultCommandTTLSeconds bounds how long a one-time command pushed over HTTP without a
+// ttl_seconds survives, so a command nobody ever collects is eventually reclaimed instead
+// of occupying RootCoord memory for the life of the process.
+//
+// It is a bound on memory, not a delivery window, and deliberately does not encode "N
+// heartbeat cycles": HeartbeatInterval is client-side config with no upper bound and the
+// server is never told what it is.
+//
+// The default lives here, not in the store, because this is the only layer that can see the
+// difference between "no ttl_seconds" and "ttl_seconds: 0". On the RPC it is invisible even
+// with an optional field: proto3 implicit presence means a client built against the older
+// definition emits nothing at all for an explicit 0, so the server cannot distinguish that
+// deliberate "never expire" from an unspecified field. Defaulting there would silently give
+// every such client a one-hour expiry it never asked for.
+const defaultCommandTTLSeconds = 3600
+
+// resolveCommandTTL applies the HTTP default to an omitted ttl_seconds.
+//
+//	absent -> defaultCommandTTLSeconds
+//	0      -> 0, an explicit "never expire"
+//	other  -> honored verbatim (negative also means never expire)
+func resolveCommandTTL(requested *int64) int64 {
+	if requested == nil {
+		return defaultCommandTTLSeconds
+	}
+	return *requested
+}
+
 // clientCommandReply pairs a reply with the client that produced it.
 //
 // A command that names no target is stored with scope "global" and delivered to every

@@ -382,21 +382,23 @@ automatically — retire them with `DeleteClientCommand`.
 **TTL.** `ttl_seconds` is a field of `PushClientCommandRequest`, not of `ClientCommand`, so
 clients never see it.
 
-`ttl_seconds` is `optional` in the proto, so an omitted field is distinguishable from an
-explicit `0`:
-
-| `ttl_seconds` | Meaning |
-|---------------|---------|
-| absent | Default: expires one hour after the push |
+| `ttl_seconds` | Meaning at the RPC / store |
+|---------------|---------------------------|
+| absent | Same as `0` — no expiry. The store applies no default. |
 | `0` | Never expires (every expiry check treats `<= 0` as immortal) |
 | `> 0` | Expires that many seconds after the push |
 | `< 0` | Never expires |
 
-The presence marker is what makes this safe. Without it — a plain proto3 `int64` — an
-omitted field and an explicit `0` decode identically, so any server-side default silently
-redefines what an existing caller's `0` means while the proto documents it as "no expiry",
-and gives that caller no way to ask for the old behavior back. With it, the default belongs
-to *absent* alone.
+**The one-hour default is applied by the HTTP layer, not the store**, and marking the field
+`optional` does not change that. Presence only helps senders that know about it: proto3
+implicit presence means a client built against the older definition emits *nothing* for an
+explicit `0`, so the server receives it as absent and cannot tell that deliberate "never
+expire" apart from "unspecified". Defaulting on absence would silently give every such
+client a one-hour expiry with no way to ask for the old behavior back.
+
+`POST /_telemetry/commands` decodes `ttl_seconds` into a pointer, so it genuinely can see
+the difference: omit the field and you get 3600, send `0` and you get no expiry. It then
+sends an explicit value onward, so the store never has to guess.
 
 That default is a **bound on how long an unanswered command occupies memory, not a delivery
 window**. It deliberately does not encode "N heartbeat cycles": `HeartbeatInterval` is
@@ -408,6 +410,10 @@ Without any default, a command that no client ever collects stays in RootCoord m
 the life of the process.
 
 Persistent configs ignore TTL entirely.
+
+**Do not combine a broadcast scope with `ttl_seconds: 0`.** A `global` or `database:` command
+is removed only by its TTL, and until then it is still handed to clients that connect later.
+With no expiry it never goes away and every new client keeps executing it.
 
 A reply reclaims a command only when the command named a single client — see
 [Replies](#replies). A broadcast command is answered by many clients, so for it the TTL is
@@ -546,12 +552,27 @@ sends persistent configs only when `request.ConfigHash != serverHash`. The respo
 
 One-time commands are returned only when `command.CreateTime > request.LastCommandTimestamp`
 (strict). The client advances `LastCommandTimestamp` to the maximum `CreateTime` it has
-seen, **after** processing the whole batch, so a mid-batch crash re-fetches. Because the
-comparison is strict, clients must additionally deduplicate by command ID to handle two
-commands created in the same millisecond.
+seen, **after** processing the whole batch, so a mid-batch crash re-fetches.
 
 Consequence: a one-time command is delivered **once**. It is not redelivered if the client
 fails to execute it, because the client has already advanced its watermark past it.
+
+> **Known defect: a millisecond-granularity watermark loses commands.**
+>
+> The cursor is a millisecond timestamp and the comparison is strict, so a command created
+> in the *same millisecond* as one the client has already processed is filtered out of every
+> subsequent heartbeat and is never delivered. It survives only until its TTL and then
+> disappears, with no error to the pusher and no record on the client.
+>
+> Relaxing the comparison to `>=` does not fix it: the client prunes its executed-ID set at
+> the watermark, so commands at exactly that timestamp would eventually be re-executed
+> instead. A correct fix needs a cursor that is unique per command — a strictly monotonic
+> sequence number, or a `(timestamp, command_id)` pair compared lexicographically — which is
+> a protocol change on both sides.
+>
+> This is pre-existing, not introduced by the client-telemetry audit, and is tracked in
+> [#51963](https://github.com/milvus-io/milvus/issues/51963). It is recorded here because an
+> earlier revision of this document described the watermark as already correct; it is not.
 
 #### Replies
 
