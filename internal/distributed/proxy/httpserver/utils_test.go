@@ -1855,6 +1855,50 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
 }
 
+func TestBuildQueryRespDynamicFieldLargeIntPrecision(t *testing.T) {
+	t.Run("dynamic field integers above 2^53 keep exact precision", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_JSON,
+			FieldName: FieldBookIntro,
+			IsDynamic: true,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{
+								[]byte(`{"big_val":9223372036854775807,"dyn_int":9007199254740993,"small":42}`),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		rows, err := buildQueryResp(0, []string{"big_val", "dyn_int", "small"}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+
+		row := rows[0]
+		bigVal, ok := row["big_val"].(json.Number)
+		require.True(t, ok, "big_val should be json.Number, got %T", row["big_val"])
+		assert.Equal(t, "9223372036854775807", bigVal.String())
+
+		dynInt, ok := row["dyn_int"].(json.Number)
+		require.True(t, ok, "dyn_int should be json.Number, got %T", row["dyn_int"])
+		assert.Equal(t, "9007199254740993", dynInt.String())
+
+		small, ok := row["small"].(json.Number)
+		require.True(t, ok, "small should be json.Number, got %T", row["small"])
+		assert.Equal(t, "42", small.String())
+
+		// Serializing the row back must emit the exact digits, not a float64-rounded value.
+		out, err := json.Marshal(row)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "9223372036854775807")
+		assert.Contains(t, string(out), "9007199254740993")
+	})
+}
+
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 	t.Run("nullable vector derives logical rows from ValidData", func(t *testing.T) {
 		fieldData := &schemapb.FieldData{
