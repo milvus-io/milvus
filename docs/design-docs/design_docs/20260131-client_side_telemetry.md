@@ -382,21 +382,21 @@ automatically — retire them with `DeleteClientCommand`.
 **TTL.** `ttl_seconds` is a field of `PushClientCommandRequest`, not of `ClientCommand`, so
 clients never see it.
 
-The RPC and the store keep the meaning the proto documents — *"0 = no expiry, >0 =
-auto-expire in seconds"*:
+`ttl_seconds` is `optional` in the proto, so an omitted field is distinguishable from an
+explicit `0`:
 
 | `ttl_seconds` | Meaning |
 |---------------|---------|
+| absent | Default: expires one hour after the push |
 | `0` | Never expires (every expiry check treats `<= 0` as immortal) |
 | `> 0` | Expires that many seconds after the push |
 | `< 0` | Never expires |
 
-**The one-hour default is applied by the HTTP layer, not the store.** A plain proto3 `int64`
-cannot distinguish an omitted field from an explicit `0`, so defaulting inside the store
-would silently redefine what an existing gRPC caller's `0` means, with no way for them to
-ask for the old behavior. `POST /_telemetry/commands` decodes `ttl_seconds` into a pointer,
-so it *can* see the difference: omit the field and you get 3600; send `0` and you get no
-expiry.
+The presence marker is what makes this safe. Without it — a plain proto3 `int64` — an
+omitted field and an explicit `0` decode identically, so any server-side default silently
+redefines what an existing caller's `0` means while the proto documents it as "no expiry",
+and gives that caller no way to ask for the old behavior back. With it, the default belongs
+to *absent* alone.
 
 That default is a **bound on how long an unanswered command occupies memory, not a delivery
 window**. It deliberately does not encode "N heartbeat cycles": `HeartbeatInterval` is
@@ -491,10 +491,11 @@ Two ways to collect a result:
   targeted lookup instead of a scan of all clients.
 
 The proxy polls RootCoord every 2s while waiting. It is deliberately not faster: replies
-only land on a heartbeat (30s by default), and every poll ships the target's entire stored
-reply set, because `command_replies` is encoded into `ClientInfo.Reserved` regardless of
-`IncludeMetrics`. Filtering that server-side would need a proto change and is left as
-follow-up.
+only land on a heartbeat, 30s by default, so a tighter loop buys nothing. Each poll sets
+`command_id` on `GetClientTelemetryRequest`, so the server returns only the requested reply
+rather than the client's whole history — 50 entries with payloads up to 1MiB each, which
+`IncludeMetrics: false` does *not* exclude, since replies are encoded into
+`ClientInfo.Reserved` regardless of that flag.
 
 Replies are also visible in the `command_replies` array of `GET /api/v1/_telemetry/clients`,
 which is how the WebUI polls; on the wire they are JSON-encoded into

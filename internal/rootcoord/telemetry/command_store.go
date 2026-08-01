@@ -121,12 +121,32 @@ const (
 	clientIDStableKey = "client_id_stable"
 )
 
-// The store honors ttl_seconds exactly as the proto documents it -- "0 = no expiry,
-// >0 = auto-expire in seconds" -- because a plain proto3 int64 cannot distinguish an
-// omitted field from an explicit zero. Substituting a default here would silently change
-// what an existing gRPC caller's 0 means, with no way for them to ask for the old
-// behavior. Defaulting belongs where absence is observable: the HTTP layer, which decodes
-// ttl_seconds into a pointer. See defaultCommandTTLSeconds in internal/proxy.
+// defaultCommandTTLSeconds bounds how long a one-time command pushed without a ttl_seconds
+// survives, so a command nobody ever collects is eventually reclaimed instead of occupying
+// RootCoord memory for the life of the process.
+//
+// It is a bound on memory, not a delivery window, and deliberately does not try to encode
+// "N heartbeat cycles": HeartbeatInterval is client-side config with no upper bound, the
+// server is not told what it is, and clients matched by one scope may use different values.
+// An hour covers a client on a multi-minute interval, or one briefly disconnected.
+const defaultCommandTTLSeconds = 3600
+
+// resolveCommandTTL applies the default to a request that did not specify a TTL.
+//
+// ttl_seconds is `optional` in the proto precisely so this distinction exists: without
+// presence, an omitted field and an explicit 0 decode identically, and any default applied
+// here would silently redefine what an existing caller's 0 means -- while the proto
+// documents 0 as "no expiry" and gives them no way to ask for it back.
+//
+//	absent -> defaultCommandTTLSeconds
+//	0      -> 0, an explicit "never expire"
+//	other  -> honored verbatim (negative also means never expire)
+func resolveCommandTTL(req *milvuspb.PushClientCommandRequest) int64 {
+	if req.TtlSeconds == nil {
+		return defaultCommandTTLSeconds
+	}
+	return req.GetTtlSeconds()
+}
 
 // cache holds in-memory cache of all commands and configs
 // Loaded at initialization and kept in sync with etcd on writes
@@ -321,8 +341,9 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 			Payload:     req.Payload,
 			CreateTime:  createTime,
 			TargetScope: scope,
-			// Stored verbatim: 0 means no expiry, per the proto. See the note above.
-			TTLSeconds: req.TtlSeconds,
+			// Resolved once at push time: absent gets the default, an explicit 0 stays
+			// "never expire". See resolveCommandTTL.
+			TTLSeconds: resolveCommandTTL(req),
 		}
 		// Update cache
 		s.cacheMu.Lock()

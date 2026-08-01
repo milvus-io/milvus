@@ -122,6 +122,23 @@ type ClientMetricsCache struct {
 	ClientIDStable atomic.Bool
 }
 
+// filterRepliesByCommand narrows a client's reply history to one command. An empty
+// commandID means "no filter", which is what every caller predating the field sends, so the
+// response shape is unchanged for them.
+func filterRepliesByCommand(replies []*StoredCommandReply, commandID string) []*StoredCommandReply {
+	if commandID == "" || len(replies) == 0 {
+		return replies
+	}
+	for _, reply := range replies {
+		if reply.CommandID == commandID {
+			// A client answers a given command at most once, so the first match is the
+			// whole answer and there is nothing to keep scanning for.
+			return []*StoredCommandReply{reply}
+		}
+	}
+	return nil
+}
+
 // snapshot copies the guarded fields so a caller can clone, encode and aggregate without
 // holding mu. See the note on mu for why sharing these pointers past the unlock is safe.
 func (c *ClientMetricsCache) snapshot() (*commonpb.ClientInfo, []*commonpb.OperationMetrics, []*StoredCommandReply) {
@@ -781,6 +798,11 @@ func (m *TelemetryManager) GetClientTelemetry(req *milvuspb.GetClientTelemetryRe
 		if req.IncludeMetrics {
 			ct.Metrics = cloneOperationMetrics(latestMetrics)
 		}
+
+		// Narrow to the requested command before encoding. A caller polling for one answer
+		// would otherwise pull the client's whole reply history -- 50 entries, payloads up
+		// to 1MiB each -- on every attempt, to read a single result.
+		storedReplies = filterRepliesByCommand(storedReplies, req.GetCommandId())
 
 		// Add command replies to ClientInfo.Reserved if there are any
 		if len(storedReplies) > 0 {

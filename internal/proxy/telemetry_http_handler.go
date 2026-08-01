@@ -345,9 +345,9 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			TargetClientID string          `json:"target_client_id"`
 			TargetDatabase string          `json:"target_database"`
 			Payload        json.RawMessage `json:"payload"`
-			// A pointer so an omitted ttl_seconds is distinguishable from an explicit 0.
-			// The RPC field cannot express that -- a plain proto3 int64 decodes both as
-			// zero -- which is why the default is applied here and not in the store.
+			// A pointer so an omitted ttl_seconds stays distinguishable from an explicit
+			// 0 all the way to the store, which applies the default only to the former.
+			// The proto field is `optional`, so the distinction survives the RPC too.
 			TTLSeconds *int64 `json:"ttl_seconds"`
 			Persistent bool   `json:"persistent"`
 		}
@@ -390,7 +390,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 			TargetClientId: cmdReq.TargetClientID,
 			TargetDatabase: cmdReq.TargetDatabase,
 			Payload:        payloadBytes,
-			TtlSeconds:     resolveCommandTTL(cmdReq.TTLSeconds),
+			TtlSeconds:     cmdReq.TTLSeconds,
 			Persistent:     cmdReq.Persistent,
 		}
 
@@ -538,11 +538,11 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 			CommandType:    "show_latency_history",
 			TargetClientId: clientID,
 			Payload:        payloadBytes,
-			// Bounded on purpose. This used to be 0, meaning never expire, which suited a
-			// request that waits for the client. But an answer an hour late is of no use to
-			// whoever asked, and an unbounded command leaks if the client never comes back.
-			// The cost is that a client offline for over an hour never sees this command.
-			TtlSeconds: defaultCommandTTLSeconds,
+			// Left unset so the store applies its default. Bounded on purpose: an answer
+			// an hour late is of no use to whoever asked, and an unbounded command leaks
+			// if the client never comes back. The cost is that a client offline for over
+			// an hour never sees this command.
+			TtlSeconds: nil,
 			Persistent: false,
 		}
 
@@ -607,11 +607,11 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 		pushReq := &milvuspb.PushClientCommandRequest{
 			CommandType:    "get_config",
 			TargetClientId: clientID,
-			// Bounded on purpose. This used to be 0, meaning never expire, which suited a
-			// request that waits for the client. But an answer an hour late is of no use to
-			// whoever asked, and an unbounded command leaks if the client never comes back.
-			// The cost is that a client offline for over an hour never sees this command.
-			TtlSeconds: defaultCommandTTLSeconds,
+			// Left unset so the store applies its default. Bounded on purpose: an answer
+			// an hour late is of no use to whoever asked, and an unbounded command leaks
+			// if the client never comes back. The cost is that a client offline for over
+			// an hour never sees this command.
+			TtlSeconds: nil,
 			Persistent: false,
 		}
 

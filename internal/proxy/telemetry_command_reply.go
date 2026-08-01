@@ -34,10 +34,7 @@ const (
 
 	// telemetryReplyPollInterval is how often the proxy re-reads client state while waiting
 	// for a reply. Replies only ever land on a heartbeat -- 30s by default -- so polling
-	// faster than this buys nothing and is not free: every poll ships the target client's
-	// entire stored reply set (up to 50 replies, each with a payload capped at 1MiB) from
-	// RootCoord through the proxy, because command_replies is encoded into
-	// ClientInfo.Reserved regardless of IncludeMetrics.
+	// faster than this buys nothing, whatever each poll costs.
 	telemetryReplyPollInterval = 2 * time.Second
 )
 
@@ -46,32 +43,6 @@ const (
 	replyStatusDone    = "done"
 	replyStatusPending = "pending"
 )
-
-// defaultCommandTTLSeconds bounds how long a one-time command pushed over HTTP without a
-// ttl_seconds survives, so a command nobody ever collects is eventually reclaimed instead
-// of occupying RootCoord memory for the life of the process.
-//
-// It is a bound on memory, not a delivery window, and deliberately does not try to encode
-// "N heartbeat cycles": HeartbeatInterval is client-side config with no upper bound, the
-// server is not told what it is, and clients matched by one scope may use different values.
-// An hour covers a client on a multi-minute interval, or one briefly disconnected.
-//
-// The default lives here rather than in the store because this is the only layer that can
-// see the difference between "no ttl_seconds" and "ttl_seconds: 0". The RPC and the store
-// keep the documented proto meaning, where 0 is no expiry.
-const defaultCommandTTLSeconds = 3600
-
-// resolveCommandTTL applies the HTTP default to an omitted ttl_seconds.
-//
-//	absent -> defaultCommandTTLSeconds
-//	0      -> 0, an explicit "never expire"
-//	other  -> honored verbatim (negative also means never expire)
-func resolveCommandTTL(requested *int64) int64 {
-	if requested == nil {
-		return defaultCommandTTLSeconds
-	}
-	return *requested
-}
 
 // clientCommandReply pairs a reply with the client that produced it.
 //
@@ -123,12 +94,14 @@ func parseWaitParam(raw string) (time.Duration, error) {
 // An empty result with a nil error means the command has not been answered yet -- a normal
 // state, not a failure, because replies only arrive on a client's next heartbeat.
 func findCommandReplies(ctx context.Context, node *Proxy, clientID, commandID string) ([]clientCommandReply, int, error) {
-	// Metrics are the largest thing a client reports, so skip them: they are not needed to
-	// read replies. This does not make the lookup cheap -- command_replies is encoded into
-	// ClientInfo.Reserved regardless of this flag -- which is why the poll interval above
-	// is measured in seconds.
+	// Ask for exactly what this lookup needs. Without CommandId the server returns every
+	// reply each matching client has accumulated -- up to 50, each payload capped at 1MiB --
+	// so polling for one answer would re-transfer the entire history on every attempt.
+	// Metrics are skipped for the same reason: they are the largest thing a client reports
+	// and are not needed to read a reply.
 	resp, err := node.GetClientTelemetry(ctx, &milvuspb.GetClientTelemetryRequest{
 		ClientId:       clientID,
+		CommandId:      commandID,
 		IncludeMetrics: false,
 	})
 	if err != nil {

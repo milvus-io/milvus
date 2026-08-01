@@ -33,6 +33,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
+// ttlPtr builds the pointer PushClientCommandRequest.TtlSeconds now takes. The field is
+// `optional` in the proto so an omitted TTL stays distinguishable from an explicit 0; a nil
+// here means "unset", which is what earns the default.
+func ttlPtr(v int64) *int64 { return &v }
+
 // mockKV implements KVInterface for testing
 type mockKV struct {
 	mu   sync.Mutex
@@ -229,7 +234,7 @@ func TestCommandTTLExpiration(t *testing.T) {
 	// Push a command with 1 second TTL
 	expiredID, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "expired_cmd",
-		TtlSeconds:  1,
+		TtlSeconds:  ttlPtr(1),
 	})
 	require.NoError(t, err)
 
@@ -241,7 +246,7 @@ func TestCommandTTLExpiration(t *testing.T) {
 	// Push a valid command (no TTL)
 	validID, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "valid_cmd",
-		TtlSeconds:  0,
+		TtlSeconds:  ttlPtr(0),
 	})
 	require.NoError(t, err)
 
@@ -260,7 +265,7 @@ func TestCleanupExpiredCommands(t *testing.T) {
 	// Push an expired command
 	expiredID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "expired",
-		TtlSeconds:  1,
+		TtlSeconds:  ttlPtr(1),
 	})
 	store.cacheMu.Lock()
 	store.cache.commands[expiredID].CreateTime = time.Now().Add(-2 * time.Second).UnixMilli()
@@ -269,7 +274,7 @@ func TestCleanupExpiredCommands(t *testing.T) {
 	// Push a valid command
 	validID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "valid",
-		TtlSeconds:  3600,
+		TtlSeconds:  ttlPtr(3600),
 	})
 
 	// Run cleanup
@@ -528,7 +533,7 @@ func TestListCommandsWithInfo(t *testing.T) {
 	// Push a command
 	cmdID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "show_errors",
-		TtlSeconds:  3600,
+		TtlSeconds:  ttlPtr(3600),
 	})
 
 	// Push a config
@@ -1003,7 +1008,7 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 		cmdID, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 			CommandType: "one_time_cmd",
 			Persistent:  false,
-			TtlSeconds:  3600,
+			TtlSeconds:  ttlPtr(3600),
 		})
 
 		// Add a persistent config
@@ -1062,22 +1067,22 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 	})
 }
 
-// TestPushCommandKeepsProtoTTLSemantics pins the wire contract. The proto documents
-// ttl_seconds as "0 = no expiry, >0 = auto-expire in seconds", and a plain proto3 int64
-// cannot tell an omitted field from an explicit zero -- so the store must not substitute a
-// default. Doing so silently redefined what an existing gRPC caller's 0 meant. The HTTP
-// layer, which decodes into a pointer and can see the difference, owns the default.
-func TestPushCommandKeepsProtoTTLSemantics(t *testing.T) {
+// TestPushCommandTTLPresence pins the wire contract. ttl_seconds is `optional` precisely so
+// an omitted field is distinguishable from an explicit 0 -- the proto documents 0 as "no
+// expiry", and without presence any server-side default would silently redefine what an
+// existing caller's 0 means, with no way for them to ask for the old behavior back.
+func TestPushCommandTTLPresence(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
 		name     string
-		ttl      int64
+		ttl      *int64
 		expected int64
 	}{
-		{"zero is stored as no-expiry", 0, 0},
-		{"positive is honored verbatim", 3600, 3600},
-		{"negative means never expire", -1, -1},
+		{"absent earns the default", nil, defaultCommandTTLSeconds},
+		{"explicit zero stays no-expiry", ttlPtr(0), 0},
+		{"positive is honored verbatim", ttlPtr(120), 120},
+		{"negative means never expire", ttlPtr(-1), -1},
 	}
 
 	for _, tc := range cases {
@@ -1099,6 +1104,9 @@ func TestPushCommandKeepsProtoTTLSemantics(t *testing.T) {
 			assert.Equal(t, tc.expected, cmd.TTLSeconds)
 		})
 	}
+
+	assert.EqualValues(t, 3600, defaultCommandTTLSeconds,
+		"a bound on memory, not a delivery window: the server is never told a client's heartbeat interval")
 }
 
 func TestExpiredCommandIsSwept(t *testing.T) {
@@ -1107,7 +1115,7 @@ func TestExpiredCommandIsSwept(t *testing.T) {
 
 	id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType: "show_errors",
-		TtlSeconds:  3600,
+		TtlSeconds:  ttlPtr(3600),
 	})
 	require.NoError(t, err)
 

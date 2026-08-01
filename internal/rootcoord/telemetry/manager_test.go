@@ -4229,3 +4229,72 @@ func TestValidatePersistentTargetIsRaceFree(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+// TestGetClientTelemetryFiltersByCommandID covers the server-side narrowing that keeps a
+// reply lookup from dragging the client's whole history along.
+//
+// Replies are returned inside ClientInfo.Reserved["command_replies"], and a client retains
+// its most recent 50 with payloads capped at 1MiB each. Before command_id existed, a caller
+// polling every couple of seconds for one answer re-transferred all of that on every
+// attempt -- and IncludeMetrics:false did not help, because replies are encoded regardless
+// of that flag.
+func TestGetClientTelemetryFiltersByCommandID(t *testing.T) {
+	m := &TelemetryManager{config: DefaultTelemetryConfig()}
+
+	const clientID = "chatty-client"
+	replies := make([]*commonpb.CommandReply, 0, 5)
+	for i := 0; i < 5; i++ {
+		replies = append(replies, &commonpb.CommandReply{
+			CommandId: fmt.Sprintf("cmd-%d", i),
+			Success:   true,
+			Payload:   []byte(fmt.Sprintf(`{"n":%d}`, i)),
+		})
+	}
+	_, err := m.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+		ClientInfo: &commonpb.ClientInfo{
+			SdkType:  "Go",
+			Reserved: map[string]string{"client_id": clientID},
+		},
+		CommandReplies: replies,
+	})
+	require.NoError(t, err)
+
+	decode := func(resp *milvuspb.GetClientTelemetryResponse) []map[string]interface{} {
+		require.Len(t, resp.Clients, 1)
+		raw := resp.Clients[0].GetClientInfo().GetReserved()["command_replies"]
+		if raw == "" {
+			return nil
+		}
+		var out []map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(raw), &out))
+		return out
+	}
+
+	t.Run("no command_id returns everything, as before", func(t *testing.T) {
+		resp, err := m.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{ClientId: clientID})
+		require.NoError(t, err)
+		assert.Len(t, decode(resp), 5)
+	})
+
+	t.Run("command_id returns only that reply", func(t *testing.T) {
+		resp, err := m.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{
+			ClientId:  clientID,
+			CommandId: "cmd-3",
+		})
+		require.NoError(t, err)
+
+		got := decode(resp)
+		require.Len(t, got, 1, "a targeted lookup must not ship the whole reply history")
+		assert.Equal(t, "cmd-3", got[0]["command_id"])
+		assert.Equal(t, `{"n":3}`, got[0]["payload"])
+	})
+
+	t.Run("unknown command_id returns none rather than everything", func(t *testing.T) {
+		resp, err := m.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{
+			ClientId:  clientID,
+			CommandId: "cmd-never-pushed",
+		})
+		require.NoError(t, err)
+		assert.Empty(t, decode(resp))
+	})
+}
