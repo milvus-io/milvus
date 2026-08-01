@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
-	"math/big"
 	"net/http"
 	"reflect"
 	"slices"
@@ -936,18 +935,160 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 	return row, nil
 }
 
-func parseStructSubInteger(raw string, bitSize int) (int64, bool) {
-	value, err := strconv.ParseInt(raw, 10, bitSize)
-	if err == nil {
-		return value, true
-	}
+func isJSONDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
+}
 
-	number, ok := new(big.Rat).SetString(raw)
-	if !ok || !number.IsInt() {
+// parseStructSubInteger parses an exact integer from a JSON number literal.
+// Integer-valued decimal and exponent forms are accepted without converting
+// through float64 or computing attacker-controlled arbitrary-precision powers.
+func parseStructSubInteger(raw string, bitSize int) (int64, bool) {
+	switch bitSize {
+	case 8, 16, 32, 64:
+	default:
 		return 0, false
 	}
-	value, err = strconv.ParseInt(number.Num().String(), 10, bitSize)
-	return value, err == nil
+	if raw == "" {
+		return 0, false
+	}
+
+	i := 0
+	negative := false
+	if raw[i] == '-' {
+		negative = true
+		i++
+		if i == len(raw) {
+			return 0, false
+		}
+	}
+
+	// An int64 has at most 19 decimal digits. Keep only the prefix that can
+	// possibly survive decimal scaling; the remaining input is still scanned
+	// to validate syntax and count significant/trailing digits.
+	var significantPrefix [19]byte
+	prefixLen := 0
+	significantDigits := 0
+	trailingZeros := 0
+	coefficientIsZero := true
+	recordDigit := func(ch byte) {
+		if coefficientIsZero {
+			if ch == '0' {
+				return
+			}
+			coefficientIsZero = false
+		}
+		significantDigits++
+		if prefixLen < len(significantPrefix) {
+			significantPrefix[prefixLen] = ch
+			prefixLen++
+		}
+		if ch == '0' {
+			trailingZeros++
+		} else {
+			trailingZeros = 0
+		}
+	}
+
+	// JSON integer part: 0 or a non-zero digit followed by digits.
+	if raw[i] == '0' {
+		recordDigit(raw[i])
+		i++
+		if i < len(raw) && isJSONDigit(raw[i]) {
+			return 0, false
+		}
+	} else if raw[i] >= '1' && raw[i] <= '9' {
+		for i < len(raw) && isJSONDigit(raw[i]) {
+			recordDigit(raw[i])
+			i++
+		}
+	} else {
+		return 0, false
+	}
+
+	fractionDigits := 0
+	if i < len(raw) && raw[i] == '.' {
+		i++
+		fractionStart := i
+		for i < len(raw) && isJSONDigit(raw[i]) {
+			recordDigit(raw[i])
+			fractionDigits++
+			i++
+		}
+		if i == fractionStart {
+			return 0, false
+		}
+	}
+
+	exponentAbs := 0
+	exponentNegative := false
+	if i < len(raw) && (raw[i] == 'e' || raw[i] == 'E') {
+		i++
+		if i < len(raw) && (raw[i] == '+' || raw[i] == '-') {
+			exponentNegative = raw[i] == '-'
+			i++
+		}
+		exponentStart := i
+		// Values beyond this limit cannot bring a non-zero coefficient into
+		// the int64 range. Saturating avoids integer overflow while preserving
+		// work proportional to the input length.
+		exponentLimit := len(raw) + 20
+		for i < len(raw) && isJSONDigit(raw[i]) {
+			digit := int(raw[i] - '0')
+			if exponentAbs < exponentLimit {
+				if exponentAbs > (exponentLimit-digit)/10 {
+					exponentAbs = exponentLimit
+				} else {
+					exponentAbs = exponentAbs*10 + digit
+				}
+			}
+			i++
+		}
+		if i == exponentStart {
+			return 0, false
+		}
+	}
+	if i != len(raw) {
+		return 0, false
+	}
+	if coefficientIsZero {
+		return 0, true
+	}
+
+	trimDigits, appendZeros := 0, 0
+	if exponentNegative {
+		trimDigits = exponentAbs + fractionDigits
+	} else if exponentAbs >= fractionDigits {
+		appendZeros = exponentAbs - fractionDigits
+	} else {
+		trimDigits = fractionDigits - exponentAbs
+	}
+	if trimDigits > trailingZeros {
+		return 0, false
+	}
+
+	keptDigits := significantDigits - trimDigits
+	if keptDigits <= 0 || keptDigits > prefixLen || appendZeros > len(significantPrefix)-keptDigits {
+		return 0, false
+	}
+
+	var integerLiteral [20]byte
+	integerLen := 0
+	if negative {
+		integerLiteral[integerLen] = '-'
+		integerLen++
+	}
+	copy(integerLiteral[integerLen:], significantPrefix[:keptDigits])
+	integerLen += keptDigits
+	for idx := 0; idx < appendZeros; idx++ {
+		integerLiteral[integerLen] = '0'
+		integerLen++
+	}
+
+	value, err := strconv.ParseInt(string(integerLiteral[:integerLen]), 10, bitSize)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.ScalarField, error) {

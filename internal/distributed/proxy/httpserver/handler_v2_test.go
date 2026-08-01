@@ -3918,6 +3918,68 @@ func TestNarrowIntegerOverflowV2(t *testing.T) {
 	}
 }
 
+func TestStructArrayIntegerExponentV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         buildStructArrayTestSchema(),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":1e-999999,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+
+	for _, action := range []string{InsertAction, UpsertAction} {
+		t.Run(action, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "sub-field sub_int")
+			assert.Contains(t, returnBody.Message, "value=1e-999999")
+		})
+	}
+}
+
+func TestStructArrayExactInt64V2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return hasStructArrayInt64Value(req.GetFieldsData(), "my_struct", "sub_int", 9007199254740993)
+	})).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		InsertCnt: 1,
+		IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		}},
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":9007199254740993.0,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, InsertAction), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
 func generateCollectionSchemaWithVectorFields() *schemapb.CollectionSchema {
 	collSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)

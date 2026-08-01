@@ -160,6 +160,22 @@ func generateNarrowIntegerCollectionSchema(dataType schemapb.DataType) *schemapb
 	return schema
 }
 
+func hasStructArrayInt64Value(fieldsData []*schemapb.FieldData, structName, subName string, expected int64) bool {
+	for _, fieldData := range fieldsData {
+		if fieldData.GetFieldName() != structName {
+			continue
+		}
+		for _, subFieldData := range fieldData.GetStructArrays().GetFields() {
+			if subFieldData.GetFieldName() != subName {
+				continue
+			}
+			rows := subFieldData.GetScalars().GetArrayData().GetData()
+			return len(rows) == 1 && len(rows[0].GetLongData().GetData()) == 1 && rows[0].GetLongData().GetData()[0] == expected
+		}
+	}
+	return false
+}
+
 func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *schemapb.CollectionSchema {
 	primaryField := generatePrimaryField(primaryDataType, false)
 	vectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
@@ -4379,6 +4395,65 @@ func TestPrintStructArrayFieldsV2(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_FloatVector.String(), subs[1][HTTPReturnFieldElementType])
 }
 
+func TestParseStructSubInteger(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		bitSize int
+		value   int64
+		ok      bool
+	}{
+		{name: "int8 max decimal", raw: "127.0", bitSize: 8, value: 127, ok: true},
+		{name: "int8 exponent", raw: "1e2", bitSize: 8, value: 100, ok: true},
+		{name: "negative scale integer", raw: "100e-2", bitSize: 8, value: 1, ok: true},
+		{name: "decimal exponent integer", raw: "1.2300e2", bitSize: 8, value: 123, ok: true},
+		{name: "exact beyond float64", raw: "9007199254740993.0", bitSize: 64, value: 9007199254740993, ok: true},
+		{name: "int64 max decimal", raw: "9223372036854775807.0", bitSize: 64, value: math.MaxInt64, ok: true},
+		{name: "int64 min decimal", raw: "-9223372036854775808.0", bitSize: 64, value: math.MinInt64, ok: true},
+		{name: "int64 max scaled", raw: "92233720368547758070e-1", bitSize: 64, value: math.MaxInt64, ok: true},
+		{name: "int64 min scaled", raw: "-92233720368547758080e-1", bitSize: 64, value: math.MinInt64, ok: true},
+		{name: "zero huge positive exponent", raw: "0.0e999999", bitSize: 64, value: 0, ok: true},
+		{name: "negative zero huge negative exponent", raw: "-0e-999999", bitSize: 64, value: 0, ok: true},
+		{name: "int8 overflow after scaling", raw: "1280e-1", bitSize: 8, ok: false},
+		{name: "fraction", raw: "127.5", bitSize: 8, ok: false},
+		{name: "negative scale fraction", raw: "100e-3", bitSize: 8, ok: false},
+		{name: "precision-sensitive fraction", raw: "1.00000000000000000000000000001", bitSize: 64, ok: false},
+		{name: "int64 max adjacent fraction", raw: "9223372036854775806.9", bitSize: 64, ok: false},
+		{name: "int64 max scaled overflow", raw: "92233720368547758080e-1", bitSize: 64, ok: false},
+		{name: "int64 min scaled overflow", raw: "-92233720368547758090e-1", bitSize: 64, ok: false},
+		{name: "huge positive exponent", raw: "1e999999", bitSize: 64, ok: false},
+		{name: "huge negative exponent", raw: "1e-999999", bitSize: 64, ok: false},
+		{name: "leading plus", raw: "+1", bitSize: 64, ok: false},
+		{name: "leading zero", raw: "01", bitSize: 64, ok: false},
+		{name: "missing integer part", raw: ".1", bitSize: 64, ok: false},
+		{name: "missing fraction", raw: "1.", bitSize: 64, ok: false},
+		{name: "missing exponent", raw: "1e", bitSize: 64, ok: false},
+		{name: "invalid bit size", raw: "1", bitSize: 7, ok: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value, ok := parseStructSubInteger(test.raw, test.bitSize)
+			assert.Equal(t, test.ok, ok)
+			if test.ok {
+				assert.Equal(t, test.value, value)
+			}
+		})
+	}
+
+	largeScaledInteger := "1" + strings.Repeat("0", 4096) + "e-4096"
+	value, ok := parseStructSubInteger(largeScaledInteger, 64)
+	require.True(t, ok)
+	assert.Equal(t, int64(1), value)
+
+	_, ok = parseStructSubInteger("1e-999999", 64)
+	assert.False(t, ok)
+	allocations := testing.AllocsPerRun(1000, func() {
+		parseStructSubInteger("1e-999999", 64)
+	})
+	assert.LessOrEqual(t, allocations, float64(2))
+}
+
 func TestStructArrayScalarSubFieldTypes(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -4487,6 +4562,8 @@ func TestStructArrayNarrowIntegerSubFieldValidation(t *testing.T) {
 		{name: "int64 above max", elementType: schemapb.DataType_Int64, raw: `[9223372036854775808]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
 		{name: "int64 below min", elementType: schemapb.DataType_Int64, raw: `[-9223372036854775809]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
 		{name: "int64 fraction", elementType: schemapb.DataType_Int64, raw: `[127.5]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
+		{name: "int64 huge positive exponent", elementType: schemapb.DataType_Int64, raw: `[1e999999]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
+		{name: "int64 huge negative exponent", elementType: schemapb.DataType_Int64, raw: `[1e-999999]`, rangeText: "[-9223372036854775808, 9223372036854775807]"},
 	}
 
 	for _, test := range tests {
