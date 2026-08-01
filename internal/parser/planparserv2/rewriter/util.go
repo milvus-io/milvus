@@ -1,10 +1,9 @@
 package rewriter
 
 import (
-	"fmt"
 	"math"
 	"sort"
-	"strings"
+	"strconv"
 
 	"github.com/samber/lo"
 
@@ -14,15 +13,21 @@ import (
 )
 
 func columnKey(c *planpb.ColumnInfo) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%t|%d|",
-		c.GetFieldId(),
-		c.GetIsElementLevel(),
-		len(c.GetNestedPath()))
-	for _, p := range c.GetNestedPath() {
-		fmt.Fprintf(&b, "%d:%s|", len(p), p)
+	nestedPath := c.GetNestedPath()
+	buf := make([]byte, 0, 32)
+	buf = strconv.AppendInt(buf, c.GetFieldId(), 10)
+	buf = append(buf, '|')
+	buf = strconv.AppendBool(buf, c.GetIsElementLevel())
+	buf = append(buf, '|')
+	buf = strconv.AppendInt(buf, int64(len(nestedPath)), 10)
+	buf = append(buf, '|')
+	for _, p := range nestedPath {
+		buf = strconv.AppendInt(buf, int64(len(p)), 10)
+		buf = append(buf, ':')
+		buf = append(buf, p...)
+		buf = append(buf, '|')
 	}
-	return b.String()
+	return string(buf)
 }
 
 // effectiveDataType returns the real scalar type to be used for comparisons.
