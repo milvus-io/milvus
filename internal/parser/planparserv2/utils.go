@@ -555,9 +555,15 @@ func getDataType(expr *ExprWithType) string {
 	return expr.dataType.String()
 }
 
-// formatGenericValue formats a literal the way the user wrote it. GenericValue.String()
-// returns an internal protobuf representation (e.g. `string_val:"two"`), which must
-// never be exposed in a user-facing error message.
+// formatGenericValue renders a parsed literal in a user-readable form.
+// GenericValue.String() returns an internal protobuf representation, such as
+// `string_val:"two"`, and must never be exposed in user-facing error messages.
+//
+// This function returns a canonical representation of the parsed value rather than
+// the original source text. By the time a GenericValue is created, literals such as
+// `1.0`, `1e3`, and `0x1p+1` have already lost their original spelling. Use
+// `literalText` when the caller has access to the original source text, and fall
+// back to this function only when it does not.
 func formatGenericValue(value *planpb.GenericValue) string {
 	switch v := value.GetVal().(type) {
 	case *planpb.GenericValue_BoolVal:
@@ -578,6 +584,18 @@ func formatGenericValue(value *planpb.GenericValue) string {
 	default:
 		return value.String()
 	}
+}
+
+// literalText returns the original source text when the caller can access the
+// literal in the parse tree, allowing error messages to show the operand exactly
+// as the user wrote it. text is empty when the operand does not have a
+// corresponding source token, such as a value provided through a template; in
+// that case, the parsed value is rendered instead.
+func literalText(text string, value *planpb.GenericValue) string {
+	if text != "" {
+		return text
+	}
+	return formatGenericValue(value)
 }
 
 // getValueDataType returns the parsed type of a literal so type-mismatch errors
@@ -788,28 +806,29 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 }
 
 // errRangeBoundMismatch reports a bound whose type does not match the field it
-// is compared against. fieldName is the source text of the column operand.
-func errRangeBoundMismatch(fieldName string, dataType schemapb.DataType, value *planpb.GenericValue) error {
+// is compared against. fieldName and valueText contain the original source text
+// for the column operand and the bound, respectively.
+func errRangeBoundMismatch(fieldName, valueText string, dataType schemapb.DataType, value *planpb.GenericValue) error {
 	return merr.WrapErrQueryPlanMsg("invalid range operations: bound value %s (%s) does not match field %s (%s)",
-		formatGenericValue(value), getValueDataType(value), fieldName, dataType.String())
+		literalText(valueText, value), getValueDataType(value), fieldName, dataType.String())
 }
 
-func castRangeValue(fieldName string, dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+func castRangeValue(fieldName, valueText string, dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(value) {
-			return nil, errRangeBoundMismatch(fieldName, dataType, value)
+			return nil, errRangeBoundMismatch(fieldName, valueText, dataType, value)
 		}
 	case schemapb.DataType_Bool:
 		return nil, merr.WrapErrQueryPlanMsg("invalid range operations on boolean expr: field %s (%s)",
 			fieldName, dataType.String())
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
 		if !IsInteger(value) {
-			return nil, errRangeBoundMismatch(fieldName, dataType, value)
+			return nil, errRangeBoundMismatch(fieldName, valueText, dataType, value)
 		}
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		if !IsNumber(value) {
-			return nil, errRangeBoundMismatch(fieldName, dataType, value)
+			return nil, errRangeBoundMismatch(fieldName, valueText, dataType, value)
 		}
 		if IsInteger(value) {
 			return NewFloat(float64(value.GetInt64Val())), nil

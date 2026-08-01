@@ -546,7 +546,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "value 1 (Double) in list cannot be casted to field id (Int64)",
+            ct.err_msg: "value 1.0 (Double) in list cannot be casted to field id (Int64)",
         }
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=term_expr, check_task=CheckTasks.err_res, check_items=error
@@ -556,7 +556,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "value 2 (Double) in list cannot be casted to field id (Int64)",
+            ct.err_msg: "value 2.0 (Double) in list cannot be casted to field id (Int64)",
         }
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=term_expr, check_task=CheckTasks.err_res, check_items=error

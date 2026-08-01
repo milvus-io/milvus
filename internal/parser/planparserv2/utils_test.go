@@ -1270,14 +1270,14 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 func Test_castRangeValue(t *testing.T) {
 	t.Run("string value for string type", func(t *testing.T) {
 		value := NewString("test")
-		result, err := castRangeValue("name", schemapb.DataType_VarChar, value)
+		result, err := castRangeValue("name", "\"test\"", schemapb.DataType_VarChar, value)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", result.GetStringVal())
 	})
 
 	t.Run("non-string value for string type fails", func(t *testing.T) {
 		value := NewInt(42)
-		_, err := castRangeValue("name", schemapb.DataType_VarChar, value)
+		_, err := castRangeValue("name", "42", schemapb.DataType_VarChar, value)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid range operations")
 		// The error must include the bound, its type, the field, and the field type.
@@ -1289,7 +1289,7 @@ func Test_castRangeValue(t *testing.T) {
 
 	t.Run("bool type is invalid for range", func(t *testing.T) {
 		value := NewBool(true)
-		_, err := castRangeValue("flag", schemapb.DataType_Bool, value)
+		_, err := castRangeValue("flag", "true", schemapb.DataType_Bool, value)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid range operations on boolean expr")
 		assert.Contains(t, err.Error(), "flag")
@@ -1298,14 +1298,14 @@ func Test_castRangeValue(t *testing.T) {
 
 	t.Run("integer value for integer type", func(t *testing.T) {
 		value := NewInt(42)
-		result, err := castRangeValue("age", schemapb.DataType_Int64, value)
+		result, err := castRangeValue("age", "42", schemapb.DataType_Int64, value)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(42), result.GetInt64Val())
 	})
 
 	t.Run("non-integer value for integer type fails", func(t *testing.T) {
 		value := NewFloat(3.14)
-		_, err := castRangeValue("age", schemapb.DataType_Int64, value)
+		_, err := castRangeValue("age", "3.14", schemapb.DataType_Int64, value)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "3.14")
 		assert.Contains(t, err.Error(), "Double")
@@ -1315,7 +1315,7 @@ func Test_castRangeValue(t *testing.T) {
 
 	t.Run("float value for float type", func(t *testing.T) {
 		value := NewFloat(3.14)
-		result, err := castRangeValue("price", schemapb.DataType_Float, value)
+		result, err := castRangeValue("price", "3.14", schemapb.DataType_Float, value)
 		assert.NoError(t, err)
 		assert.Equal(t, 3.14, result.GetFloatVal())
 	})
@@ -1323,14 +1323,14 @@ func Test_castRangeValue(t *testing.T) {
 	t.Run("integer value promoted to float for float type", func(t *testing.T) {
 		// Integer values should be promoted to float when target type is float
 		value := NewInt(42)
-		result, err := castRangeValue("price", schemapb.DataType_Double, value)
+		result, err := castRangeValue("price", "42", schemapb.DataType_Double, value)
 		assert.NoError(t, err)
 		assert.Equal(t, float64(42), result.GetFloatVal())
 	})
 
 	t.Run("non-number value for float type fails", func(t *testing.T) {
 		value := NewString("test")
-		_, err := castRangeValue("price", schemapb.DataType_Float, value)
+		_, err := castRangeValue("price", "\"test\"", schemapb.DataType_Float, value)
 		assert.Error(t, err)
 		// The rejected literal must preserve its original formatting and must not expose
 		// protobuf text representation.
@@ -1339,10 +1339,34 @@ func Test_castRangeValue(t *testing.T) {
 		assert.Contains(t, err.Error(), "price")
 		assert.Contains(t, err.Error(), "Float")
 	})
+
+	t.Run("bound is reported as written, not as parsed", func(t *testing.T) {
+		// Once parsed, `1e3`, `1.0`, and `0x1p+1` are indistinguishable from integer
+		// literals, so the source text is needed to determine which literal was rejected.
+		for _, text := range []string{"1e3", "1.0", "0x1p+1"} {
+			_, err := castRangeValue("age", text, schemapb.DataType_Int64, NewFloat(1000))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), text)
+		}
+	})
+
+	t.Run("parsed value is rendered without source text", func(t *testing.T) {
+		_, err := castRangeValue("age", "", schemapb.DataType_Int64, NewFloat(3.14))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "3.14")
+		assert.NotContains(t, err.Error(), "float_val")
+	})
 }
 
-// Test_formatGenericValue verifies that literals are formatted exactly as the user
-// wrote them, not using the protobuf text format returned by GenericValue.String().
+func Test_literalText(t *testing.T) {
+	assert.Equal(t, "1e3", literalText("1e3", NewFloat(1000)))
+	assert.Equal(t, `'two'`, literalText(`'two'`, NewString("two")))
+	assert.Equal(t, "1000", literalText("", NewFloat(1000)))
+	assert.Equal(t, `"two"`, literalText("", NewString("two")))
+}
+
+// Test_formatGenericValue verifies that parsed literals are rendered in a readable
+// form, not in the protobuf text format returned by GenericValue.String().
 func Test_formatGenericValue(t *testing.T) {
 	assert.Equal(t, "true", formatGenericValue(NewBool(true)))
 	assert.Equal(t, "42", formatGenericValue(NewInt(42)))

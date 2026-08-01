@@ -1205,8 +1205,15 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		for i, e := range array {
 			castedValue, err := castValue(dataType, e)
 			if err != nil {
+				// dataType is printed as-is after the target is narrowed above. If the array
+				// target is not narrowed, dataType remains Array, so the element type is appended
+				// to reflect the expected shape of each value in the list.
+				fieldDataType := dataType.String()
+				if typeutil.IsArrayType(dataType) {
+					fieldDataType = getDataType(childExpr)
+				}
 				return merr.WrapErrParameterInvalidMsg("value %s (%s) in list cannot be casted to field %s (%s)",
-					formatGenericValue(e), getValueDataType(e), ctx.Expr(0).GetText(), dataType.String())
+					literalText(termElementText(ctx.Expr(1), i), e), getValueDataType(e), ctx.Expr(0).GetText(), fieldDataType)
 			}
 			values[i] = castedValue
 		}
@@ -1408,6 +1415,21 @@ func columnIdentifierText(identifier, child, structSubField, structIndexField an
 	}
 }
 
+// termElementText returns the source text of the i-th element in a term list. It
+// returns an empty string when the list is not a literal, such as when it is
+// produced by constant folding, since there is no source token available to quote.
+func termElementText(list parser.IExprContext, i int) string {
+	arrayCtx, ok := list.(*parser.ArrayContext)
+	if !ok {
+		return ""
+	}
+	elements := arrayCtx.AllExpr()
+	if i >= len(elements) {
+		return ""
+	}
+	return elements[i].GetText()
+}
+
 func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
@@ -1546,12 +1568,12 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
 	if !isTemplateExpr(lowerValueExpr) {
-		if lowerValue, err = castRangeValue(fieldText, fieldDataType, lowerValue); err != nil {
+		if lowerValue, err = castRangeValue(fieldText, ctx.Expr(0).GetText(), fieldDataType, lowerValue); err != nil {
 			return err
 		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
-		if upperValue, err = castRangeValue(fieldText, fieldDataType, upperValue); err != nil {
+		if upperValue, err = castRangeValue(fieldText, ctx.Expr(1).GetText(), fieldDataType, upperValue); err != nil {
 			return err
 		}
 	}
@@ -1633,12 +1655,12 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
 	if !isTemplateExpr(lowerValueExpr) {
-		if lowerValue, err = castRangeValue(fieldText, fieldDataType, lowerValue); err != nil {
+		if lowerValue, err = castRangeValue(fieldText, ctx.Expr(1).GetText(), fieldDataType, lowerValue); err != nil {
 			return err
 		}
 	}
 	if !isTemplateExpr(upperValueExpr) {
-		if upperValue, err = castRangeValue(fieldText, fieldDataType, upperValue); err != nil {
+		if upperValue, err = castRangeValue(fieldText, ctx.Expr(0).GetText(), fieldDataType, upperValue); err != nil {
 			return err
 		}
 	}
