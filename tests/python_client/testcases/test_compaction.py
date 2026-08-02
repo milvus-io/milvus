@@ -150,7 +150,7 @@ class TestCompactionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("delete_pos", [1, tmp_nb // 2])
-    def test_compact_after_delete(self, delete_pos):
+    def test_compact_after_delete_partial(self, delete_pos):
         """
         target: test delete one entity and compact
         method: 1.create with shard_num=1
