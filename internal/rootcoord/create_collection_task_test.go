@@ -46,6 +46,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestCreateCollectionTaskReleaseFileResources(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	heldIDs := []int64{10, 20}
+	meta.EXPECT().DecFileResourceRefCnt(heldIDs).Once()
+
+	task := &createCollectionTask{
+		Core:                &Core{meta: meta},
+		heldFileResourceIds: heldIDs,
+	}
+
+	task.releaseFileResources()
+	require.Nil(t, task.heldFileResourceIds)
+	task.releaseFileResources()
+}
+
 func Test_createCollectionTask_validate(t *testing.T) {
 	paramtable.Init()
 	t.Run("empty request", func(t *testing.T) {

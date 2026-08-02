@@ -63,7 +63,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -186,7 +185,7 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 	}, &querypb.LoadMetaInfo{
 		LoadType:        querypb.LoadType_LoadCollection,
 		PartitionIDs:    []int64{1001, 1002},
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
+		SchemaBarrierTs: 0,
 	})
 }
 
@@ -220,7 +219,7 @@ func (s *DelegatorDataSuite) genTextCollection() {
 	}, nil, &querypb.LoadMetaInfo{
 		LoadType:        querypb.LoadType_LoadCollection,
 		PartitionIDs:    []int64{1001},
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
+		SchemaBarrierTs: 0,
 	})
 }
 
@@ -257,7 +256,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			InputFieldIds:  []int64{102},
 			OutputFieldIds: []int64{101},
 		}},
-	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
+	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 0})
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
@@ -833,6 +832,104 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
 	s.Empty(sealed)
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-retry/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Run(func(context.Context, string) {
+			s.delegator.distribution.AddDistributions(SegmentEntry{
+				NodeID:      1,
+				SegmentID:   100,
+				PartitionID: 500,
+				Version:     1,
+				Level:       datapb.SegmentLevel_L1,
+			})
+			s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:         1,
+				SealedInTarget:        []int64{100},
+				SealedSegmentRowCount: map[int64]int64{100: 3},
+			}, []int64{500})
+		}).
+		Return(nil, merr.WrapErrIoTooManyRequests(remotePath, errors.New("storage throttled"))).Once()
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(3), fieldStats.NumRow())
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsDoesNotRetryPermanentFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-missing/segment_100/field_101/0"
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(nil, merr.WrapErrIoKeyNotFound(remotePath)).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrIoKeyNotFound)
+}
+
 func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegment() {
 	s.genCollectionWithFunction()
 	s.delegator.distribution.AddDistributions(SegmentEntry{
@@ -1244,17 +1341,21 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners() {
+func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	err := s.delegator.syncCollectionIndexMeta(ctx, &querypb.LoadSegmentsRequest{
+	s.Require().Nil(s.delegator.getIDFOracle())
+	err := s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
 		CollectionID:  s.collectionID,
 		Schema:        schema,
 		LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: 1},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
 	})
 	s.Require().NoError(err)
+	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
+	s.Equal(uint64(1), s.delegator.schemaBarrierTs)
+	s.Require().NotNil(s.delegator.getIDFOracle())
 
 	// The load path has already advanced the collection snapshot, so the DDL
 	// event is skipped as a no-op. The function runner key must still point at
@@ -1265,6 +1366,19 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	})
 	s.Require().NoError(err)
 	s.True(ok)
+}
+
+func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelegatorSchema() {
+	ctx := context.Background()
+	s.delegator.Start()
+	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Version = 1
+	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
+	s.manager.Collection.Unref(s.collectionID, 1)
+
+	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{CollectionID: s.collectionID}))
+	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
+	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {

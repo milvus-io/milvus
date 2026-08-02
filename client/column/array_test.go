@@ -281,6 +281,13 @@ func (s *ArraySuite) TestBasic() {
 			s.Equal(row, sf.GetStringData().GetData())
 		}
 
+		sliced := column.Slice(0, -1)
+		s.IsType((*ColumnVarCharArray)(nil), sliced)
+		s.Require().NoError(sliced.AppendValue([]string{"after_slice"}))
+		s.NotPanics(func() {
+			sliced.FieldData()
+		})
+
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnVarCharArray)

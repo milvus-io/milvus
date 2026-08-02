@@ -46,7 +46,7 @@ SplitBlockBloomFilterView::Parse(std::string_view blob) {
     }
     // Defensive upper bound on the whole envelope, checked before any field
     // is read. The proxy is the operator-tunable gate: it rejects blobs above
-    // proxy.maxBloomFilterSize (default 32 MiB) at plan-build time and
+    // proxy.maxBloomFilterSize (default 64 MiB) at plan-build time and
     // validates the envelope via sbbf.Parse (same 128 MB format cap mirroring
     // Arrow's kMaximumBloomFilterBytes); in practice the blob is also bounded
     // by the gRPC transport limit. But a hand-crafted plan can reach segcore

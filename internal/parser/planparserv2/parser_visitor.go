@@ -306,6 +306,31 @@ func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	return nil
 }
 
+// contextualizeEmptyArrayLiteral assigns the element type of a whole ARRAY
+// column to an inline empty array literal. Unlike a non-empty literal, [] has
+// no element from which the parser can infer a type. The field provides that
+// missing context for equality comparisons without relaxing comparisons on
+// ARRAY elements or JSON paths.
+func contextualizeEmptyArrayLiteral(literal, field *ExprWithType) {
+	if literal == nil || field == nil || literal.dataType != schemapb.DataType_Array {
+		return
+	}
+	valueExpr := literal.expr.GetValueExpr()
+	if valueExpr == nil || isTemplateExpr(valueExpr) {
+		return
+	}
+	array := valueExpr.GetValue().GetArrayVal()
+	if array == nil || len(array.GetArray()) != 0 || array.GetElementType() != schemapb.DataType_None {
+		return
+	}
+	columnInfo := toColumnInfo(field)
+	if columnInfo == nil || columnInfo.GetDataType() != schemapb.DataType_Array ||
+		len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel() {
+		return
+	}
+	array.ElementType = columnInfo.GetElementType()
+}
+
 // VisitAddSub translates expr to arithmetic plan.
 func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	var err error
@@ -496,6 +521,10 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		return err
 	}
 
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	contextualizeEmptyArrayLiteral(leftExpr, rightExpr)
+	contextualizeEmptyArrayLiteral(rightExpr, leftExpr)
+
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
@@ -516,8 +545,6 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		}
 		return ret
 	}
-
-	leftExpr, rightExpr := getExpr(left), getExpr(right)
 
 	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
 	if err != nil {
@@ -1117,6 +1144,12 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 	}
 }
 
+func isTermExprTargetSupported(dataType schemapb.DataType) bool {
+	return typeutil.IsPrimitiveType(dataType) ||
+		typeutil.IsJSONType(dataType) ||
+		typeutil.IsArrayType(dataType)
+}
+
 // VisitTerm translates expr to term plan.
 func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	child := ctx.Expr(0).Accept(v)
@@ -1140,6 +1173,9 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	// 2. Array with element level flag (e.g., $[intField] IN [1, 2] in MATCH_ALL/ElementFilter)
 	if typeutil.IsArrayType(dataType) && (len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
 		dataType = columnInfo.GetElementType()
+	}
+	if !isTermExprTargetSupported(dataType) {
+		return merr.WrapErrParameterInvalidMsg("term expression is not supported for data type %s", dataType.String())
 	}
 
 	term := ctx.Expr(1).Accept(v)
@@ -1204,6 +1240,81 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 
 func isValidStructSubField(tokenText string) bool {
 	return len(tokenText) >= 4 && tokenText[:2] == "$[" && tokenText[len(tokenText)-1] == ']'
+}
+
+func validateMatchColumnInfo(columnInfo *planpb.ColumnInfo) (bool, error) {
+	if columnInfo == nil {
+		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate column info is missing")
+	}
+	if !columnInfo.GetIsElementLevel() {
+		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate can only use element-level fields")
+	}
+	return true, nil
+}
+
+func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
+	if expr == nil {
+		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate is missing")
+	}
+
+	switch realExpr := expr.GetExpr().(type) {
+	case *planpb.Expr_ColumnExpr:
+		return false, merr.WrapErrParameterInvalidMsg("raw element columns are not supported inside MATCH predicate")
+	case *planpb.Expr_TermExpr:
+		return validateMatchColumnInfo(realExpr.TermExpr.GetColumnInfo())
+	case *planpb.Expr_UnaryRangeExpr:
+		return validateMatchColumnInfo(realExpr.UnaryRangeExpr.GetColumnInfo())
+	case *planpb.Expr_BinaryRangeExpr:
+		return validateMatchColumnInfo(realExpr.BinaryRangeExpr.GetColumnInfo())
+	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
+		return validateMatchColumnInfo(realExpr.BinaryArithOpEvalRangeExpr.GetColumnInfo())
+	case *planpb.Expr_CompareExpr:
+		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside MATCH predicate")
+	case *planpb.Expr_JsonContainsExpr:
+		return false, merr.WrapErrParameterInvalidMsg("array/JSON contains expressions are not supported inside MATCH predicate")
+	case *planpb.Expr_NullExpr:
+		return validateMatchColumnInfo(realExpr.NullExpr.GetColumnInfo())
+	case *planpb.Expr_ExistsExpr:
+		return validateMatchColumnInfo(realExpr.ExistsExpr.GetInfo())
+	case *planpb.Expr_GisfunctionFilterExpr:
+		return validateMatchColumnInfo(realExpr.GisfunctionFilterExpr.GetColumnInfo())
+	case *planpb.Expr_TimestamptzArithCompareExpr:
+		return validateMatchColumnInfo(realExpr.TimestamptzArithCompareExpr.GetTimestamptzColumn())
+	case *planpb.Expr_UnaryExpr:
+		return validateMatchPredicateElementLevel(realExpr.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		leftElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryExpr.GetLeft())
+		if err != nil {
+			return false, err
+		}
+		rightElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryExpr.GetRight())
+		if err != nil {
+			return false, err
+		}
+		return leftElementLevel && rightElementLevel, nil
+	case *planpb.Expr_BinaryArithExpr:
+		leftElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryArithExpr.GetLeft())
+		if err != nil {
+			return false, err
+		}
+		rightElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryArithExpr.GetRight())
+		if err != nil {
+			return false, err
+		}
+		return leftElementLevel && rightElementLevel, nil
+	case *planpb.Expr_CallExpr:
+		return false, merr.WrapErrParameterInvalidMsg("function calls are not supported inside MATCH predicate")
+	case *planpb.Expr_ValueExpr, *planpb.Expr_AlwaysTrueExpr:
+		return false, nil
+	case *planpb.Expr_ElementFilterExpr:
+		return false, merr.WrapErrParameterInvalidMsg("element_filter is not supported inside MATCH predicate")
+	case *planpb.Expr_MatchExpr:
+		return false, merr.WrapErrParameterInvalidMsg("nested MATCH predicate is not supported")
+	case *planpb.Expr_RandomSampleExpr:
+		return false, merr.WrapErrParameterInvalidMsg("random sample is not supported inside MATCH predicate")
+	default:
+		return false, merr.WrapErrParameterInvalidMsg("unsupported MATCH predicate expression")
+	}
 }
 
 func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*planpb.ColumnInfo, error) {
@@ -1422,14 +1533,8 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserLE
 	upperInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserLE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !lowerInclusive || !upperInclusive {
-			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
-		} else {
-			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
+		if err := validateBinaryRangeBounds(lowerValue, upperValue, lowerInclusive, upperInclusive); err != nil {
+			return err
 		}
 	}
 
@@ -1509,14 +1614,8 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserGE
 	upperInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserGE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !lowerInclusive || !upperInclusive {
-			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
-		} else {
-			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
-			}
+		if err := validateBinaryRangeBounds(lowerValue, upperValue, lowerInclusive, upperInclusive); err != nil {
+			return err
 		}
 	}
 
@@ -1666,6 +1765,22 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	}
 }
 
+func newLogicalBinaryExpr(leftExpr, rightExpr *ExprWithType, op planpb.BinaryExpr_BinaryOp) *ExprWithType {
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Left:  leftExpr.expr,
+					Right: rightExpr.expr,
+					Op:    op,
+				},
+			},
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 // VisitLogicalOr apply logical or to two boolean expressions.
 func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{} {
 	left := ctx.Expr(0).Accept(v)
@@ -1699,6 +1814,9 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 			return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 		}
 		if boolLiteral.GetBoolVal() {
+			if otherExpr != nil && canBeExecuted(otherExpr) && otherExpr.expr.GetIsTemplate() {
+				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalOr)
+			}
 			// true or expr → always true
 			return &ExprWithType{
 				expr:     alwaysTrueExpr(),
@@ -1712,10 +1830,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return otherExpr
 	}
 
-	var leftExpr *ExprWithType
-	var rightExpr *ExprWithType
-	leftExpr = getExpr(left)
-	rightExpr = getExpr(right)
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
 	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
 		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in logical and expression")
 	}
@@ -1727,21 +1842,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_BinaryExpr{
-			BinaryExpr: &planpb.BinaryExpr{
-				Left:  leftExpr.expr,
-				Right: rightExpr.expr,
-				Op:    planpb.BinaryExpr_LogicalOr,
-			},
-		},
-		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
-	}
-
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return newLogicalBinaryExpr(leftExpr, rightExpr, planpb.BinaryExpr_LogicalOr)
 }
 
 // VisitLogicalAnd apply logical and to two boolean expressions.
@@ -1777,6 +1878,9 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 		}
 		if !boolLiteral.GetBoolVal() {
+			if otherExpr != nil && canBeExecuted(otherExpr) && otherExpr.expr.GetIsTemplate() {
+				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalAnd)
+			}
 			// false and expr → always false
 			return &ExprWithType{
 				expr:     alwaysFalseExpr(),
@@ -1790,10 +1894,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return otherExpr
 	}
 
-	var leftExpr *ExprWithType
-	var rightExpr *ExprWithType
-	leftExpr = getExpr(left)
-	rightExpr = getExpr(right)
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
 	if isRandomSampleExpr(leftExpr) {
 		return merr.WrapErrQueryPlanMsg("random sample expression can only be the last expression in the logical and expression")
 	}
@@ -1806,47 +1907,39 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 	}
 
-	var expr *planpb.Expr
 	if isRandomSampleExpr(rightExpr) {
 		randomSampleExpr := rightExpr.expr.GetRandomSampleExpr()
 		randomSampleExpr.Predicate = leftExpr.expr
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_RandomSampleExpr{
-				RandomSampleExpr: randomSampleExpr,
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_RandomSampleExpr{
+					RandomSampleExpr: randomSampleExpr,
+				},
+				// The wrapper must carry the predicate's template flag, or the
+				// top-level IsTemplate short-circuit skips FillExpressionValue and
+				// an unfilled placeholder (e.g. a deferred bloom_match) fans out
+				// to QueryNodes. Mirrors the element_filter branch below.
+				IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 			},
-			// The wrapper must carry the predicate's template flag, or the
-			// top-level IsTemplate short-circuit skips FillExpressionValue and
-			// an unfilled placeholder (e.g. a deferred bloom_match) fans out
-			// to QueryNodes. Mirrors the element_filter branch below.
-			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+			dataType: schemapb.DataType_Bool,
 		}
-	} else if isElementFilterExpr(rightExpr) {
+	}
+	if isElementFilterExpr(rightExpr) {
 		// Similar to RandomSampleExpr, extract doc-level predicate
 		elementFilterExpr := rightExpr.expr.GetElementFilterExpr()
 		elementFilterExpr.Predicate = leftExpr.expr
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_ElementFilterExpr{
-				ElementFilterExpr: elementFilterExpr,
-			},
-			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
-		}
-	} else {
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_BinaryExpr{
-				BinaryExpr: &planpb.BinaryExpr{
-					Left:  leftExpr.expr,
-					Right: rightExpr.expr,
-					Op:    planpb.BinaryExpr_LogicalAnd,
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ElementFilterExpr{
+					ElementFilterExpr: elementFilterExpr,
 				},
+				IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 			},
-			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+			dataType: schemapb.DataType_Bool,
 		}
 	}
 
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return newLogicalBinaryExpr(leftExpr, rightExpr, planpb.BinaryExpr_LogicalAnd)
 }
 
 // visitBitwiseBinaryOp is the shared implementation for VisitBitAnd/VisitBitOr/VisitBitXor.
@@ -3087,6 +3180,13 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	predicateExpr := getExpr(predicate)
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
+	}
+	if !isElementLevel {
+		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
 	}
 
 	// bloom_match is not supported inside a MATCH_* element predicate. Its

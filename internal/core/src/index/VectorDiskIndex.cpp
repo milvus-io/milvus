@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -374,8 +375,13 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     }
 
     if (disk_valid_data.found) {
-        BuildValidDataFromBitmap(
-            this, disk_valid_data.total_count, disk_valid_data.bitmap.data());
+        auto offset_mapping_options = GetOffsetMappingMmapOptions(load_config);
+        offset_mapping_options.mmap_dir_path =
+            GetOffsetMappingMmapDir(local_index_path_prefix);
+        BuildValidDataFromBitmap(this,
+                                 disk_valid_data.total_count,
+                                 disk_valid_data.bitmap.data(),
+                                 offset_mapping_options);
     }
 }
 

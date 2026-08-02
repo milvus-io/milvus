@@ -1008,8 +1008,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
              expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
-            auto schema = segment->get_schema();
-            auto field_meta = schema[field_id];
+            auto schema = segment->get_schema_snapshot();
+            auto field_meta = (*schema)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =
@@ -1076,6 +1076,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     GetActiveCount() const {
         return active_count_;
     }
+
+    // The concrete string literal to hand to a scalar index's ShouldUseOp cost
+    // guard, for the anchored pattern ops (PrefixMatch/PostfixMatch/InnerMatch)
+    // whose index cost depends on the literal. Empty for every other op
+    // (including the equality family, which FMINDEX declines outright), so the
+    // guard is judged on the op alone. Lets FMINDEX decline degenerate high-hit
+    // LIKE literals to the raw-data scan on the VARCHAR path.
+    std::string
+    StringLiteralForCostGuard() const;
 
     // Check if ngram index can be used (index exists + literal is valid + no offset input)
     bool
@@ -1171,7 +1180,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};

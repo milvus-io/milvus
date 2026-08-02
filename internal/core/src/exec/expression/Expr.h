@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -302,12 +303,12 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto& schema = segment_->get_schema();
-        auto& field_meta = schema[field_id_];
+        auto schema = segment_->get_schema_snapshot();
+        auto& field_meta = (*schema)[field_id_];
         field_type_ = field_meta.get_data_type();
 
-        if (schema.get_primary_field_id().has_value() &&
-            schema.get_primary_field_id().value() == field_id_ &&
+        if (schema->get_primary_field_id().has_value() &&
+            schema->get_primary_field_id().value() == field_id_ &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -349,8 +350,8 @@ class SegmentExpr : public Expr {
             return;
         }
         pinned_index_initialized_ = true;
-        auto& schema = segment_->get_schema();
-        auto& field_meta = schema[field_id_];
+        auto schema = segment_->get_schema_snapshot();
+        auto& field_meta = (*schema)[field_id_];
         pinned_index_ = PinIndex(op_ctx_,
                                  segment_,
                                  field_meta,
@@ -445,8 +446,11 @@ class SegmentExpr : public Expr {
                 if (segment_->HasFieldData(field_id_)) {
                     MoveCursorForData();
                 }
+            } else if (exec_path_ == ExprExecPath::JsonStats) {
+                current_data_global_pos_ += std::min(
+                    batch_size_, active_count_ - current_data_global_pos_);
             } else {
-                // RawData, PkIndex, TextIndex, JsonStats all use data cursor.
+                // RawData, PkIndex, and TextIndex use the data cursor.
                 MoveCursorForData();
             }
         }
@@ -535,6 +539,11 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
+        EnsureExecPathDetermined();
+        if (exec_path_ == ExprExecPath::JsonStats) {
+            return std::min(batch_size_,
+                            active_count_ - current_data_global_pos_);
+        }
         auto current_chunk =
             UseIndexCursor() ? current_index_chunk_ : current_data_chunk_;
         auto current_chunk_pos = UseIndexCursor() ? current_index_chunk_pos_
@@ -1861,7 +1870,20 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
         return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, values...);
+            func, false, IndexValidityMode::Default, nullptr, values...);
+    }
+
+    // Execute an index query once for the whole segment and gather only the
+    // requested rows. Unlike ProcessIndexChunksByOffsets, this also supports
+    // JSON indexes whose query APIs return a full row-level bitmap (including
+    // JsonFlatIndexQueryExecutor).
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksAndGatherByOffsets(FUNC func,
+                                         const OffsetVector& offsets,
+                                         const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(
+            func, false, IndexValidityMode::Default, &offsets, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -1872,7 +1894,8 @@ class SegmentExpr : public Expr {
     ProcessIndexChunksWithRowLevel(FUNC func,
                                    IndexValidityMode validity_mode,
                                    const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
+        return ProcessIndexChunksImpl<T>(
+            func, true, validity_mode, nullptr, values...);
     }
 
     TargetBitmap
@@ -1913,6 +1936,7 @@ class SegmentExpr : public Expr {
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
                            IndexValidityMode validity_mode,
+                           const OffsetVector* offsets,
                            const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -2031,6 +2055,20 @@ class SegmentExpr : public Expr {
         bool need_element_slicing =
             cached_is_nested_index_ && !func_returns_row_level;
 
+        if (offsets != nullptr) {
+            AssertInfo(!need_element_slicing,
+                       "cannot gather row offsets from an element-level "
+                       "index result");
+            AssertInfo(cached_index_chunk_res_->size() ==
+                           static_cast<size_t>(active_count_),
+                       "index result size {} does not match row count {}",
+                       cached_index_chunk_res_->size(),
+                       active_count_);
+            return GatherCachedResultByOffsets(*cached_index_chunk_res_,
+                                               *cached_index_chunk_valid_res_,
+                                               *offsets);
+        }
+
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
@@ -2125,8 +2163,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                    auto schema = segment_->get_schema_snapshot();
+                    auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -2199,8 +2237,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                    auto schema = segment_->get_schema_snapshot();
+                    auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -2496,6 +2534,28 @@ class SegmentExpr : public Expr {
                value < kFirstNonInjectiveInteger;
     }
 
+    static bool
+    JsonNumericBoundRequiresPreciseInt64Comparison(
+        const proto::plan::GenericValue& bound) {
+        if (bound.has_int64_val()) {
+            return !IsInt64SafeForJsonDoubleIndex(bound.int64_val());
+        }
+        if (!bound.has_float_val() || !std::isfinite(bound.float_val())) {
+            return false;
+        }
+
+        // A double bound in this interval can alias a neighboring int64 when
+        // JSON data or a path index converts the integer to double. Bounds
+        // outside the int64 domain cannot have that ambiguity.
+        constexpr double kFirstNonInjectiveInteger = 0x1p53;
+        constexpr double kInt64Magnitude = 0x1p63;
+        const auto value = bound.float_val();
+        return (value >= kFirstNonInjectiveInteger &&
+                value <= kInt64Magnitude) ||
+               (value <= -kFirstNonInjectiveInteger &&
+                value >= -kInt64Magnitude);
+    }
+
  public:
     bool
     CanUseNestedIndex() const override {
@@ -2503,9 +2563,14 @@ class SegmentExpr : public Expr {
         return PinnedIndexIsNested();
     }
 
+    // Ask the pinned scalar index whether `op` should run through it or fall
+    // back to the raw-data scan. Pass the concrete query literal in `pattern`
+    // when the caller has one (string pattern ops): an index with a cheap
+    // per-literal cost bound (FMINDEX's count-first guard) uses it to decline
+    // degenerate high-hit literals whose enumeration would lose to the scan.
     template <typename T>
     bool
-    CanUseIndexForOp(OpType op) const {
+    CanUseIndexForOp(OpType op, const std::string& pattern = "") const {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
@@ -2519,7 +2584,7 @@ class SegmentExpr : public Expr {
                    num_index_chunk_);
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         AssertInfo(scalar_index != nullptr, "invalid scalar index type");
-        return scalar_index->ShouldUseOp(op);
+        return scalar_index->ShouldUseOp(op, pattern);
     }
 
     template <typename T>
@@ -2649,6 +2714,30 @@ class SegmentExpr : public Expr {
         valid_result.append(
             *cached_valid_result_, current_data_global_pos_, real_batch_size);
         MoveCursor();
+        return std::make_shared<ColumnVector>(std::move(result),
+                                              std::move(valid_result));
+    }
+
+    VectorPtr
+    GatherCachedResultByOffsets(const TargetBitmap& cached_res,
+                                const TargetBitmap& cached_valid_res,
+                                const OffsetVector& offsets) const {
+        AssertInfo(cached_res.size() == cached_valid_res.size(),
+                   "cached result and validity sizes differ: {} vs {}",
+                   cached_res.size(),
+                   cached_valid_res.size());
+        TargetBitmap result(offsets.size(), false);
+        TargetBitmap valid_result(offsets.size(), false);
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            const auto offset = offsets[i];
+            AssertInfo(
+                offset >= 0 && static_cast<size_t>(offset) < cached_res.size(),
+                "offset {} is outside cached result size {}",
+                offset,
+                cached_res.size());
+            result[i] = cached_res[offset];
+            valid_result[i] = cached_valid_res[offset];
+        }
         return std::make_shared<ColumnVector>(std::move(result),
                                               std::move(valid_result));
     }

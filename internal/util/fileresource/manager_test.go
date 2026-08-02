@@ -28,10 +28,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -225,6 +228,32 @@ func (suite *SyncManagerSuite) TestSync_UpdateAndRemoveNotifyListener() {
 	suite.Require().Len(listener.events, 3)
 	suite.Empty(listener.events[2].Resources)
 	suite.NoDirExists(path.Join(suite.tempDir, "2"))
+}
+
+func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersion() {
+	mockey.PatchConvey("failed analyzer update keeps version retryable", suite.T(), func() {
+		expectedErr := errors.New("mock analyzer update failed")
+		mocker := mockey.Mock(analyzer.UpdateGlobalResourceInfo).Return(expectedErr).Build()
+
+		resources := []*internalpb.FileResourceInfo{
+			{Id: 1, Name: "test.file", Path: "/storage/test.file"},
+		}
+		suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil).Once()
+
+		err := suite.manager.Sync(1, resources)
+		suite.ErrorIs(err, expectedErr)
+		suite.Equal(uint64(0), suite.manager.GetVersion())
+
+		// the same version is retried and reaches the analyzer again, re-downloading the resource
+		suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil).Once()
+		mocker.Return(nil)
+
+		suite.Require().NoError(suite.manager.Sync(1, resources))
+		suite.Equal(uint64(1), suite.manager.GetVersion())
+		content, err := os.ReadFile(path.Join(suite.tempDir, "1", "test.file"))
+		suite.NoError(err)
+		suite.Equal("test content", string(content))
+	})
 }
 
 func (suite *SyncManagerSuite) TestMode() {

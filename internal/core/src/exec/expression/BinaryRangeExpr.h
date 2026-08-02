@@ -336,7 +336,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForIndex();
+    ExecRangeVisitorImplForIndex(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -351,7 +351,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJsonStats();
+    ExecRangeVisitorImplForJsonStats(OffsetVector* input = nullptr);
 
     template <typename ValueType>
     VectorPtr
@@ -370,7 +370,6 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     SingleElement lower_arg_;
     SingleElement upper_arg_;
     bool arg_inited_{false};

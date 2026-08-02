@@ -57,7 +57,7 @@ func NewNullableColumnFloatVector(fieldName string, dim int, values [][]float32,
 	col := NewColumnFloatVector(fieldName, dim, values)
 	col.withValidData(validData)
 	col.nullable = true
-	return col, nil
+	return col, col.ValidateNullable()
 }
 
 func NewNullableColumnBinaryVector(fieldName string, dim int, values [][]byte, validData []bool) (*ColumnBinaryVector, error) {
@@ -67,7 +67,7 @@ func NewNullableColumnBinaryVector(fieldName string, dim int, values [][]byte, v
 	col := NewColumnBinaryVector(fieldName, dim, values)
 	col.withValidData(validData)
 	col.nullable = true
-	return col, nil
+	return col, col.ValidateNullable()
 }
 
 func NewNullableColumnFloat16Vector(fieldName string, dim int, values [][]byte, validData []bool) (*ColumnFloat16Vector, error) {
@@ -77,7 +77,7 @@ func NewNullableColumnFloat16Vector(fieldName string, dim int, values [][]byte, 
 	col := NewColumnFloat16Vector(fieldName, dim, values)
 	col.withValidData(validData)
 	col.nullable = true
-	return col, nil
+	return col, col.ValidateNullable()
 }
 
 func NewNullableColumnBFloat16Vector(fieldName string, dim int, values [][]byte, validData []bool) (*ColumnBFloat16Vector, error) {
@@ -87,7 +87,7 @@ func NewNullableColumnBFloat16Vector(fieldName string, dim int, values [][]byte,
 	col := NewColumnBFloat16Vector(fieldName, dim, values)
 	col.withValidData(validData)
 	col.nullable = true
-	return col, nil
+	return col, col.ValidateNullable()
 }
 
 func NewNullableColumnInt8Vector(fieldName string, dim int, values [][]int8, validData []bool) (*ColumnInt8Vector, error) {
@@ -97,7 +97,7 @@ func NewNullableColumnInt8Vector(fieldName string, dim int, values [][]int8, val
 	col := NewColumnInt8Vector(fieldName, dim, values)
 	col.withValidData(validData)
 	col.nullable = true
-	return col, nil
+	return col, col.ValidateNullable()
 }
 
 func NewNullableColumnSparseFloatVector(fieldName string, values []entity.SparseEmbedding, validData []bool) (*ColumnSparseFloatVector, error) {
@@ -107,7 +107,7 @@ func NewNullableColumnSparseFloatVector(fieldName string, values []entity.Sparse
 	col := NewColumnSparseVectors(fieldName, values)
 	col.withValidData(validData)
 	col.nullable = true
-	return col, nil
+	return col, col.ValidateNullable()
 }
 
 func getValidCount(validData []bool) int {

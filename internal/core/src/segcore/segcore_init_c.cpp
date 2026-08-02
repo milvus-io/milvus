@@ -81,9 +81,11 @@ SegcoreSetEnableGISSplitFusion(const bool value) {
 
 extern "C" void
 SegcoreSetVisibilityFilterEnabled(const bool value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    config.set_visibility_filter_enabled(value);
+    // Deprecated compatibility shim: row visibility filtering is always
+    // enforced and this value is ignored. The symbol survives so callers
+    // built against the v3.0.0 interface keep linking; the Go side rejects
+    // `false` at querynode startup before this could ever matter.
+    (void)value;
 }
 
 extern "C" void
@@ -98,6 +100,13 @@ SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_nlist(value);
+}
+
+extern "C" void
+SegcoreSetFMIndexCostRatio(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_fmindex_cost_ratio(value);
 }
 
 extern "C" void

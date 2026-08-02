@@ -170,6 +170,11 @@ class SegmentInterface {
     virtual const Schema&
     get_schema() const = 0;
 
+    virtual SchemaPtr
+    get_schema_snapshot() const {
+        return std::make_shared<Schema>(get_schema());
+    }
+
     virtual int64_t
     get_deleted_count() const = 0;
 
@@ -563,6 +568,12 @@ class SegmentInternalInterface : public SegmentInterface {
     set_field_avg_size(FieldId field_id,
                        int64_t num_rows,
                        int64_t field_size) override;
+
+    void
+    set_field_avg_size(const FieldMeta& field_meta,
+                       int64_t num_rows,
+                       int64_t field_size);
+
     virtual bool
     is_chunked() const {
         return false;
@@ -850,7 +861,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 

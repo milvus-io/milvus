@@ -23,6 +23,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1407,21 +1408,30 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
 
+    // One batch conversion for the contiguous range instead of a validity
+    // lock plus a logical->physical search per row: flush walks the whole
+    // segment through here, and per-row lookups made that O(rows * log
+    // valid). Validity and physical offsets come from one mapping snapshot;
+    // for a non-mapping column this is the identity.
+    std::vector<int64_t> logical_offsets(num_rows);
+    std::iota(logical_offsets.begin(), logical_offsets.end(), start_offset);
+    auto row_valid = std::make_unique<bool[]>(num_rows);
+    std::vector<int64_t> physical_offsets;
+    field_info.vec_base->get_offset_mapping().FilterValidLogicalOffsets(
+        logical_offsets.data(), num_rows, row_valid.get(), physical_offsets);
+
+    size_t next_physical = 0;
     for (int64_t i = 0; i < num_rows; i++) {
-        auto logical_offset = start_offset + i;
-        if (field_info.valid_data &&
-            !field_info.valid_data->is_valid(logical_offset)) {
+        if (!row_valid[i]) {
+            if (field_info.valid_data == nullptr) {
+                return arrow::Status::Invalid(
+                    "valid nullable vector array row missing physical data");
+            }
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
         }
 
-        auto physical_offset =
-            field_info.vec_base->get_physical_offset(logical_offset);
-        if (physical_offset < 0) {
-            return arrow::Status::Invalid(
-                "valid nullable vector array row missing physical data");
-        }
-
+        const auto physical_offset = physical_offsets[next_physical++];
         const auto& vector_array = (*vector_array_vec)[physical_offset];
         if (vector_array.get_element_type() != field_info.element_type) {
             return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
@@ -1694,13 +1704,13 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
         }
         auto ids = growing_segment->get_insert_record().get_data_field_ids();
         std::unordered_set<int64_t> seen(ids.begin(), ids.end());
-        const auto& schema = growing_segment->get_schema();
-        for (const auto& field_id : schema.get_field_ids()) {
+        auto schema = growing_segment->get_schema_snapshot();
+        for (const auto& field_id : schema->get_field_ids()) {
             auto raw_field_id = field_id.get();
             if (seen.find(raw_field_id) != seen.end()) {
                 continue;
             }
-            const auto& field_meta = schema[field_id];
+            const auto& field_meta = (*schema)[field_id];
             if (milvus::IsVectorDataType(field_meta.get_data_type()) &&
                 growing_segment->CanReadRawVectorFromIndex(field_id)) {
                 ids.push_back(raw_field_id);
@@ -1990,6 +2000,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto flush_schema =
             ParseFlushSchema(config->schema_blob, config->schema_length);
         const auto& schema = *flush_schema;
+        auto runtime_schema = growing_segment->get_schema_snapshot();
         auto& insert_record = growing_segment->get_insert_record();
 
         int64_t total_rows = end_offset - start_offset;
@@ -2048,7 +2059,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                     // compaction). The Go layer normally trims such columns
                     // from the layout already — this is the defense for
                     // stale layouts.
-                    if (!growing_segment->get_schema().has_field(field_id)) {
+                    if (!runtime_schema->has_field(field_id)) {
                         LOG_INFO(
                             "skip dropped field {} when flushing growing "
                             "segment {}",
@@ -2261,8 +2272,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto writer_result = milvus_storage::segment::SegmentWriter::Create(
             fs, arrow_schema, writer_config);
         if (!writer_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          writer_result.status().ToString());
+            auto error = milvus_storage::ToSegcoreError(writer_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto writer = std::move(writer_result).ValueOrDie();
 
@@ -2349,8 +2360,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 arrow::RecordBatch::Make(arrow_schema, batch_rows, arrays);
             auto write_status = writer->Write(batch);
             if (!write_status.ok()) {
-                return milvus::FailureCStatus(milvus::UnexpectedError,
-                                              write_status.ToString());
+                auto error = milvus_storage::ToSegcoreError(write_status);
+                return milvus::FailureCStatus(&error);
             }
 
             current_offset += batch_rows;
@@ -2360,8 +2371,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // close writer — returns ColumnGroups + LobFiles, does NOT commit
         auto close_result = writer->Close();
         if (!close_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          close_result.status().ToString());
+            auto error = milvus_storage::ToSegcoreError(close_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto output = std::move(close_result).ValueOrDie();
         if (rows_written > 0 && !has_timestamp) {
@@ -2445,16 +2456,17 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 milvus_storage::api::transaction::OverwriteResolver,
                 retry_limit);
         if (!transaction_result.ok()) {
-            return milvus::FailureCStatus(
-                milvus::UnexpectedError,
-                transaction_result.status().ToString());
+            auto error =
+                milvus_storage::ToSegcoreError(transaction_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto transaction = std::move(transaction_result).ValueOrDie();
 
         auto manifest_result = transaction->GetManifest();
         if (!manifest_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          manifest_result.status().ToString());
+            auto error =
+                milvus_storage::ToSegcoreError(manifest_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto manifest = manifest_result.ValueOrDie();
 
@@ -2541,8 +2553,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 fmt::format("{}/{}", writer_config.segment_path, rel_path);
             auto write_status = WriteRawFile(fs, full_path, serialized);
             if (!write_status.ok()) {
-                return milvus::FailureCStatus(milvus::UnexpectedError,
-                                              write_status.ToString());
+                auto error = milvus_storage::ToSegcoreError(write_status);
+                return milvus::FailureCStatus(&error);
             }
             stat_entry.paths.push_back(full_path);
 
@@ -2571,9 +2583,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 for (const auto& existing_path : paths_to_merge) {
                     auto existing_result = ReadBM25StatsFile(fs, existing_path);
                     if (!existing_result.ok()) {
-                        return milvus::FailureCStatus(
-                            milvus::UnexpectedError,
-                            existing_result.status().ToString());
+                        auto error = milvus_storage::ToSegcoreError(
+                            existing_result.status());
+                        return milvus::FailureCStatus(&error);
                     }
                     merged_stats.Merge(existing_result.ValueOrDie());
                 }
@@ -2587,8 +2599,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 write_status =
                     WriteRawFile(fs, merged_full_path, merged_serialized);
                 if (!write_status.ok()) {
-                    return milvus::FailureCStatus(milvus::UnexpectedError,
-                                                  write_status.ToString());
+                    auto error = milvus_storage::ToSegcoreError(write_status);
+                    return milvus::FailureCStatus(&error);
                 }
                 stat_entry.paths.push_back(merged_full_path);
                 memory_size += merged_serialized.size();
@@ -2601,8 +2613,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // commit
         auto commit_result = transaction->Commit();
         if (!commit_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          commit_result.status().ToString());
+            auto error = milvus_storage::ToSegcoreError(commit_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto committed_version = commit_result.ValueOrDie();
 
@@ -2635,7 +2647,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+        return milvus::FailureCStatus(&e);
     }
 }
 

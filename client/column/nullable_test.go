@@ -371,6 +371,73 @@ func (s *NullableScalarSuite) TestBasic() {
 	})
 }
 
+func (s *NullableScalarSuite) TestVectorSlice() {
+	sparse, err := entity.NewSliceSparseEmbedding([]uint32{0}, []float32{1})
+	s.Require().NoError(err)
+
+	cases := []struct {
+		name   string
+		create func() (Column, error)
+	}{
+		{
+			name: "float vector",
+			create: func() (Column, error) {
+				return NewNullableColumnFloatVector("vector", 2, [][]float32{{1, 2}}, []bool{false, true})
+			},
+		},
+		{
+			name: "binary vector",
+			create: func() (Column, error) {
+				return NewNullableColumnBinaryVector("vector", 8, [][]byte{{1}}, []bool{false, true})
+			},
+		},
+		{
+			name: "float16 vector",
+			create: func() (Column, error) {
+				return NewNullableColumnFloat16Vector("vector", 2, [][]byte{{1, 2, 3, 4}}, []bool{false, true})
+			},
+		},
+		{
+			name: "bfloat16 vector",
+			create: func() (Column, error) {
+				return NewNullableColumnBFloat16Vector("vector", 2, [][]byte{{1, 2, 3, 4}}, []bool{false, true})
+			},
+		},
+		{
+			name: "int8 vector",
+			create: func() (Column, error) {
+				return NewNullableColumnInt8Vector("vector", 2, [][]int8{{1, 2}}, []bool{false, true})
+			},
+		},
+		{
+			name: "sparse vector",
+			create: func() (Column, error) {
+				return NewNullableColumnSparseFloatVector("vector", []entity.SparseEmbedding{sparse}, []bool{false, true})
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			vector, err := tc.create()
+			s.Require().NoError(err)
+			s.Require().NoError(vector.ValidateNullable())
+
+			var sliced Column
+			s.NotPanics(func() {
+				sliced = vector.Slice(0, vector.Len())
+			})
+			s.Require().NotNil(sliced)
+			s.Equal(2, sliced.Len())
+			isNull, err := sliced.IsNull(0)
+			s.Require().NoError(err)
+			s.True(isNull)
+			_, err = sliced.Get(1)
+			s.NoError(err)
+		})
+	}
+}
+
 func TestNullableScalar(t *testing.T) {
 	suite.Run(t, new(NullableScalarSuite))
 }
