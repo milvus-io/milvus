@@ -396,6 +396,7 @@ func TestDataDistributionReportBuilders(t *testing.T) {
 		ManifestPath: "manifest-path",
 		DataVersion:  3,
 	})
+	mockSegment.EXPECT().MemSize().Return(int64(1024))
 
 	info := buildSegmentVersionInfo(mockSegment)
 
