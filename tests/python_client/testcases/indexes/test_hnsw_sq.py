@@ -1,11 +1,11 @@
-import logging
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
+# fmt: off
 import pytest
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from idx_hnsw_sq import HNSW_SQ
+from pymilvus import DataType
 
 index_type = "HNSW_SQ"
 success = "success"
@@ -13,6 +13,7 @@ pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
 default_nb = ct.default_nb
+index_build_timeout = 600
 default_build_params = {"M": 16, "efConstruction": 200, "sq_type": "SQ8"}
 default_search_params = {"ef": 64, "refine_k": 1}
 
@@ -54,7 +55,7 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
                               check_task=CheckTasks.err_res,
                               check_items=params.get("expected"))
         else:
-            self.create_index(client, collection_name, index_params)
+            self.create_index(client, collection_name, index_params, timeout=index_build_timeout)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
 
             # load collection
@@ -126,7 +127,7 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
             self.create_index(client, collection_name, index_params,
                               check_task=CheckTasks.err_res,
                               check_items={"err_code": 999,
-                                           "err_msg": f"can't build with this index HNSW_SQ: invalid parameter"})
+                                           "err_msg": "can't build with this index HNSW_SQ: invalid parameter"})
 
         else:
             self.create_index(client, collection_name, index_params)
