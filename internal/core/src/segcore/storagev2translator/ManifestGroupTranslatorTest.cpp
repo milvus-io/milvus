@@ -108,6 +108,29 @@ class ColumnEstimateTestChunkReader : public milvus_storage::api::ChunkReader {
         return delegate_->get_chunk_estimated_size();
     }
 
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string& field_name) override {
+        if (column_lookup_count_ != nullptr) {
+            ++*column_lookup_count_;
+        }
+        if (column_estimate_mode_ == ColumnEstimateMode::UNAVAILABLE) {
+            return arrow::Status::NotImplemented(
+                "column estimate unavailable for fallback test");
+        }
+        auto result = delegate_->get_chunk_column_estimated_size(field_name);
+        if (!result.ok()) {
+            return result.status();
+        }
+        auto sizes = std::move(result).ValueOrDie();
+        if (column_estimate_mode_ == ColumnEstimateMode::ZERO) {
+            std::fill(sizes.begin(), sizes.end(), 0);
+        } else if (column_estimate_mode_ == ColumnEstimateMode::FIRST_ZERO &&
+                   !sizes.empty()) {
+            sizes.front() = 0;
+        }
+        return sizes;
+    }
+
     arrow::Result<std::vector<std::vector<uint64_t>>>
     get_chunk_column_estimated_size() override {
         if (column_lookup_count_ != nullptr) {
@@ -193,6 +216,11 @@ class FullyDeletedTestChunkReader : public milvus_storage::api::ChunkReader {
 
     arrow::Result<std::vector<uint64_t>>
     get_chunk_estimated_size() override {
+        return std::vector<uint64_t>{0};
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string&) override {
         return std::vector<uint64_t>{0};
     }
 
