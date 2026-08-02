@@ -1125,6 +1125,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto writeback_mode = mmap_config.GetMmapWriteback()
+                              ? MmapChunkWritebackMode::FdatasyncOnFinish
+                              : MmapChunkWritebackMode::Disabled;
 
     auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
     column_group->columns = column_names;
@@ -1187,7 +1190,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             /*fallback_bytes_per_row=*/0,
             shard_,
             std::nullopt,
-            milvus::MmapChunkWritebackMode::Disabled,
+            writeback_mode,
             enable_async_load);
 
         auto chunked_column_group =
@@ -1271,7 +1274,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             /*fallback_bytes_per_row=*/0,
             shard_,
             size_estimate,
-            milvus::MmapChunkWritebackMode::Disabled,
+            writeback_mode,
             enable_async_load);
 
         auto chunked_column_group =
