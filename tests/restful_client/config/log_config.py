@@ -17,7 +17,7 @@ class LogConfig:
             return str(log_path)
         except Exception as e:
             # now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-            log_path = f"/tmp/ci_logs"
+            log_path = "/tmp/ci_logs"
             print(
                 "[get_env_variable] failed to get environment variables : %s, use default path : %s"
                 % (str(e), log_path)

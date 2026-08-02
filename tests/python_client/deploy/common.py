@@ -1,4 +1,5 @@
 import json
+
 from utils.util_log import test_log as log
 
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "BIN_FLAT", "BIN_IVF_FLAT"]
@@ -50,7 +51,7 @@ def gen_search_param(index_type, metric_type="L2"):
 
 def get_deploy_test_collections():
     try:
-        with open("/tmp/ci_logs/deploy_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/deploy_test_all_collections.json") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
@@ -61,7 +62,7 @@ def get_deploy_test_collections():
 
 def get_chaos_test_collections():
     try:
-        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:

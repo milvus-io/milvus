@@ -1,13 +1,12 @@
-import random
-import time
+import datetime
 import random
 import string
-from faker import Faker
+import time
+
 import numpy as np
-from sklearn import preprocessing
-import requests
+from faker import Faker
 from loguru import logger
-import datetime
+from sklearn import preprocessing
 
 fake = Faker()
 

@@ -3,9 +3,11 @@ CDC sync tests for collection DDL operations.
 """
 
 import time
+
 import pytest
-from pymilvus import DataType, Collection
 from common.common_type import CaseLabel
+from pymilvus import Collection, DataType
+
 from .base import TestCDCSyncBase, logger
 
 

@@ -1,23 +1,24 @@
-import pytest
 import time
-from pymilvus import connections, utility, Collection
-from utils.util_log import test_log as log
+
+import pytest
 from base.client_base import TestcaseBase
-from chaos.checker import InsertChecker, FlushChecker, UpsertChecker, DeleteChecker, Op, ResultAnalyzer
 from chaos import chaos_commons as cc
-from common import common_func as cf
-from utils.util_k8s import get_querynode_id_pod_pairs
-from utils.util_birdwatcher import BirdWatcher
-from customize.milvus_operator import MilvusOperator
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel
 from chaos.chaos_commons import assert_statistic
+from chaos.checker import DeleteChecker, FlushChecker, InsertChecker, Op, ResultAnalyzer, UpsertChecker
+from common import common_func as cf
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from customize.milvus_operator import MilvusOperator
+from pymilvus import Collection, connections, utility
+from utils.util_birdwatcher import BirdWatcher
+from utils.util_k8s import get_querynode_id_pod_pairs
+from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 prefix = "test_rg"
 
-from rich.table import Table
 from rich.console import Console
+from rich.table import Table
 
 
 def display_segment_distribution_info(collection_name, release_name, segment_info=None):

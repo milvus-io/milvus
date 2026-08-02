@@ -1,8 +1,8 @@
+import copy
 import sys
 import traceback
-import copy
 
-from check.func_check import ResponseChecker, Error
+from check.func_check import Error, ResponseChecker
 from utils.util_log import test_log as log
 
 # enable_traceback = os.getenv('ENABLE_TRACEBACK', "True")

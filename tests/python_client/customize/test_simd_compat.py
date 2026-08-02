@@ -1,14 +1,14 @@
-import pytest
 import time
 
-from pymilvus import connections
-from utils.util_log import test_log as log
+import pytest
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
-from milvus_operator import MilvusOperator
-from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from milvus_operator import MilvusOperator
+from pymilvus import connections
+from utils.util_log import test_log as log
 
 # sorted by the priority order of the simd
 # | configuration | possible returned SIMD |

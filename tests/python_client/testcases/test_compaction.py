@@ -1,14 +1,12 @@
 import threading
-from time import time, sleep
+from time import sleep, time
 
 import pytest
-from pymilvus.grpc_gen.common_pb2 import SegmentState
-from pymilvus.exceptions import MilvusException
-
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus.exceptions import MilvusException
 from utils.util_log import test_log as log
 
 prefix = "compact"

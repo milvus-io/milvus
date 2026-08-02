@@ -32,11 +32,10 @@ Usage with standalone server (for environments without pytest-httpserver):
 """
 
 import json
+import socket
 import threading
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Optional, Callable, Any
-import socket
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 def generate_mock_embedding(text: str, dim: int) -> list:
@@ -198,7 +197,7 @@ def get_local_ip() -> str:
         s.close()
         if not ip.startswith("127."):
             return ip
-    except (OSError, socket.error):
+    except OSError:
         # Socket connection failed, try next method
         pass
 
@@ -208,7 +207,7 @@ def get_local_ip() -> str:
         ip = socket.gethostbyname(hostname)
         if not ip.startswith("127."):
             return ip
-    except (OSError, socket.error, socket.gaierror):
+    except (OSError, socket.gaierror):
         # Hostname resolution failed, fall back to localhost
         pass
 
@@ -264,8 +263,8 @@ class MockTEIServer:
         self.port = port
         self.dim = dim
         self._external_host = external_host
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
         self._running = False
         # Instance-specific state (not shared between servers)
         self._state = {
@@ -319,7 +318,7 @@ class MockTEIServer:
                     sock.close()
                     return
                 sock.close()
-            except (OSError, socket.error):
+            except OSError:
                 # Connection not ready yet, retry
                 pass
             time.sleep(0.1)
@@ -377,8 +376,8 @@ def pytest_httpserver_fixture(dim: int = 768):
 
 
 if __name__ == "__main__":
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     print("Testing standalone MockTEIServer...")
     with MockTEIServer(port=8080, dim=768) as server:

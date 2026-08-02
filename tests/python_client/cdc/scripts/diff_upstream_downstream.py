@@ -13,14 +13,14 @@ compare result
 
 """
 
+import collections.abc
+import json
+import threading
 import time
 
-from loguru import logger
-import json
-import collections.abc
 from deepdiff import DeepDiff
-from pymilvus import connections, Collection, db, list_collections
-import threading
+from loguru import logger
+from pymilvus import Collection, connections, db, list_collections
 
 
 def convert_deepdiff(diff):
@@ -59,7 +59,7 @@ def get_collection_info(info, db_name, c_name):
             cnt = res[0]["count(*)"]
             # logger.info(cnt)
             info[db_name][c_name]["cnt"] = cnt
-        except Exception as e:
+        except Exception:
             # logger.warning(f"failed to query {db_name}.{c_name}: {e}")
             info[db_name][c_name]["cnt"] = -1
 

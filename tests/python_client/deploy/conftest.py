@@ -1,17 +1,16 @@
-import logging
-
-import pytest
 import functools
+import logging
 import socket
 
-import common.common_type as ct
 import common.common_func as cf
-from utils.util_log import test_log as log
-from common.common_func import param_info
+import common.common_type as ct
+import pytest
 from check.param_check import ip_check, number_check
+from common.common_func import param_info
 from config.log_config import log_config
-from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
 from pymilvus.orm.types import CONSISTENCY_STRONG
+from utils.util_log import test_log as log
+from utils.util_pymilvus import gen_binary_default_fields, gen_default_fields, gen_unique_str, get_milvus
 
 timeout = 60
 dimension = 128

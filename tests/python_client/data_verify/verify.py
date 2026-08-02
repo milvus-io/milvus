@@ -5,11 +5,10 @@ This script verifies data consistency between Milvus collections and their
 corresponding PostgreSQL storage by comparing entities.
 """
 
-import os
 import argparse
+import os
 
 from dotenv import load_dotenv
-
 from pymilvus_pg import MilvusPGClient as MilvusClient
 
 # Load environment variables from .env file

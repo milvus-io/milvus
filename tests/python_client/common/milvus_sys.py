@@ -1,7 +1,8 @@
-import ujson
 import json
-from pymilvus.grpc_gen import milvus_pb2 as milvus_types
+
+import ujson
 from pymilvus import connections
+from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 
 # from utils.util_log import test_log as log
 sys_info_req = ujson.dumps({"metric_type": "system_info"})

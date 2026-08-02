@@ -1,6 +1,7 @@
+import functools
 import time
 from datetime import datetime
-import functools
+
 from utils.util_log import test_log as log
 
 DEFAULT_FMT = "[{start_time}] [{elapsed:0.8f}s] {collection_name} {func_name} -> {res!r}"

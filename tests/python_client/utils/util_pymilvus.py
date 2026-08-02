@@ -1,16 +1,17 @@
+import copy
 import json
 import random
 import string
 import threading
-import traceback
 import time
-import copy
+import traceback
+
 import numpy as np
 import requests
+from pymilvus import DataType, MilvusClient
 from sklearn import preprocessing
-from pymilvus import MilvusClient, DataType
-from utils.util_log import test_log as log
 from utils.util_k8s import init_k8s_client_config
+from utils.util_log import test_log as log
 
 port = 19530
 epsilon = 0.000001
@@ -761,7 +762,7 @@ def assert_equal_vector(v1, v2):
 def restart_server(helm_release_name):
     res = True
     timeout = 120
-    from kubernetes import client, config
+    from kubernetes import client
 
     client.rest.logger.setLevel(log.WARNING)
 
@@ -962,12 +963,12 @@ class MyThread(threading.Thread):
     def run(self):
         self.exc = None
         try:
-            super(MyThread, self).run()
+            super().run()
         except BaseException as e:
             self.exc = e
             log.error(traceback.format_exc())
 
     def join(self):
-        super(MyThread, self).join()
+        super().join()
         if self.exc:
             raise self.exc

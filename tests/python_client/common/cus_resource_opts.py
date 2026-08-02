@@ -1,18 +1,17 @@
-from __future__ import print_function
 
 import os
 
+from common.common_type import in_cluster_env
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from utils.util_log import test_log as log
-from common.common_type import in_cluster_env
 
 _GROUP = "milvus.io"
 _VERSION = "v1alpha1"
 _NAMESPACE = "default"
 
 
-class CustomResourceOperations(object):
+class CustomResourceOperations:
     def __init__(self, kind, group=_GROUP, version=_VERSION, namespace=_NAMESPACE):
         self.group = group
         self.version = version

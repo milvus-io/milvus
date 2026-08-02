@@ -1,9 +1,9 @@
 import json
-import pytest
 
+import pytest
 from base.client_base import TestcaseBase
-from deploy.common import get_deploy_test_collections
 from common.common_type import CaseLabel
+from deploy.common import get_deploy_test_collections
 from utils.util_log import test_log as log
 
 

@@ -1,10 +1,11 @@
 import random
 import time
-from utils.utils import gen_collection_name
-from utils.util_log import test_log as logger
+
 import pytest
 from base.testbase import TestBase
-from pymilvus import FieldSchema, CollectionSchema, DataType, Collection
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 
 @pytest.mark.L0
@@ -269,7 +270,7 @@ class TestRestfulSdkCompatibility(TestBase):
         time.sleep(5)
         # query data by sdk
         collection = Collection(name=name)
-        res = collection.query(expr=f"uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
+        res = collection.query(expr="uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         for item in res:
             uid = item["uid"]
             assert uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -283,7 +284,7 @@ class TestRestfulSdkCompatibility(TestBase):
         time.sleep(5)
         # query data by sdk
         collection = Collection(name=name)
-        res = collection.query(expr=f"uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
+        res = collection.query(expr="uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         pk_id_list = []
         for item in res:
             uid = item["uid"]
@@ -291,7 +292,7 @@ class TestRestfulSdkCompatibility(TestBase):
         expr = f"id in {pk_id_list}"
         collection.delete(expr)
         time.sleep(5)
-        res = collection.query(expr=f"uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
+        res = collection.query(expr="uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         assert len(res) == 0
 
     def test_collection_create_by_sdk_delete_vector_by_restful(self):
@@ -319,7 +320,7 @@ class TestRestfulSdkCompatibility(TestBase):
         ]
         collection.insert(data)
         time.sleep(5)
-        res = collection.query(expr=f"int64 in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
+        res = collection.query(expr="int64 in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         pk_id_list = []
         for item in res:
             pk_id_list.append(item["int64"])
@@ -327,5 +328,5 @@ class TestRestfulSdkCompatibility(TestBase):
         # delete data by restful
         rsp = self.vector_client.vector_delete(payload)
         time.sleep(5)
-        res = collection.query(expr=f"int64 in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
+        res = collection.query(expr="int64 in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         assert len(res) == 0

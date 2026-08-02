@@ -1,12 +1,9 @@
 import pytest
-
-from pymilvus import DataType
 from base.client_v2_base import TestMilvusClientV2Base
-
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import DataType
 from utils.util_pymilvus import *
 
 prefix = "client_alias"
@@ -84,7 +81,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "a".join("a" for i in range(256))
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         self.create_alias(client, collection_name, alias, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -101,7 +98,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection alias must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection alias must be less than 255 characters"}
         self.create_alias(client, collection_name, alias, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -163,7 +160,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         alias = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection alias must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection alias must be less than 255 characters"}
         self.drop_alias(client, alias, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -196,7 +193,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "a".join("a" for i in range(256))
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         self.alter_alias(client, collection_name, alias, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -236,7 +233,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection alias must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection alias must be less than 255 characters"}
         self.alter_alias(client, collection_name, alias, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 

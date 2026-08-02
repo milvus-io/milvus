@@ -1,15 +1,15 @@
-import random
-from sklearn import preprocessing
-import numpy as np
-import sys
 import json
+import random
+import sys
 import time
-from utils import constant
-from utils.utils import gen_collection_name
-from utils.util_log import test_log as logger
+
+import numpy as np
 import pytest
 from base.testbase import TestBase
-from utils.utils import get_data_by_payload, get_common_fields_by_data
+from sklearn import preprocessing
+from utils import constant
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name, get_common_fields_by_data, get_data_by_payload
 
 
 @pytest.mark.L0

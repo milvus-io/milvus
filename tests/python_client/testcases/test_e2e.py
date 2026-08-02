@@ -1,6 +1,6 @@
 import time
-import pytest
 
+import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct

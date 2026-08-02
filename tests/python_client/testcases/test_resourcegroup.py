@@ -1,10 +1,9 @@
 import pytest
-from pymilvus.client.types import ResourceGroupConfig
-
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus.client.types import ResourceGroupConfig
 from utils.util_pymilvus import *
 
 config_nodes = 8
@@ -762,7 +761,7 @@ class TestTransferNode(TestcaseBase):
         self.init_resource_group(rg_name)
 
         # transfer replicas
-        error = {ct.err_code: 999, ct.err_msg: f"resource group node not enough"}
+        error = {ct.err_code: 999, ct.err_msg: "resource group node not enough"}
         if num_node in [0, -1]:
             error = {
                 ct.err_code: 999,
@@ -772,12 +771,12 @@ class TestTransferNode(TestcaseBase):
             if isinstance(num_node, str):
                 error = {
                     ct.err_code: 999,
-                    ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted as an integer>",
+                    ct.err_msg: "Unexpected error, message=<'str' object cannot be interpreted as an integer>",
                 }
             else:
                 error = {
                     ct.err_code: 999,
-                    ct.err_msg: f"Unexpected error, message=<'float' object cannot be interpreted as an integer>",
+                    ct.err_msg: "Unexpected error, message=<'float' object cannot be interpreted as an integer>",
                 }
         self.utility_wrap.transfer_node(
             source=ct.default_resource_group_name,
@@ -806,18 +805,18 @@ class TestTransferNode(TestcaseBase):
         # transfer replicas
         error = {
             ct.err_code: 999,
-            ct.err_msg: f"failed to transfer replica between resource group, err=nodes not enough",
+            ct.err_msg: "failed to transfer replica between resource group, err=nodes not enough",
         }
         if type(num_replica) is not int:
             if isinstance(num_replica, str):
                 error = {
                     ct.err_code: 999,
-                    ct.err_msg: f"Unexpected error, message=<'str' object cannot be interpreted as an integer>",
+                    ct.err_msg: "Unexpected error, message=<'str' object cannot be interpreted as an integer>",
                 }
             elif isinstance(num_replica, float):
                 error = {
                     ct.err_code: 999,
-                    ct.err_msg: f"Unexpected error, message=<'float' object cannot be interpreted as an integer>",
+                    ct.err_msg: "Unexpected error, message=<'float' object cannot be interpreted as an integer>",
                 }
         if num_replica in [0, -1]:
             error = {
@@ -825,7 +824,7 @@ class TestTransferNode(TestcaseBase):
                 ct.err_msg: f"invalid parameter[expected=NumReplica > 0][actual=invalid NumReplica {num_replica}]",
             }
         if num_replica == 99:
-            error = {ct.err_code: 999, ct.err_msg: f"NumReplica not greater than the number of replica"}
+            error = {ct.err_code: 999, ct.err_msg: "NumReplica not greater than the number of replica"}
 
         self.utility_wrap.transfer_replica(
             source=ct.default_resource_group_name,
@@ -1923,7 +1922,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         self.utility_wrap.transfer_node(source=ct.default_resource_group_name, target=rg_name, num_node=3)
 
         # transfer 2 replicas to rgA
-        error = {ct.err_code: 5, ct.err_msg: f"NumReplica not greater than the number of replica"}
+        error = {ct.err_code: 5, ct.err_msg: "NumReplica not greater than the number of replica"}
         self.utility_wrap.transfer_replica(
             source=ct.default_resource_group_name,
             target=rg_name,

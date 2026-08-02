@@ -1,14 +1,15 @@
-import pytest
 import time
-from datetime import datetime, timedelta, timezone
-from common.common_type import CaseLabel, CheckTasks
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
+from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from pymilvus import AnnSearchRequest, DataType, WeightedRanker
+from pymilvus.orm.types import CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY, CONSISTENCY_SESSION, CONSISTENCY_STRONG
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from base.client_v2_base import TestMilvusClientV2Base
-from pymilvus import DataType, AnnSearchRequest, WeightedRanker
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 
 default_nb = ct.default_nb
 default_dim = ct.default_dim
@@ -634,7 +635,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert collection_info["properties"].get("ttl_field") == "ttl"
 
         # Insert data with future TTL
-        ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        ttl_str = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": ttl_str, default_vector_field_name: list(vectors[i])}
@@ -678,7 +679,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name, properties={"ttl_field": "ttl"})
 
         # Insert data with future timestamp (10 seconds from now in UTC)
-        ttl_timestamp = datetime.now(timezone.utc) + timedelta(seconds=10)
+        ttl_timestamp = datetime.now(UTC) + timedelta(seconds=10)
         ttl_str = ttl_timestamp.isoformat()
 
         vectors = cf.gen_vectors(nb, dim=default_dim)
@@ -732,7 +733,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with future ttl
-        ttl_timestamp = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        ttl_timestamp = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         ttl_str = ttl_timestamp.isoformat()
 
         vectors = cf.gen_vectors(nb, dim=default_dim)
@@ -770,7 +771,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with past ttl (already expired)
-        ttl_timestamp = datetime.now(timezone.utc) - timedelta(seconds=60)
+        ttl_timestamp = datetime.now(UTC) - timedelta(seconds=60)
         ttl_str = ttl_timestamp.isoformat()
 
         vectors = cf.gen_vectors(nb, dim=default_dim)
@@ -806,7 +807,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert NULL ttl data (never expires) + short TTL data
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb * 2, dim=default_dim)
         rows = []
         for i in range(nb * 2):
@@ -865,8 +866,8 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Prepare ttl values
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
-        past_ttl = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
+        past_ttl = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
 
         # Insert mixed data
         vectors = cf.gen_vectors(nb, dim=default_dim)
@@ -914,7 +915,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with future ttl
-        ttl_timestamp = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        ttl_timestamp = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         ttl_str = ttl_timestamp.isoformat()
 
         vectors = cf.gen_vectors(nb, dim=default_dim)
@@ -965,7 +966,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with original TTL (8s)
-        original_ttl = (datetime.now(timezone.utc) + timedelta(seconds=original_ttl_seconds)).isoformat()
+        original_ttl = (datetime.now(UTC) + timedelta(seconds=original_ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": original_ttl, default_vector_field_name: list(vectors[i])}
@@ -976,7 +977,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         # Wait 4 seconds, then upsert with extended TTL (12s from now)
         time.sleep(4)
-        extended_ttl = (datetime.now(timezone.utc) + timedelta(seconds=12)).isoformat()
+        extended_ttl = (datetime.now(UTC) + timedelta(seconds=12)).isoformat()
         upsert_rows = [
             {default_primary_key_field_name: i, "ttl": extended_ttl, default_vector_field_name: list(vectors[i])}
             for i in range(nb)
@@ -1012,7 +1013,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with long TTL (60s)
-        long_ttl = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        long_ttl = (datetime.now(UTC) + timedelta(seconds=60)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": long_ttl, default_vector_field_name: list(vectors[i])}
@@ -1028,7 +1029,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert res[0].get("count(*)") == nb
 
         # Upsert with short TTL (8s from now)
-        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        short_ttl = (datetime.now(UTC) + timedelta(seconds=short_ttl_seconds)).isoformat()
         upsert_rows = [
             {default_primary_key_field_name: i, "ttl": short_ttl, default_vector_field_name: list(vectors[i])}
             for i in range(nb)
@@ -1062,7 +1063,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with future ttl
-        ttl_timestamp = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        ttl_timestamp = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": ttl_timestamp, default_vector_field_name: list(vectors[i])}
@@ -1113,7 +1114,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with long TTL
-        ttl_timestamp = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        ttl_timestamp = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": ttl_timestamp, default_vector_field_name: list(vectors[i])}
@@ -1182,7 +1183,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with explicit timezone offset (+08:00)
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         future_utc = now_utc + timedelta(seconds=ttl_seconds)
         # Convert to +08:00 offset format
         tz_shanghai = timezone(timedelta(hours=8))
@@ -1241,7 +1242,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert first batch with short TTL
-        ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        ttl_str = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": ttl_str, default_vector_field_name: list(vectors[i])}
@@ -1267,7 +1268,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert res[0].get("count(*)") == 0
 
         # Re-insert using the same PKs (0..nb-1) — should succeed since originals are expired
-        reuse_ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        reuse_ttl_str = (datetime.now(UTC) + timedelta(seconds=60)).isoformat()
         reuse_vectors = cf.gen_vectors(nb, dim=default_dim)
         reuse_rows = [
             {default_primary_key_field_name: i, "ttl": reuse_ttl_str, default_vector_field_name: list(reuse_vectors[i])}
@@ -1293,7 +1294,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert len(res) == 10
 
         # Insert additional batch with new PKs
-        new_ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        new_ttl_str = (datetime.now(UTC) + timedelta(seconds=60)).isoformat()
         new_vectors = cf.gen_vectors(nb, dim=default_dim)
         new_rows = [
             {
@@ -1336,8 +1337,8 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         self._create_ttl_collection(client, collection_name)
 
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
-        past_ttl = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
+        past_ttl = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
@@ -1380,7 +1381,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         self._create_ttl_collection(client, collection_name)
 
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
@@ -1440,7 +1441,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         self._create_ttl_collection(client, collection_name)
 
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
@@ -1521,7 +1522,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(
             client,
             collection_name,
-            filter=f"id >= 0 and id < 5",
+            filter="id >= 0 and id < 5",
             output_fields=[default_primary_key_field_name, "ttl", "varchar_field"],
             consistency_level=CONSISTENCY_STRONG,
         )[0]
@@ -1553,7 +1554,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert data with short TTL
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {default_primary_key_field_name: i, "ttl": future_ttl, default_vector_field_name: list(vectors[i])}
@@ -1606,7 +1607,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, "partition_b")
 
         # Insert short TTL data into partition_a
-        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        short_ttl = (datetime.now(UTC) + timedelta(seconds=short_ttl_seconds)).isoformat()
         vectors_a = cf.gen_vectors(nb, dim=default_dim)
         rows_a = [
             {default_primary_key_field_name: i, "ttl": short_ttl, default_vector_field_name: list(vectors_a[i])}
@@ -1615,7 +1616,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows_a, partition_name="partition_a")
 
         # Insert long TTL data into partition_b
-        long_ttl = (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat()
+        long_ttl = (datetime.now(UTC) + timedelta(seconds=300)).isoformat()
         vectors_b = cf.gen_vectors(nb, dim=default_dim)
         rows_b = [
             {default_primary_key_field_name: nb + i, "ttl": long_ttl, default_vector_field_name: list(vectors_b[i])}
@@ -1695,8 +1696,8 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         # ttl = far future (won't expire under original ttl_field)
         # ttl_dynamic = short TTL (will expire if switched to)
-        far_future = (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat()
-        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        far_future = (datetime.now(UTC) + timedelta(seconds=300)).isoformat()
+        short_ttl = (datetime.now(UTC) + timedelta(seconds=short_ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = [
             {
@@ -1753,7 +1754,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._create_ttl_collection(client, collection_name)
 
         # Insert short TTL data (id 0~49) + NULL TTL data (id 50~99)
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        future_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         vectors = cf.gen_vectors(nb * 2, dim=default_dim)
         rows = []
         for i in range(nb * 2):
@@ -1828,7 +1829,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert res[0].get("count(*)") == nb
 
         # Step 2: Upsert same PKs with short TTL
-        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        short_ttl = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
         upsert_rows = [
             {default_primary_key_field_name: i, "ttl": short_ttl, default_vector_field_name: list(vectors[i])}
             for i in range(nb)

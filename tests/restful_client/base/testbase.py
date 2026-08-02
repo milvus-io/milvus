@@ -1,10 +1,11 @@
 import json
 import sys
-import pytest
 import time
+
+import pytest
+from api.milvus import CollectionClient, VectorClient
 from pymilvus import connections, db
 from utils.util_log import test_log as logger
-from api.milvus import VectorClient, CollectionClient
 from utils.utils import get_data_by_payload
 
 
