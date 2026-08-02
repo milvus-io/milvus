@@ -19,29 +19,9 @@ package proxy
 import (
 	"context"
 	"sort"
-	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-)
-
-const (
-	// maxTelemetryWait bounds how long a synchronous telemetry request may block. A client
-	// answers on its next heartbeat, so anything beyond a couple of heartbeat intervals is
-	// almost certainly a client that is not going to answer at all.
-	maxTelemetryWait = 90 * time.Second
-
-	// telemetryReplyPollInterval is how often the proxy re-reads client state while waiting
-	// for a reply. Replies only ever land on a heartbeat -- 30s by default -- so polling
-	// faster than this buys nothing and is not free: every poll ships the target client's
-	// entire stored reply set (up to 50 replies, each with a payload capped at 1MiB) from
-	// RootCoord through the proxy, because command_replies is encoded into
-	// ClientInfo.Reserved regardless of IncludeMetrics.
-	//
-	// Narrowing that server-side needs GetClientTelemetryRequest.command_id, which exists in
-	// milvus-proto but not in the version this repo pins; see the design doc.
-	telemetryReplyPollInterval = 2 * time.Second
 )
 
 // Reply lookup outcomes reported to API callers.
@@ -89,33 +69,6 @@ type clientCommandReply struct {
 	Reply    *CommandReply `json:"reply"`
 }
 
-// parseWaitParam interprets the `wait` query parameter. It accepts a Go duration string
-// ("30s", "1m500ms") or a bare number of seconds ("30"). An empty value means "do not
-// wait". The result is clamped to [0, maxTelemetryWait]; a negative value is treated as 0.
-func parseWaitParam(raw string) (time.Duration, error) {
-	if raw == "" {
-		return 0, nil
-	}
-
-	wait, err := time.ParseDuration(raw)
-	if err != nil {
-		seconds, convErr := strconv.ParseFloat(raw, 64)
-		if convErr != nil {
-			return 0, merr.WrapErrParameterInvalidMsg(
-				"invalid wait %q: expected a duration such as \"30s\" or a number of seconds", raw)
-		}
-		wait = time.Duration(seconds * float64(time.Second))
-	}
-
-	if wait < 0 {
-		return 0, nil
-	}
-	if wait > maxTelemetryWait {
-		wait = maxTelemetryWait
-	}
-	return wait, nil
-}
-
 // findCommandReplies looks up every reply to a command. clientID may be empty, in which
 // case every known client is scanned; passing it turns the lookup into a targeted one,
 // which is what callers who pushed a client-scoped command should do.
@@ -129,9 +82,9 @@ func parseWaitParam(raw string) (time.Duration, error) {
 // state, not a failure, because replies only arrive on a client's next heartbeat.
 func findCommandReplies(ctx context.Context, node *Proxy, clientID, commandID string) ([]clientCommandReply, int, error) {
 	// Metrics are the largest thing a client reports, so skip them: they are not needed to
-	// read replies. This does not make the lookup cheap -- command_replies is encoded into
-	// ClientInfo.Reserved regardless of this flag -- which is why the poll interval above
-	// is measured in seconds.
+	// read replies. It does not make the lookup cheap -- command_replies is encoded into
+	// ClientInfo.Reserved regardless of this flag, so the response still carries each
+	// matching client's whole reply history. Passing clientID is what actually bounds it.
 	resp, err := node.GetClientTelemetry(ctx, &milvuspb.GetClientTelemetryRequest{
 		ClientId:       clientID,
 		IncludeMetrics: false,
@@ -160,121 +113,32 @@ func findCommandReplies(ctx context.Context, node *Proxy, clientID, commandID st
 	return found, len(clients), nil
 }
 
-// waitForCommandReply polls for replies until the timeout elapses or the request is
-// canceled. A zero timeout performs exactly one lookup.
-//
-// When clientID is set the command was aimed at one client, so exactly one answer is
-// possible and the first one ends the wait.
-//
-// When it is empty the command may have been broadcast, so returning on the first reply
-// would hand back one client's answer as though it were the cluster's. Instead the wait
-// continues until every client the lookup can see has answered, or the budget runs out.
-// That stopping condition is not proof of completeness -- the server does not record who a
-// broadcast command reached -- but it beats blocking for the full budget on a command that
-// everyone already answered.
-//
-// An empty result with a nil error means "still pending" and is a normal outcome.
-func waitForCommandReply(ctx context.Context, node *Proxy, clientID, commandID string, timeout time.Duration) ([]clientCommandReply, int, error) {
-	// The budget has to bound the lookups themselves, not just the gaps between them. A
-	// timer racing the poll loop leaves every RPC unbounded, so one hung or retrying
-	// MixCoord call blows straight through the wait -- a 50ms request included -- and holds
-	// a management HTTP handler for however long the call takes. Putting the deadline on the
-	// context makes it cover the first lookup and every retry, and doubles as the loop's
-	// exit condition so there is only one thing to get right.
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	targeted := clientID != ""
-
-	// done reports whether there is anything left to wait for.
-	//
-	// A targeted lookup expects exactly one answer, so the first one ends it. An untargeted
-	// one has no delivery target to compare against -- the server does not record who a
-	// broadcast command reached -- but "every client I can see has answered" is still a far
-	// better stopping condition than "always block for the maximum". Anything that connects
-	// afterwards was not part of the picture the caller is looking at, and re-querying
-	// later returns it.
-	done := func(replies []clientCommandReply, observed int) bool {
-		if len(replies) == 0 {
-			return false
-		}
-		if targeted {
-			return true
-		}
-		return len(replies) >= observed
-	}
-
-	replies, known, err := findCommandReplies(ctx, node, clientID, commandID)
-	if err != nil {
-		return nil, 0, budgetAwareErr(ctx, err)
-	}
-	if timeout <= 0 || done(replies, known) {
-		return replies, known, nil
-	}
-
-	ticker := time.NewTicker(telemetryReplyPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Budget spent, or the caller hung up. Either way report what was collected;
-			// the command itself is unaffected and "pending" is the honest answer.
-			return replies, known, nil
-		case <-ticker.C:
-			latest, latestKnown, err := findCommandReplies(ctx, node, clientID, commandID)
-			if err != nil {
-				// Keep what was already collected; a transient lookup failure should not
-				// discard answers the caller has effectively already waited for.
-				return replies, known, budgetAwareErr(ctx, err)
-			}
-			replies, known = latest, latestKnown
-			if done(replies, known) {
-				return replies, known, nil
-			}
-		}
-	}
-}
-
-// budgetAwareErr drops a lookup error that is really just the wait budget running out
-// mid-RPC. Reporting that as a 500 would turn an expired wait into a failure depending on
-// whether the deadline landed between calls or inside one.
-func budgetAwareErr(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
-		return nil
-	}
-	return err
-}
-
 // commandReplyPayload renders a reply lookup as the JSON body shared by every endpoint
 // that can return one, so callers can parse a single shape regardless of which endpoint
 // produced it.
 //
 // `status` is always present: "done" once at least one client has answered, "pending"
-// otherwise. Callers should branch on it rather than on the presence of `reply`, and a
-// "pending" response is not an error -- retry, or ask again with a longer `wait`.
+// otherwise. Callers should branch on it rather than on the presence of `reply`. A
+// "pending" response is not an error -- the client answers on its next heartbeat, so the
+// caller polls this endpoint again when it is ready to.
 //
 // `replies` is always an array, one entry per answering client. Re-querying later returns
 // everything accumulated so far -- replies are retained per client (the most recent 50).
 //
 // `observed_clients` is how many clients this lookup examined, not how many the command was
 // aimed at, and the two are not the same: the scan covers every cached client regardless of
-// the command's target scope, includes clients that have gone inactive or connected after
-// the command was pushed, and its membership changes between polls. So `responded` reaching
-// `observed_clients` does not mean every recipient answered, and falling short of it does
-// not mean any are missing. There is deliberately no field claiming completeness, because
-// the server does not record who a broadcast command was delivered to; treat both numbers
-// as observations.
+// the command's target scope, and includes clients that have gone inactive or connected
+// after the command was pushed. So `responded` reaching `observed_clients` does not mean
+// every recipient answered, and falling short of it does not mean any are missing. There is
+// deliberately no field claiming completeness, because the server does not record who a
+// broadcast command was delivered to; treat both numbers as observations.
 //
 // `reply` and `client_id` repeat the first entry, which is the whole answer for the common
 // case of a command aimed at one client. Anything reading a command that was not
 // client-scoped must use `replies`. When nothing has answered yet, `client_id` falls back
 // to targetClientID so a caller that pushed to a known client still sees who it is waiting
 // on; it is omitted when the command named no target.
-func commandReplyPayload(commandID, targetClientID string, replies []clientCommandReply, observedClients int, waited time.Duration) map[string]interface{} {
+func commandReplyPayload(commandID, targetClientID string, replies []clientCommandReply, observedClients int) map[string]interface{} {
 	if replies == nil {
 		replies = []clientCommandReply{}
 	}
@@ -286,16 +150,12 @@ func commandReplyPayload(commandID, targetClientID string, replies []clientComma
 		"responded":        len(replies),
 		"observed_clients": observedClients,
 	}
-	if waited > 0 {
-		body["waited_ms"] = waited.Milliseconds()
-	}
-
 	if len(replies) == 0 {
 		if targetClientID != "" {
 			body["client_id"] = targetClientID
 		}
 		body["message"] = "Command has not been answered yet. The client replies on its " +
-			"next heartbeat; retry, or pass ?wait= to block until it arrives."
+			"next heartbeat; query this endpoint again to collect it."
 		return body
 	}
 

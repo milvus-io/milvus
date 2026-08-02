@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -155,32 +154,12 @@ func getTelemetryClients(node *Proxy) gin.HandlerFunc {
 
 // respondToPushedCommand finishes an endpoint that just pushed a command to one client.
 //
-// With wait <= 0 it returns the command ID straight away and the caller collects the reply
-// later from the command-reply endpoint. With wait > 0 it blocks until the client answers
-// or the budget runs out, so a caller gets the result from a single request.
-//
-// Either way the body has the same shape, so callers do not need to special-case the two
-// modes: check "status", and read "reply" when it is "done".
-func respondToPushedCommand(c *gin.Context, node *Proxy, clientID, commandID string, wait time.Duration) {
-	if wait <= 0 {
-		c.JSON(http.StatusOK, commandReplyPayload(commandID, clientID, nil, 0, 0))
-		return
-	}
-
-	start := time.Now()
-	replies, known, err := waitForCommandReply(c.Request.Context(), node, clientID, commandID, wait)
-	if err != nil {
-		mlog.Warn(c.Request.Context(), "respondToPushedCommand: failed to wait for reply",
-			mlog.Err(err),
-			mlog.String("command_id", commandID),
-			mlog.String("client_id", clientID))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, commandReplyPayload(commandID, clientID, replies, known, time.Since(start)))
+// The reply is not available yet -- the client answers on its next heartbeat -- so this
+// returns the command ID immediately and the caller collects the result later from the
+// command-reply endpoint. The body has the same shape that endpoint returns, so a caller
+// parses one thing either way.
+func respondToPushedCommand(c *gin.Context, node *Proxy, clientID, commandID string) {
+	c.JSON(http.StatusOK, commandReplyPayload(commandID, clientID, nil, 0))
 }
 
 // getTelemetryCommandReply returns a client's reply to a previously pushed command.
@@ -191,21 +170,21 @@ func respondToPushedCommand(c *gin.Context, node *Proxy, clientID, commandID str
 //
 // URL param: commandId
 // Query params:
-//   - client_id: the client the command was sent to. Optional, but supplying it turns a
-//     scan of all clients into a targeted lookup, and tells the server exactly one answer
-//     is possible so a wait can end as soon as it arrives.
-//   - wait: block up to this long for replies (e.g. "30s"), capped at maxTelemetryWait.
-//     Default is to return immediately with whatever is known. Without client_id the
-//     command may have been broadcast, so a wait runs for its whole budget collecting
-//     answers rather than returning the first one as if it were the cluster's.
+//   - client_id: the client the command was sent to. Optional, but strongly preferred --
+//     it turns a scan of every cached client into a lookup of one. Each client in the scan
+//     contributes its entire stored reply history to the response, since command_replies is
+//     encoded into ClientInfo.Reserved regardless of IncludeMetrics, so an untargeted
+//     lookup costs proportionally to the size of the fleet.
 //
-// This route is served on the management HTTP port (9091 by default), which sets no write
-// timeout, so the full wait is reachable. `proxy.http.writeTimeout` governs the separate
-// /v1 and /v2/vectordb server and has no effect here.
+// This is a single lookup, not a subscription: it returns what is known right now. There is
+// deliberately no server-side blocking mode. A caller that wants to wait polls this endpoint
+// on its own schedule, which keeps the cost of waiting where the caller can see and control
+// it -- one request, one internal query -- instead of turning a single HTTP request into
+// dozens of full-history transfers inside the cluster.
 //
 // Always 200 on a successful lookup; branch on the "status" field ("done" or "pending").
-// "pending" is a normal state, not an error: replies may still be in flight, and replies
-// are also evicted once a client accumulates more than 50 of them. "responded" and
+// "pending" is a normal state, not an error: the client answers on its next heartbeat, and
+// replies are evicted once a client accumulates more than 50 of them. "responded" and
 // "observed_clients" are observations, not a progress bar -- the server does not record
 // which clients a broadcast command reached, so neither number establishes completeness.
 func getTelemetryCommandReply(node *Proxy) gin.HandlerFunc {
@@ -227,18 +206,9 @@ func getTelemetryCommandReply(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		wait, err := parseWaitParam(c.Query("wait"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": err.Error(),
-			})
-			return
-		}
-
 		clientID := c.Query("client_id")
 
-		start := time.Now()
-		replies, known, err := waitForCommandReply(ctx, node, clientID, commandID, wait)
+		replies, known, err := findCommandReplies(ctx, node, clientID, commandID)
 		if err != nil {
 			mlog.Warn(ctx, "getTelemetryCommandReply: failed to look up reply",
 				mlog.Err(err),
@@ -249,7 +219,7 @@ func getTelemetryCommandReply(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, commandReplyPayload(commandID, clientID, replies, known, time.Since(start)))
+		c.JSON(http.StatusOK, commandReplyPayload(commandID, clientID, replies, known))
 	}
 }
 
@@ -486,11 +456,11 @@ func deleteTelemetryCommand(node *Proxy) gin.HandlerFunc {
 //   - start_time: RFC3339 format start time
 //   - end_time: RFC3339 format end time
 //   - detail: "true" to return all snapshots instead of aggregated metrics (default: aggregated)
-//   - wait: block up to this long for the client's reply (see getTelemetryCommandReply)
 //
-// The client answers on its next heartbeat. If it stays offline for over an hour the
-// command expires unfetched and this request can never complete -- re-issue it once the
-// client is back.
+// The client answers on its next heartbeat, so this returns a command ID rather than the
+// answer; collect it from the command-reply endpoint. If the client stays offline for over
+// an hour the command expires unfetched and the answer never arrives -- re-issue it once
+// the client is back.
 func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -517,14 +487,6 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 		if startTime == "" || endTime == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "start_time and end_time query parameters are required (RFC3339 format)",
-			})
-			return
-		}
-
-		wait, err := parseWaitParam(c.Query("wait"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": err.Error(),
 			})
 			return
 		}
@@ -573,18 +535,18 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		respondToPushedCommand(c, node, clientID, resp.CommandId, wait)
+		respondToPushedCommand(c, node, clientID, resp.CommandId)
 	}
 }
 
 // getTelemetryClientConfig sends a get_config command to a specific client
 // The client will respond with its configuration in the next heartbeat
 // URL param: clientId
-// Query params:
-//   - wait: block up to this long for the client's reply (see getTelemetryCommandReply)
 //
-// If the client stays offline for over an hour the command expires unfetched and this
-// request can never complete -- re-issue it once the client is back.
+// The client answers on its next heartbeat, so this returns a command ID rather than the
+// answer; collect it from the command-reply endpoint. If the client stays offline for over
+// an hour the command expires unfetched and the answer never arrives -- re-issue it once
+// the client is back.
 func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -600,14 +562,6 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 		if clientID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "client_id parameter is required",
-			})
-			return
-		}
-
-		wait, err := parseWaitParam(c.Query("wait"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": err.Error(),
 			})
 			return
 		}
@@ -641,6 +595,6 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		respondToPushedCommand(c, node, clientID, resp.CommandId, wait)
+		respondToPushedCommand(c, node, clientID, resp.CommandId)
 	}
 }

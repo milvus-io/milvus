@@ -430,7 +430,7 @@ REST API endpoints for WebUI and external integrations.
 | `/api/v1/_telemetry/clients/{clientId}/config` | GET | Push `get_config`; returns a command ID |
 | `/api/v1/_telemetry/clients/{clientId}/history` | GET | Push `show_latency_history`; `?start_time=`, `?end_time=`, `?detail=` |
 | `/api/v1/_telemetry/commands` | POST | Push an arbitrary command |
-| `/api/v1/_telemetry/commands/{commandId}/reply` | GET | Fetch a client's reply; `?client_id=`, `?wait=` |
+| `/api/v1/_telemetry/commands/{commandId}/reply` | GET | Fetch a client's reply; `?client_id=` |
 | `/api/v1/_telemetry/commands/{commandId}` | DELETE | Remove a command |
 
 **Authentication:** Basic Auth via `TelemetryAuthMiddleware`, active only when
@@ -485,30 +485,36 @@ establishes completeness. Re-querying later returns everything accumulated so fa
 client-scoped command — which `/config` and `/history` always are — and anything reading a
 broadcast command must use `replies`.
 
-Two ways to collect a result:
+**Collecting a result is always deferred.** Push the command, keep the returned
+`command_id`, and read it later from `/api/v1/_telemetry/commands/{commandId}/reply`.
+Passing `?client_id=` makes that a lookup of one client instead of a scan of every cached
+one, and is strongly preferred.
 
-- **Synchronous** — pass `?wait=30s` to `/config`, `/history`, or the reply endpoint. Waits
-  are clamped to 90s and bounded by the request context; expiry is reported as `pending`.
-  With a `client_id` exactly one answer is possible, so the wait ends as soon as it lands.
-  Without one the command may have been broadcast, so the wait does not stop at the first
-  reply — that would hand one client's answer back as the cluster's. It ends when every
-  client the lookup can see has answered, or when the budget runs out. That is not proof of
-  completeness (the server does not record who a broadcast command reached), but it avoids
-  blocking for the full budget on a command everyone already answered.
-- **Deferred** — push without `wait`, keep the returned `command_id`, and fetch it later
-  from `/api/v1/_telemetry/commands/{commandId}/reply`. Passing `?client_id=` makes that a
-  targeted lookup instead of a scan of all clients.
+There is deliberately **no server-side blocking mode**. An earlier revision of this work
+offered `?wait=`, which polled RootCoord on the caller's behalf; it was removed because the
+cost multiplies in a way the caller cannot see:
 
-The proxy polls RootCoord every 2s while waiting. It is deliberately not faster: replies
-only land on a heartbeat, 30s by default, so a tighter loop buys nothing — and each poll is
-not free. The server returns the target's whole reply history, 50 entries with payloads to
-1MiB each, and `IncludeMetrics: false` does *not* exclude it, because replies are encoded
-into `ClientInfo.Reserved` regardless of that flag.
+- Every lookup carries each matching client's **entire** stored reply history — up to 50
+  replies — because `command_replies` is encoded into `ClientInfo.Reserved` regardless of
+  `IncludeMetrics`, and the proxy filters by command ID only after decoding.
+- Reply payloads are bounded at 1MiB only for the **built-in** handlers. A reply from a
+  handler registered through `RegisterCommandHandler` has no size limit at all.
+- Without `client_id` the scan covers the whole fleet, so the per-lookup cost scales with
+  the number of connected clients.
+- `common.security.authorizationEnabled` defaults to **false**, and
+  `TelemetryAuthMiddleware` passes every request straight through when it is off — so the
+  endpoint is unauthenticated by default.
 
-`GetClientTelemetryRequest.command_id` exists in milvus-proto for exactly this
-([#647](https://github.com/milvus-io/milvus-proto/pull/647)) and narrows the response to the
-requested reply, but this repo still pins the version that predates it. Using it is a
-follow-up, gated on a proto bump — see the note under *Known gaps*.
+A blocking mode turns one unauthenticated HTTP request into dozens of full-history
+transfers inside the cluster. A caller that wants to wait polls the endpoint on its own
+schedule instead, which keeps one request to one internal query and puts the cost where it
+is visible.
+
+`GetClientTelemetryRequest.command_id`
+([milvus-io/milvus-proto#647](https://github.com/milvus-io/milvus-proto/pull/647)) would let
+the server return just the requested reply and remove the per-lookup amplification
+entirely. This repo pins a milvus-proto that predates it; using it is a follow-up gated on a
+proto bump, and a blocking mode should only be reconsidered once it is in place.
 
 Replies are also visible in the `command_replies` array of `GET /api/v1/_telemetry/clients`,
 which is how the WebUI polls; on the wire they are JSON-encoded into
