@@ -517,7 +517,6 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        collection_info = self.describe_collection(client, collection_name)[0]
 
         # Generate vectors to search
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
@@ -1978,7 +1977,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         # 3. search with output field vector
         search_params = cf.get_search_params_params(index)
         binary_vectors = cf.gen_vectors(1, dim, vector_data_type=DataType.BINARY_VECTOR)
-        res = self.search(
+        self.search(
             client,
             collection_name,
             binary_vectors,

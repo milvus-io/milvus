@@ -454,10 +454,10 @@ class TestCompactionOperation(TestcaseBase):
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
-        c_plans = collection_w.get_compaction_plans()[0]
+        collection_w.get_compaction_plans()
 
-        # assert len(c_plans.plans) == 2
-        # todo assert two types compaction plan
+        # todo assert two types of compaction plan (delete + merge). The historical
+        # `assert len(plans) == 2` was never enabled, so the expected count is unverified.
 
         # search
         ids.pop(0)
@@ -834,8 +834,7 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)
 
-        # verify the two segments are merged into one
-        c_plans = collection_w.get_compaction_plans()[0]
+        # the two segments being merged into one is already asserted by check_merge_compact above
 
         # verify queryNode load the compacted segments
         collection_w.load()

@@ -164,8 +164,7 @@ class TestRestartBase:
         connect.create_index(collection, field_name, default_index, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        stats = connect.get_collection_stats(collection)
-        # logging.getLogger().info(stats)
+        connect.get_collection_stats(collection)
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again

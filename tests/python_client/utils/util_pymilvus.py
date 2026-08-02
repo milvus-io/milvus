@@ -177,7 +177,6 @@ def gen_binary_super_vectors(vectors, length):
     binary_vectors = []
     dim = len(vectors[0])
     for i in range(length):
-        cnt_1 = np.count_nonzero(vectors[i])
         # raw_vector = [0 for i in range(dim)] ???
         raw_vector = [1 for i in range(dim)]
         raw_vectors.append(raw_vector)
