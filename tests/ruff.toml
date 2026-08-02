@@ -18,13 +18,31 @@ select = [
 ignore = [
     "E501",  # line-too-long handled by formatter
     "E741",  # ambiguous variable names (l, I, O) common in test code
+
+    # The rules below cannot be satisfied without editing test behaviour, so they
+    # are disabled rather than left permanently red. Everything mechanical
+    # (whitespace, import hygiene, formatting) is enforced.
+    "F403",  # `from common.common_type import *` is the base idiom of this suite
+    "F405",  # names resolved through those star imports
+    "F841",  # assigned-but-unused: tests keep call results on purpose
+    "E722",  # bare `except:` is widespread in teardown/cleanup paths
+    "E402",  # imports after sys.path manipulation
+    "E712",  # `== True` / `== False`: rewriting to a truth test would change
+             # behaviour for None (e.g. `hit.get(field) == False`)
+    "UP031",  # printf-style formatting: mechanical rewrite, but it is a code change
 ]
 
 [lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]
+"__init__.py" = ["F401"]
 "conftest.py" = ["F401", "F811"]
-"**/testcases/**/*.py" = ["E402"]
-"**/chaos/**/*.py" = ["E402"]
+
+# Known duplicate definitions. The later definition silently shadows the earlier
+# one, so these cases are already not running what they look like they run.
+# Fixing them changes which tests execute, which does not belong in a lint-only
+# change; tracked separately.
+"**/python_client/testcases/test_compaction.py" = ["F811"]  # test_compact_after_delete
+"**/python_client/utils/util_pymilvus.py" = ["F811"]        # add_vector_field
+"**/restful_client/testcases/test_vector_operations.py" = ["F811"]  # TestDeleteVector
 
 [format]
 quote-style = "double"
