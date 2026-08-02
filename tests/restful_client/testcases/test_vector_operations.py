@@ -835,7 +835,7 @@ class TestDeleteVector(TestBase):
 
 
 @pytest.mark.L1
-class TestDeleteVector(TestBase):
+class TestDeleteVectorNegative(TestBase):
     def test_delete_vector_with_invalid_api_key(self):
         """
         Delete a vector with an invalid api key

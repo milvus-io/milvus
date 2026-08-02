@@ -36,14 +36,6 @@ ignore = [
 "__init__.py" = ["F401"]
 "conftest.py" = ["F401", "F811"]
 
-# Known duplicate definitions. The later definition silently shadows the earlier
-# one, so these cases are already not running what they look like they run.
-# Fixing them changes which tests execute, which does not belong in a lint-only
-# change; tracked separately.
-"**/python_client/testcases/test_compaction.py" = ["F811"]  # test_compact_after_delete
-"**/python_client/utils/util_pymilvus.py" = ["F811"]        # add_vector_field
-"**/restful_client/testcases/test_vector_operations.py" = ["F811"]  # TestDeleteVector
-
 [format]
 quote-style = "double"
 indent-style = "space"
