@@ -1,14 +1,14 @@
+import asyncio
 import random
 import time
-import pytest
-import asyncio
-from pymilvus.client.types import LoadState, DataType
-from pymilvus import AnnSearchRequest, RRFRanker
 
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus.client.types import DataType, LoadState
 from utils.util_log import test_log as log
 
 pytestmark = pytest.mark.asyncio
@@ -48,7 +48,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
-        log.info("Total time: {:.2f} seconds".format(end_time - start_time))
+        log.info(f"Total time: {end_time - start_time:.2f} seconds")
         for r in insert_res:
             assert r[0]["insert_count"] == step
 
@@ -162,7 +162,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
-        log.info("Total time: {:.2f} seconds".format(end_time - start_time))
+        log.info(f"Total time: {end_time - start_time:.2f} seconds")
         for r in insert_res:
             assert r[0]["insert_count"] == step
 
@@ -297,7 +297,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
-        log.info("Total time: {:.2f} seconds".format(end_time - start_time))
+        log.info(f"Total time: {end_time - start_time:.2f} seconds")
         for r in insert_res:
             assert r[0]["insert_count"] == step
 
@@ -404,7 +404,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
-        log.info("Total time: {:.2f} seconds".format(end_time - start_time))
+        log.info(f"Total time: {end_time - start_time:.2f} seconds")
         for r in insert_res:
             assert r[0]["insert_count"] == step
 
@@ -467,7 +467,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
-        log.info("Total time: {:.2f} seconds".format(end_time - start_time))
+        log.info(f"Total time: {end_time - start_time:.2f} seconds")
         for r in insert_res:
             assert r[0]["insert_count"] == step
 
@@ -554,7 +554,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
-        log.info("Total time: {:.2f} seconds".format(end_time - start_time))
+        log.info(f"Total time: {end_time - start_time:.2f} seconds")
         for r in insert_res:
             assert r[0]["insert_count"] == step
 

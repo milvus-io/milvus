@@ -1,26 +1,24 @@
-import utils.util_pymilvus as ut
-from utils.util_log import test_log as log
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from common.text_generator import KoreanTextGenerator, ICUTextGenerator
-from common.code_mapping import ConnectionErrorMessage as cem
-from base.client_base import TestcaseBase
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
-from pymilvus import (
-    FieldSchema,
-    CollectionSchema,
-    DataType,
-)
-import threading
-from pymilvus import DefaultConfig
-import time
-import pytest
 import random
+import threading
+import time
+from collections import Counter
+
 import numpy as np
 import pandas as pd
-from collections import Counter
+import pytest
+import utils.util_pymilvus as ut
+from base.client_base import TestcaseBase
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from common.text_generator import ICUTextGenerator, KoreanTextGenerator
 from faker import Faker
+from pymilvus import (
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+)
+from utils.util_log import test_log as log
 
 Faker.seed(19530)
 
@@ -666,7 +664,7 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         else:
             res = vectors[0].iloc[0:pos, :2].to_dict("records")
 
-        term_expr = f""
+        term_expr = ""
         collection_w.query(
             term_expr,
             output_fields=[ct.default_int64_field_name, default_float_field_name],

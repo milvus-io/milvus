@@ -2,11 +2,13 @@
 CDC sync tests for data manipulation operations.
 """
 
-import time
 import random
+import time
+
 import pytest
-from pymilvus import DataType
 from common.common_type import CaseLabel
+from pymilvus import DataType
+
 from .base import TestCDCSyncBase, logger
 
 

@@ -1,13 +1,12 @@
 import sys
-from numpy import NaN
 
+from numpy import NaN
 from pymilvus import Partition
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
-from utils.api_request import api_request
 from common.common_func import param_info
-
+from utils.api_request import api_request
 
 TIMEOUT = 180
 

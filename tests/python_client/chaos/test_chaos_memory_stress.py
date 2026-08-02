@@ -1,31 +1,30 @@
+import datetime
 import random
 import threading
 import time
 from time import sleep
 
 import pytest
-import datetime
-
-from pymilvus import connections
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, start_monitor_threads
 from chaos.checker import (
-    Op,
     CollectionCreateChecker,
-    InsertFlushChecker,
     IndexCreateChecker,
-    SearchChecker,
+    InsertFlushChecker,
+    Op,
     QueryChecker,
+    SearchChecker,
 )
-from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common import common_func as cf
 from common import common_type as ct
-from chaos import chaos_commons as cc
-from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, start_monitor_threads
 from common.common_type import CaseLabel, CheckTasks
-from chaos import constants
-from utils.util_log import test_log as log
+from common.cus_resource_opts import CustomResourceOperations as CusResource
+from pymilvus import connections
 from utils.util_k8s import get_querynode_id_pod_pairs
+from utils.util_log import test_log as log
 
 
 def apply_memory_stress(chaos_yaml):

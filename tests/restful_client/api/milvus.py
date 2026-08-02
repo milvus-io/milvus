@@ -1,10 +1,11 @@
 import json
-import requests
 import time
 import uuid
-from utils.util_log import test_log as logger
-from tenacity import retry, retry_if_exception_type, stop_after_attempt
+
+import requests
 from requests.exceptions import ConnectionError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+from utils.util_log import test_log as logger
 
 
 def logger_request_response(response, url, tt, headers, data, str_data, str_response, method):

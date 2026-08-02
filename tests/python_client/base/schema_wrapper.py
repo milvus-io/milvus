@@ -2,8 +2,8 @@ import sys
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
-from utils.api_request import api_request
 from pymilvus import CollectionSchema, FieldSchema
+from utils.api_request import api_request
 
 
 class ApiCollectionSchemaWrapper:
