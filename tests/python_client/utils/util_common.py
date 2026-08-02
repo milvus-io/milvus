@@ -5,6 +5,7 @@ import json
 import pandas as pd
 from utils.util_log import test_log as log
 
+
 def gen_experiment_config(yaml):
     """load the yaml file of chaos experiment"""
     with open(yaml) as f:
@@ -18,7 +19,7 @@ def findkeys(node, kv):
     if isinstance(node, list):
         for i in node:
             for x in findkeys(i, kv):
-               yield x
+                yield x
     elif isinstance(node, dict):
         if kv in node:
             yield node[kv]
@@ -92,20 +93,24 @@ def wait_signal_to_apply_chaos():
     all_db_file = glob.glob("/tmp/ci_logs/event_records*.jsonl")
     log.info(f"all files {all_db_file}")
     ready_apply_chaos = True
-    timeout = 15*60
+    timeout = 15 * 60
     t0 = time.time()
     for f in all_db_file:
         while True and (time.time() - t0 < timeout):
             try:
                 records = []
-                with open(f, 'r') as file:
+                with open(f, "r") as file:
                     for line in file:
                         line = line.strip()
                         if line:
                             records.append(json.loads(line))
-                df = pd.DataFrame(records) if records else pd.DataFrame(columns=["event_name", "event_status", "event_ts"])
+                df = (
+                    pd.DataFrame(records)
+                    if records
+                    else pd.DataFrame(columns=["event_name", "event_status", "event_ts"])
+                )
                 log.debug(f"read {f}:result\n {df}")
-                result = df[(df['event_name'] == 'init_chaos') & (df['event_status'] == 'ready')]
+                result = df[(df["event_name"] == "init_chaos") & (df["event_status"] == "ready")]
                 if len(result) > 0:
                     log.info(f"{f}: {result}")
                     ready_apply_chaos = True
@@ -121,17 +126,18 @@ def wait_signal_to_apply_chaos():
 
 
 if __name__ == "__main__":
-    d = { "id" : "abcde",
-        "key1" : "blah",
-        "key2" : "blah blah",
-        "nestedlist" : [
-        { "id" : "qwerty",
-            "nestednestedlist" : [
-            { "id" : "xyz", "keyA" : "blah blah blah" },
-            { "id" : "fghi", "keyZ" : "blah blah blah" }],
-            "anothernestednestedlist" : [
-            { "id" : "asdf", "keyQ" : "blah blah" },
-            { "id" : "yuiop", "keyW" : "blah" }] } ] }
-    print(list(findkeys(d, 'id')))
+    d = {
+        "id": "abcde",
+        "key1": "blah",
+        "key2": "blah blah",
+        "nestedlist": [
+            {
+                "id": "qwerty",
+                "nestednestedlist": [{"id": "xyz", "keyA": "blah blah blah"}, {"id": "fghi", "keyZ": "blah blah blah"}],
+                "anothernestednestedlist": [{"id": "asdf", "keyQ": "blah blah"}, {"id": "yuiop", "keyW": "blah"}],
+            }
+        ],
+    }
+    print(list(findkeys(d, "id")))
     update_key_value(d, "none_id", "ccc")
     print(d)

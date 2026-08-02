@@ -16,7 +16,6 @@ from utils.wrapper import counter
 
 
 class TestDataNodeScale:
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_scale_data_node(self):
         """
@@ -33,28 +32,28 @@ class TestDataNodeScale:
         """
         release_name = "scale-data"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
 
         data_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'spec.mode': 'cluster',
-            'metadata.name': release_name,
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.dataNode.replicas': 2,
-            'spec.config.common.retentionDuration': 60
+            "metadata.namespace": constants.NAMESPACE,
+            "spec.mode": "cluster",
+            "metadata.name": release_name,
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.dataNode.replicas": 2,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(data_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
         try:
             # connect
             connections.add_connection(default={"host": host, "port": 19530})
-            connections.connect(alias='default')
+            connections.connect(alias="default")
 
             # create
             c_name = cf.gen_unique_str("scale_data")
@@ -65,20 +64,20 @@ class TestDataNodeScale:
 
             @counter
             def do_insert():
-                """ do insert and flush """
+                """do insert and flush"""
                 insert_res, is_succ = collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
                 log.debug(collection_w.num_entities)
                 return insert_res, is_succ
 
             def loop_insert():
-                """ loop do insert """
+                """loop do insert"""
                 while True:
                     do_insert()
 
             threading.Thread(target=loop_insert, args=(), daemon=True).start()
 
             # scale dataNode to 5
-            mic.upgrade(release_name, {'spec.components.dataNode.replicas': 5}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.dataNode.replicas": 5}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
             log.debug("Expand dataNode test finished")
@@ -90,20 +89,20 @@ class TestDataNodeScale:
 
             @counter
             def do_new_insert():
-                """ do new insert """
+                """do new insert"""
                 insert_res, is_succ = collection_w_new.insert(cf.gen_default_dataframe_data(tmp_nb))
                 log.debug(collection_w_new.num_entities)
                 return insert_res, is_succ
 
             def loop_new_insert():
-                """ loop new insert """
+                """loop new insert"""
                 while True:
                     do_new_insert()
 
             threading.Thread(target=loop_new_insert, args=(), daemon=True).start()
 
             # scale dataNode to 3
-            mic.upgrade(release_name, {'spec.components.dataNode.replicas': 3}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.dataNode.replicas": 3}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
@@ -119,7 +118,7 @@ class TestDataNodeScale:
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
 
             mic.uninstall(release_name, namespace=constants.NAMESPACE)

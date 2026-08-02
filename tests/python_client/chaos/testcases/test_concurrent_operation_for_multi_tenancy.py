@@ -4,14 +4,7 @@ import threading
 import json
 from time import sleep
 from pymilvus import connections, db
-from chaos.checker import (InsertChecker,
-                           UpsertChecker,
-                           SearchChecker,
-                           QueryChecker,
-                           DeleteChecker,
-                           Op,
-                           ResultAnalyzer
-                           )
+from chaos.checker import InsertChecker, UpsertChecker, SearchChecker, QueryChecker, DeleteChecker, Op, ResultAnalyzer
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
@@ -36,14 +29,13 @@ class TestBase:
     expect_compact = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token, db_name, milvus_ns):
         # Prioritize uri and token for connection
@@ -58,9 +50,9 @@ class TestOperations(TestBase):
             actual_token = f"{user}:{password}" if user and password else None
 
         if actual_token:
-            connections.connect('default', uri=actual_uri, token=actual_token)
+            connections.connect("default", uri=actual_uri, token=actual_token)
         else:
-            connections.connect('default', uri=actual_uri)
+            connections.connect("default", uri=actual_uri)
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -100,7 +92,7 @@ class TestOperations(TestBase):
     def test_operations(self, request_duration, is_check, collection_name, collection_num, db_name):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         all_checkers = []
 
         def worker(c_name):
@@ -113,12 +105,13 @@ class TestOperations(TestBase):
                 if num_entities < 200000:
                     nb = 5000
                     num_to_insert = 200000 - num_entities
-                    for i in range(num_to_insert//nb):
+                    for i in range(num_to_insert // nb):
                         op_checker[Op.insert].insert_data(nb=nb)
                 else:
                     log.info(f"collection {c_name} has enough data {num_entities}, skip insert data")
             except Exception as e:
                 log.error(f"insert data error: {e}")
+
         threads = []
         for i in range(collection_num):
             c_name = collection_name if collection_name else f"DB_{db_name}_Collection_{i}_Checker"
@@ -137,7 +130,7 @@ class TestOperations(TestBase):
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
         for i in range(10):
-            sleep(request_duration//10)
+            sleep(request_duration // 10)
             for checker in all_checkers:
                 for k, v in checker.items():
                     v.check_result()

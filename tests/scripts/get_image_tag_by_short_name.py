@@ -2,6 +2,7 @@ import requests
 import argparse
 from tenacity import retry, stop_after_attempt
 
+
 @retry(stop=stop_after_attempt(7))
 def get_image_tag_by_short_name(tag, arch):
 
@@ -26,6 +27,7 @@ def get_image_tag_by_short_name(tag, arch):
         return tag
     else:
         return tag_candidates[-1]
+
 
 if __name__ == "__main__":
     argparse = argparse.ArgumentParser()

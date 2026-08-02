@@ -14,44 +14,37 @@ import random
 import numpy as np
 import time
 import argparse
-from pymilvus import (
-    connections, list_collections,
-    FieldSchema, CollectionSchema, DataType,
-    Collection, utility
-)
+from pymilvus import connections, list_collections, FieldSchema, CollectionSchema, DataType, Collection, utility
+
 TIMEOUT = 120
 
 
 def hello_milvus(collection_name):
     import time
+
     # create collection
     dim = 128
     default_fields = [
         FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="float", dtype=DataType.FLOAT),
         FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length=65535),
-        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
     if utility.has_collection(collection_name):
         print("collection is exist")
         collection = Collection(name=collection_name)
         default_schema = collection.schema
-        dim = [field.params['dim'] for field in default_schema.fields if field.dtype in [101, 102]][0]
+        dim = [field.params["dim"] for field in default_schema.fields if field.dtype in [101, 102]][0]
     print(f"\nCreate collection...")
     collection = Collection(name=collection_name, schema=default_schema)
     #  insert data
     nb = 3000
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
     t0 = time.time()
-    
+
     collection.insert(
-        [
-            [i for i in range(nb)],
-            [np.float32(i) for i in range(nb)],
-            [str(i) for i in range(nb)],
-            vectors
-        ]
+        [[i for i in range(nb)], [np.float32(i) for i in range(nb)], [str(i) for i in range(nb)], vectors]
     )
     t1 = time.time()
     print(f"\nInsert {nb} vectors cost {t1 - t0:.4f} seconds")
@@ -91,8 +84,13 @@ def hello_milvus(collection_name):
     print(f"\nSearch...")
     # define output_fields of search result
     res = collection.search(
-        vectors[-2:], "float_vector", search_params, topK,
-        "int64 > 100", output_fields=["int64", "float"], timeout=TIMEOUT
+        vectors[-2:],
+        "float_vector",
+        search_params,
+        topK,
+        "int64 > 100",
+        output_fields=["int64", "float"],
+        timeout=TIMEOUT,
     )
     t1 = time.time()
     print(f"search cost  {t1 - t0:.4f} seconds")
@@ -106,13 +104,13 @@ def hello_milvus(collection_name):
     expr = "int64 in [2,4,6,8]"
     output_fields = ["int64", "float"]
     res = collection.query(expr, output_fields, timeout=TIMEOUT)
-    sorted_res = sorted(res, key=lambda k: k['int64'])
+    sorted_res = sorted(res, key=lambda k: k["int64"])
     for r in sorted_res:
         print(r)
 
 
-parser = argparse.ArgumentParser(description='host ip')
-parser.add_argument('--host', type=str, default='127.0.0.1', help='host ip')
+parser = argparse.ArgumentParser(description="host ip")
+parser.add_argument("--host", type=str, default="127.0.0.1", help="host ip")
 args = parser.parse_args()
 # add time stamp
 print(f"\nStart time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")

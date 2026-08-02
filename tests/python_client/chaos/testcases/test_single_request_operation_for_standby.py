@@ -2,14 +2,16 @@ import pytest
 import threading
 from time import sleep
 from pymilvus import connections
-from chaos.checker import (CollectionCreateChecker,
-                           InsertChecker,
-                           FlushChecker,
-                           SearchChecker,
-                           QueryChecker,
-                           IndexCreateChecker,
-                           DeleteChecker,
-                           Op)
+from chaos.checker import (
+    CollectionCreateChecker,
+    InsertChecker,
+    FlushChecker,
+    SearchChecker,
+    QueryChecker,
+    IndexCreateChecker,
+    DeleteChecker,
+    Op,
+)
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
@@ -17,9 +19,7 @@ from common.milvus_sys import MilvusSys
 from chaos.chaos_commons import assert_statistic
 from chaos import constants
 from delayed_assert import assert_expectations
-from utils.util_k8s import (get_milvus_instance_name,
-                            get_milvus_deploy_tool,
-                            record_time_when_standby_activated)
+from utils.util_k8s import get_milvus_instance_name, get_milvus_deploy_tool, record_time_when_standby_activated
 
 
 class TestBase:
@@ -29,14 +29,13 @@ class TestBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token, milvus_ns):
         # Prioritize uri and token for connection
@@ -51,9 +50,9 @@ class TestOperations(TestBase):
             actual_token = f"{user}:{password}" if user and password else None
 
         if actual_token:
-            connections.connect('default', uri=actual_uri, token=actual_token)
+            connections.connect("default", uri=actual_uri, token=actual_token)
         else:
-            connections.connect('default', uri=actual_uri)
+            connections.connect("default", uri=actual_uri)
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -64,7 +63,7 @@ class TestOperations(TestBase):
         self.password = password
         self.uri = actual_uri
         self.token = actual_token
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.chaos_ns = constants.CHAOS_NAMESPACE
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
@@ -87,7 +86,7 @@ class TestOperations(TestBase):
     def test_operations(self, request_duration, target_component, is_check):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         c_name = None
         self.init_health_checkers(collection_name=c_name)
         cc.start_monitor_threads(self.health_checkers)
@@ -98,14 +97,16 @@ class TestOperations(TestBase):
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
         # start a thread to record the time when standby is activated
-        t = threading.Thread(target=record_time_when_standby_activated,
-                             args=(self.milvus_ns, self.release_name, target_component),
-                             kwargs={"timeout": request_duration//2},
-                             daemon=True)
+        t = threading.Thread(
+            target=record_time_when_standby_activated,
+            args=(self.milvus_ns, self.release_name, target_component),
+            kwargs={"timeout": request_duration // 2},
+            daemon=True,
+        )
         t.start()
-        log.info('start a thread to reset health_checkers when standby is activated')
+        log.info("start a thread to reset health_checkers when standby is activated")
         for i in range(10):
-            sleep(request_duration//10)
+            sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
         if is_check:
@@ -113,6 +114,6 @@ class TestOperations(TestBase):
             for k, v in self.health_checkers.items():
                 log.info(f"{k} rto: {v.get_rto()}")
                 rto = v.get_rto()
-                pytest.assume(rto < 30,  f"{k} rto expect 30s but get {rto}s")  # rto should be less than 30s
+                pytest.assume(rto < 30, f"{k} rto expect 30s but get {rto}s")  # rto should be less than 30s
 
         log.info("*********************Chaos Test Completed**********************")

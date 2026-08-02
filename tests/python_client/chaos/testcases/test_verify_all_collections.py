@@ -2,14 +2,16 @@ import pytest
 from time import sleep
 from collections import defaultdict
 from pymilvus import connections
-from chaos.checker import (InsertChecker,
-                           UpsertChecker,
-                           FlushChecker,
-                           SearchChecker,
-                           QueryChecker,
-                           IndexCreateChecker,
-                           DeleteChecker,
-                           Op)
+from chaos.checker import (
+    InsertChecker,
+    UpsertChecker,
+    FlushChecker,
+    SearchChecker,
+    QueryChecker,
+    IndexCreateChecker,
+    DeleteChecker,
+    Op,
+)
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from chaos.chaos_commons import assert_statistic
@@ -26,7 +28,7 @@ class TestBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
@@ -48,7 +50,6 @@ def get_collections_with_limit():
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", params=get_collections_with_limit())
     def collection_name(self, request):
         if request.param == [] or request.param == "":
@@ -69,9 +70,9 @@ class TestOperations(TestBase):
             actual_token = f"{user}:{password}" if user and password else None
 
         if actual_token:
-            connections.connect('default', uri=actual_uri, token=actual_token)
+            connections.connect("default", uri=actual_uri, token=actual_token)
         else:
-            connections.connect('default', uri=actual_uri)
+            connections.connect("default", uri=actual_uri)
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -100,7 +101,7 @@ class TestOperations(TestBase):
     def test_operations(self, collection_name, request_duration):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         c_name = collection_name
         self.init_health_checkers(collection_name=c_name)
         cc.start_monitor_threads(self.health_checkers)
@@ -111,7 +112,7 @@ class TestOperations(TestBase):
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
         for i in range(10):
-            sleep(request_duration//10)
+            sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
         log.info("******assert after chaos deleted: ")

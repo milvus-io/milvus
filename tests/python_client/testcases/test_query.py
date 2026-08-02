@@ -31,7 +31,6 @@ fake_jp = Faker("ja_JP")
 fake_ko = Faker("ko_KR")
 
 
-
 # patch faker to generate text with specific distribution
 cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
 cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
@@ -41,11 +40,11 @@ pd.set_option("expand_frame_repr", False)
 prefix = "query"
 exp_res = "exp_res"
 count = "count(*)"
-default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
-default_mix_expr = "int64 >= 0 && varchar >= \"0\""
-default_expr = f'{ct.default_int64_field_name} >= 0'
+default_term_expr = f"{ct.default_int64_field_name} in [0, 1]"
+default_mix_expr = 'int64 >= 0 && varchar >= "0"'
+default_expr = f"{ct.default_int64_field_name} >= 0"
 default_invalid_expr = "varchar >= 0"
-default_string_term_expr = f'{ct.default_string_field_name} in [\"0\", \"1\"]'
+default_string_term_expr = f'{ct.default_string_field_name} in ["0", "1"]'
 default_index_params = ct.default_index
 binary_index_params = ct.default_binary_index
 
@@ -79,7 +78,7 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
-        term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
+        term_expr = f"{default_int_field_name} in {entities[:default_pos]}"
         error = {ct.err_code: 999, ct.err_msg: "cannot parse expression: int64 in"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -87,15 +86,13 @@ class TestQueryParams(TestcaseBase):
         expr = "int64 in {value_0}"
         expr_params = {"value_1": [0, 1]}
         error = {ct.err_code: 999, ct.err_msg: "the value of expression template variable name {value_0} is not found"}
-        collection_w.query(expr=expr, expr_params=expr_params,
-                           check_task=CheckTasks.err_res, check_items=error)
+        collection_w.query(expr=expr, expr_params=expr_params, check_task=CheckTasks.err_res, check_items=error)
 
         # check the template variable type dismatch
         expr = "int64 in {value_0}"
         expr_params = {"value_0": 1}
         error = {ct.err_code: 999, ct.err_msg: "the value of term expression template variable {value_0} is not array"}
-        collection_w.query(expr=expr, expr_params=expr_params,
-                           check_task=CheckTasks.err_res, check_items=error)
+        collection_w.query(expr=expr, expr_params=expr_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query(self, enable_dynamic_field):
@@ -105,8 +102,9 @@ class TestQueryParams(TestcaseBase):
         expected: verify query result
         """
         # create collection, insert default_nb, load collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                             enable_dynamic_field=enable_dynamic_field)[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix, insert_data=True, enable_dynamic_field=enable_dynamic_field
+        )[0:2]
         pos = 5
         if enable_dynamic_field:
             int_values = []
@@ -116,12 +114,14 @@ class TestQueryParams(TestcaseBase):
             res = [{ct.default_int64_field_name: int_values[i]} for i in range(pos)]
         else:
             int_values = vectors[0][ct.default_int64_field_name].values.tolist()
-            res = vectors[0].iloc[0:pos, :1].to_dict('records')
+            res = vectors[0].iloc[0:pos, :1].to_dict("records")
 
-        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
-        collection_w.query(term_expr,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"{ct.default_int64_field_name} in {int_values[:pos]}"
+        collection_w.query(
+            term_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_auto_id_collection(self):
@@ -133,28 +133,36 @@ class TestQueryParams(TestcaseBase):
         self._connect()
         df = cf.gen_default_dataframe_data()
         df[ct.default_int64_field_name] = None
-        insert_res, _, = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                                       primary_field=ct.default_int64_field_name,
-                                                                       auto_id=True)
+        (
+            insert_res,
+            _,
+        ) = self.collection_wrap.construct_from_dataframe(
+            cf.gen_unique_str(prefix), df, primary_field=ct.default_int64_field_name, auto_id=True
+        )
         assert self.collection_wrap.num_entities == ct.default_nb
         ids = insert_res[1].primary_keys
         pos = 5
-        res = df.iloc[:pos, :1].to_dict('records')
+        res = df.iloc[:pos, :1].to_dict("records")
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         # query with all primary keys
-        term_expr_1 = f'{ct.default_int64_field_name} in {ids[:pos]}'
+        term_expr_1 = f"{ct.default_int64_field_name} in {ids[:pos]}"
         for i in range(5):
             res[i][ct.default_int64_field_name] = ids[i]
-        self.collection_wrap.query(term_expr_1,
-                                   check_task=CheckTasks.check_query_results,
-                                   check_items={exp_res: res, "pk_name": self.collection_wrap.primary_field.name})
+        self.collection_wrap.query(
+            term_expr_1,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": self.collection_wrap.primary_field.name},
+        )
 
         # query with part primary keys
-        term_expr_2 = f'{ct.default_int64_field_name} in {[ids[0], 0]}'
-        self.collection_wrap.query(term_expr_2, check_task=CheckTasks.check_query_results,
-                                   check_items={exp_res: res[:1], "pk_name": self.collection_wrap.primary_field.name})
+        term_expr_2 = f"{ct.default_int64_field_name} in {[ids[0], 0]}"
+        self.collection_wrap.query(
+            term_expr_2,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res[:1], "pk_name": self.collection_wrap.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_non_string_expr(self):
@@ -164,7 +172,7 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        exprs = [1, 2., [], {}, ()]
+        exprs = [1, 2.0, [], {}, ()]
         error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
         for expr in exprs:
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
@@ -178,10 +186,12 @@ class TestQueryParams(TestcaseBase):
         expected: query result is correct
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        res = vectors[0].iloc[:2, :1].to_dict('records')
-        collection_w.query(default_term_expr,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        res = vectors[0].iloc[:2, :1].to_dict("records")
+        collection_w.query(
+            default_term_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.fixture(scope="function", params=[0, 10, 100])
     def offset(self, request):
@@ -210,8 +220,9 @@ class TestQueryParams(TestcaseBase):
         t.start()
         res2 = collection_w.query(expr, output_fields=[default_float_field_name])[0]
         t.join()
-        assert [res1[i][default_float_field_name] for i in range(upsert_nb)] == \
-               [res2[i][default_float_field_name] for i in range(upsert_nb)]
+        assert [res1[i][default_float_field_name] for i in range(upsert_nb)] == [
+            res2[i][default_float_field_name] for i in range(upsert_nb)
+        ]
 
 
 class TestQueryOperation(TestcaseBase):
@@ -230,18 +241,19 @@ class TestQueryOperation(TestcaseBase):
         """
 
         # init a collection and insert data
-        collection_w, vectors, binary_raw_vectors = \
-            self.init_collection_general(prefix, insert_data=True)[0:3]
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
 
         # data preparation
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
-        term_expr = f'{ct.default_int64_field_name} in {int_values}'
-        check_vec = vectors[0].iloc[:, [0]][0:len(int_values)].to_dict('records')
+        term_expr = f"{ct.default_int64_field_name} in {int_values}"
+        check_vec = vectors[0].iloc[:, [0]][0 : len(int_values)].to_dict("records")
 
         # query all array value
-        collection_w.query(term_expr,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: check_vec, "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            term_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: check_vec, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_half_term_array(self):
@@ -252,11 +264,10 @@ class TestQueryOperation(TestcaseBase):
         """
 
         half = ct.default_nb // 2
-        collection_w, partition_w, df_partition, df_default = \
-            self.insert_entities_into_two_partitions_in_half(half)
+        collection_w, partition_w, df_partition, df_default = self.insert_entities_into_two_partitions_in_half(half)
 
         int_values = df_default[ct.default_int64_field_name].values.tolist()
-        term_expr = f'{ct.default_int64_field_name} in {int_values}'
+        term_expr = f"{ct.default_int64_field_name} in {int_values}"
         res, _ = collection_w.query(term_expr)
         assert len(res) == len(int_values)
 
@@ -269,7 +280,7 @@ class TestQueryOperation(TestcaseBase):
         """
         collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
         int_values = [0, 0, 0, 0]
-        term_expr = f'{ct.default_int64_field_name} in {int_values}'
+        term_expr = f"{ct.default_int64_field_name} in {int_values}"
         res, _ = collection_w.query(term_expr)
         assert len(res) == 1
         assert res[0][ct.default_int64_field_name] == int_values[0]
@@ -289,10 +300,14 @@ class TestQueryOperation(TestcaseBase):
         assert mutation_res.primary_keys == df[ct.default_int64_field_name].tolist()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        term_expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
-        res = df.iloc[:, :2].to_dict('records')
-        collection_w.query(term_expr, output_fields=["*"], check_items=CheckTasks.check_query_results,
-                           check_task={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"{ct.default_int64_field_name} in {[0, 0, 0]}"
+        res = df.iloc[:, :2].to_dict("records")
+        collection_w.query(
+            term_expr,
+            output_fields=["*"],
+            check_items=CheckTasks.check_query_results,
+            check_task={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_multi_logical_exprs(self):
@@ -309,14 +324,15 @@ class TestQueryOperation(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
 
-        multi_exprs = " || ".join(f'{default_int_field_name} == {i}' for i in range(60))
+        multi_exprs = " || ".join(f"{default_int_field_name} == {i}" for i in range(60))
 
         collection_w.load()
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         limit = 1000
-        _, check_res = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
-                                           ct.default_search_params, limit, multi_exprs)
-        assert (check_res == True)
+        _, check_res = collection_w.search(
+            vectors_s[: ct.default_nq], ct.default_float_vec_field_name, ct.default_search_params, limit, multi_exprs
+        )
+        assert check_res == True
 
 
 class TestQueryString(TestcaseBase):
@@ -333,8 +349,9 @@ class TestQueryString(TestcaseBase):
         method: query string expr with binary
         expected: verify query successfully
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                             is_binary=True, is_index=False)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=False)[
+            0:2
+        ]
         collection_w.create_index(ct.default_binary_vec_field_name, binary_index_params)
         collection_w.load()
         assert collection_w.has_index()[0]
@@ -363,7 +380,7 @@ class TestQueryString(TestcaseBase):
             primary_keys.append(primary_key)
 
         def insert(thread_i):
-            log.debug(f'In thread-{thread_i}')
+            log.debug(f"In thread-{thread_i}")
             mutation_res, _ = collection_w.insert(df_list[thread_i])
             assert mutation_res.insert_count == ct.default_nb
             assert mutation_res.primary_keys == primary_keys[thread_i]
@@ -381,14 +398,15 @@ class TestQueryString(TestcaseBase):
         collection_w.load()
         df_dict_list = []
         for df in df_list:
-            df_dict_list += df.to_dict('records')
+            df_dict_list += df.to_dict("records")
         output_fields = ["*"]
         expression = "int64 >= 0"
-        collection_w.query(expression, output_fields=output_fields,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: df_dict_list,
-                                        "pk_name": collection_w.primary_field.name,
-                                        "with_vec": True})
+        collection_w.query(
+            expression,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: df_dict_list, "pk_name": collection_w.primary_field.name, "with_vec": True},
+        )
 
 
 class TestQueryCount(TestcaseBase):
@@ -426,10 +444,12 @@ class TestQueryCount(TestcaseBase):
         assert len(segment_info) == 1
 
         # count after compact
-        collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: tmp_nb * segment_num}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr=default_expr,
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: [{count: tmp_nb * segment_num}], "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_compact_delete(self):
@@ -447,7 +467,7 @@ class TestQueryCount(TestcaseBase):
         insert_res, _ = collection_w.insert(df)
 
         # delete half entities, flush
-        half_expr = f'{ct.default_int64_field_name} in {[i for i in range(ct.default_nb // 2)]}'
+        half_expr = f"{ct.default_int64_field_name} in {[i for i in range(ct.default_nb // 2)]}"
         collection_w.delete(half_expr)
         assert collection_w.num_entities == ct.default_nb
 
@@ -457,11 +477,12 @@ class TestQueryCount(TestcaseBase):
 
         # load and count
         collection_w.load()
-        collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: ct.default_nb // 2}],
-                                        "pk_name": collection_w.primary_field.name}
-                           )
+        collection_w.query(
+            expr=default_expr,
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: [{count: ct.default_nb // 2}], "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index", ct.all_index_types[10:12])
@@ -481,21 +502,26 @@ class TestQueryCount(TestcaseBase):
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
         collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
         collection_w.load()
-        collection_w.query(expr=default_expr, output_fields=[count],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: ct.default_nb}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr=default_expr,
+            output_fields=[count],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: [{count: ct.default_nb}], "pk_name": collection_w.primary_field.name},
+        )
         expr = "int64 > 50 && int64 < 100 && float < 75"
-        collection_w.query(expr=expr, output_fields=[count],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: 24}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr=expr,
+            output_fields=[count],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: [{count: 24}], "pk_name": collection_w.primary_field.name},
+        )
         batch_size = 100
-        collection_w.query_iterator(batch_size=batch_size, expr=default_expr,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb,
-                                                 "batch_size": batch_size,
-                                                 "pk_name": collection_w.primary_field.name})
+        collection_w.query_iterator(
+            batch_size=batch_size,
+            expr=default_expr,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={"count": ct.default_nb, "batch_size": batch_size, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.repeat(3)
@@ -513,10 +539,12 @@ class TestQueryCount(TestcaseBase):
         """
         # insert data
         collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=True)[0]
-        collection_w.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 200}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr="",
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{ct.default_count_output: 200}], "pk_name": collection_w.primary_field.name},
+        )
         collection_w.release()
         partition_w1, partition_w2 = collection_w.partitions
         # load
@@ -529,19 +557,28 @@ class TestQueryCount(TestcaseBase):
         # partition_w1.load()
         collection_w.load(partition_names=[partition_w1.name])
         # search on collection, partition1, partition2
-        collection_w.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 50}],
-                                        "pk_name": collection_w.primary_field.name})
-        partition_w1.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 50}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr="",
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{ct.default_count_output: 50}], "pk_name": collection_w.primary_field.name},
+        )
+        partition_w1.query(
+            expr="",
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{ct.default_count_output: 50}], "pk_name": collection_w.primary_field.name},
+        )
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
-        collection_w.search(vectors[:1], ct.default_float_vec_field_name, ct.default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(
+            vectors[:1],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            200,
+            partition_names=[partition_w2.name],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "not loaded"},
+        )
 
 
 class TestQueryNoneAndDefaultData(TestcaseBase):
@@ -574,26 +611,33 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: verify query result
         """
         # create collection, insert default_nb, load collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                             enable_dynamic_field=enable_dynamic_field,
-                                                             nullable_fields={
-                                                                 default_float_field_name: null_data_percent})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            insert_data=True,
+            enable_dynamic_field=enable_dynamic_field,
+            nullable_fields={default_float_field_name: null_data_percent},
+        )[0:2]
         pos = 5
         if enable_dynamic_field:
             int_values, float_values = [], []
             for vector in vectors[0]:
                 int_values.append(vector[ct.default_int64_field_name])
                 float_values.append(vector[default_float_field_name])
-            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in
-                   range(pos)]
+            res = [
+                {ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]}
+                for i in range(pos)
+            ]
         else:
             int_values = vectors[0][ct.default_int64_field_name].values.tolist()
-            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+            res = vectors[0].iloc[0:pos, :2].to_dict("records")
 
-        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"{ct.default_int64_field_name} in {int_values[:pos]}"
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_by_expr_none_with_none_data(self, enable_dynamic_field, null_data_percent):
@@ -603,25 +647,33 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: verify query result
         """
         # create collection, insert default_nb, load collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                             enable_dynamic_field=enable_dynamic_field,
-                                                             nullable_fields={
-                                                                 default_float_field_name: null_data_percent})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            insert_data=True,
+            enable_dynamic_field=enable_dynamic_field,
+            nullable_fields={default_float_field_name: null_data_percent},
+        )[0:2]
         pos = 5
         if enable_dynamic_field:
             int_values, float_values = [], []
             for vector in vectors[0]:
                 int_values.append(vector[ct.default_int64_field_name])
                 float_values.append(vector[default_float_field_name])
-            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in
-                   range(pos)]
+            res = [
+                {ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]}
+                for i in range(pos)
+            ]
         else:
-            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+            res = vectors[0].iloc[0:pos, :2].to_dict("records")
 
-        term_expr = f''
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           limit=pos, check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f""
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            limit=pos,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_by_nullable_field_with_none_data(self):
@@ -631,40 +683,49 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: verify query result
         """
         # create collection, insert default_nb, load collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True,
-                                                             nullable_fields={default_float_field_name: 0.5})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix, insert_data=True, enable_dynamic_field=True, nullable_fields={default_float_field_name: 0.5}
+        )[0:2]
         pos = 5
         int_values, float_values = [], []
         for vector in vectors[0]:
             int_values.append(vector[ct.default_int64_field_name])
             float_values.append(vector[default_float_field_name])
-        res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in
-               range(pos)]
+        res = [
+            {ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in range(pos)
+        ]
 
-        term_expr = f'{default_float_field_name} < {pos}'
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"{default_float_field_name} < {pos}"
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_after_none_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index,
-                                                      null_data_percent):
+    def test_query_after_none_data_all_field_datatype(
+        self, varchar_scalar_index, numeric_scalar_index, null_data_percent
+    ):
         """
         target: test query after different index on scalar fields
         method: query after different index on nullable fields
         expected: verify query result
         """
         # 1. initialize with data
-        nullable_fields = {ct.default_int32_field_name: null_data_percent,
-                           ct.default_int16_field_name: null_data_percent,
-                           ct.default_int8_field_name: null_data_percent,
-                           ct.default_bool_field_name: null_data_percent,
-                           ct.default_float_field_name: null_data_percent,
-                           ct.default_double_field_name: null_data_percent,
-                           ct.default_string_field_name: null_data_percent}
+        nullable_fields = {
+            ct.default_int32_field_name: null_data_percent,
+            ct.default_int16_field_name: null_data_percent,
+            ct.default_int8_field_name: null_data_percent,
+            ct.default_bool_field_name: null_data_percent,
+            ct.default_float_field_name: null_data_percent,
+            ct.default_double_field_name: null_data_percent,
+            ct.default_string_field_name: null_data_percent,
+        }
         # 2. create collection, insert default_nb
-        collection_w, vectors = self.init_collection_general(prefix, True, 1000, is_all_data_type=True, is_index=False,
-                                                             nullable_fields=nullable_fields)[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix, True, 1000, is_all_data_type=True, is_index=False, nullable_fields=nullable_fields
+        )[0:2]
         # 3. create index on vector field and load
         index = "HNSW"
         params = cf.get_index_params_params(index)
@@ -692,13 +753,18 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         for i in range(pos):
             int64_values.append(scalar_fields[0][i])
             float_values.append(scalar_fields[5][i])
-        res = [{ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]} for i in
-               range(pos)]
+        res = [
+            {ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]}
+            for i in range(pos)
+        ]
 
-        term_expr = f'0 <= {ct.default_int64_field_name} < {pos}'
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"0 <= {ct.default_int64_field_name} < {pos}"
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_default_value_with_insert(self, enable_dynamic_field):
@@ -708,26 +774,34 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: query successfully and verify query result
         """
         # 1. initialize with data
-        collection_w, vectors = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field,
-                                                             default_value_fields={
-                                                                 ct.default_float_field_name: np.float32(10.0)})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            True,
+            enable_dynamic_field=enable_dynamic_field,
+            default_value_fields={ct.default_float_field_name: np.float32(10.0)},
+        )[0:2]
         pos = 5
         if enable_dynamic_field:
             int_values, float_values = [], []
             for vector in vectors[0]:
                 int_values.append(vector[ct.default_int64_field_name])
                 float_values.append(vector[default_float_field_name])
-            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in
-                   range(pos)]
+            res = [
+                {ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]}
+                for i in range(pos)
+            ]
         else:
             int_values = vectors[0][ct.default_int64_field_name].values.tolist()
-            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+            res = vectors[0].iloc[0:pos, :2].to_dict("records")
 
-        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
+        term_expr = f"{ct.default_int64_field_name} in {int_values[:pos]}"
         # 2. query
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_default_value_without_insert(self, enable_dynamic_field):
@@ -737,15 +811,21 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: query successfully and verify query result
         """
         # 1. initialize with data
-        collection_w, vectors = self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field,
-                                                             default_value_fields={
-                                                                 ct.default_float_field_name: np.float32(10.0)})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            False,
+            enable_dynamic_field=enable_dynamic_field,
+            default_value_fields={ct.default_float_field_name: np.float32(10.0)},
+        )[0:2]
 
-        term_expr = f'{ct.default_int64_field_name} > 0'
+        term_expr = f"{ct.default_int64_field_name} > 0"
         # 2. query
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [], "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: [], "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_default_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index):
@@ -755,16 +835,24 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: query successfully and verify query result
         """
         # 1. initialize with data
-        default_value_fields = {ct.default_int32_field_name: np.int32(1),
-                                ct.default_int16_field_name: np.int32(2),
-                                ct.default_int8_field_name: np.int32(3),
-                                ct.default_bool_field_name: True,
-                                ct.default_float_field_name: np.float32(10.0),
-                                ct.default_double_field_name: 10.0,
-                                ct.default_string_field_name: "1"}
-        collection_w, vectors = self.init_collection_general(prefix, True, 1000, partition_num=1, is_all_data_type=True,
-                                                             is_index=False, default_value_fields=default_value_fields)[
-                                0:2]
+        default_value_fields = {
+            ct.default_int32_field_name: np.int32(1),
+            ct.default_int16_field_name: np.int32(2),
+            ct.default_int8_field_name: np.int32(3),
+            ct.default_bool_field_name: True,
+            ct.default_float_field_name: np.float32(10.0),
+            ct.default_double_field_name: 10.0,
+            ct.default_string_field_name: "1",
+        }
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            True,
+            1000,
+            partition_num=1,
+            is_all_data_type=True,
+            is_index=False,
+            default_value_fields=default_value_fields,
+        )[0:2]
         # 2. create index on vector field and load
         index = "HNSW"
         params = cf.get_index_params_params(index)
@@ -792,14 +880,19 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         for i in range(pos):
             int64_values.append(scalar_fields[0][i])
             float_values.append(scalar_fields[5][i])
-        res = [{ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]} for i in
-               range(pos)]
+        res = [
+            {ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]}
+            for i in range(pos)
+        ]
 
-        term_expr = f'0 <= {ct.default_int64_field_name} < {pos}'
+        term_expr = f"0 <= {ct.default_int64_field_name} < {pos}"
         # 5. query
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue #36003")
@@ -810,42 +903,56 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: query successfully and verify query result
         """
         # 1. initialize with data
-        collection_w, vectors = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field,
-                                                             nullable_fields={ct.default_float_field_name: 1},
-                                                             default_value_fields={
-                                                                 ct.default_float_field_name: np.float32(10.0)})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            True,
+            enable_dynamic_field=enable_dynamic_field,
+            nullable_fields={ct.default_float_field_name: 1},
+            default_value_fields={ct.default_float_field_name: np.float32(10.0)},
+        )[0:2]
         pos = 5
         if enable_dynamic_field:
             int_values, float_values = [], []
             for vector in vectors[0]:
                 int_values.append(vector[ct.default_int64_field_name])
                 float_values.append(vector[default_float_field_name])
-            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in
-                   range(pos)]
+            res = [
+                {ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]}
+                for i in range(pos)
+            ]
         else:
-            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+            res = vectors[0].iloc[0:pos, :2].to_dict("records")
 
-        term_expr = f'{ct.default_float_field_name} in [10.0]'
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           limit=pos, check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"{ct.default_float_field_name} in [10.0]"
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            limit=pos,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.tags(CaseLabel.GPU)
-    def test_query_after_different_index_with_params_none_default_data(self, varchar_scalar_index, numeric_scalar_index,
-                                                                       null_data_percent):
+    def test_query_after_different_index_with_params_none_default_data(
+        self, varchar_scalar_index, numeric_scalar_index, null_data_percent
+    ):
         """
         target: test query after different index
         method: test query after different index on none default data
         expected: query successfully and verify query result
         """
         # 1. initialize with data
-        collection_w, vectors = self.init_collection_general(prefix, True, 1000, partition_num=1,
-                                                             is_all_data_type=True, is_index=False,
-                                                             nullable_fields={
-                                                                 ct.default_string_field_name: null_data_percent},
-                                                             default_value_fields={
-                                                                 ct.default_float_field_name: np.float32(10.0)})[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            True,
+            1000,
+            partition_num=1,
+            is_all_data_type=True,
+            is_index=False,
+            nullable_fields={ct.default_string_field_name: null_data_percent},
+            default_value_fields={ct.default_float_field_name: np.float32(10.0)},
+        )[0:2]
         # 2. create index on vector field and load
         index = "HNSW"
         params = cf.get_index_params_params(index)
@@ -867,14 +974,19 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         for i in range(pos):
             int64_values.append(scalar_fields[0][i])
             float_values.append(scalar_fields[5][i])
-        res = [{ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]} for i in
-               range(pos)]
+        res = [
+            {ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]}
+            for i in range(pos)
+        ]
 
-        term_expr = f'{ct.default_int64_field_name} in {int64_values[:pos]}'
+        term_expr = f"{ct.default_int64_field_name} in {int64_values[:pos]}"
         # 5. query
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_iterator_with_none_data(self, null_data_percent):
@@ -886,18 +998,19 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 100
-        collection_w = self.init_collection_general(prefix, True, is_index=False,
-                                                    nullable_fields={ct.default_string_field_name: null_data_percent})[
-            0]
+        collection_w = self.init_collection_general(
+            prefix, True, is_index=False, nullable_fields={ct.default_string_field_name: null_data_percent}
+        )[0]
         collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(batch_size, expr=expr,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": batch_size})
+        collection_w.query_iterator(
+            batch_size,
+            expr=expr,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={"count": ct.default_nb, "pk_name": collection_w.primary_field.name, "batch_size": batch_size},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue #36123")
@@ -908,26 +1021,34 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: query successfully and verify query result
         """
         # 1. initialize with data
-        collection_w, vectors = self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field,
-                                                             nullable_fields={
-                                                                 ct.default_float_field_name: null_data_percent},
-                                                             is_partition_key=ct.default_float_field_name)[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix,
+            True,
+            enable_dynamic_field=enable_dynamic_field,
+            nullable_fields={ct.default_float_field_name: null_data_percent},
+            is_partition_key=ct.default_float_field_name,
+        )[0:2]
         pos = 5
         if enable_dynamic_field:
             int_values, float_values = [], []
             for vector in vectors[0]:
                 int_values.append(vector[ct.default_int64_field_name])
                 float_values.append(vector[default_float_field_name])
-            res = [{ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]} for i in
-                   range(pos)]
+            res = [
+                {ct.default_int64_field_name: int_values[i], default_float_field_name: float_values[i]}
+                for i in range(pos)
+            ]
         else:
             int_values = vectors[0][ct.default_int64_field_name].values.tolist()
-            res = vectors[0].iloc[0:pos, :2].to_dict('records')
+            res = vectors[0].iloc[0:pos, :2].to_dict("records")
 
-        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
-        collection_w.query(term_expr, output_fields=[ct.default_int64_field_name, default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+        term_expr = f"{ct.default_int64_field_name} in {int_values[:pos]}"
+        collection_w.query(
+            term_expr,
+            output_fields=[ct.default_int64_field_name, default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue #36538")
@@ -943,13 +1064,21 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         expected: No exception
         """
         # insert data
-        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=True,
-                                                    nullable_fields={ct.default_float_field_name: null_data_percent},
-                                                    default_value_fields={ct.default_string_field_name: "data"})[0]
-        collection_w.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 200}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w = self.init_collection_general(
+            prefix,
+            True,
+            200,
+            partition_num=1,
+            is_index=True,
+            nullable_fields={ct.default_float_field_name: null_data_percent},
+            default_value_fields={ct.default_string_field_name: "data"},
+        )[0]
+        collection_w.query(
+            expr="",
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{ct.default_count_output: 200}], "pk_name": collection_w.primary_field.name},
+        )
         collection_w.release()
         partition_w1, partition_w2 = collection_w.partitions
         # load
@@ -962,19 +1091,28 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         # partition_w1.load()
         collection_w.load(partition_names=[partition_w1.name])
         # search on collection, partition1, partition2
-        collection_w.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 50}],
-                                        "pk_name": collection_w.primary_field.name})
-        partition_w1.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 50}],
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr="",
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{ct.default_count_output: 50}], "pk_name": collection_w.primary_field.name},
+        )
+        partition_w1.query(
+            expr="",
+            output_fields=[ct.default_count_output],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{ct.default_count_output: 50}], "pk_name": collection_w.primary_field.name},
+        )
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
-        collection_w.search(vectors[:1], ct.default_float_vec_field_name, ct.default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(
+            vectors[:1],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            200,
+            partition_names=[partition_w2.name],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "not loaded"},
+        )
 
 
 class TestQueryTextMatch(TestcaseBase):
@@ -988,9 +1126,7 @@ class TestQueryTextMatch(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_query_text_match_en_normal(
-            self, tokenizer, enable_inverted_index, enable_partition_key
-    ):
+    def test_query_text_match_en_normal(self, tokenizer, enable_inverted_index, enable_partition_key):
         """
         target: test text match normal
         method: 1. enable text match and insert data with varchar
@@ -1041,9 +1177,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 3000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -1066,11 +1200,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         # only if the collection is flushed, the inverted index ca be applied.
         # growing segment may be not applied, although in strong consistency.
         collection_w.flush()
@@ -1127,9 +1257,7 @@ class TestQueryTextMatch(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.parametrize("lang_type", ["chinese"])
-    def test_query_text_match_zh_normal(
-            self, lang_type, enable_inverted_index, enable_partition_key
-    ):
+    def test_query_text_match_zh_normal(self, lang_type, enable_inverted_index, enable_partition_key):
         """
         target: test text match normal
         method: 1. enable text match and insert data with varchar
@@ -1180,9 +1308,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 3000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if lang_type == "chinese":
             language = "zh"
@@ -1205,11 +1331,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         # only if the collection is flushed, the inverted index ca be applied.
         # growing segment may be not applied, although in strong consistency.
         collection_w.flush()
@@ -1269,16 +1391,15 @@ class TestQueryTextMatch(TestcaseBase):
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
             for r in res:
-                assert any(
-                    [token in r[field] for token in top_10_tokens]), f"top 10 tokens {top_10_tokens} not in {r[field]}"
+                assert any([token in r[field] for token in top_10_tokens]), (
+                    f"top 10 tokens {top_10_tokens} not in {r[field]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.parametrize("tokenizer", ["icu"])
-    def test_query_text_match_with_icu_tokenizer(
-            self, tokenizer, enable_inverted_index, enable_partition_key
-    ):
+    def test_query_text_match_with_icu_tokenizer(self, tokenizer, enable_inverted_index, enable_partition_key):
         """
         target: test text match with icu tokenizer
         method: 1. enable text match and insert data with varchar
@@ -1329,9 +1450,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 3000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = ICUTextGenerator()
         data = [
             {
@@ -1348,11 +1467,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         # only if the collection is flushed, the inverted index ca be applied.
         # growing segment may be not applied, although in strong consistency.
         collection_w.flush()
@@ -1405,14 +1520,11 @@ class TestQueryTextMatch(TestcaseBase):
             for r in res:
                 assert any([token in r[field] for token in top_10_tokens])
 
-
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
-    def test_query_text_match_with_growing_segment(
-            self, tokenizer, enable_inverted_index, enable_partition_key
-    ):
+    def test_query_text_match_with_growing_segment(self, tokenizer, enable_inverted_index, enable_partition_key):
         """
         target: test text match normal
         method: 1. enable text match and insert data with varchar
@@ -1463,9 +1575,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 3000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
             language = "zh"
@@ -1495,18 +1605,12 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         # Use server-side analyzer to get tokens consistent with what Milvus indexes
         text_fields = ["word", "sentence", "paragraph", "text"]
         wf_map = {}
         for field in text_fields:
-            wf_map[field] = cf.analyze_documents_with_analyzer_params(
-                df[field].tolist(), analyzer_params
-            )
+            wf_map[field] = cf.analyze_documents_with_analyzer_params(df[field].tolist(), analyzer_params)
 
         # Wait for growing-segment BM25 index to be ready.
         # Poll every 1s (up to 30s) using the top token from the "word" field.
@@ -1560,14 +1664,11 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"res len {len(res)}")
             assert len(res) > 0
 
-
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.parametrize("lang_type", ["chinese"])
-    def test_query_text_match_zh_en_mix(
-            self, lang_type, enable_inverted_index, enable_partition_key
-    ):
+    def test_query_text_match_zh_en_mix(self, lang_type, enable_inverted_index, enable_partition_key):
         """
         target: test text match normal
         method: 1. enable text match and insert data with varchar
@@ -1618,9 +1719,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 3000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if lang_type == "chinese":
             language = "zh"
@@ -1643,11 +1742,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
         # only if the collection is flushed, the inverted index ca be applied.
         # growing segment may be not applied, although in strong consistency.
         collection_w.flush()
@@ -1699,8 +1794,9 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"res len {len(res)}")
             assert len(res) > 0
             for r in res:
-                assert any(
-                    [token in r[field] for token in top_10_tokens]), f"top 10 tokens {top_10_tokens} not in {r[field]}"
+                assert any([token in r[field] for token in top_10_tokens]), (
+                    f"top 10 tokens {top_10_tokens} not in {r[field]}"
+                )
 
         # query single field for multi-word
         for field in text_fields:
@@ -1715,8 +1811,9 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"res len {len(res)}")
             assert len(res) > 0
             for r in res:
-                assert any(
-                    [token in r[field] for token in top_10_tokens]), f"top 10 tokens {top_10_tokens} not in {r[field]}"
+                assert any([token in r[field] for token in top_10_tokens]), (
+                    f"top 10 tokens {top_10_tokens} not in {r[field]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_stop_words(self):
@@ -1731,10 +1828,11 @@ class TestQueryTextMatch(TestcaseBase):
         analyzer_params = {
             "tokenizer": "standard",
             "filter": [
-                       {
-                           "type": "stop",
-                           "stop_words": stops_words,
-                       }],
+                {
+                    "type": "stop",
+                    "stop_words": stops_words,
+                }
+            ],
         }
         dim = 128
         fields = [
@@ -1751,9 +1849,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -1768,11 +1864,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -1821,9 +1913,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -1838,11 +1928,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -1856,7 +1942,7 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query single field for one word
         for field in text_fields:
-            tokens =[item[0] for item in wf_map[field].most_common(1)]
+            tokens = [item[0] for item in wf_map[field].most_common(1)]
             for token in tokens:
                 # search with Capital case
                 token = token.capitalize()
@@ -1877,7 +1963,7 @@ class TestQueryTextMatch(TestcaseBase):
                 log.info(f"expr: {expr}")
                 upper_case_res, _ = collection_w.query(expr=expr, output_fields=["id", field])
                 log.info(f"res len {len(upper_case_res)}")
-                assert len(capital_case_res) == len(lower_case_res)  and len(capital_case_res) == len(upper_case_res)
+                assert len(capital_case_res) == len(lower_case_res) and len(capital_case_res) == len(upper_case_res)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_length_filter(self):
@@ -1915,9 +2001,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -1932,11 +2016,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -1950,7 +2030,7 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query sentence field with long word
         for field in text_fields:
-            tokens =[long_word]
+            tokens = [long_word]
             for token in tokens:
                 expr = f"text_match({field}, '{token}')"
                 log.info(f"expr: {expr}")
@@ -1958,13 +2038,12 @@ class TestQueryTextMatch(TestcaseBase):
                 assert len(res) == 0
         # query sentence field with max length word
         for field in text_fields:
-            tokens =[max_length_word]
+            tokens = [max_length_word]
             for token in tokens:
                 expr = f"text_match({field}, '{token}')"
                 log.info(f"expr: {expr}")
                 res, _ = collection_w.query(expr=expr, output_fields=["id", field])
                 assert len(res) == data_size
-
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_stemmer_filter(self):
@@ -1977,15 +2056,17 @@ class TestQueryTextMatch(TestcaseBase):
         """
         analyzer_params = {
             "tokenizer": "standard",
-            "filter": [{
-                "type": "stemmer",  # Specifies the filter type as stemmer
-                "language": "english",  # Sets the language for stemming to English
-            }]
+            "filter": [
+                {
+                    "type": "stemmer",  # Specifies the filter type as stemmer
+                    "language": "english",  # Sets the language for stemming to English
+                }
+            ],
         }
         word_pairs = {
-            "play": ['play', 'plays', 'played', 'playing'],
-            "book": ['book', 'books', 'booked', 'booking'],
-            "study": ['study', 'studies', 'studied', 'studying'],
+            "play": ["play", "plays", "played", "playing"],
+            "book": ["book", "books", "booked", "booking"],
+            "study": ["study", "studies", "studied", "studying"],
         }
 
         dim = 128
@@ -2003,9 +2084,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -2020,11 +2099,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2046,7 +2121,6 @@ class TestQueryTextMatch(TestcaseBase):
                     res, _ = collection_w.query(expr=expr, output_fields=["id", field])
                     pytest.assume(len(res) == data_size, f"stem {stem} token {token} not found in {res}")
 
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_ascii_folding_filter(self):
         """
@@ -2057,6 +2131,7 @@ class TestQueryTextMatch(TestcaseBase):
         expected: get the correct token, text match successfully and result is correct
         """
         from unidecode import unidecode
+
         analyzer_params = {
             "tokenizer": "standard",
             "filter": ["asciifolding"],
@@ -2068,7 +2143,7 @@ class TestQueryTextMatch(TestcaseBase):
             "The œuvre of Łukasz includes æsthetic pieces",
             "München's König Street has günstig prices",
             "El niño está jugando en el jardín",
-            "Le système éducatif français"
+            "Le système éducatif français",
         ]
 
         dim = 128
@@ -2086,9 +2161,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -2103,11 +2176,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2126,7 +2195,9 @@ class TestQueryTextMatch(TestcaseBase):
                 expr = f"""text_match({field}, "{ascii_folding_text}")"""
                 log.info(f"expr: {expr}")
                 res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                pytest.assume(len(res) == data_size, f"origin {text} ascii_folding text {ascii_folding_text} not found in {res}")
+                pytest.assume(
+                    len(res) == data_size, f"origin {text} ascii_folding text {ascii_folding_text} not found in {res}"
+                )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_decompounder_filter(self):
@@ -2140,11 +2211,13 @@ class TestQueryTextMatch(TestcaseBase):
         word_list = ["dampf", "schiff", "fahrt", "brot", "backen", "automat"]
         analyzer_params = {
             "tokenizer": "standard",
-            "filter": ["lowercase",
+            "filter": [
+                "lowercase",
                 {
-                "type": "decompounder",  # Specifies the filter type as decompounder
-                "word_list": word_list,  # Sets the word list for decompounding
-            }],
+                    "type": "decompounder",  # Specifies the filter type as decompounder
+                    "word_list": word_list,  # Sets the word list for decompounding
+                },
+            ],
         }
 
         origin_texts = [
@@ -2175,9 +2248,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -2192,11 +2263,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2223,16 +2290,16 @@ class TestQueryTextMatch(TestcaseBase):
         expected: get the correct token, text match successfully and result is correct
         """
         common_non_ascii = [
-            'é',  # common in words like café, résumé
-            '©',  # copyright
-            '™',  # trademark
-            '®',  # registered trademark
-            '°',  # degrees, e.g. 20°C
-            '€',  # euro currency
-            '£',  # pound sterling
-            '±',  # plus-minus sign
-            '→',  # right arrow
-            '•'  # bullet point
+            "é",  # common in words like café, résumé
+            "©",  # copyright
+            "™",  # trademark
+            "®",  # registered trademark
+            "°",  # degrees, e.g. 20°C
+            "€",  # euro currency
+            "£",  # pound sterling
+            "±",  # plus-minus sign
+            "→",  # right arrow
+            "•",  # bullet point
         ]
         analyzer_params = {
             "tokenizer": "standard",
@@ -2254,9 +2321,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -2271,11 +2336,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2291,7 +2352,6 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             pytest.assume(len(res) == 0, f"res len {len(res)}, data size {data_size}")
-
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_cncharonly_filter(self):
@@ -2324,9 +2384,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         data = [
             {
@@ -2340,11 +2398,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2370,12 +2424,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: get the correct token, text match successfully and result is correct
         """
-        analyzer_params = {
-            "tokenizer": {
-            "type": "lindera",
-            "dict_kind": dict_kind
-            }
-        }
+        analyzer_params = {"tokenizer": {"type": "lindera", "dict_kind": dict_kind}}
         if dict_kind == "ipadic":
             fake = fake_jp
         elif dict_kind == "ko-dic":
@@ -2399,9 +2448,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         data = [
             {
                 "id": i,
@@ -2414,11 +2461,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2487,9 +2530,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -2506,11 +2547,7 @@ class TestQueryTextMatch(TestcaseBase):
         df = pd.DataFrame(data)
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2601,9 +2638,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data = [
@@ -2620,11 +2655,7 @@ class TestQueryTextMatch(TestcaseBase):
         df = pd.DataFrame(data)
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2640,10 +2671,8 @@ class TestQueryTextMatch(TestcaseBase):
         df_new = cf.split_dataframes(df, fields=text_fields)
         log.info(f"new df \n{df_new}")
         for i in range(2):
-            query, text_match_expr, pandas_expr = (
-                cf.generate_random_query_from_freq_dict(
-                    wf_map, min_freq=3, max_terms=5, p_not=0.2
-                )
+            query, text_match_expr, pandas_expr = cf.generate_random_query_from_freq_dict(
+                wf_map, min_freq=3, max_terms=5, p_not=0.2
             )
             log.info(f"expr: {text_match_expr}")
             res, _ = collection_w.query(expr=text_match_expr, output_fields=text_fields)
@@ -2658,30 +2687,20 @@ class TestQueryTextMatch(TestcaseBase):
                         key = expr["field"]
 
                     tmp_expr = cf.generate_text_match_expr(expr)
-                    res, _ = collection_w.query(
-                        expr=tmp_expr, output_fields=text_fields
-                    )
+                    res, _ = collection_w.query(expr=tmp_expr, output_fields=text_fields)
                     text_match_df = pd.DataFrame(res)
-                    log.info(
-                        f"text match res {len(text_match_df)}\n{text_match_df[key]}"
-                    )
+                    log.info(f"text match res {len(text_match_df)}\n{text_match_df[key]}")
                     log.info(f"tmp expr {tmp_expr} {len(res)}")
                     tmp_idx = [r["id"] for r in res]
                     step_by_step_results.append(tmp_idx)
-                    pandas_filter_res = cf.generate_pandas_text_match_result(
-                        expr, df_new
-                    )
+                    pandas_filter_res = cf.generate_pandas_text_match_result(expr, df_new)
                     tmp_pd_idx = pandas_filter_res["id"].tolist()
-                    diff_id = set(tmp_pd_idx).union(set(tmp_idx)) - set(
-                        tmp_pd_idx
-                    ).intersection(set(tmp_idx))
+                    diff_id = set(tmp_pd_idx).union(set(tmp_idx)) - set(tmp_pd_idx).intersection(set(tmp_idx))
                     log.info(f"diff between text match and manual check {diff_id}")
                     assert len(diff_id) == 0
                     for idx in diff_id:
                         log.info(df[df["id"] == idx][key].values)
-                    log.info(
-                        f"pandas_filter_res {len(pandas_filter_res)} \n {pandas_filter_res}"
-                    )
+                    log.info(f"pandas_filter_res {len(pandas_filter_res)} \n {pandas_filter_res}")
                 if isinstance(expr, str):
                     step_by_step_results.append(expr)
             final_res = cf.evaluate_expression(step_by_step_results)
@@ -2744,9 +2763,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data_en = [
@@ -2776,11 +2793,7 @@ class TestQueryTextMatch(TestcaseBase):
         df = pd.DataFrame(data)
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2797,11 +2810,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"new df \n{df_new}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -2886,13 +2895,9 @@ class TestQueryTextMatch(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
-        default_schema = CollectionSchema(
-            fields=default_fields, description="test collection"
-        )
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=default_schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
         data = []
         data_size = 10000
         for i in range(data_size):
@@ -2907,11 +2912,7 @@ class TestQueryTextMatch(TestcaseBase):
             data.append(d)
         batch_size = 5000
         for i in range(0, data_size, batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < data_size
-                else data[i:data_size]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < data_size else data[i:data_size])
         # only if the collection is flushed, the inverted index ca be applied.
         # growing segment may be not applied, although in strong consistency.
         collection_w.flush()
@@ -3006,13 +3007,9 @@ class TestQueryTextMatch(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
-        default_schema = CollectionSchema(
-            fields=default_fields, description="test collection"
-        )
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=default_schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=default_schema)
         data = []
         data_size = 10000
         for i in range(data_size):
@@ -3028,11 +3025,7 @@ class TestQueryTextMatch(TestcaseBase):
             data.append(d)
         batch_size = 5000
         for i in range(0, data_size, batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < data_size
-                else data[i:data_size]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < data_size else data[i:data_size])
         collection_w.create_index(
             "emb",
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
@@ -3116,9 +3109,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data_en = [
@@ -3147,11 +3138,7 @@ class TestQueryTextMatch(TestcaseBase):
         df = pd.DataFrame(data)
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -3168,11 +3155,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"new df \n{df_new}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i: i + batch_size]
-                if i + batch_size < len(df)
-                else data[i: len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -3261,9 +3244,7 @@ class TestQueryTextMatch(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         data_size = 5000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         language = "en"
         data_null = [
@@ -3282,11 +3263,7 @@ class TestQueryTextMatch(TestcaseBase):
         log.info(f"dataframe\n{df}")
         batch_size = 5000
         for i in range(0, len(df), batch_size):
-            collection_w.insert(
-                data[i:i + batch_size]
-                if i + batch_size < len(df)
-                else data[i:len(df)]
-            )
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
             collection_w.flush()
         collection_w.create_index(
             "emb",
@@ -3352,7 +3329,7 @@ class TestQueryCompareTwoColumn(TestcaseBase):
         collection_w.load()
         # f4 / 4 > 1 always false, so f3 < f4 will not be executed
         res = collection_w.query(expr="f4 / 4 > 1 and f3 < f4", output_fields=["count(*)"])[0]
-        assert res[0]['count(*)'] == 0
+        assert res[0]["count(*)"] == 0
         collection_w.drop()
 
 
@@ -3413,9 +3390,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
-        default_schema = CollectionSchema(
-            fields=default_fields, description="test collection"
-        )
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
         error = {ct.err_code: 2000, ct.err_msg: "unsupported tokenizer"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
@@ -3434,9 +3409,10 @@ class TestQueryFunction(TestcaseBase):
                 query with mix call expr in string field and int field
         expected: query successfully
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                             primary_field=ct.default_string_field_name)[0:2]
-        res = vectors[0].iloc[:, 1:3].to_dict('records')
+        collection_w, vectors = self.init_collection_general(
+            prefix, insert_data=True, primary_field=ct.default_string_field_name
+        )[0:2]
+        res = vectors[0].iloc[:, 1:3].to_dict("records")
         output_fields = [default_float_field_name, default_string_field_name]
         for mixed_call_expr in [
             "not empty(varchar) && int64 >= 0",
@@ -3449,7 +3425,8 @@ class TestQueryFunction(TestcaseBase):
                 mixed_call_expr,
                 output_fields=output_fields,
                 check_task=CheckTasks.check_query_results,
-                check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
+                check_items={exp_res: res, "pk_name": collection_w.primary_field.name},
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_invalid(self):
@@ -3458,8 +3435,7 @@ class TestQueryFunction(TestcaseBase):
         method: query with invalid call expr
         expected: raise exception
         """
-        collection_w, entities = self.init_collection_general(
-            prefix, insert_data=True, nb=10)[0:2]
+        collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
         test_cases = [
             (
                 "A_FUNCTION_THAT_DOES_NOT_EXIST()".lower(),
@@ -3470,14 +3446,14 @@ class TestQueryFunction(TestcaseBase):
             (f"empty({default_int_field_name})", "function empty(int64_t) not found"),
             # starts_with
             (f"starts_with({default_int_field_name})", "function starts_with(int64_t) not found"),
-            (f"starts_with({default_int_field_name}, {default_int_field_name})",
-             "function starts_with(int64_t, int64_t) not found"),
+            (
+                f"starts_with({default_int_field_name}, {default_int_field_name})",
+                "function starts_with(int64_t, int64_t) not found",
+            ),
         ]
         for call_expr, err_msg in test_cases:
             error = {ct.err_code: 65535, ct.err_msg: err_msg}
-            collection_w.query(
-                call_expr, check_task=CheckTasks.err_res, check_items=error
-            )
+            collection_w.query(call_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue 36685")
@@ -3519,9 +3495,7 @@ class TestQueryFunction(TestcaseBase):
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
-        default_schema = CollectionSchema(
-            fields=default_fields, description="test collection"
-        )
+        default_schema = CollectionSchema(fields=default_fields, description="test collection")
         error = {ct.err_code: 2000, ct.err_msg: "field type is not supported"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),

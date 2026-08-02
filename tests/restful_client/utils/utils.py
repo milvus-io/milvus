@@ -14,12 +14,13 @@ fake = Faker()
 
 def random_string(length=8):
     letters = string.ascii_letters
-    return ''.join(random.choice(letters) for _ in range(length))
+    return "".join(random.choice(letters) for _ in range(length))
 
 
 def gen_collection_name(prefix="test_collection", length=8):
-    name = f'{prefix}_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f") + random_string(length=length)
+    name = f"{prefix}_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f") + random_string(length=length)
     return name
+
 
 def admin_password():
     return "Milvus"
@@ -38,15 +39,12 @@ def wait_cluster_be_ready(cluster_id, client, timeout=120):
     t0 = time.time()
     while True and time.time() - t0 < timeout:
         rsp = client.cluster_describe(cluster_id)
-        if rsp['code'] == 200:
-            if rsp['data']['status'] == "RUNNING":
+        if rsp["code"] == 200:
+            if rsp["data"]["status"] == "RUNNING":
                 return time.time() - t0
         time.sleep(1)
         logger.debug("wait cluster to be ready, cost time: %s" % (time.time() - t0))
     return -1
-
-
-
 
 
 def gen_data_by_type(field):
@@ -94,15 +92,17 @@ def get_random_json_data(uid=None):
     # gen random dict data
     if uid is None:
         uid = 0
-    data = {"uid": uid,  "name": fake.name(), "address": fake.address(), "text": fake.text(), "email": fake.email(),
-            "phone_number": fake.phone_number(),
-            "array_int_dynamic": [random.randint(1, 100_000) for i in range(random.randint(1, 10))],
-            "array_varchar_dynamic": [fake.name() for i in range(random.randint(1, 10))],
-            "json": {
-                "name": fake.name(),
-                "address": fake.address()
-                }
-            }
+    data = {
+        "uid": uid,
+        "name": fake.name(),
+        "address": fake.address(),
+        "text": fake.text(),
+        "email": fake.email(),
+        "phone_number": fake.phone_number(),
+        "array_int_dynamic": [random.randint(1, 100_000) for i in range(random.randint(1, 10))],
+        "array_varchar_dynamic": [fake.name() for i in range(random.randint(1, 10))],
+        "json": {"name": fake.name(), "address": fake.address()},
+    }
     for i in range(random.randint(1, 10)):
         data["key" + str(random.randint(1, 100_000))] = "value" + str(random.randint(1, 100_000))
     return data
@@ -113,17 +113,22 @@ def get_data_by_payload(payload, nb=100):
     vector_field = payload.get("vectorField", "vector")
     data = []
     if nb == 1:
-        data = [{
-            vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
-            **get_random_json_data()
-
-        }]
+        data = [
+            {
+                vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
+                **get_random_json_data(),
+            }
+        ]
     else:
         for i in range(nb):
-            data.append({
-                vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
-                **get_random_json_data(uid=i)
-            })
+            data.append(
+                {
+                    vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[
+                        0
+                    ].tolist(),
+                    **get_random_json_data(uid=i),
+                }
+            )
     return data
 
 
@@ -152,6 +157,3 @@ def get_all_fields_by_data(data, exclude_fields=None):
         exclude_fields = set(exclude_fields)
         fields = fields.difference(exclude_fields)
     return list(fields)
-
-
-

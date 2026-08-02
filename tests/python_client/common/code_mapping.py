@@ -7,8 +7,7 @@ class ErrorCode(Enum):
     Error = 1
 
 
-ErrorMessage = {ErrorCode.ErrorOk: "",
-                ErrorCode.Error: "is illegal"}
+ErrorMessage = {ErrorCode.ErrorOk: "", ErrorCode.Error: "is illegal"}
 
 
 class ErrorMap:
@@ -19,7 +18,9 @@ class ErrorMap:
 
 class ConnectionErrorMessage(ExceptionsMessage):
     FailConnect = "Fail connecting to server on %s:%s. Timeout"
-    ConnectExist = "The connection named %s already creating, but passed parameters don't match the configured parameters"
+    ConnectExist = (
+        "The connection named %s already creating, but passed parameters don't match the configured parameters"
+    )
 
 
 class CollectionErrorMessage(ExceptionsMessage):
