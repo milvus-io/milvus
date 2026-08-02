@@ -35,9 +35,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -455,6 +457,20 @@ func (mr *MilvusRoles) Run() {
 	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
 	defer mlog.Cleanup()
+
+	// Worker nodes (querynode, datanode, streamingnode) host no credential
+	// metadata, so without this they could not authenticate anyone once
+	// common.security.adminAuthEnabled is on and their management plane and
+	// pprof would answer 503 to root as well as to attackers. This occupies the
+	// fallback slot only: proxy and mix coord register in-process verifiers that
+	// take precedence, so single-process standalone never makes this RPC.
+	rootCredentialVerifier := adminauth.NewRootCredentialVerifier(ctx, mix.NewClient)
+	http.RegisterFallbackPasswordVerifyFunc(rootCredentialVerifier.Verify)
+	defer func() {
+		if err := rootCredentialVerifier.Close(); err != nil {
+			mlog.Warn(ctx, "close root credential verifier failed", mlog.Err(err))
+		}
+	}()
 
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)

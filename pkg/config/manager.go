@@ -32,7 +32,23 @@ import (
 const (
 	TombValue     = "TOMB_VAULE"
 	RuntimeSource = "RuntimeSource"
+	redactedValue = "<redacted>"
 )
+
+// sensitiveKeyPatterns is a conservative fallback for configuration keys that
+// are not registered through ParamItem/ParamGroup. In particular, EnvSource
+// imports every process environment variable, so relying only on registered
+// metadata would make unknown keys such as AWS_SECRET_ACCESS_KEY readable and
+// loggable through the config manager.
+var sensitiveKeyPatterns = []string{
+	"password",
+	"secret",
+	"token",
+	"credential",
+	"accesskey",
+	"apikey",
+	"privatekey",
+}
 
 type Filter func(key string) (string, bool)
 
@@ -83,12 +99,16 @@ func filterate(key string, filters ...Filter) (string, bool) {
 }
 
 type Manager struct {
-	Dispatcher    *EventDispatcher
-	sources       *typeutil.ConcurrentMap[string, Source]
-	keySourceMap  *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
-	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
-	forbiddenKeys *typeutil.ConcurrentSet[string]
-	immutableKeys *typeutil.ConcurrentSet[string]
+	Dispatcher            *EventDispatcher
+	sources               *typeutil.ConcurrentMap[string, Source]
+	keySourceMap          *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
+	overlays              *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
+	forbiddenKeys         *typeutil.ConcurrentSet[string]
+	immutableKeys         *typeutil.ConcurrentSet[string]
+	sensitiveKeys         *typeutil.ConcurrentSet[string]
+	sensitiveKeyPrefixes  *typeutil.ConcurrentSet[string]
+	registeredKeys        *typeutil.ConcurrentSet[string]
+	registeredKeyPrefixes *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
 	configCache map[string]any
@@ -97,13 +117,17 @@ type Manager struct {
 
 func NewManager() *Manager {
 	manager := &Manager{
-		Dispatcher:    NewEventDispatcher(),
-		sources:       typeutil.NewConcurrentMap[string, Source](),
-		keySourceMap:  typeutil.NewConcurrentMap[string, string](),
-		overlays:      typeutil.NewConcurrentMap[string, string](),
-		forbiddenKeys: typeutil.NewConcurrentSet[string](),
-		immutableKeys: typeutil.NewConcurrentSet[string](),
-		configCache:   make(map[string]any),
+		Dispatcher:            NewEventDispatcher(),
+		sources:               typeutil.NewConcurrentMap[string, Source](),
+		keySourceMap:          typeutil.NewConcurrentMap[string, string](),
+		overlays:              typeutil.NewConcurrentMap[string, string](),
+		forbiddenKeys:         typeutil.NewConcurrentSet[string](),
+		immutableKeys:         typeutil.NewConcurrentSet[string](),
+		sensitiveKeys:         typeutil.NewConcurrentSet[string](),
+		sensitiveKeyPrefixes:  typeutil.NewConcurrentSet[string](),
+		registeredKeys:        typeutil.NewConcurrentSet[string](),
+		registeredKeyPrefixes: typeutil.NewConcurrentSet[string](),
+		configCache:           make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
 		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
@@ -322,6 +346,117 @@ func (m *Manager) IsImmutable(key string) bool {
 	return m.immutableKeys.Contain(formatKey(key))
 }
 
+// SensitiveUpdate marks a configuration key as sensitive. Sensitive keys are
+// redacted by the /management/config/get endpoint to prevent disclosure of
+// credentials, infrastructure topology, and security posture to authenticated
+// but unprivileged callers.
+func (m *Manager) SensitiveUpdate(key string) {
+	m.sensitiveKeys.Insert(formatKey(key))
+}
+
+// RegisterConfigKey records a declared ParamItem key. Config sources may hold
+// arbitrary keys (EnvSource imports the whole process environment), so callers
+// exposing configuration must distinguish declared Milvus config from source
+// implementation details.
+func (m *Manager) RegisterConfigKey(key string) {
+	m.registeredKeys.Insert(formatKey(key))
+}
+
+// RegisterConfigPrefix records a declared ParamGroup prefix. An empty prefix is
+// intentionally ignored because it would make every environment variable look
+// like a declared Milvus configuration.
+func (m *Manager) RegisterConfigPrefix(prefix string) {
+	formattedPrefix := formatKey(prefix)
+	if formattedPrefix != "" {
+		m.registeredKeyPrefixes.Insert(formattedPrefix)
+	}
+}
+
+// IsConfigRegistered reports whether key belongs to a declared ParamItem or
+// ParamGroup.
+func (m *Manager) IsConfigRegistered(key string) bool {
+	formattedKey := formatKey(key)
+	if m.registeredKeys.Contain(formattedKey) {
+		return true
+	}
+
+	registered := false
+	m.registeredKeyPrefixes.Range(func(prefix string) bool {
+		if strings.HasPrefix(formattedKey, prefix) {
+			registered = true
+			return false
+		}
+		return true
+	})
+	return registered
+}
+
+// SensitivePrefixUpdate marks every configuration under prefix as sensitive.
+// This is used by ParamGroup values whose concrete keys are discovered only at
+// runtime (for example, credential.aksk1.secret_access_key).
+func (m *Manager) SensitivePrefixUpdate(prefix string) {
+	formattedPrefix := formatKey(prefix)
+	if formattedPrefix != "" {
+		m.sensitiveKeyPrefixes.Insert(formattedPrefix)
+	}
+}
+
+// IsSensitive checks registered ParamItem keys, registered ParamGroup prefixes,
+// and finally a conservative name-based fallback for unregistered source keys.
+func (m *Manager) IsSensitive(key string) bool {
+	formattedKey := formatKey(key)
+	if m.sensitiveKeys.Contain(formattedKey) {
+		return true
+	}
+
+	isSensitivePrefix := false
+	m.sensitiveKeyPrefixes.Range(func(prefix string) bool {
+		if strings.HasPrefix(formattedKey, prefix) {
+			isSensitivePrefix = true
+			return false
+		}
+		return true
+	})
+	if isSensitivePrefix {
+		return true
+	}
+
+	// formatKey intentionally preserves '-' for configuration lookup semantics;
+	// remove it only for secret-pattern matching so private-key and api-key do
+	// not bypass the fallback.
+	patternKey := strings.ReplaceAll(formattedKey, "-", "")
+	for _, pattern := range sensitiveKeyPatterns {
+		if strings.Contains(patternKey, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// RedactedValue returns value for logging, replacing it with a placeholder when
+// the key is marked Sensitive or is not a declared Milvus configuration. Config
+// sources may contain arbitrary environment or plugin keys whose meaning cannot
+// be inferred from their names, so unknown values must fail closed as well.
+func (m *Manager) RedactedValue(key, value string) string {
+	if value == "" {
+		return value
+	}
+	if !m.IsConfigRegistered(key) || m.IsSensitive(key) {
+		return redactedValue
+	}
+	return value
+}
+
+// RedactedValues returns a logging-safe copy of values. The input map is never
+// mutated because callers still need the original values for persistence.
+func (m *Manager) RedactedValues(values map[string]string) map[string]string {
+	redacted := make(map[string]string, len(values))
+	for key, value := range values {
+		redacted[key] = m.RedactedValue(key, value)
+	}
+	return redacted
+}
+
 func (m *Manager) UpdateSourceOptions(opts ...Option) {
 	var options Options
 	for _, opt := range opts {
@@ -423,7 +558,12 @@ func (m *Manager) updateEvent(e *Event) error {
 	}
 
 	e.HasUpdated = true
-	mlog.Info(context.TODO(), "receive update event", mlog.Any("event", e))
+	mlog.Info(context.TODO(), "receive update event",
+		mlog.String("eventSource", e.EventSource),
+		mlog.String("eventType", e.EventType),
+		mlog.String("key", e.Key),
+		mlog.String("value", m.RedactedValue(e.Key, e.Value)),
+		mlog.Bool("hasUpdated", e.HasUpdated))
 	return nil
 }
 
@@ -435,7 +575,13 @@ func (m *Manager) OnEvent(event *Event) {
 	}
 	err := m.updateEvent(event)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed in updating event with error", mlog.Err(err), mlog.Any("event", event))
+		mlog.Warn(context.TODO(), "failed in updating event with error",
+			mlog.Err(err),
+			mlog.String("eventSource", event.EventSource),
+			mlog.String("eventType", event.EventType),
+			mlog.String("key", event.Key),
+			mlog.String("value", m.RedactedValue(event.Key, event.Value)),
+			mlog.Bool("hasUpdated", event.HasUpdated))
 		return
 	}
 
@@ -538,21 +684,23 @@ func (m *Manager) ProcessImmutableConfigs(renderers map[string]func(raw string) 
 			if hasRenderer {
 				rendered := render(configValue)
 				mlog.Info(context.TODO(), "rendered immutable config value before persisting",
-					mlog.String("key", key), mlog.String("rawValue", configValue), mlog.String("renderedValue", rendered))
+					mlog.String("key", key), mlog.String("rawValue", m.RedactedValue(key, configValue)),
+					mlog.String("renderedValue", m.RedactedValue(key, rendered)))
 				configValue = rendered
 			}
 			mlog.Info(context.TODO(), "immutable config not exist in etcd, saving to persistent storage",
-				mlog.String("fromSource", confgSourceName), mlog.String("key", key), mlog.String("value", configValue))
+				mlog.String("fromSource", confgSourceName), mlog.String("key", key),
+				mlog.String("value", m.RedactedValue(key, configValue)))
 			if err := m.SaveConfigToEtcd(etcdSourceImpl, key, configValue); err != nil {
 				mlog.Error(context.TODO(), "failed to save immutable config to etcd",
-					mlog.String("key", key), mlog.String("value", configValue), mlog.Err(err))
+					mlog.String("key", key), mlog.String("value", m.RedactedValue(key, configValue)), mlog.Err(err))
 				saveErrors = append(saveErrors, err)
 			} else {
-				mlog.Info(context.TODO(), "successfully saved immutable config to etcd", mlog.String("key", key), mlog.String("value", configValue))
+				mlog.Info(context.TODO(), "successfully saved immutable config to etcd", mlog.String("key", key), mlog.String("value", m.RedactedValue(key, configValue)))
 				savedConfigs = append(savedConfigs, key)
 			}
 		} else if getFromEtcdErr == nil {
-			mlog.Info(context.TODO(), "immutable config already exists in etcd", mlog.String("key", key), mlog.String("value", configValue))
+			mlog.Info(context.TODO(), "immutable config already exists in etcd", mlog.String("key", key), mlog.String("value", m.RedactedValue(key, configValue)))
 		} else {
 			mlog.Warn(context.TODO(), "failed to check config in etcd", mlog.String("key", key), mlog.Err(getFromEtcdErr))
 		}
@@ -590,11 +738,13 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 	}
 	if !resp.Succeeded {
 		mlog.Info(context.TODO(), "config already exists in etcd, skip writing",
-			mlog.String("etcdKey", etcdKey), mlog.String("configKey", key), mlog.String("value", value))
+			mlog.String("etcdKey", etcdKey), mlog.String("configKey", key),
+			mlog.String("value", m.RedactedValue(key, value)))
 		return nil
 	}
 	mlog.Info(context.TODO(), "config atomically saved to etcd",
-		mlog.String("etcdKey", etcdKey), mlog.String("configKey", key), mlog.String("value", value))
+		mlog.String("etcdKey", etcdKey), mlog.String("configKey", key),
+		mlog.String("value", m.RedactedValue(key, value)))
 
 	return nil
 }
@@ -650,7 +800,7 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 	mlog.Info(context.TODO(), "configs atomically altered in etcd",
 		mlog.Int("updates", len(updates)),
 		mlog.Int("deletes", len(deletes)),
-		mlog.Any("updated", updates),
+		mlog.Any("updated", m.RedactedValues(updates)),
 		mlog.Strings("deleted", deletes))
 	return nil
 }

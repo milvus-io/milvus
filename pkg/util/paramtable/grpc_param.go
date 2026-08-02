@@ -113,6 +113,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.TLSMode.Init(base.mgr)
 
@@ -574,6 +575,7 @@ func (p *InternalTLSConfig) Init(base *BaseTable) {
 		Version:      "2.5.0",
 		DefaultValue: "false",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.InternalTLSEnabled.Init(base.mgr)
 

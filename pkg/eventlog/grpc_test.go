@@ -19,6 +19,8 @@ package eventlog
 import (
 	context "context"
 	fmt "fmt"
+	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -196,6 +198,116 @@ func (s *GrpcLoggerSuite) TestRecordFunc() {
 
 func (s *GrpcLoggerSuite) TestFlush() {
 	s.NoError(s.l.Flush())
+}
+
+func TestGrpcListenAddress(t *testing.T) {
+	t.Run("legacy mode remains remotely reachable", func(t *testing.T) {
+		// Keep the flag-off behavior unchanged for compatibility with existing
+		// remote eventlog clients.
+		if got := grpcListenAddress(false); got != ":0" {
+			t.Fatalf("legacy eventlog listen address = %q, want :0", got)
+		}
+	})
+
+	t.Run("secured mode is loopback only", func(t *testing.T) {
+		// The gRPC stream has no credential exchange, so secured mode must not
+		// expose it on a remotely reachable interface after authenticating only
+		// the HTTP discovery request.
+		if got := grpcListenAddress(true); got != "127.0.0.1:0" {
+			t.Fatalf("secured eventlog listen address = %q, want 127.0.0.1:0", got)
+		}
+	})
+}
+
+func resetGrpcLogger() {
+	grpcLogMu.Lock()
+	defer grpcLogMu.Unlock()
+	if logger := grpcLog.Load(); logger != nil {
+		logger.Close()
+	}
+	grpcLog.Store(nil)
+}
+
+func TestGrpcLoggerUpgradesToLoopback(t *testing.T) {
+	resetGrpcLogger()
+	t.Cleanup(resetGrpcLogger)
+
+	_, err := getGrpcLoggerWithLocalOnly(false)
+	if err != nil {
+		t.Fatalf("start legacy eventlog listener: %v", err)
+	}
+	legacy := grpcLog.Load()
+	if legacy == nil || legacy.localOnly {
+		t.Fatal("legacy eventlog listener should be remotely reachable")
+	}
+
+	err = EnsureLocalOnly()
+	if err != nil {
+		t.Fatalf("upgrade eventlog listener to loopback: %v", err)
+	}
+	secured := grpcLog.Load()
+	if secured == nil || !secured.localOnly {
+		t.Fatal("secured eventlog listener should be loopback-only")
+	}
+	if secured == legacy {
+		t.Fatal("enabling admin auth must replace the existing wildcard listener")
+	}
+	if !secured.lis.Addr().(*net.TCPAddr).IP.IsLoopback() {
+		t.Fatalf("secured eventlog listener bound to %s, want loopback", secured.lis.Addr())
+	}
+}
+
+func TestGrpcLoggerConcurrentUpgradeStaysLoopbackOnly(t *testing.T) {
+	resetGrpcLogger()
+	originalListenFunc := grpcListenFunc
+	t.Cleanup(func() {
+		resetGrpcLogger()
+		grpcListenFunc = originalListenFunc
+	})
+
+	listenStarted := make(chan struct{})
+	releaseFirstListen := make(chan struct{})
+	var blockFirstListen sync.Once
+	grpcListenFunc = func(network, address string) (net.Listener, error) {
+		blockFirstListen.Do(func() {
+			close(listenStarted)
+			<-releaseFirstListen
+		})
+		return net.Listen(network, address)
+	}
+
+	legacyResult := make(chan error, 1)
+	go func() {
+		_, err := getGrpcLoggerWithLocalOnly(false)
+		legacyResult <- err
+	}()
+	<-listenStarted
+
+	securedResult := make(chan error, 1)
+	go func() {
+		securedResult <- EnsureLocalOnly()
+	}()
+
+	// Give the secured request time to overlap the deliberately blocked legacy
+	// start. Under the old singleflight implementation it joined the wildcard
+	// creation and incorrectly returned success without upgrading the listener.
+	time.Sleep(20 * time.Millisecond)
+	close(releaseFirstListen)
+
+	if err := <-legacyResult; err != nil {
+		t.Fatalf("start legacy eventlog listener: %v", err)
+	}
+	if err := <-securedResult; err != nil {
+		t.Fatalf("secure eventlog listener: %v", err)
+	}
+
+	secured := grpcLog.Load()
+	if secured == nil || !secured.localOnly {
+		t.Fatal("concurrent security upgrade must leave a loopback-only listener")
+	}
+	if !secured.lis.Addr().(*net.TCPAddr).IP.IsLoopback() {
+		t.Fatalf("secured eventlog listener bound to %s, want loopback", secured.lis.Addr())
+	}
 }
 
 func TestGrpcLogger(t *testing.T) {

@@ -45,6 +45,10 @@ type ParamItem struct {
 	Formatter func(originValue string) string
 	Forbidden bool
 	Immutable bool
+	// Sensitive marks this parameter as containing sensitive material (credentials,
+	// infrastructure topology, security posture). Sensitive parameters are redacted
+	// by the /management/config/get endpoint regardless of caller privilege.
+	Sensitive bool
 
 	manager *config.Manager
 
@@ -57,11 +61,21 @@ type ParamItem struct {
 
 func (pi *ParamItem) Init(manager *config.Manager) {
 	pi.manager = manager
+	pi.manager.RegisterConfigKey(pi.Key)
+	for _, key := range pi.FallbackKeys {
+		pi.manager.RegisterConfigKey(key)
+	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
+	}
+	if pi.Sensitive {
+		pi.manager.SensitiveUpdate(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.SensitiveUpdate(key)
+		}
 	}
 
 	currentValue := pi.GetValue()
@@ -101,17 +115,20 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 		return
 	}
 
+	oldValueForLog := pi.manager.RedactedValue(pi.Key, oldValue)
+	newValueForLog := pi.manager.RedactedValue(pi.Key, newValue)
+
 	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
 		mlog.Error(context.TODO(), "param change callback failed",
 			mlog.String("key", pi.Key),
-			mlog.String("oldValue", oldValue),
-			mlog.String("newValue", newValue),
+			mlog.String("oldValue", oldValueForLog),
+			mlog.String("newValue", newValueForLog),
 			mlog.Err(err))
 	} else {
 		mlog.Info(context.TODO(), "param value changed",
 			mlog.String("key", pi.Key),
-			mlog.String("oldValue", oldValue),
-			mlog.String("newValue", newValue))
+			mlog.String("oldValue", oldValueForLog),
+			mlog.String("newValue", newValueForLog))
 	}
 
 	pi.lastValue.Store(&newValue)
@@ -389,6 +406,9 @@ type ParamGroup struct {
 	Version   string
 	Doc       string
 	Export    bool
+	// Sensitive marks every dynamically discovered key under KeyPrefix as
+	// sensitive. Use this for groups that contain credentials or other secrets.
+	Sensitive bool
 
 	GetFunc func() map[string]string
 	DocFunc func(string) string
@@ -398,6 +418,10 @@ type ParamGroup struct {
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
 	pg.manager = manager
+	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
+	if pg.Sensitive {
+		pg.manager.SensitivePrefixUpdate(pg.KeyPrefix)
+	}
 }
 
 func (pg *ParamGroup) GetValue() map[string]string {

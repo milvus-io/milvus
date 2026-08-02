@@ -60,11 +60,14 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.ReplicaLoadConfigCompliancePath, s.HandleReplicaLoadConfigCompliance},
 		}
 
-		// Loop through the slice and register each route.
+		// All /management/* routes are gated by common.security.adminAuthEnabled.
+		// When the flag is true, requests must present HTTP Basic Auth with the
+		// milvus root user's credentials.
 		for _, route := range routes {
 			management.Register(&management.Handler{
 				Path:        route.path,
 				HandlerFunc: route.handler,
+				AuthPolicy:  management.AuthByAdminFlag,
 			})
 		}
 	})
@@ -1352,7 +1355,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
 		logger.Info(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
-			mlog.Any("updates", configsToUpdate),
+			mlog.Any("updates", paramMgr.RedactedValues(configsToUpdate)),
 			mlog.Strings("deletes", keysToDelete),
 			mlog.Err(err))
 		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
@@ -1362,7 +1365,7 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	logger.Info(request.Context(), "HandleAlterConfig success",
 		mlog.Int("updates", len(configsToUpdate)),
 		mlog.Int("deletes", len(keysToDelete)),
-		mlog.Any("updated", configsToUpdate),
+		mlog.Any("updated", paramMgr.RedactedValues(configsToUpdate)),
 		mlog.Strings("deleted", keysToDelete))
 
 	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
@@ -1404,11 +1407,17 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Redact sensitive config keys (passwords, secrets, tokens).
-		normalizedKey := strings.ToLower(key)
-		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
-			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
+		// Deny declared sensitive ParamItems/ParamGroups and secret-like source
+		// keys before looking them up.
+		if paramMgr.IsSensitive(key) {
 			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
+			continue
+		}
+		// EnvSource imports the whole process environment. Only declared Milvus
+		// keys may cross this API boundary; name matching cannot identify opaque
+		// secrets such as DATABASE_URL or vendor-specific credentials.
+		if !paramMgr.IsConfigRegistered(key) {
+			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
 			continue
 		}
 		source, value, err := paramMgr.GetConfig(key)
