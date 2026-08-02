@@ -1,19 +1,26 @@
 from faker import Faker
 import random
 
+
 class ICUTextGenerator:
     """
-    ICU(International Components for Unicode)TextGenerator: 
+    ICU(International Components for Unicode)TextGenerator:
     Generate test sentences containing multiple languages (Chinese, English, Japanese, Korean), emojis, and special symbols.
     """
+
     def __init__(self):
         self.fake_en = Faker("en_US")
         self.fake_zh = Faker("zh_CN")
         self.fake_ja = Faker("ja_JP")
         self.fake_de = Faker("de_DE")
         self.korean_samples = [
-            "안녕하세요 세계", "파이썬 프로그래밍", "데이터 분석", "인공지능",
-            "밀버스 테스트", "한국어 샘플", "자연어 처리"
+            "안녕하세요 세계",
+            "파이썬 프로그래밍",
+            "데이터 분석",
+            "인공지능",
+            "밀버스 테스트",
+            "한국어 샘플",
+            "자연어 처리",
         ]
         self.emojis = ["😊", "🐍", "🚀", "🌏", "💡", "🔥", "✨", "👍"]
         self.specials = ["#", "@", "$"]
@@ -31,7 +38,7 @@ class ICUTextGenerator:
             random.choice(self.emojis),
             random.choice(self.specials),
         ]
-        return  random.choice(parts)
+        return random.choice(parts)
 
     def sentence(self):
         """
@@ -53,48 +60,87 @@ class ICUTextGenerator:
         """
         Generate a paragraph containing multiple sentences, each with multiple languages, emojis, and special symbols.
         """
-        return ' '.join([self.sentence() for _ in range(num_sentences)])
+        return " ".join([self.sentence() for _ in range(num_sentences)])
 
     def text(self, num_sentences=5):
         """
         Generate multiple sentences containing multiple languages, emojis, and special symbols.
         """
-        return ' '.join([self.sentence() for _ in range(num_sentences)])
+        return " ".join([self.sentence() for _ in range(num_sentences)])
 
 
 class KoreanTextGenerator:
     """
     KoreanTextGenerator: Generate test sentences containing Korean activities, verbs, connectors, and modifiers.
     """
+
     def __init__(self):
         # Sports/Activities (Nouns)
         self.activities = [
-            "수영", "축구", "농구", "테니스",
-            "배구", "야구", "골프", "럭비",
-            "달리기", "자전거", "스케이트", "스키",
-            "서핑", "다이빙", "등산", "요가",
-            "춤", "하이킹", "독서", "요리"
+            "수영",
+            "축구",
+            "농구",
+            "테니스",
+            "배구",
+            "야구",
+            "골프",
+            "럭비",
+            "달리기",
+            "자전거",
+            "스케이트",
+            "스키",
+            "서핑",
+            "다이빙",
+            "등산",
+            "요가",
+            "춤",
+            "하이킹",
+            "독서",
+            "요리",
         ]
 
         # Verbs (Base Form)
         self.verbs = [
-            "좋아하다", "즐기다", "하다", "배우다",
-            "가르치다", "보다", "시작하다", "계속하다",
-            "연습하다", "선호하다", "마스터하다", "도전하다"
+            "좋아하다",
+            "즐기다",
+            "하다",
+            "배우다",
+            "가르치다",
+            "보다",
+            "시작하다",
+            "계속하다",
+            "연습하다",
+            "선호하다",
+            "마스터하다",
+            "도전하다",
         ]
 
         # Connectors
         self.connectors = [
-            "그리고", "또는", "하지만", "그런데",
-            "그래서", "또한", "게다가", "그러면서",
-            "동시에", "함께"
+            "그리고",
+            "또는",
+            "하지만",
+            "그런데",
+            "그래서",
+            "또한",
+            "게다가",
+            "그러면서",
+            "동시에",
+            "함께",
         ]
 
         # Modifiers (Frequency/Degree)
         self.modifiers = [
-            "매우", "자주", "가끔", "열심히",
-            "전문적으로", "규칙적으로", "매일", "일주일에 한 번",
-            "취미로", "진지하게"
+            "매우",
+            "자주",
+            "가끔",
+            "열심히",
+            "전문적으로",
+            "규칙적으로",
+            "매일",
+            "일주일에 한 번",
+            "취미로",
+            "진지하게",
         ]
 
     def conjugate_verb(self, verb):
@@ -104,7 +150,6 @@ class KoreanTextGenerator:
         elif verb.endswith("다"):
             return verb[:-1] + "아요"
         return verb
-
 
     def word(self):
         return random.choice(self.activities + self.verbs + self.modifiers + self.connectors)
@@ -131,10 +176,10 @@ class KoreanTextGenerator:
         return sentence + "."
 
     def paragraph(self, num_sentences=3):
-        return '\n'.join([self.sentence() for _ in range(num_sentences)])
+        return "\n".join([self.sentence() for _ in range(num_sentences)])
 
     def text(self, num_sentences=5):
-        return '\n'.join([self.sentence() for _ in range(num_sentences)])
+        return "\n".join([self.sentence() for _ in range(num_sentences)])
 
 
 def generate_text_by_analyzer(analyzer_params):

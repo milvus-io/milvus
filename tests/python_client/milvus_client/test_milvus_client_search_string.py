@@ -11,8 +11,8 @@ default_nb = ct.default_nb
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invalid_string_exp = "varchar >= 0"
 prefix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
@@ -30,6 +30,7 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
     Data: 3000 rows, varchar overridden with str(i) for predictable prefix/comparison expressions
     Index: COSINE on float_vector
     """
+
     shared_alias = "TestSearchStringAutoId"
 
     def setup_class(self):
@@ -62,6 +63,7 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
 
         def teardown():
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -76,27 +78,33 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         # query to get a valid string value from the collection
-        query_res, _ = self.query(client, self.collection_name, filter="int64 >= 0",
-                                  output_fields=[default_string_field_name], limit=10)
+        query_res, _ = self.query(
+            client, self.collection_name, filter="int64 >= 0", output_fields=[default_string_field_name], limit=10
+        )
         search_str = query_res[1][default_string_field_name]
         search_exp = f"{default_string_field_name} == '{search_str}'"
         log.info("test_search_string_field_not_primary: searching collection %s" % self.collection_name)
         log.info("search expr: %s" % search_exp)
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=search_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "pk_name": default_int64_field_name,
-                                          "limit": 1,
-                                          "metric": "COSINE",
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=search_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "pk_name": default_int64_field_name,
+                "limit": 1,
+                "metric": "COSINE",
+                "enable_milvus_client_api": True,
+            },
+        )
         assert res[0][0]["entity"][default_string_field_name] == search_str
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -109,23 +117,27 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: all results have int64 >= 0 and varchar >= "0", distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_mix_expr: searching collection %s" %
-                 self.collection_name)
+        log.info("test_search_string_mix_expr: searching collection %s" % self.collection_name)
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=default_search_mix_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "pk_name": default_int64_field_name,
-                                          "limit": default_limit,
-                                          "metric": "COSINE",
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=default_search_mix_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "pk_name": default_int64_field_name,
+                "limit": default_limit,
+                "metric": "COSINE",
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify filter effectiveness
         for hits in res:
             for hit in hits:
@@ -141,19 +153,22 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: error 1100 with "cannot parse expression" message
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_with_invalid_expr: searching collection %s" %
-                 self.collection_name)
+        log.info("test_search_string_with_invalid_expr: searching collection %s" % self.collection_name)
         vectors = cf.gen_vectors(default_nq, default_dim)
-        self.search(client, self.collection_name,
-                    data=vectors[:default_nq],
-                    anns_field=default_search_field,
-                    search_params=default_search_params,
-                    limit=default_limit,
-                    filter=default_invalid_string_exp,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1100,
-                                 "err_msg": "failed to create query plan: cannot "
-                                            "parse expression: varchar >= 0"})
+        self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=default_invalid_string_exp,
+            check_task=CheckTasks.err_res,
+            check_items={
+                "err_code": 1100,
+                "err_msg": "failed to create query plan: cannot parse expression: varchar >= 0",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_not_primary_prefix(self):
@@ -165,23 +180,27 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: results have varchar starting with "0", distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_field_not_primary_prefix: searching collection %s" %
-                 self.collection_name)
+        log.info("test_search_string_field_not_primary_prefix: searching collection %s" % self.collection_name)
         output_fields = [default_float_field_name, default_string_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=prefix_expr,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "limit": 1,
-                                          "metric": "COSINE",
-                                          "pk_name": default_int64_field_name,
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=prefix_expr,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": 1,
+                "metric": "COSINE",
+                "pk_name": default_int64_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify prefix filter effectiveness
         for hits in res:
             for hit in hits:
@@ -196,24 +215,28 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: all rows match (every varchar >= ""), distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        search_string_exp = "varchar >= \"\""
-        log.info("test_search_string_field_not_primary_is_empty: searching collection %s" %
-                 self.collection_name)
+        search_string_exp = 'varchar >= ""'
+        log.info("test_search_string_field_not_primary_is_empty: searching collection %s" % self.collection_name)
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=search_string_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "pk_name": default_int64_field_name,
-                                          "limit": default_limit,
-                                          "metric": "COSINE",
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=search_string_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "pk_name": default_int64_field_name,
+                "limit": default_limit,
+                "metric": "COSINE",
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify filter effectiveness
         for hits in res:
             for hit in hits:
@@ -228,6 +251,7 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
     Data: 3000 rows
     Index: COSINE on float_vector, TRIE on varchar
     """
+
     shared_alias = "TestSearchStringVarcharPK"
 
     def setup_class(self):
@@ -257,6 +281,7 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
 
         def teardown():
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -271,27 +296,33 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         # query to get a valid string value from the collection
-        query_res, _ = self.query(client, self.collection_name, filter="int64 >= 0",
-                                  output_fields=[default_string_field_name], limit=10)
+        query_res, _ = self.query(
+            client, self.collection_name, filter="int64 >= 0", output_fields=[default_string_field_name], limit=10
+        )
         search_str = query_res[1][default_string_field_name]
         search_exp = f"{default_string_field_name} == '{search_str}'"
         log.info("test_search_string_field_is_primary_true: searching collection %s" % self.collection_name)
         log.info("search expr: %s" % search_exp)
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=search_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "pk_name": ct.default_string_field_name,
-                                          "limit": 1,
-                                          "metric": "COSINE",
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=search_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "pk_name": ct.default_string_field_name,
+                "limit": 1,
+                "metric": "COSINE",
+                "enable_milvus_client_api": True,
+            },
+        )
         assert res[0][0]["entity"][default_string_field_name] == search_str
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -303,23 +334,27 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         expected: results match prefix filter, distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_field_index: searching collection %s" %
-                 self.collection_name)
+        log.info("test_search_string_field_index: searching collection %s" % self.collection_name)
         output_fields = [default_float_field_name, default_string_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=prefix_expr,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "limit": 1,
-                                          "metric": "COSINE",
-                                          "pk_name": ct.default_string_field_name,
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=prefix_expr,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": 1,
+                "metric": "COSINE",
+                "pk_name": ct.default_string_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify prefix filter effectiveness
         for hits in res:
             for hit in hits:
@@ -334,25 +369,29 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         expected: results returned (all rows match), distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        search_string_exp = "varchar >= \"\""
+        search_string_exp = 'varchar >= ""'
         limit = 1
-        log.info("test_search_string_field_is_primary_insert_empty: searching collection %s" %
-                 self.collection_name)
+        log.info("test_search_string_field_is_primary_insert_empty: searching collection %s" % self.collection_name)
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
-        res, _ = self.search(client, self.collection_name,
-                             data=vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=limit,
-                             filter=search_string_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "limit": limit,
-                                          "metric": "COSINE",
-                                          "enable_milvus_client_api": True,
-                                          "pk_name": ct.default_string_field_name})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=limit,
+            filter=search_string_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": limit,
+                "metric": "COSINE",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_string_field_name,
+            },
+        )
         # manually verify filter effectiveness
         for hits in res:
             for hit in hits:
@@ -372,9 +411,13 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         nb = 3000
         # query to get all data for filter evaluation (varchar is PK, use varchar > "" to match all)
-        query_res, _ = self.query(client, self.collection_name, filter='varchar > ""',
-                                  output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                                  limit=nb)
+        query_res, _ = self.query(
+            client,
+            self.collection_name,
+            filter='varchar > ""',
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            limit=nb,
+        )
         # filter result with expression in collection
         filter_ids = []
         expression_eval = expression.replace("&&", "and").replace("||", "or")
@@ -387,12 +430,15 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         # search with expression (AUTOINDEX/HNSW may not return all matches, use subset check)
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = cf.gen_vectors(default_nq, default_dim)
-        search_res, _ = self.search(client, self.collection_name,
-                                    data=vectors[:default_nq],
-                                    anns_field=default_search_field,
-                                    search_params=default_search_params,
-                                    limit=nb,
-                                    filter=expression)
+        search_res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=nb,
+            filter=expression,
+        )
 
         filter_ids_set = set(filter_ids)
         for hits in search_res:
@@ -408,6 +454,7 @@ class TestSearchStringBinary(TestMilvusClientV2Base):
     Data: 3000 rows with binary vectors, varchar=str(i), float=i*1.0
     Index: BIN_IVF_FLAT/JACCARD
     """
+
     shared_alias = "TestSearchStringBinary"
 
     def setup_class(self):
@@ -437,14 +484,18 @@ class TestSearchStringBinary(TestMilvusClientV2Base):
         self.flush(client, self.collection_name)
 
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_binary_vec_field_name,
-                      index_type="BIN_IVF_FLAT", metric_type="JACCARD",
-                      params={"nlist": 128})
+        idx.add_index(
+            field_name=ct.default_binary_vec_field_name,
+            index_type="BIN_IVF_FLAT",
+            metric_type="JACCARD",
+            params={"nlist": 128},
+        )
         self.create_index(client, self.collection_name, index_params=idx)
         self.load_collection(client, self.collection_name)
 
         def teardown():
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -460,19 +511,24 @@ class TestSearchStringBinary(TestMilvusClientV2Base):
         _, search_binary_vectors = cf.gen_binary_vectors(default_nq, dim)
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         output_fields = [default_string_field_name]
-        res, _ = self.search(client, self.collection_name,
-                             data=search_binary_vectors[:default_nq],
-                             anns_field=ct.default_binary_vec_field_name,
-                             search_params=search_params,
-                             limit=default_limit,
-                             filter=default_search_string_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "limit": default_limit,
-                                          "metric": "JACCARD",
-                                          "pk_name": default_int64_field_name,
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=search_binary_vectors[:default_nq],
+            anns_field=ct.default_binary_vec_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            filter=default_search_string_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "JACCARD",
+                "pk_name": default_int64_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify filter effectiveness
         for hits in res:
             for hit in hits:
@@ -490,19 +546,24 @@ class TestSearchStringBinary(TestMilvusClientV2Base):
         dim = 128
         _, search_binary_vectors = cf.gen_binary_vectors(default_nq, dim)
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        res, _ = self.search(client, self.collection_name,
-                             data=search_binary_vectors[:default_nq],
-                             anns_field=ct.default_binary_vec_field_name,
-                             search_params=search_params,
-                             limit=default_limit,
-                             filter=default_search_string_exp,
-                             output_fields=[default_string_field_name],
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "limit": default_limit,
-                                          "metric": "JACCARD",
-                                          "pk_name": default_int64_field_name,
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=search_binary_vectors[:default_nq],
+            anns_field=ct.default_binary_vec_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            filter=default_search_string_exp,
+            output_fields=[default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "JACCARD",
+                "pk_name": default_int64_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify filter effectiveness
         for hits in res:
             for hit in hits:
@@ -519,24 +580,28 @@ class TestSearchStringBinary(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         dim = 128
-        log.info("test_search_mix_expr_with_binary: searching collection %s" %
-                 self.collection_name)
+        log.info("test_search_mix_expr_with_binary: searching collection %s" % self.collection_name)
         _, search_binary_vectors = cf.gen_binary_vectors(default_nq, dim)
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         output_fields = [default_string_field_name, default_float_field_name]
-        res, _ = self.search(client, self.collection_name,
-                             data=search_binary_vectors[:default_nq],
-                             anns_field=ct.default_binary_vec_field_name,
-                             search_params=search_params,
-                             limit=default_limit,
-                             filter=default_search_mix_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "pk_name": default_int64_field_name,
-                                          "limit": default_limit,
-                                          "metric": "JACCARD",
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=search_binary_vectors[:default_nq],
+            anns_field=ct.default_binary_vec_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            filter=default_search_mix_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "pk_name": default_int64_field_name,
+                "limit": default_limit,
+                "metric": "JACCARD",
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify filter effectiveness
         for hits in res:
             for hit in hits:
@@ -581,26 +646,32 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # query to get a valid string value from the collection
-        query_res, _ = self.query(client, collection_name, filter='varchar > ""',
-                                  output_fields=[default_string_field_name], limit=10)
+        query_res, _ = self.query(
+            client, collection_name, filter='varchar > ""', output_fields=[default_string_field_name], limit=10
+        )
         search_str = query_res[0][default_string_field_name]
         search_exp = f"{default_string_field_name} == '{search_str}'"
         log.info("test_search_string_different_language: searching with language=%s" % language)
         search_vectors = cf.gen_vectors(default_nq, dim)
         output_fields = [default_string_field_name, default_float_field_name]
-        res, _ = self.search(client, collection_name,
-                             data=search_vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=search_exp,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "limit": 1,
-                                          "metric": "COSINE",
-                                          "pk_name": default_int64_field_name,
-                                          "enable_milvus_client_api": True})
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=search_vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=search_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": 1,
+                "metric": "COSINE",
+                "pk_name": default_int64_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
         assert res[0][0]["entity"][default_string_field_name] == search_str
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -639,26 +710,32 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        log.info("test_search_string_field_is_primary_true_multi_vector_fields: searching collection %s" %
-                 collection_name)
+        log.info(
+            "test_search_string_field_is_primary_true_multi_vector_fields: searching collection %s" % collection_name
+        )
         search_vectors = cf.gen_vectors(default_nq, dim)
         output_fields = [default_string_field_name, default_float_field_name]
         vector_list = [ct.default_float_vec_field_name, multiple_vector_field_1, multiple_vector_field_2]
         for search_field in vector_list:
-            res, _ = self.search(client, collection_name,
-                                 data=search_vectors[:default_nq],
-                                 anns_field=search_field,
-                                 search_params=default_search_params,
-                                 limit=default_limit,
-                                 filter=default_search_string_exp,
-                                 output_fields=output_fields,
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": default_nq,
-                                              "ids": insert_ids,
-                                              "pk_name": ct.default_string_field_name,
-                                              "limit": default_limit,
-                                              "metric": "COSINE",
-                                              "enable_milvus_client_api": True})
+            res, _ = self.search(
+                client,
+                collection_name,
+                data=search_vectors[:default_nq],
+                anns_field=search_field,
+                search_params=default_search_params,
+                limit=default_limit,
+                filter=default_search_string_exp,
+                output_fields=output_fields,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "nq": default_nq,
+                    "ids": insert_ids,
+                    "pk_name": ct.default_string_field_name,
+                    "limit": default_limit,
+                    "metric": "COSINE",
+                    "enable_milvus_client_api": True,
+                },
+            )
             # manually verify filter effectiveness
             for hits in res:
                 for hit in hits:
@@ -701,28 +778,31 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        log.info("test_range_search_string_field_is_primary_true: searching collection %s" %
-                 collection_name)
-        range_search_params = {"metric_type": "L2",
-                               "params": {"radius": 1000, "range_filter": 0}}
+        log.info("test_range_search_string_field_is_primary_true: searching collection %s" % collection_name)
+        range_search_params = {"metric_type": "L2", "params": {"radius": 1000, "range_filter": 0}}
         search_vectors = cf.gen_vectors(default_nq, dim)
         output_fields = [default_string_field_name, default_float_field_name]
         vector_list = [ct.default_float_vec_field_name, multiple_vector_field_1, multiple_vector_field_2]
         for search_field in vector_list:
-            res, _ = self.search(client, collection_name,
-                                 data=search_vectors[:default_nq],
-                                 anns_field=search_field,
-                                 search_params=range_search_params,
-                                 limit=default_limit,
-                                 filter=default_search_string_exp,
-                                 output_fields=output_fields,
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": default_nq,
-                                              "ids": insert_ids,
-                                              "limit": default_limit,
-                                              "metric": "L2",
-                                              "pk_name": ct.default_string_field_name,
-                                              "enable_milvus_client_api": True})
+            res, _ = self.search(
+                client,
+                collection_name,
+                data=search_vectors[:default_nq],
+                anns_field=search_field,
+                search_params=range_search_params,
+                limit=default_limit,
+                filter=default_search_string_exp,
+                output_fields=output_fields,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "nq": default_nq,
+                    "ids": insert_ids,
+                    "limit": default_limit,
+                    "metric": "L2",
+                    "pk_name": ct.default_string_field_name,
+                    "enable_milvus_client_api": True,
+                },
+            )
             # manually verify filter effectiveness
             for hits in res:
                 for hit in hits:
@@ -755,9 +835,9 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
 
         # create index
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name,
-                      index_type="IVF_SQ8", metric_type="COSINE",
-                      params={"nlist": 64})
+        idx.add_index(
+            field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="COSINE", params={"nlist": 64}
+        )
         idx.add_index(field_name=ct.default_string_field_name, index_type="Trie")
         self.create_index(client, collection_name, index_params=idx)
 
@@ -769,24 +849,28 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # search with compare expr
-        expr = 'float >= int64'
+        expr = "float >= int64"
         search_vectors = cf.gen_vectors(default_nq, default_dim)
-        output_fields = [default_int64_field_name,
-                         default_float_field_name, default_string_field_name]
-        res, _ = self.search(client, collection_name,
-                             data=search_vectors[:default_nq],
-                             anns_field=default_search_field,
-                             search_params=default_search_params,
-                             limit=default_limit,
-                             filter=expr,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.check_search_results,
-                             check_items={"nq": default_nq,
-                                          "ids": insert_ids,
-                                          "limit": default_limit,
-                                          "metric": "COSINE",
-                                          "pk_name": ct.default_string_field_name,
-                                          "enable_milvus_client_api": True})
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=search_vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=expr,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "ids": insert_ids,
+                "limit": default_limit,
+                "metric": "COSINE",
+                "pk_name": ct.default_string_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
         # manually verify cross-field comparison filter
         for hits in res:
             for hit in hits:

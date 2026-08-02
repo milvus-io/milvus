@@ -6,15 +6,16 @@ from pymilvus.client.constants import DEFAULT_RESOURCE_GROUP
 from pymilvus.client.types import ResourceGroupConfig, ResourceGroupInfo
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
-from chaos.checker import (InsertChecker,
-                           UpsertChecker,
-                           SearchChecker,
-                           HybridSearchChecker,
-                           QueryChecker,
-                           DeleteChecker,
-                           Op,
-                           ResultAnalyzer
-                           )
+from chaos.checker import (
+    InsertChecker,
+    UpsertChecker,
+    SearchChecker,
+    HybridSearchChecker,
+    QueryChecker,
+    DeleteChecker,
+    Op,
+    ResultAnalyzer,
+)
 from chaos import chaos_commons as cc
 from common import common_func as cf
 from utils.util_k8s import get_querynode_id_pod_pairs
@@ -25,7 +26,7 @@ from common.common_type import CaseLabel
 from chaos.chaos_commons import assert_statistic
 from delayed_assert import assert_expectations
 
-namespace = 'chaos-testing'
+namespace = "chaos-testing"
 prefix = "test_rg"
 
 from rich.table import Table
@@ -55,7 +56,7 @@ def display_resource_group_info(info: Union[ResourceGroupInfo, List[ResourceGrou
                 str(i.num_incoming_node),
                 str(i.config.requests.node_num),
                 str(i.config.limits.node_num),
-                "\n".join([str(node.hostname) for node in i.nodes])
+                "\n".join([str(node.hostname) for node in i.nodes]),
             )
     else:
         table.add_row(
@@ -67,7 +68,7 @@ def display_resource_group_info(info: Union[ResourceGroupInfo, List[ResourceGrou
             str(info.num_incoming_node),
             str(info.config.requests.node_num),
             str(info.config.limits.node_num),
-            "\n".join([str(node.hostname) for node in info.nodes])
+            "\n".join([str(node.hostname) for node in info.nodes]),
         )
 
     console = Console()
@@ -97,7 +98,7 @@ def display_segment_distribution_info(collection_name, release_name):
             str(r.num_rows),
             str(r.state),
             str(r.nodeIds),
-            str([querynode_id_pod_pair.get(node_id) for node_id in r.nodeIds])
+            str([querynode_id_pod_pair.get(node_id) for node_id in r.nodeIds]),
         )
     console = Console()
     console.width = 300
@@ -115,20 +116,21 @@ def list_all_resource_groups():
 
 def _install_milvus(image_tag="master-latest"):
     release_name = f"rg-test-{cf.gen_digits_by_length(6)}"
-    cus_configs = {'spec.mode': 'cluster',
-                   'spec.dependencies.msgStreamType': 'kafka',
-                   'spec.components.image': f'harbor.milvus.io/milvus/milvus:{image_tag}',
-                   'metadata.namespace': namespace,
-                   'metadata.name': release_name,
-                   'spec.components.proxy.serviceType': 'LoadBalancer',
-                   }
+    cus_configs = {
+        "spec.mode": "cluster",
+        "spec.dependencies.msgStreamType": "kafka",
+        "spec.components.image": f"harbor.milvus.io/milvus/milvus:{image_tag}",
+        "metadata.namespace": namespace,
+        "metadata.name": release_name,
+        "spec.components.proxy.serviceType": "LoadBalancer",
+    }
     milvus_op = MilvusOperator()
     log.info(f"install milvus with configs: {cus_configs}")
     milvus_op.install(cus_configs)
     healthy = milvus_op.wait_for_healthy(release_name, namespace, timeout=1200)
     log.info(f"milvus healthy: {healthy}")
     if healthy:
-        endpoint = milvus_op.endpoint(release_name, namespace).split(':')
+        endpoint = milvus_op.endpoint(release_name, namespace).split(":")
         log.info(f"milvus endpoint: {endpoint}")
         host = endpoint[0]
         port = endpoint[1]
@@ -138,7 +140,6 @@ def _install_milvus(image_tag="master-latest"):
 
 
 class TestResourceGroup(TestcaseBase):
-
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
@@ -150,8 +151,8 @@ class TestResourceGroup(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_resource_group_scale_up(self, image_tag):
         """
-       steps
-       """
+        steps
+        """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
@@ -162,13 +163,16 @@ class TestResourceGroup(TestcaseBase):
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         # scale up rg1 to 8 nodes one by one
         for replicas in range(1, 8):
-            milvus_op.scale(release_name, 'queryNode', replicas, namespace)
+            milvus_op.scale(release_name, "queryNode", replicas, namespace)
             time.sleep(10)
             # get querynode info
             qn = mil.query_nodes
@@ -187,7 +191,7 @@ class TestResourceGroup(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -196,13 +200,16 @@ class TestResourceGroup(TestcaseBase):
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         # scale down rg1 from 8 to 1 node one by one
         for replicas in range(8, 1, -1):
-            milvus_op.scale(release_name, 'queryNode', replicas, namespace)
+            milvus_op.scale(release_name, "queryNode", replicas, namespace)
             time.sleep(10)
             resource_group = self.utility.describe_resource_group(name)
             log.info(f"Resource group {name} info:\n {display_resource_group_info(resource_group)}")
@@ -218,7 +225,7 @@ class TestResourceGroup(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -229,17 +236,23 @@ class TestResourceGroup(TestcaseBase):
 
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         rg_list.append(name)
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 3},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 3},
+                limits={"node_num": 6},
+            ),
+        )
         rg_list.append(name)
         # assert two rg satisfy the request node_num
         list_all_resource_groups()
@@ -249,7 +262,7 @@ class TestResourceGroup(TestcaseBase):
 
         # scale down rg1 from 8 to 1 node one by one
         for replicas in range(8, 1, -1):
-            milvus_op.scale(release_name, 'queryNode', replicas, namespace)
+            milvus_op.scale(release_name, "queryNode", replicas, namespace)
             time.sleep(10)
             for name in rg_list:
                 resource_group = self.utility.describe_resource_group(name)
@@ -272,21 +285,27 @@ class TestResourceGroup(TestcaseBase):
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         rg_list.append(name)
 
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 3},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 3},
+                limits={"node_num": 6},
+            ),
+        )
         rg_list.append(name)
         for replicas in range(1, 8):
-            milvus_op.scale(release_name, 'queryNode', replicas, namespace)
+            milvus_op.scale(release_name, "queryNode", replicas, namespace)
             time.sleep(10)
             list_all_resource_groups()
 
@@ -295,13 +314,12 @@ class TestResourceGroup(TestcaseBase):
             assert resource_group.num_available_node >= resource_group.config.requests.node_num
         # scale down rg1 from 8 to 1 node one by one
         for replicas in range(8, 1, -1):
-            milvus_op.scale(release_name, 'queryNode', replicas, namespace)
+            milvus_op.scale(release_name, "queryNode", replicas, namespace)
             time.sleep(10)
             list_all_resource_groups()
         for rg in rg_list:
             resource_group = self.utility.describe_resource_group(rg)
             assert resource_group.num_available_node >= 1
-
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_resource_group_querynode_add_into_new_rg(self, image_tag):
@@ -312,7 +330,7 @@ class TestResourceGroup(TestcaseBase):
         release_name, host, port = _install_milvus(image_tag=image_tag)
 
         self.release_name = release_name
-        milvus_op.scale(release_name, 'queryNode', 10, namespace)
+        milvus_op.scale(release_name, "queryNode", 10, namespace)
         assert host is not None
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
@@ -321,10 +339,13 @@ class TestResourceGroup(TestcaseBase):
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         rg_list.append(name)
         for rg in rg_list:
             resource_group = self.utility.describe_resource_group(rg)
@@ -334,10 +355,13 @@ class TestResourceGroup(TestcaseBase):
         # the querynode will be added into the new rg from default rg
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 3},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 3},
+                limits={"node_num": 6},
+            ),
+        )
         rg_list.append(name)
         list_all_resource_groups()
         for rg in rg_list:
@@ -356,38 +380,55 @@ class TestResourceGroup(TestcaseBase):
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 1})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 1})}
+        )
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         rg1_name = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         name = cf.gen_unique_str("rg")
         rg2_name = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 6},
+            ),
+        )
         list_all_resource_groups()
         log.info("update resource group")
         utility.update_resource_groups(
-            {rg1_name: ResourceGroupConfig(requests={"node_num": 6},
-                                           limits={"node_num": 8},
-                                           transfer_from=[{"resource_group": rg2_name}],
-                                           transfer_to=[{"resource_group": rg2_name}], )})
+            {
+                rg1_name: ResourceGroupConfig(
+                    requests={"node_num": 6},
+                    limits={"node_num": 8},
+                    transfer_from=[{"resource_group": rg2_name}],
+                    transfer_to=[{"resource_group": rg2_name}],
+                )
+            }
+        )
         time.sleep(10)
         list_all_resource_groups()
         utility.update_resource_groups(
-            {rg2_name: ResourceGroupConfig(requests={"node_num": 6},
-                                           limits={"node_num": 8},
-                                           transfer_from=[{"resource_group": rg1_name}],
-                                           transfer_to=[{"resource_group": rg1_name}], )})
+            {
+                rg2_name: ResourceGroupConfig(
+                    requests={"node_num": 6},
+                    limits={"node_num": 8},
+                    transfer_from=[{"resource_group": rg1_name}],
+                    transfer_to=[{"resource_group": rg1_name}],
+                )
+            }
+        )
         time.sleep(10)
         list_all_resource_groups()
         # no querynode was transferred between rg1 and rg2
@@ -408,32 +449,44 @@ class TestResourceGroup(TestcaseBase):
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
-        milvus_op.scale(release_name, 'queryNode', 15, namespace)
+        milvus_op.scale(release_name, "queryNode", 15, namespace)
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 3})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 3})}
+        )
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         rg1_name = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 2},
-            limits={"node_num": 2},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 2},
+                limits={"node_num": 2},
+            ),
+        )
         name = cf.gen_unique_str("rg")
         rg2_name = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 6},
-            limits={"node_num": 10},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 6},
+                limits={"node_num": 10},
+            ),
+        )
         list_all_resource_groups()
         rg2_available_node_before = self.utility.describe_resource_group(rg2_name).num_available_node
         log.info("update resource group")
         utility.update_resource_groups(
-            {rg1_name: ResourceGroupConfig(requests={"node_num": 4},
-                                           limits={"node_num": 6},
-                                           transfer_from=[{"resource_group": rg2_name}],
-                                           transfer_to=[{"resource_group": rg2_name}], )})
+            {
+                rg1_name: ResourceGroupConfig(
+                    requests={"node_num": 4},
+                    limits={"node_num": 6},
+                    transfer_from=[{"resource_group": rg2_name}],
+                    transfer_to=[{"resource_group": rg2_name}],
+                )
+            }
+        )
         time.sleep(10)
         list_all_resource_groups()
         # expect qn in rg 1 transfer from rg2 not the default rg
@@ -452,38 +505,49 @@ class TestResourceGroup(TestcaseBase):
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
-        milvus_op.scale(release_name, 'queryNode', 10, namespace)
+        milvus_op.scale(release_name, "queryNode", 10, namespace)
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})}
+        )
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         rg1_name = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 2},
-            limits={"node_num": 10},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 2},
+                limits={"node_num": 10},
+            ),
+        )
         name = cf.gen_unique_str("rg")
         rg2_name = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 4},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 4},
+                limits={"node_num": 4},
+            ),
+        )
         list_all_resource_groups()
         rg1_node_available_before = self.utility.describe_resource_group(rg1_name).num_available_node
         log.info("update resource group")
         utility.update_resource_groups(
-            {rg2_name: ResourceGroupConfig(requests={"node_num": 2},
-                                           limits={"node_num": 2},
-                                           transfer_from=[{"resource_group": rg1_name}],
-                                           transfer_to=[{"resource_group": rg1_name}], )})
+            {
+                rg2_name: ResourceGroupConfig(
+                    requests={"node_num": 2},
+                    limits={"node_num": 2},
+                    transfer_from=[{"resource_group": rg1_name}],
+                    transfer_to=[{"resource_group": rg1_name}],
+                )
+            }
+        )
         time.sleep(10)
         list_all_resource_groups()
         # expect qn in rg 2 transfer to rg1 not the default rg
         rg1_node_available_after = self.utility.describe_resource_group(rg1_name).num_available_node
         assert rg1_node_available_after > rg1_node_available_before
-
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_resource_group_with_rg_transfer_with_rg_list(self, image_tag):
@@ -497,51 +561,66 @@ class TestResourceGroup(TestcaseBase):
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
-        milvus_op.scale(release_name, 'queryNode', 12, namespace)
+        milvus_op.scale(release_name, "queryNode", 12, namespace)
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 1})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 1})}
+        )
         # create rg1 with request node_num=4, limit node_num=6
         name = cf.gen_unique_str("rg")
         source_rg = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 1},
-            limits={"node_num": 1},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 1},
+                limits={"node_num": 1},
+            ),
+        )
         name = cf.gen_unique_str("rg")
         small_rg = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 2},
-            limits={"node_num": 4},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 2},
+                limits={"node_num": 4},
+            ),
+        )
         name = cf.gen_unique_str("rg")
         big_rg = name
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 3},
-            limits={"node_num": 6},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 3},
+                limits={"node_num": 6},
+            ),
+        )
         list_all_resource_groups()
         small_rg_node_available_before = self.utility.describe_resource_group(small_rg).num_available_node
         big_rg_node_available_before = self.utility.describe_resource_group(big_rg).num_available_node
         log.info("update resource group")
         utility.update_resource_groups(
-            {source_rg: ResourceGroupConfig(requests={"node_num": 6},
-                                           limits={"node_num": 6},
-                                           transfer_from=[{"resource_group": small_rg}, {"resource_group": big_rg}],
-                                           )})
+            {
+                source_rg: ResourceGroupConfig(
+                    requests={"node_num": 6},
+                    limits={"node_num": 6},
+                    transfer_from=[{"resource_group": small_rg}, {"resource_group": big_rg}],
+                )
+            }
+        )
         time.sleep(10)
         list_all_resource_groups()
         # expect source rg transfer from small rg and big rg
         small_rg_node_available_after = self.utility.describe_resource_group(small_rg).num_available_node
         big_rg_node_available_after = self.utility.describe_resource_group(big_rg).num_available_node
-        assert (small_rg_node_available_before + big_rg_node_available_before > small_rg_node_available_after +
-                big_rg_node_available_after)
+        assert (
+            small_rg_node_available_before + big_rg_node_available_before
+            > small_rg_node_available_after + big_rg_node_available_after
+        )
 
 
 class TestReplicasManagement(TestcaseBase):
-
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
@@ -557,7 +636,7 @@ class TestReplicasManagement(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 12, namespace)
+        milvus_op.scale(release_name, "queryNode", 12, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -567,17 +646,19 @@ class TestReplicasManagement(TestcaseBase):
         for i in range(4):
             name = cf.gen_unique_str("rg")
             self.utility = utility
-            self.utility.create_resource_group(name, config=ResourceGroupConfig(
-                requests={"node_num": 2},
-                limits={"node_num": 6},
-            ))
+            self.utility.create_resource_group(
+                name,
+                config=ResourceGroupConfig(
+                    requests={"node_num": 2},
+                    limits={"node_num": 6},
+                ),
+            )
             resource_groups.append(name)
         list_all_resource_groups()
 
         # create collection and load with 2 replicase
         self.skip_connection = True
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                             enable_dynamic_field=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True)[0:2]
         collection_w.release()
         log.info(f"resource groups: {resource_groups}")
         collection_w.load(replica_number=len(resource_groups), _resource_groups=resource_groups)
@@ -589,8 +670,12 @@ class TestReplicasManagement(TestcaseBase):
         rg_to_scale_down = resource_groups[0]
         # scale down a rg to 1 node
         self.utility.update_resource_groups(
-            {rg_to_scale_down: ResourceGroupConfig(requests={"node_num": 1},
-                                                   limits={"node_num": 1}, )}
+            {
+                rg_to_scale_down: ResourceGroupConfig(
+                    requests={"node_num": 1},
+                    limits={"node_num": 1},
+                )
+            }
         )
 
         list_all_resource_groups()
@@ -598,8 +683,12 @@ class TestReplicasManagement(TestcaseBase):
         log.info(f"replicas: {replicas}")
         # scale down a rg t0 0 node
         self.utility.update_resource_groups(
-            {rg_to_scale_down: ResourceGroupConfig(requests={"node_num": 0},
-                                                   limits={"node_num": 0}, )}
+            {
+                rg_to_scale_down: ResourceGroupConfig(
+                    requests={"node_num": 0},
+                    limits={"node_num": 0},
+                )
+            }
         )
         list_all_resource_groups()
         replicas = collection_w.get_replicas()
@@ -612,7 +701,7 @@ class TestReplicasManagement(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 12, namespace)
+        milvus_op.scale(release_name, "queryNode", 12, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -623,10 +712,13 @@ class TestReplicasManagement(TestcaseBase):
         for i in range(3):
             name = cf.gen_unique_str("rg")
             self.utility = utility
-            self.utility.create_resource_group(name, config=ResourceGroupConfig(
-                requests={"node_num": 3},
-                limits={"node_num": 6},
-            ))
+            self.utility.create_resource_group(
+                name,
+                config=ResourceGroupConfig(
+                    requests={"node_num": 3},
+                    limits={"node_num": 6},
+                ),
+            )
             resource_groups.append(name)
         log.info(f"resource groups: {resource_groups}")
         list_all_resource_groups()
@@ -635,8 +727,9 @@ class TestReplicasManagement(TestcaseBase):
         self.skip_connection = True
         for i in range(3):
             prefix = cf.gen_unique_str("test_rg")
-            collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                                 enable_dynamic_field=True)[0:2]
+            collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True)[
+                0:2
+            ]
             collection_w.release()
             col_list.append(collection_w)
             collection_w.load(replica_number=len(resource_groups), _resource_groups=resource_groups)
@@ -654,7 +747,7 @@ class TestReplicasManagement(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 12, namespace)
+        milvus_op.scale(release_name, "queryNode", 12, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -665,10 +758,13 @@ class TestReplicasManagement(TestcaseBase):
         for i in range(3):
             name = cf.gen_unique_str("rg")
             self.utility = utility
-            self.utility.create_resource_group(name, config=ResourceGroupConfig(
-                requests={"node_num": 3},
-                limits={"node_num": 6},
-            ))
+            self.utility.create_resource_group(
+                name,
+                config=ResourceGroupConfig(
+                    requests={"node_num": 3},
+                    limits={"node_num": 6},
+                ),
+            )
             resource_groups.append(name)
         log.info(f"resource groups: {resource_groups}")
         list_all_resource_groups()
@@ -677,8 +773,9 @@ class TestReplicasManagement(TestcaseBase):
         self.skip_connection = True
         for i in range(3):
             prefix = cf.gen_unique_str("test_rg")
-            collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                                 enable_dynamic_field=True)[0:2]
+            collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True)[
+                0:2
+            ]
             collection_w.release()
             col_list.append(collection_w)
             collection_w.load(replica_number=1, _resource_groups=resource_groups)
@@ -696,7 +793,7 @@ class TestReplicasManagement(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 12, namespace)
+        milvus_op.scale(release_name, "queryNode", 12, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -707,10 +804,13 @@ class TestReplicasManagement(TestcaseBase):
         for i in range(3):
             name = cf.gen_unique_str("rg")
             self.utility = utility
-            self.utility.create_resource_group(name, config=ResourceGroupConfig(
-                requests={"node_num": 3},
-                limits={"node_num": 6},
-            ))
+            self.utility.create_resource_group(
+                name,
+                config=ResourceGroupConfig(
+                    requests={"node_num": 3},
+                    limits={"node_num": 6},
+                ),
+            )
             resource_groups.append(name)
         log.info(f"resource groups: {resource_groups}")
         list_all_resource_groups()
@@ -719,8 +819,9 @@ class TestReplicasManagement(TestcaseBase):
         self.skip_connection = True
         for i in range(3):
             prefix = cf.gen_unique_str("test_rg")
-            collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
-                                                                 enable_dynamic_field=True)[0:2]
+            collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True)[
+                0:2
+            ]
             collection_w.release()
             col_list.append(collection_w)
             collection_w.load(replica_number=1, _resource_groups=[resource_groups[i]])
@@ -731,8 +832,12 @@ class TestReplicasManagement(TestcaseBase):
             log.info(f"replicas: {replicas}")
 
         # transfer replicas to default rg
-        self.utility.transfer_replica(source_group=resource_groups[0], target_group=DEFAULT_RESOURCE_GROUP,
-                                      collection_name=col_list[0].name, num_replicas=1)
+        self.utility.transfer_replica(
+            source_group=resource_groups[0],
+            target_group=DEFAULT_RESOURCE_GROUP,
+            collection_name=col_list[0].name,
+            num_replicas=1,
+        )
 
         list_all_resource_groups()
         # list replicas
@@ -742,7 +847,6 @@ class TestReplicasManagement(TestcaseBase):
 
 
 class TestServiceAvailableDuringScale(TestcaseBase):
-
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         shards_num = 5
@@ -770,22 +874,26 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 3, namespace)
+        milvus_op.scale(release_name, "queryNode", 3, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})}
+        )
         # create rg
         resource_groups = []
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 1},
-            limits={"node_num": 1},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 1},
+                limits={"node_num": 1},
+            ),
+        )
         resource_groups.append(name)
         list_all_resource_groups()
         c_name = cf.gen_unique_str("Checker_")
@@ -797,13 +905,14 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         log.info("*********************Load Start**********************")
         request_duration = 360
         for i in range(10):
-            time.sleep(request_duration//10)
+            time.sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
             # scale up querynode when progress is 3/10
             if i == 3:
                 utility.update_resource_groups(
-                    {name: ResourceGroupConfig(requests={"node_num": 2}, limits={"node_num": 2})})
+                    {name: ResourceGroupConfig(requests={"node_num": 2}, limits={"node_num": 2})}
+                )
                 log.info(f"scale up querynode in rg {name} from 1 to 2")
             list_all_resource_groups()
             display_segment_distribution_info(c_name, release_name)
@@ -820,22 +929,26 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 3, namespace)
+        milvus_op.scale(release_name, "queryNode", 3, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 5})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 5})}
+        )
         # create rg
         resource_groups = []
         name = cf.gen_unique_str("rg")
         self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 2},
-            limits={"node_num": 2},
-        ))
+        self.utility.create_resource_group(
+            name,
+            config=ResourceGroupConfig(
+                requests={"node_num": 2},
+                limits={"node_num": 2},
+            ),
+        )
         resource_groups.append(name)
         list_all_resource_groups()
         c_name = cf.gen_unique_str("Checker_")
@@ -848,14 +961,15 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         log.info("*********************Load Start**********************")
         request_duration = 360
         for i in range(10):
-            time.sleep(request_duration//10)
+            time.sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
             # scale down querynode in rg when progress is 3/10
             if i == 3:
                 list_all_resource_groups()
                 utility.update_resource_groups(
-                    {name: ResourceGroupConfig(requests={"node_num": 1}, limits={"node_num": 1})})
+                    {name: ResourceGroupConfig(requests={"node_num": 1}, limits={"node_num": 1})}
+                )
                 log.info(f"scale down querynode in rg {name} from 2 to 1")
                 list_all_resource_groups()
         time.sleep(60)
@@ -867,7 +981,6 @@ class TestServiceAvailableDuringScale(TestcaseBase):
 
 
 class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
-
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         shards_num = 5
@@ -895,23 +1008,27 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
         """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 5, namespace)
+        milvus_op.scale(release_name, "queryNode", 5, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
         utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})})
+            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})}
+        )
         # create rg
         resource_groups = []
         for i in range(2):
             name = cf.gen_unique_str("rg")
             self.utility = utility
-            self.utility.create_resource_group(name, config=ResourceGroupConfig(
-                requests={"node_num": 1},
-                limits={"node_num": 1},
-            ))
+            self.utility.create_resource_group(
+                name,
+                config=ResourceGroupConfig(
+                    requests={"node_num": 1},
+                    limits={"node_num": 1},
+                ),
+            )
             resource_groups.append(name)
         list_all_resource_groups()
         c_name = cf.gen_unique_str("Checker_")
@@ -924,7 +1041,7 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
         log.info("*********************Load Start**********************")
         request_duration = 360
         for i in range(10):
-            time.sleep(request_duration//10)
+            time.sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
             # transfer replicas from default to another
@@ -932,8 +1049,12 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
                 # transfer replicas from default rg to another rg
                 list_all_resource_groups()
                 display_segment_distribution_info(c_name, release_name)
-                self.utility.transfer_replica(source_group=resource_groups[0], target_group=resource_groups[1],
-                                              collection_name=c_name, num_replicas=1)
+                self.utility.transfer_replica(
+                    source_group=resource_groups[0],
+                    target_group=resource_groups[1],
+                    collection_name=c_name,
+                    num_replicas=1,
+                )
             list_all_resource_groups()
             display_segment_distribution_info(c_name, release_name)
         time.sleep(60)

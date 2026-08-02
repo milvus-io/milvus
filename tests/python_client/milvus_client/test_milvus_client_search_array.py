@@ -18,8 +18,13 @@ FLOAT_ARRAY = "float_array"
 BOOL_ARRAY = "bool_array"
 ARRAY_FIELDS = [INT64_ARRAY, VARCHAR_ARRAY, FLOAT_ARRAY, BOOL_ARRAY]
 
-CHECK_ITEMS = {"nq": default_nq, "limit": default_limit, "metric": "L2",
-               "enable_milvus_client_api": True, "pk_name": PK_FIELD}
+CHECK_ITEMS = {
+    "nq": default_nq,
+    "limit": default_limit,
+    "metric": "L2",
+    "enable_milvus_client_api": True,
+    "pk_name": PK_FIELD,
+}
 
 
 def _build_array_schema(wrapper, client, nullable=False):
@@ -27,14 +32,17 @@ def _build_array_schema(wrapper, client, nullable=False):
     schema = wrapper.create_schema(client)[0]
     schema.add_field(PK_FIELD, DataType.INT64, is_primary=True)
     schema.add_field(VEC_FIELD, DataType.FLOAT_VECTOR, dim=default_dim)
-    schema.add_field(INT64_ARRAY, DataType.ARRAY, element_type=DataType.INT64,
-                     max_capacity=100, nullable=nullable)
-    schema.add_field(VARCHAR_ARRAY, DataType.ARRAY, element_type=DataType.VARCHAR,
-                     max_capacity=100, max_length=128, nullable=nullable)
-    schema.add_field(FLOAT_ARRAY, DataType.ARRAY, element_type=DataType.FLOAT,
-                     max_capacity=100, nullable=nullable)
-    schema.add_field(BOOL_ARRAY, DataType.ARRAY, element_type=DataType.BOOL,
-                     max_capacity=100, nullable=nullable)
+    schema.add_field(INT64_ARRAY, DataType.ARRAY, element_type=DataType.INT64, max_capacity=100, nullable=nullable)
+    schema.add_field(
+        VARCHAR_ARRAY,
+        DataType.ARRAY,
+        element_type=DataType.VARCHAR,
+        max_capacity=100,
+        max_length=128,
+        nullable=nullable,
+    )
+    schema.add_field(FLOAT_ARRAY, DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100, nullable=nullable)
+    schema.add_field(BOOL_ARRAY, DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100, nullable=nullable)
     return schema
 
 
@@ -61,6 +69,7 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
     Schema: int64(PK), float_vector(128), int64_array, varchar_array, float_array, bool_array
     Data: 3000 rows, deterministic arrays, INVERTED index on arrays, FLAT/L2 on vector
     """
+
     shared_alias = "TestSearchArrayShared"
 
     def setup_class(self):
@@ -71,8 +80,7 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
     def prepare_collection(self, request):
         client = self._client(alias=self.shared_alias)
         schema = _build_array_schema(self, client)
-        self.create_collection(client, self.collection_name, schema=schema,
-                               force_teardown=False)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
         data = _gen_deterministic_data(default_nb, schema)
         self.__class__.shared_data = data
         self.insert(client, self.collection_name, data=data)
@@ -85,8 +93,8 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         self.load_collection(client, self.collection_name)
 
         def teardown():
-            self.drop_collection(self._client(alias=self.shared_alias),
-                                 self.collection_name)
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -100,13 +108,18 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
         target_val = 5
         expr = f"array_contains({INT64_ARRAY}, {target_val})"
-        expected_ids = {i for i in range(default_nb)
-                        if target_val in [i % 50, (i + 1) % 50, (i + 2) % 50]}
-        res, _ = self.search(client, self.collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        expected_ids = {i for i in range(default_nb) if target_val in [i % 50, (i + 1) % 50, (i + 2) % 50]}
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
             assert hit.id in expected_ids
             assert target_val in hit.entity[INT64_ARRAY]
@@ -122,11 +135,17 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
         target_vals = [0, 1]
         expr = f"array_contains_all({INT64_ARRAY}, {target_vals})"
-        res, _ = self.search(client, self.collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
             arr = hit.entity[INT64_ARRAY]
             for v in target_vals:
@@ -143,15 +162,20 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
         target_vals = [49, 48]
         expr = f"array_contains_any({INT64_ARRAY}, {target_vals})"
-        res, _ = self.search(client, self.collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
             arr = hit.entity[INT64_ARRAY]
-            assert any(v in arr for v in target_vals), \
-                f"ID {hit.id}: {arr} has none of {target_vals}"
+            assert any(v in arr for v in target_vals), f"ID {hit.id}: {arr} has none of {target_vals}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_array_length(self):
@@ -163,11 +187,17 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         vectors = cf.gen_vectors(default_nq, default_dim)
         expr = f"array_length({INT64_ARRAY}) == 3"
-        res, _ = self.search(client, self.collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
             assert len(hit.entity[INT64_ARRAY]) == 3
 
@@ -183,11 +213,17 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         target_val = 10
         expr = f"{INT64_ARRAY}[0] == {target_val}"
         expected_ids = {i for i in range(default_nb) if i % 50 == target_val}
-        res, _ = self.search(client, self.collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
             assert hit.id in expected_ids
             assert hit.entity[INT64_ARRAY][0] == target_val
@@ -219,11 +255,17 @@ class TestSearchArrayIndependent(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
         target_val = 5
         expr = f"array_contains({INT64_ARRAY}, {target_val})"
-        res, _ = self.search(client, collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
             assert target_val in hit.entity[INT64_ARRAY]
 
@@ -252,13 +294,18 @@ class TestSearchArrayIndependent(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
         target_val = 5
         expr = f"array_contains({INT64_ARRAY}, {target_val})"
-        res, _ = self.search(client, collection_name, data=vectors,
-                             anns_field=VEC_FIELD, limit=default_limit,
-                             filter=expr, output_fields=[INT64_ARRAY],
-                             check_task=CheckTasks.check_search_results,
-                             check_items=CHECK_ITEMS)
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=vectors,
+            anns_field=VEC_FIELD,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[INT64_ARRAY],
+            check_task=CheckTasks.check_search_results,
+            check_items=CHECK_ITEMS,
+        )
         for hit in res[0]:
-            assert hit.id >= null_count, \
-                f"ID {hit.id} is in the null range [0, {null_count})"
+            assert hit.id >= null_count, f"ID {hit.id} is in the null range [0, {null_count})"
             assert hit.entity[INT64_ARRAY] is not None
             assert target_val in hit.entity[INT64_ARRAY]

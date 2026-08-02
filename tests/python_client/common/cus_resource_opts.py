@@ -7,8 +7,8 @@ from kubernetes.client.rest import ApiException
 from utils.util_log import test_log as log
 from common.common_type import in_cluster_env
 
-_GROUP = 'milvus.io'
-_VERSION = 'v1alpha1'
+_GROUP = "milvus.io"
+_VERSION = "v1alpha1"
 _NAMESPACE = "default"
 
 
@@ -23,20 +23,21 @@ class CustomResourceOperations(object):
             self.plural = kind.lower()
 
         # init k8s client config
-        in_cluster = os.getenv(in_cluster_env, default='False')
+        in_cluster = os.getenv(in_cluster_env, default="False")
         log.debug(f"env variable IN_CLUSTER: {in_cluster}")
-        if in_cluster.lower() == 'true':
+        if in_cluster.lower() == "true":
             config.load_incluster_config()
         else:
             config.load_kube_config()
 
     def create(self, body):
         """create or apply a custom resource in k8s"""
-        pretty = 'true'
+        pretty = "true"
         api_instance = client.CustomObjectsApi()
         try:
-            api_response = api_instance.create_namespaced_custom_object(self.group, self.version, self.namespace,
-                                                                        plural=self.plural, body=body, pretty=pretty)
+            api_response = api_instance.create_namespaced_custom_object(
+                self.group, self.version, self.namespace, plural=self.plural, body=body, pretty=pretty
+            )
             log.info(f"create custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->create_namespaced_custom_object: %s\n" % e)
@@ -48,9 +49,9 @@ class CustomResourceOperations(object):
         print(metadata_name)
         try:
             api_instance = client.CustomObjectsApi()
-            api_response = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace,
-                                                                        self.plural,
-                                                                        metadata_name)
+            api_response = api_instance.delete_namespaced_custom_object(
+                self.group, self.version, self.namespace, self.plural, metadata_name
+            )
             log.info(f"delete custom resource response: {api_response}")
         except ApiException as e:
             if raise_ex:
@@ -61,10 +62,9 @@ class CustomResourceOperations(object):
         """patch a custom resource in k8s"""
         api_instance = client.CustomObjectsApi()
         try:
-            api_response = api_instance.patch_namespaced_custom_object(self.group, self.version, self.namespace,
-                                                                       plural=self.plural,
-                                                                       name=metadata_name,
-                                                                       body=body)
+            api_response = api_instance.patch_namespaced_custom_object(
+                self.group, self.version, self.namespace, plural=self.plural, name=metadata_name, body=body
+            )
             log.debug(f"patch custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->patch_namespaced_custom_object: %s\n" % e)
@@ -73,11 +73,12 @@ class CustomResourceOperations(object):
 
     def list_all(self):
         """list all the customer resources in k8s"""
-        pretty = 'true'
+        pretty = "true"
         try:
             api_instance = client.CustomObjectsApi()
-            api_response = api_instance.list_namespaced_custom_object(self.group, self.version, self.namespace,
-                                                                      plural=self.plural, pretty=pretty)
+            api_response = api_instance.list_namespaced_custom_object(
+                self.group, self.version, self.namespace, plural=self.plural, pretty=pretty
+            )
             log.debug(f"list custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->list_namespaced_custom_object: %s\n" % e)
@@ -88,9 +89,9 @@ class CustomResourceOperations(object):
         """get a customer resources by name in k8s"""
         try:
             api_instance = client.CustomObjectsApi()
-            api_response = api_instance.get_namespaced_custom_object(self.group, self.version,
-                                                                     self.namespace, self.plural,
-                                                                     name=metadata_name)
+            api_response = api_instance.get_namespaced_custom_object(
+                self.group, self.version, self.namespace, self.plural, name=metadata_name
+            )
             # log.debug(f"get custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->get_namespaced_custom_object: %s\n" % e)

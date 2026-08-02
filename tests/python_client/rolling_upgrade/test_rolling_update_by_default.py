@@ -24,9 +24,7 @@ class TestBase:
 
 def run_cmd(cmd):
     log.info(f"cmd: {cmd}")
-    res = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
+    res = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = res.communicate()
     output = stdout.decode("utf-8")
     log.info(f"{cmd}\n{output}\n")

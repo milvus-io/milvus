@@ -7,11 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_k8s import (
-    get_pod_ip_name_pairs,
-    get_milvus_instance_name,
-    get_milvus_deploy_tool
-)
+from utils.util_k8s import get_pod_ip_name_pairs, get_milvus_instance_name, get_milvus_deploy_tool
 from utils.util_log import test_log as log
 from common.bulk_insert_data import (
     prepare_bulk_insert_json_files,
@@ -46,28 +42,23 @@ def entity_suffix(entities):
 
 
 class TestcaseBaseBulkInsert(TestcaseBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, host, milvus_ns):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
         self._connect()
         self.milvus_ns = milvus_ns
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.instance_name = get_milvus_instance_name(self.milvus_ns, host)
         self.deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
         minio_label = f"release={self.instance_name}, app=minio"
         if self.deploy_tool == "milvus-operator":
             minio_label = f"release={self.instance_name}-minio, app=minio"
-        minio_ip_pod_pair = get_pod_ip_name_pairs(
-            self.milvus_ns, minio_label
-        )
+        minio_ip_pod_pair = get_pod_ip_name_pairs(self.milvus_ns, minio_label)
         ms = MilvusSys()
         minio_ip = list(minio_ip_pod_pair.keys())[0]
         minio_port = "9000"
         self.minio_endpoint = f"{minio_ip}:{minio_port}"
-        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"][
-            "minio_bucket_name"
-        ]
+        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
 
     # def teardown_method(self, method):
     #     log.info(("*" * 35) + " teardown " + ("*" * 35))
@@ -75,7 +66,6 @@ class TestcaseBaseBulkInsert(TestcaseBase):
 
 
 class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
-
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -121,9 +111,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -134,15 +122,11 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(5)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -160,7 +144,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
             results, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {ids}")
             assert len(results) == len(ids)
         log.info("wait for task clean triggered")
-        time.sleep(6*60)  # wait for 6 minutes for task clean triggered
+        time.sleep(6 * 60)  # wait for 6 minutes for task clean triggered
         num_entities = self.collection_wrap.num_entities
         log.info(f" collection entities: {num_entities}")
         assert num_entities == entities
@@ -223,9 +207,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert not success
@@ -236,13 +218,11 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
         log.info(f" collection entities: {num_entities}")
         assert num_entities == 0
         log.info("wait for task clean triggered")
-        time.sleep(6*60)  # wait for 6 minutes for task clean triggered
+        time.sleep(6 * 60)  # wait for 6 minutes for task clean triggered
         num_entities = self.collection_wrap.num_entities
         log.info(f" collection entities: {num_entities}")
         assert num_entities == 0
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         assert not success
         for state in states.values():
             assert state.state_name in ["Failed and cleaned"]

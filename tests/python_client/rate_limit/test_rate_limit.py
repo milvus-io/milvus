@@ -30,7 +30,7 @@ rate_limit_period = 61
 
 
 class TestRateLimit(TestcaseBase):
-    """ Test case of search interface """
+    """Test case of search interface"""
 
     """
     ******************************************************************
@@ -54,24 +54,27 @@ class TestRateLimit(TestcaseBase):
         # 1. install milvus with operator
         release_name = "rate_limit" + MILVUS_MODE + rate_limit_enable + collection_rate_limit
         image_tag = get_latest_tag()
-        image = f'{IMAGE_REPOSITORY}:{image_tag}'
-        host = cf.install_milvus_operator_specific_config(NAMESPACE, MILVUS_MODE, release_name, image,
-                                                          rate_limit_enable, collection_rate_limit)
+        image = f"{IMAGE_REPOSITORY}:{image_tag}"
+        host = cf.install_milvus_operator_specific_config(
+            NAMESPACE, MILVUS_MODE, release_name, image, rate_limit_enable, collection_rate_limit
+        )
 
         # 2. connect milvus
         self.connection_wrap.add_connection(default={"host": host, "port": milvus_port})
-        self.connection_wrap.connect(alias='default')
+        self.connection_wrap.connect(alias="default")
 
         # 3. create maximum numbers of collections in one two limit periods
         for period in range(2):
-            log.info("test_rate_limit_create_collection: starting to check rate limit period %d" % (period+1))
+            log.info("test_rate_limit_create_collection: starting to check rate limit period %d" % (period + 1))
             for collection_num in range(collectionRateLimit):
-                log.info("test_rate_limit_create_collection: creating collection %d" % (collection_num+1))
+                log.info("test_rate_limit_create_collection: creating collection %d" % (collection_num + 1))
                 c_name = cf.gen_unique_str(prefix)
-                collection_w = self.init_collection_wrap(c_name,
-                                                         check_task=CheckTasks.check_collection_property,
-                                                         check_items={exp_name: c_name, exp_schema: default_schema})
-        # 4. create one more collection
+                collection_w = self.init_collection_wrap(
+                    c_name,
+                    check_task=CheckTasks.check_collection_property,
+                    check_items={exp_name: c_name, exp_schema: default_schema},
+                )
+            # 4. create one more collection
             log.info("test_rate_limit_create_collection: creating one more collection")
             c_name = cf.gen_unique_str(prefix)
             error = {ct.err_code: 0, ct.err_msg: "Fail to create collection"}
@@ -98,10 +101,8 @@ class TestRateLimit(TestcaseBase):
                     drop_num = 0
         # 8. export milvus logs
         label = f"app.kubernetes.io/instance={release_name}"
-        log.info('Start to export milvus pod logs')
+        log.info("Start to export milvus pod logs")
         read_pod_log(namespace=NAMESPACE, label_selector=label, release_name=release_name)
 
         # 9. uninstall milvus
         mil.uninstall(release_name, namespace=NAMESPACE)
-
-

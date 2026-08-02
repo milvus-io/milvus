@@ -53,37 +53,40 @@ class TestSearchDiskannIndependent(TestMilvusClientV2Base):
 
         # 2. create index
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name,
-                      index_type="DISKANN", metric_type="L2", params={})
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="DISKANN", metric_type="L2", params={})
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
         # delete half of data
-        expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
+        expr = f"{ct.default_int64_field_name} in {ids[:half_nb]}"
         self.delete(client, collection_name, filter=expr)
 
-        tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
+        tmp_expr = f"{ct.default_int64_field_name} in {[0]}"
         self.delete(client, collection_name, filter=tmp_expr)
 
         # search
         default_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
         vectors = cf.gen_vectors(default_nq, dim)
-        output_fields = [default_int64_field_name,
-                         default_float_field_name, default_string_field_name]
-        self.search(client, collection_name,
-                    data=vectors[:default_nq],
-                    anns_field=default_search_field,
-                    search_params=default_search_params,
-                    limit=default_limit,
-                    filter=default_search_exp,
-                    output_fields=output_fields,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "ids": ids[half_nb:],
-                                 "limit": default_limit,
-                                 "metric": "L2",
-                                 "pk_name": ct.default_int64_field_name,
-                                 "enable_milvus_client_api": True})
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        self.search(
+            client,
+            collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=default_limit,
+            filter=default_search_exp,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "ids": ids[half_nb:],
+                "limit": default_limit,
+                "metric": "L2",
+                "pk_name": ct.default_int64_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_scalar_field(self):
@@ -116,8 +119,7 @@ class TestSearchDiskannIndependent(TestMilvusClientV2Base):
 
         # 2. create index
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name,
-                      index_type="DISKANN", metric_type="L2", params={})
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="DISKANN", metric_type="L2", params={})
         idx.add_index(field_name=ct.default_string_field_name, index_type="")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
@@ -127,19 +129,23 @@ class TestSearchDiskannIndependent(TestMilvusClientV2Base):
         limit = 4
         default_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
         vectors = cf.gen_vectors(default_nq, dim)
-        output_fields = [default_int64_field_name,
-                         default_float_field_name, default_string_field_name]
-        self.search(client, collection_name,
-                    data=vectors[:default_nq],
-                    anns_field=default_search_field,
-                    search_params=default_search_params,
-                    limit=limit,
-                    filter=default_expr,
-                    output_fields=output_fields,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "ids": ids,
-                                 "limit": limit,
-                                 "metric": "L2",
-                                 "pk_name": ct.default_string_field_name,
-                                 "enable_milvus_client_api": True})
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        self.search(
+            client,
+            collection_name,
+            data=vectors[:default_nq],
+            anns_field=default_search_field,
+            search_params=default_search_params,
+            limit=limit,
+            filter=default_expr,
+            output_fields=output_fields,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "ids": ids,
+                "limit": limit,
+                "metric": "L2",
+                "pk_name": ct.default_string_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )

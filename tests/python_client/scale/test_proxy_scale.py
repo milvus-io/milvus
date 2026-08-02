@@ -15,7 +15,7 @@ from utils.util_pymilvus import get_latest_tag
 
 
 def e2e_milvus_parallel(process_num, host, c_name):
-    """ e2e milvus """
+    """e2e milvus"""
     process_list = []
     for i in range(process_num):
         p = multiprocessing.Process(target=sc.e2e_milvus, args=(host, c_name))
@@ -27,7 +27,6 @@ def e2e_milvus_parallel(process_num, host, c_name):
 
 
 class TestProxyScale:
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_scale_proxy(self):
         """
@@ -43,46 +42,46 @@ class TestProxyScale:
         fail_count = 0
         release_name = "scale-proxy"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
         data_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'metadata.name': release_name,
-            'spec.mode': 'cluster',
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.proxy.replicas': 1,
-            'spec.components.dataNode.replicas': 2,
-            'spec.config.common.retentionDuration': 60
+            "metadata.namespace": constants.NAMESPACE,
+            "metadata.name": release_name,
+            "spec.mode": "cluster",
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.proxy.replicas": 1,
+            "spec.components.dataNode.replicas": 2,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(data_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
         try:
             c_name = cf.gen_unique_str("proxy_scale")
             e2e_milvus_parallel(2, host, c_name)
-            log.info('Milvus test before expand')
+            log.info("Milvus test before expand")
 
             # expand proxy replicas from 1 to 5
-            mic.upgrade(release_name, {'spec.components.proxy.replicas': 5}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.proxy.replicas": 5}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             e2e_milvus_parallel(5, host, c_name)
-            log.info('Milvus test after expand')
+            log.info("Milvus test after expand")
 
             # expand proxy replicas from 5 to 2
-            mic.upgrade(release_name, {'spec.components.proxy.replicas': 2}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.proxy.replicas": 2}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             e2e_milvus_parallel(2, host, c_name)
-            log.info('Milvus test after shrink')
+            log.info("Milvus test after shrink")
 
-            connections.connect('default', host=host, port=19530)
+            connections.connect("default", host=host, port=19530)
             collection_w = ApiCollectionWrapper()
             collection_w.init_collection(name=c_name)
             """
@@ -97,9 +96,9 @@ class TestProxyScale:
             # raise Exception(str(e))
 
         finally:
-            log.info(f'Test finished with {fail_count} fail request')
+            log.info(f"Test finished with {fail_count} fail request")
             assert fail_count <= 1
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
