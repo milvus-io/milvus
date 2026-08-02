@@ -959,7 +959,7 @@ func TestStructArrayExactInt64V1(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	returnBody := &ReturnErrMsg{}
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
-	assert.Equal(t, http.StatusOK, returnBody.Code)
+	assert.Equal(t, int32(http.StatusOK), returnBody.Code)
 }
 
 func TestReturnInt64(t *testing.T) {
