@@ -367,6 +367,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
 		metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
 		metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		metakv.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string, value string) error {
 			if rand.Intn(3) == 0 {
 				return errors.New("failed")
