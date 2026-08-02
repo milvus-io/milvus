@@ -74,9 +74,12 @@ type clientCommandReply struct {
 // which is what callers who pushed a client-scoped command should do.
 //
 // It returns the replies, each tagged with the client that produced it, and how many
-// clients were examined so a caller can tell a complete answer from a partial one. Replies
-// are ordered by client ID so that repeating the request yields the same order -- the
-// underlying iteration is over a sync.Map, whose order is unspecified.
+// clients this lookup examined. That count is an observation, not a delivery target: the
+// scan covers every cached client regardless of the command's scope, so it establishes
+// nothing about completeness either way. See commandReplyPayload.
+//
+// Replies are ordered by client ID so that repeating the request yields the same order --
+// the underlying iteration is over a sync.Map, whose order is unspecified.
 //
 // An empty result with a nil error means the command has not been answered yet -- a normal
 // state, not a failure, because replies only arrive on a client's next heartbeat.
