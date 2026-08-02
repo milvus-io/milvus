@@ -546,7 +546,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "value 'float_val:1' in list cannot be casted to Int64",
+            ct.err_msg: "value 1.0 (Double) in list cannot be casted to field id (Int64)",
         }
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=term_expr, check_task=CheckTasks.err_res, check_items=error
@@ -556,7 +556,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "value 'float_val:2' in list cannot be casted to Int64",
+            ct.err_msg: "value 2.0 (Double) in list cannot be casted to field id (Int64)",
         }
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=term_expr, check_task=CheckTasks.err_res, check_items=error
@@ -1614,7 +1614,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         not_support_expr = f"{ct.default_bool_field_name} in [0]"
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "value 'int64_val:0' in list cannot be casted to Bool",
+            ct.err_msg: "value 0 (Int64) in list cannot be casted to field bool (Bool)",
         }
         self.query(
             client,
@@ -5143,7 +5143,7 @@ class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
         expression = "varchar == int64"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "comparisons between VarChar and Int64 are not supported",
+            ct.err_msg: "comparisons between varchar (VarChar) and int64 (Int64) are not supported",
         }
         self.query(
             client,

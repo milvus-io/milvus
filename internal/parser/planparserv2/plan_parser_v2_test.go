@@ -1604,6 +1604,81 @@ func TestExpr_JSONBinaryRangePreciseBoundValidation(t *testing.T) {
 	require.NotNil(t, expr.GetBinaryExpr())
 }
 
+// Type-mismatch errors in range, `in`, and comparison expressions must include
+// the rejected field name and its type. Without this, users must manually isolate
+// the failing operand.
+func TestExpr_TypeMismatchNamesFieldAndType(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+
+	cases := []struct {
+		expr        string
+		contains    []string
+		notContains []string
+	}{
+		{expr: `1.5 < Int64Field < 3.5`, contains: []string{"1.5", "Double", "Int64Field", "Int64"}},
+		{expr: `"a" < Int64Field < "z"`, contains: []string{`"a"`, "VarChar", "Int64Field", "Int64"}},
+		{expr: `3.5 > Int64Field > 1.5`, contains: []string{"1.5", "Double", "Int64Field", "Int64"}},
+		{expr: `1 < VarCharField < 5`, contains: []string{"1", "Int64", "VarCharField", "VarChar"}},
+		{expr: `0 < BoolField < 1`, contains: []string{"boolean expr", "BoolField", "Bool"}},
+		{expr: `1 < ArrayField[0] < "z"`, contains: []string{`"z"`, "VarChar", "ArrayField[0]", "Int64"}},
+		{expr: `Int64Field in [1, "two", 3]`, contains: []string{`"two"`, "VarChar", "Int64Field", "Int64"}},
+		{expr: `VarCharField in [1, 2]`, contains: []string{"1", "Int64", "VarCharField", "VarChar"}},
+		{expr: `VarCharField > 5`, contains: []string{"VarCharField", "VarChar", "5", "Int64"}},
+		{expr: `Int64Field == "abc"`, contains: []string{"Int64Field", "Int64", `"abc"`, "VarChar"}},
+		{expr: `VarCharField > Int64Field`, contains: []string{"VarCharField", "VarChar", "Int64Field", "Int64"}},
+
+		// Literals whose source text differs from their parsed value must be shown as
+		// written. Reporting `1.0` as `1 (Double)` would be misleading.
+		{
+			expr:        `Int64Field in [1.0]`,
+			contains:    []string{"value 1.0 (Double)", "Int64Field", "Int64"},
+			notContains: []string{"value 1 ("},
+		},
+		{
+			expr:        `Int64Field in [1e3]`,
+			contains:    []string{"value 1e3 (Double)"},
+			notContains: []string{"1000"},
+		},
+		{
+			expr:        `Int64Field in ['two']`,
+			contains:    []string{`value 'two' (VarChar)`},
+			notContains: []string{`"two"`},
+		},
+		{
+			expr:        `0x1p+1 < Int64Field < 3`,
+			contains:    []string{"bound value 0x1p+1 (Double)", "Int64Field", "Int64"},
+			notContains: []string{"bound value 2 "},
+		},
+		{
+			expr:        `3 > Int64Field > 0x1p+1`,
+			contains:    []string{"bound value 0x1p+1 (Double)"},
+			notContains: []string{"bound value 2 "},
+		},
+
+		// An unindexed array target expects a list of arrays, so the error must preserve
+		// the element type. `ArrayField in [[1, 2]]` is valid, while `ArrayField in [1]`
+		// is not; reporting only `Array` would not clearly communicate this distinction.
+		{expr: `ArrayField in [1]`, contains: []string{"ArrayField", "Array[Int64]"}},
+		{expr: `StringArrayField in [1]`, contains: []string{"StringArrayField", "Array[VarChar]"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.expr, func(t *testing.T) {
+			_, err := ParseExpr(helper, c.expr, nil)
+			require.Error(t, err)
+			for _, want := range c.contains {
+				assert.Contains(t, err.Error(), want)
+			}
+			for _, unwanted := range c.notContains {
+				assert.NotContains(t, err.Error(), unwanted)
+			}
+			// The internal protobuf text format must never appear in a user-facing error message.
+			assert.NotContains(t, err.Error(), "string_val:")
+			assert.NotContains(t, err.Error(), "int64_val:")
+		})
+	}
+}
+
 func TestExpr_castValue(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

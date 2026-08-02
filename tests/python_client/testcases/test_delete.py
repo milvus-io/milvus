@@ -1839,7 +1839,7 @@ class TestDeleteString(TestcaseBase):
         collection_w.load()
         error = {ct.err_code: 1100,
                  ct.err_msg: f"failed to create delete plan: cannot parse expression: {default_invalid_string_exp}: "
-                             f"comparisons between VarChar and Int64 are not supported: query plan failed: invalid parameter"}
+                             f"comparisons between varchar (VarChar) and 0 (Int64) are not supported: query plan failed: invalid parameter"}
         collection_w.delete(expr=default_invalid_string_exp,
                             check_task=CheckTasks.err_res, check_items=error)
 
