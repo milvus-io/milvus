@@ -1,4 +1,3 @@
-
 import os
 
 from common.common_type import in_cluster_env
