@@ -480,7 +480,11 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
 			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {
-			mlog.Warn(ctx, "compact wrong, fail to merge sort segments",
+			// Compactor-boundary catch-all: mergeSortMultipleSegments can fail
+			// before it ever reaches the merge sort step (reader/writer
+			// construction, deltalog composition, ...), and those paths don't
+			// log on their own, so this line is their only record.
+			mlog.Warn(ctx, "compact wrong, merge sort compaction failed (compactor boundary)",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.Int64("collectionID", t.collectionID),
 				mlog.Err(err))
