@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
 const defaultTickerInterval = 10 * time.Second
@@ -21,7 +22,7 @@ type Balancer interface {
 }
 
 type snapshotSource interface {
-	Build(ctx context.Context) *BalancerSnapshot
+	build(ctx context.Context, pending triggerBatch) (*BalancerSnapshot, []qviews.ShardID)
 }
 
 // DefaultBalancer owns the trigger queue and reconcile loop. Business
@@ -144,8 +145,7 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	if pending.empty() {
 		return nil
 	}
-	snap := b.snapshotBuilder.Build(ctx)
-	dirty := pending.expand(snap)
+	snap, dirty := b.snapshotBuilder.build(ctx, pending)
 	if len(dirty) == 0 {
 		return nil
 	}

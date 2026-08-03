@@ -3,7 +3,6 @@ package balancer
 import (
 	"sort"
 
-	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -118,18 +117,12 @@ func initialProjectedRows(nodes map[int64]*BalanceNode) map[int64]int64 {
 
 func currentShardRows(snap *BalancerSnapshot, shardID qviews.ShardID) map[int64]int64 {
 	rowsByNode := make(map[int64]int64)
-	stats := snap.ShardStatsMap()[shardID]
-	if stats == nil {
+	if snap == nil {
 		return rowsByNode
 	}
-	for segmentID, segment := range stats.Segments {
-		rows := segmentRows(segmentInfoFor(snap, segmentID, segment.PartitionID))
-		for nodeID, state := range segment.Nodes {
-			switch state {
-			case coordview.SegmentStateUp, coordview.SegmentStateReady, coordview.SegmentStatePreparing:
-				rowsByNode[nodeID] += rows
-			}
-		}
+	rowStats := snap.ShardRowStatsSnapshot[shardID]
+	for nodeID, rows := range rowStats {
+		rowsByNode[nodeID] = rows.UpRowCount + rows.PendingRowCount
 	}
 	return rowsByNode
 }

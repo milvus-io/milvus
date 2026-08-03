@@ -24,6 +24,9 @@ type BalancerSnapshot struct {
 
 	// Per-node info with cross-shard aggregates embedded.
 	Nodes map[int64]*BalanceNode
+	// ShardRowStatsSnapshot contains the target shards' exact row counts already
+	// included in Nodes. Policy subtracts them before replacing or releasing ashard
+	ShardRowStatsSnapshot map[qviews.ShardID]ShardRowStats
 
 	// Tunable parameters for the allocation algorithm.
 	Config *BalanceConfig

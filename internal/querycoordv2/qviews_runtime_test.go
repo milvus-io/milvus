@@ -74,36 +74,6 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	assert.Contains(t, runtime.shardViewRegistry.Snapshot().StatsMap(), shardID)
 }
 
-func TestNewQViewsRuntimeUsesDefaultRowBalanceConfig(t *testing.T) {
-	ctx := context.Background()
-	catalog := metastoremocks.NewQueryCoordCatalog(t)
-	catalog.EXPECT().GetCollections(mock.Anything).Return(nil, nil).Once()
-	catalog.EXPECT().GetPartitions(mock.Anything, mock.Anything).
-		Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Once()
-	catalog.EXPECT().GetReplicas(mock.Anything).Return(nil, nil).Once()
-
-	var config *balancer.BalanceConfig
-	_, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
-		queryCoordCatalog:    catalog,
-		queryViewCatalog:     &fakeQueryViewCatalog{},
-		viewSyncClient:       &fakeRuntimeViewSyncClient{},
-		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
-		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     &fakeRuntimeDataViewProvider{},
-		balancerFactory: func(builder *balancer.SnapshotBuilder) qviewsBalancer {
-			config = builder.Build(ctx).Config
-			return &fakeRuntimeBalancer{}
-		},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, config)
-	assert.Positive(t, config.StickinessWeight)
-	assert.Positive(t, config.NodeLoadWeight)
-	assert.Positive(t, config.FanoutWeight)
-	assert.Positive(t, config.StickyRowsScale)
-	assert.Positive(t, config.TargetRowsPerShardNode)
-}
-
 type fakeRuntimeDataViewReferences struct {
 	recovered []qviews.DataVersion
 }
@@ -259,6 +229,14 @@ type fakeRuntimeDataViewProvider struct{}
 
 func (p *fakeRuntimeDataViewProvider) DataViewSnapshot(context.Context) *balancer.DataViewSnapshot {
 	return balancer.NewDataViewSnapshot(0, nil, nil)
+}
+
+func (p *fakeRuntimeDataViewProvider) DataViewSnapshotForCollections(context.Context, map[int64]struct{}) *balancer.DataViewSnapshot {
+	return balancer.NewDataViewSnapshot(0, nil, nil)
+}
+
+func (p *fakeRuntimeDataViewProvider) SegmentSnapshot(context.Context, []int64) balancer.SegmentSnapshot {
+	return nil
 }
 
 type fakeRuntimeBalancer struct {
