@@ -292,7 +292,10 @@ The interface covers two operation groups:
 - scan operations for expression evaluation;
 - positional take/output operations for retrieve, requery, and bulk_subscript.
 
-`Scan` returns a cursor of `ScanBatch` values.
+`PrepareScan` returns a prepared scan that owns the planned cell set and its
+cache pins. Cursors of `ScanBatch` values are opened from that prepared scan.
+The convenience `Scan` method prepares the input and immediately opens the
+initial cursor.
 
 Scan outputs:
 
@@ -317,13 +320,13 @@ Vortex converts the current Arrow slice's validity bitmap into a
 `FixedVector<bool>`, and `ScanBatch::owner` keeps that mask and the values alive
 for the batch lifetime.
 
-Scan creation first plans the cells required by the requested row range and
-projection, pins that complete cell set, and then constructs the cursor over
-the pinned input. Validity-only scans use the same flow but omit value parsing;
+Scan preparation first plans the cells required by the requested row range and
+projection, pins that complete cell set, and then constructs cursors over the
+pinned input. Validity-only scans use the same flow but omit value parsing;
 non-nullable validity-only scans have an empty cell plan. `Next(max_rows)` never
 loads or pins cells. It only returns a complete batch starting at `Position()`,
 bounded by both `max_rows` and the current column chunk, and advances the cursor
-position. `ScanBatch::owner` shares the cursor's pinned input (plus any
+position. `ScanBatch::owner` shares the prepared scan's pinned input (plus any
 batch-local materialization) so returned pointers remain valid even if the
 cursor advances or is closed.
 
@@ -418,19 +421,20 @@ This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
 
-`VortexColumn::Scan` prepares every file range covered by the scan before it
-returns the cursor: it creates the read plan, pins the plan's cell ids, and
-opens the reader under that pin. Nullable row-id scans prepare both the
-predicate plan and the validity plan, union their cell ids, and share one pin
-between the two readers. The cursor only consumes these prepared readers and
-never calls the planner or cache layer from `Next()`.
+`VortexColumn::PrepareScan` prepares every file range covered by the scan before
+it returns: it creates the read plan and pins the plan's cell ids. Opening a
+cursor creates readers under those retained pins. Nullable row-id scans prepare
+both the predicate plan and the validity plan, union their cell ids, and share
+one pin between the two readers. The cursor only consumes these prepared
+readers and never calls the planner or cache layer from `Next()`.
 
 The expression layer keeps only its segment-global execution position. Normal
-evaluation consumes complete cursor batches and advances that position. If a
-conjunction short-circuits an execution batch, the expression advances its
-logical position and closes the active cursor. The next real read reopens a
-cursor at the new position on the same retained column generation. A future
-cursor seek operation can replace reopen without changing this ownership split.
+evaluation consumes complete cursor batches and advances that position. The
+prepared scan retains the selected column generation, plans, and cell pins. If
+a conjunction short-circuits an execution batch, the expression advances its
+logical position and closes only the active cursor. The next real read reopens
+a cursor at the new position from the same prepared scan, without pinning cells
+again.
 Legacy Chunk access follows the same position rule: chunk id and in-chunk offset
 are derived caches. A short-circuit invalidates that cache, and the next Chunk
 read reconstructs it from the segment-global execution position.

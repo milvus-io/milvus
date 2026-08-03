@@ -194,6 +194,51 @@ struct VortexRowIdScanSource {
         validity_reader;
 };
 
+using VortexCellPin = std::shared_ptr<
+    cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>;
+
+struct PreparedVortexScanSource {
+    VortexReaderRange range;
+    std::vector<uint64_t> cell_ids;
+    VortexCellPin pin;
+};
+
+class CallbackPreparedScan final
+    : public ChunkedColumnInterface::PreparedScan {
+ public:
+    using SeekFunc =
+        std::function<ChunkedColumnInterface::ScanResult(int64_t)>;
+
+    CallbackPreparedScan(int64_t start, int64_t end, SeekFunc seek)
+        : start_(start), end_(end), seek_(std::move(seek)) {
+    }
+
+    int64_t
+    Start() const override {
+        return start_;
+    }
+
+    int64_t
+    End() const override {
+        return end_;
+    }
+
+    ChunkedColumnInterface::ScanResult
+    Seek(int64_t position) const override {
+        AssertInfo(position >= start_ && position <= end_,
+                   "vortex scan cursor position {} outside prepared range [{}, {})",
+                   position,
+                   start_,
+                   end_);
+        return seek_(position);
+    }
+
+ private:
+    int64_t start_;
+    int64_t end_;
+    SeekFunc seek_;
+};
+
 std::vector<uint64_t>
 MergeCellIds(const std::vector<uint64_t>& left,
              const std::vector<uint64_t>& right) {
@@ -205,6 +250,35 @@ MergeCellIds(const std::vector<uint64_t>& left,
     cell_ids.erase(std::unique(cell_ids.begin(), cell_ids.end()),
                    cell_ids.end());
     return cell_ids;
+}
+
+void
+AssertCellsCovered(const std::vector<uint64_t>& planned,
+                   const std::vector<uint64_t>& pinned) {
+    AssertInfo(std::all_of(planned.begin(),
+                           planned.end(),
+                           [&pinned](uint64_t cell_id) {
+                               return std::find(pinned.begin(),
+                                                pinned.end(),
+                                                cell_id) != pinned.end();
+                           }),
+               "vortex scan seek requires cells outside its prepared pin");
+}
+
+VortexReaderRange
+TrimReaderRange(const VortexReaderRange& range, int64_t position) {
+    const auto range_start = std::max(range.range_start, position);
+    AssertInfo(range_start < range.range_end,
+               "cannot trim vortex range [{}, {}) at {}",
+               range.range_start,
+               range.range_end,
+               position);
+    const auto skipped = range_start - range.range_start;
+    auto trimmed = range;
+    trimmed.local_offset += skipped;
+    trimmed.length -= skipped;
+    trimmed.range_start = range_start;
+    return trimmed;
 }
 
 std::optional<VortexReaderRange>
@@ -2689,9 +2763,9 @@ VortexColumn::TakeOwn(milvus::OpContext* op_ctx,
     return result;
 }
 
-ChunkedColumnInterface::ScanResult
-VortexColumn::Scan(milvus::OpContext* op_ctx,
-                   const ScanOptions& options) const {
+ChunkedColumnInterface::PreparedScanResult
+VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
+                          const ScanOptions& options) const {
     AssertInfo(options.start_offset >= 0 && options.length >= 0 &&
                    options.start_offset + options.length <=
                        static_cast<int64_t>(NumRows()),
@@ -2715,7 +2789,7 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
         // common cursor to emit the requested row ranges without opening a
         // Vortex reader.
         if (options.projection == ScanProjection::NoData && !IsNullable()) {
-            return ChunkedColumnInterface::Scan(op_ctx, options);
+            return ChunkedColumnInterface::PrepareScan(op_ctx, options);
         }
 
         // Primitive and string-like fields can be exposed as ScanBatch views
@@ -2725,7 +2799,7 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
             SupportsDirectDataScan()) {
             const auto value_kind = ResolveDataScanValueKind(
                 data_type_, options.projection, options.value_kind);
-            std::vector<VortexDataScanSource> sources;
+            std::vector<PreparedVortexScanSource> prepared_sources;
             auto plan_pos = options.start_offset;
             const auto scan_end = options.start_offset + options.length;
             while (auto range =
@@ -2736,22 +2810,50 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
                     static_cast<uint64_t>(range->local_offset),
                     static_cast<uint64_t>(range->local_offset + range->length));
                 auto pin = PinPlanCells(op_ctx, range->chunk_id, plan.cell_ids);
-                auto reader = OpenDataScanWithPlan(range->chunk_id, plan, pin);
-                sources.emplace_back(
-                    VortexDataScanSource{*range, std::move(reader)});
+                prepared_sources.emplace_back(PreparedVortexScanSource{
+                    *range, std::move(plan.cell_ids), std::move(pin)});
                 plan_pos = range->range_end;
             }
-            return std::make_unique<VortexDataScanCursor>(this,
-                                                          options.start_offset,
-                                                          options.length,
-                                                          options.projection,
-                                                          value_kind,
-                                                          std::move(sources));
+            return std::make_shared<CallbackPreparedScan>(
+                options.start_offset,
+                scan_end,
+                [this,
+                 scan_end,
+                 projection = options.projection,
+                 value_kind,
+                 prepared_sources = std::move(prepared_sources)](
+                    int64_t position) {
+                    std::vector<VortexDataScanSource> sources;
+                    for (const auto& prepared : prepared_sources) {
+                        if (prepared.range.range_end <= position) {
+                            continue;
+                        }
+                        auto range = TrimReaderRange(prepared.range, position);
+                        const auto& file = files_[range.chunk_id];
+                        auto plan = PlanRowRange(
+                            file,
+                            static_cast<uint64_t>(range.local_offset),
+                            static_cast<uint64_t>(range.local_offset +
+                                                  range.length));
+                        AssertCellsCovered(plan.cell_ids, prepared.cell_ids);
+                        auto reader = OpenDataScanWithPlan(
+                            range.chunk_id, plan, prepared.pin);
+                        sources.emplace_back(VortexDataScanSource{
+                            range, std::move(reader)});
+                    }
+                    return std::make_unique<VortexDataScanCursor>(
+                        this,
+                        position,
+                        scan_end - position,
+                        projection,
+                        value_kind,
+                        std::move(sources));
+                });
         }
 
         // Complex types that cannot be represented by the Vortex scan view
         // reuse the common ChunkedColumn fallback path.
-        return ChunkedColumnInterface::Scan(op_ctx, options);
+        return ChunkedColumnInterface::PrepareScan(op_ctx, options);
     }
 
     // RowId output is only meaningful for pushed-down predicates. Without a
@@ -2774,7 +2876,7 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
 
     // RowId scan and its optional validity side-stream share one unioned cell
     // pin per file range. All sources are prepared before cursor creation.
-    std::vector<VortexRowIdScanSource> sources;
+    std::vector<PreparedVortexScanSource> prepared_sources;
     auto plan_pos = options.start_offset;
     const auto scan_end = options.start_offset + options.length;
     while (auto range = NextVortexReaderRange(this, &plan_pos, scan_end)) {
@@ -2791,20 +2893,56 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
                 MergeCellIds(matched_plan.cell_ids, validity_plan->cell_ids);
         }
         auto pin = PinPlanCells(op_ctx, range->chunk_id, cell_ids);
-        auto matched_reader =
-            OpenRowIdScanWithPlan(range->chunk_id, matched_plan, pin);
-        std::optional<PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>>
-            validity_reader;
-        if (validity_plan.has_value()) {
-            validity_reader =
-                OpenDataScanWithPlan(range->chunk_id, *validity_plan, pin);
-        }
-        sources.emplace_back(VortexRowIdScanSource{
-            *range, std::move(matched_reader), std::move(validity_reader)});
+        prepared_sources.emplace_back(PreparedVortexScanSource{
+            *range, std::move(cell_ids), std::move(pin)});
         plan_pos = range->range_end;
     }
-    return std::make_unique<VortexRowIdScanCursor>(
-        this, options.start_offset, options.length, std::move(sources));
+    return std::make_shared<CallbackPreparedScan>(
+        options.start_offset,
+        scan_end,
+        [this,
+         scan_end,
+         predicate = std::move(*predicate),
+         prepared_sources = std::move(prepared_sources)](int64_t position) {
+            std::vector<VortexRowIdScanSource> sources;
+            for (const auto& prepared : prepared_sources) {
+                if (prepared.range.range_end <= position) {
+                    continue;
+                }
+                auto range = TrimReaderRange(prepared.range, position);
+                const auto& file = files_[range.chunk_id];
+                const auto row_start =
+                    static_cast<uint64_t>(range.local_offset);
+                const auto row_end = static_cast<uint64_t>(
+                    range.local_offset + range.length);
+                auto matched_plan =
+                    PlanRowRange(file, row_start, row_end, predicate);
+                std::optional<milvus_storage::vortex::VortexPlan>
+                    validity_plan;
+                auto cell_ids = matched_plan.cell_ids;
+                if (IsNullable()) {
+                    validity_plan = PlanRowRange(file, row_start, row_end);
+                    cell_ids = MergeCellIds(matched_plan.cell_ids,
+                                            validity_plan->cell_ids);
+                }
+                AssertCellsCovered(cell_ids, prepared.cell_ids);
+                auto matched_reader = OpenRowIdScanWithPlan(
+                    range.chunk_id, matched_plan, prepared.pin);
+                std::optional<
+                    PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>>
+                    validity_reader;
+                if (validity_plan.has_value()) {
+                    validity_reader = OpenDataScanWithPlan(
+                        range.chunk_id, *validity_plan, prepared.pin);
+                }
+                sources.emplace_back(VortexRowIdScanSource{
+                    range,
+                    std::move(matched_reader),
+                    std::move(validity_reader)});
+            }
+            return std::make_unique<VortexRowIdScanCursor>(
+                this, position, scan_end - position, std::move(sources));
+        });
 }
 
 }  // namespace milvus

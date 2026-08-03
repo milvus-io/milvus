@@ -1352,12 +1352,20 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     const int64_t planned_offsets[]{0, kNullableRows - 1};
     column.ManualEvictCache();
     EXPECT_FALSE(column.CellsLoaded(planned_offsets, 2));
-    auto validity_cursor = column.Scan(
+    auto validity_scan = column.PrepareScan(
         nullptr,
         ChunkedColumnInterface::ScanOptions::ForNoData(0, kNullableRows));
+    ASSERT_NE(validity_scan, nullptr);
+    auto validity_cursor = validity_scan->Seek(0);
     ASSERT_NE(validity_cursor, nullptr);
     EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
     ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(validity_cursor->Next(2, &batch));
+    validity_cursor.reset();
+    column.ManualEvictCache();
+    EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
+    validity_cursor = validity_scan->Seek(2);
+    ASSERT_NE(validity_cursor, nullptr);
     while (validity_cursor->Next(2, &batch)) {
     }
 
@@ -1365,6 +1373,7 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     const auto row_id_options = ChunkedColumnInterface::ScanOptions::ForUnary(
         0, kNullableRows, proto::plan::OpType::Equal, predicate);
     validity_cursor.reset();
+    validity_scan.reset();
     column.ManualEvictCache();
     EXPECT_FALSE(column.CellsLoaded(planned_offsets, 2));
     auto row_id_cursor = column.Scan(nullptr, row_id_options);

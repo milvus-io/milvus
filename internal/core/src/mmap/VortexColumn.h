@@ -227,8 +227,9 @@ class VortexColumn final : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t count) const override;
 
-    ScanResult
-    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override;
+    PreparedScanResult
+    PrepareScan(milvus::OpContext* op_ctx,
+                const ScanOptions& options) const override;
 
  private:
     struct TakeResult {
