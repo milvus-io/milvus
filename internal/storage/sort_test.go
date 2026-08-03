@@ -731,3 +731,35 @@ func TestMergeSortUnsortedInputReportsLaterRecord(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.ErrorContains(t, err, "reader 0 record 1 row 0 out of order")
 }
+
+// Both preceding tests drive a single reader, so idx.ri is always 0 in the
+// error -- a hardcoded 0 in place of idx.ri would pass them too. This variant
+// uses two readers, keeps reader 0 in order throughout, and puts the disorder
+// in reader 1's second record, so the reported reader index and per-reader
+// record number are both load-bearing.
+func TestMergeSortUnsortedInputReportsOffendingReader(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {10, 20, 30}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {40}}, nil),
+	}}
+	r1 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {15, 25}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {35, 5}}, nil),
+	}}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1024, schema, []RecordReader{r0, r1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.ErrorContains(t, err, "not sorted by the merge key")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.ErrorContains(t, err, "reader 1 record 1 row 1 out of order")
+}
