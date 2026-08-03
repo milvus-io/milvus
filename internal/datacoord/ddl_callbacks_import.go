@@ -72,8 +72,8 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 			return &internalpb.ImportFile{
 				Id:        file.GetId(),
 				Paths:     file.GetPaths(),
-				PkIdBegin: file.GetPkIdRange().GetBegin(),
-				PkIdEnd:   file.GetPkIdRange().GetEnd(),
+				PkIdBegin: file.GetPreAllocatedAutoIds().GetBegin(),
+				PkIdEnd:   file.GetPreAllocatedAutoIds().GetEnd(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
@@ -219,7 +219,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.
 		for i := 0; i < len(files) && i < len(msgFiles); i++ {
-			msgFiles[i].PkIdRange = &commonpb.IDRange{
+			msgFiles[i].PreAllocatedAutoIds = &commonpb.IDRange{
 				Begin: files[i].GetPkIdBegin(),
 				End:   files[i].GetPkIdEnd(),
 			}
