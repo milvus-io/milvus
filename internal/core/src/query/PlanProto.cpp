@@ -1267,21 +1267,16 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
 
     if (column_info.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        const auto column_data_type =
-            static_cast<DataType>(column_info.data_type());
-        const auto column_element_type =
-            static_cast<DataType>(column_info.element_type());
-        const bool is_recursive_array_length =
-            expr_pb.arith_op() == proto::plan::ArithOpType::ArrayLength &&
-            column_data_type == DataType::ARRAY &&
-            column_element_type == DataType::ARRAY;
-        if (is_recursive_array_length) {
-            Assert(field.has_element_schema());
-            Assert(field.get_element_type() == DataType::ARRAY);
+        if (field.has_element_schema()) {
+            Assert(expr_pb.arith_op() == proto::plan::ArithOpType::ArrayLength);
+            Assert(static_cast<DataType>(column_info.data_type()) ==
+                   DataType::ARRAY);
+            Assert(static_cast<DataType>(column_info.element_type()) ==
+                   DataType::ARRAY);
             Assert(column_info.nested_path().empty());
         } else {
-            Assert(!field.has_element_schema());
-            Assert(field.get_element_type() == column_element_type);
+            Assert(field.get_element_type() ==
+                   static_cast<DataType>(column_info.element_type()));
         }
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
@@ -1323,16 +1318,13 @@ ProtoParser::ParseJsonContainsExprs(
         Assert(data_type == DataType::ARRAY);
         Assert(static_cast<DataType>(columnInfo.data_type()) ==
                DataType::ARRAY);
-        const auto column_element_type =
-            static_cast<DataType>(columnInfo.element_type());
         Assert(field.has_element_schema());
-        const auto& logical_child = field.get_element_schema();
-        Assert(logical_child.has_array_element());
-        const auto& logical_element = logical_child.array_element();
-        Assert(logical_element.has_leaf_type());
-        Assert(IsPrimitiveType(logical_element.leaf_type()));
+        const auto& logical_element =
+            field.get_element_schema().array_element();
+        Assert(logical_element.has_leaf_type() &&
+               IsPrimitiveType(logical_element.leaf_type()));
         Assert(static_cast<DataType>(logical_element.leaf_type()) ==
-               column_element_type);
+               static_cast<DataType>(columnInfo.element_type()));
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
         Assert(!field.has_element_schema());
